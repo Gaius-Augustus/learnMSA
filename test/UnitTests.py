@@ -686,9 +686,25 @@ class TestAlignment(unittest.TestCase):
         ref_subalignment = ["FE...LIX...", "FE...LIXbac", "FEabcLIX..."]
         for s,r in zip(subalignment_strings, ref_subalignment):
             self.assertEqual(s,r)
-        
-    def test_alignment_A(self):
-        pass
+       
+    #this test aims to test the high level alignment function by feeding real world data to it
+    #and checking if the resulting alignment meets some friendly thresholds 
+    def test_alignment_egf(self):
+        fasta_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/egf.fasta", gaps=False, contains_lower_case=True)
+        ref_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/egf.ref", gaps=True, contains_lower_case=True)
+        ref_subset = np.array([fasta_file.seq_ids.index(sid) for sid in ref_file.seq_ids])
+        loglik, alignment = msa_hmm.align.fit_and_align_n(fasta_file, num_runs=1, subset=ref_subset, verbose=False)[0]
+        #some friendly thresholds to check if the alignments does make sense at all
+        self.assertTrue(loglik > -70)
+        self.assertTrue(alignment.msa_hmm_layer.length > 25)
+        alignment.to_file(os.path.dirname(__file__)+"/data/egf.out.fasta")
+        pred_fasta_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/egf.out.fasta", gaps=True, contains_lower_case=True)
+        p,r = pred_fasta_file.precision_recall(ref_file)
+        tc = pred_fasta_file.tc_score(ref_file)
+        #based on experience, any half decent hyperparameter choice should yield at least these scores
+        self.assertTrue(p > 0.7)
+        self.assertTrue(r > 0.7)
+        self.assertTrue(tc > 0.1)
         
         
 if __name__ == '__main__':

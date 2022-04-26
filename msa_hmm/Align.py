@@ -795,13 +795,13 @@ def fit_and_align(fasta_file,
     return alignment
 
 
-def fit_and_align_n(fasta_file, num_runs, verbose=True):
+def fit_and_align_n(fasta_file, num_runs, verbose=True, **kwargs):
     if verbose:
         print("Training of", num_runs, "independent models on file", os.path.basename(fasta_file.filename))
     results = []
     for i in range(num_runs):
         t_s = time.time()
-        alignment = fit_and_align(fasta_file, verbose=verbose)
+        alignment = fit_and_align(fasta_file, verbose=verbose, **kwargs)
         t_a = time.time()
          #compute loglik
         #estimate the ll only on a subset of maximum size 200.000
