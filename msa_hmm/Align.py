@@ -711,6 +711,7 @@ def fit_and_align(fasta_file,
              " min surgery seqs:", min_surgery_seqs,
              " len mul:", len_mul,
              " use prior:", use_prior,
+             " dirichlet mix comp count:", dirichlet_mix_comp_count,
              " use anc.probs.:", use_anc_probs,
              " tau init:", tau_init)
     #ignore short sequences for all surgery iterations except the last
