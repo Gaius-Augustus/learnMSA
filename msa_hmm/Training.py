@@ -33,6 +33,7 @@ def make_model(num_seq,
                alpha_single, 
                alpha_frag,
                use_prior=True,
+               dirichlet_mix_comp_count=1,
                use_anc_probs=True,
                tau_init=0.0, 
                trainable_kernels={}):
@@ -48,7 +49,8 @@ def make_model(num_seq,
                                 alpha_single=alpha_single, 
                                 alpha_frag=alpha_frag,
                                 trainable_kernels=trainable_kernels,
-                                use_prior=use_prior)
+                                use_prior=use_prior,
+                                dirichlet_mix_comp_count=dirichlet_mix_comp_count)
     anc_probs_layer = AncProbsLayer(num_seq, tau_init=tau_init)
     if use_anc_probs:
         forward_seq = anc_probs_layer(sequences, mask, subset)
@@ -103,6 +105,7 @@ def fit_model(fasta_file,
               alpha_single, 
               alpha_frag,
               use_prior=True,
+              dirichlet_mix_comp_count=1,
               use_anc_probs=True,
               tau_init=0.0, 
               trainable_kernels={},
@@ -126,6 +129,7 @@ def fit_model(fasta_file,
                                                            alpha_single=alpha_single, 
                                                            alpha_frag=alpha_frag,
                                                            use_prior=use_prior,
+                                                           dirichlet_mix_comp_count=dirichlet_mix_comp_count,
                                                            use_anc_probs=use_anc_probs,
                                                            tau_init=tau_init, 
                                                            trainable_kernels=trainable_kernels)

@@ -17,13 +17,14 @@ class MsaHmmLayer(tf.keras.layers.Layer):
                  alpha_single,
                  alpha_frag ,
                  trainable_kernels={},
-                 use_prior=True
+                 use_prior=True,
+                 dirichlet_mix_comp_count=1
                 ):
         super(MsaHmmLayer, self).__init__()
         self.length = length
         self.num_seq = num_seq
         self.use_prior = use_prior 
-        self.load_priors(alpha_flank, alpha_single, alpha_frag)
+        self.load_priors(alpha_flank, alpha_single, alpha_frag, dirichlet_mix_comp_count)
         if isinstance(emission_init, str) and emission_init == "background":
             self.emission_init = make_emission_init_kernel(length)
         else:
@@ -70,7 +71,11 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         return loglik
     
     
-    def load_priors(self, alpha_flank, alpha_single, alpha_frag):
+    def load_priors(self, 
+                    alpha_flank, 
+                    alpha_single, 
+                    alpha_frag,
+                    dirichlet_mix_comp_count):
         #euqivalent to the alpha parameters of a dirichlet mixture -1 .
         #these values are crutial when jointly optimizing the main model with the additional
         #"Plan7" states and transitions
@@ -82,11 +87,10 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         self.alpha_frag = tf.constant(alpha_frag, dtype=ut.dtype) 
         
         PRIOR_PATH = os.path.dirname(__file__)+"/trained_prior/"
-        DIRICHLET_COMP_COUNT = 1
-        model, DMP = dm.make_model(DIRICHLET_COMP_COUNT, 20, -1, trainable=False)
+        model, DMP = dm.make_model(dirichlet_mix_comp_count, 20, -1, trainable=False)
         model.load_weights(
-            PRIOR_PATH+str(DIRICHLET_COMP_COUNT)+"_components_prior_pdf/ckpt").expect_partial()
-        self.emission_dirichlet_mix = dm.DirichletMixturePrior(DIRICHLET_COMP_COUNT, 20, -1,
+            PRIOR_PATH+str(dirichlet_mix_comp_count)+"_components_prior_pdf/ckpt").expect_partial()
+        self.emission_dirichlet_mix = dm.DirichletMixturePrior(dirichlet_mix_comp_count, 20, -1,
                                             DMP.alpha_kernel.numpy(),
                                             DMP.q_kernel.numpy(),
                                             trainable=False)
