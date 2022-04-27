@@ -733,6 +733,7 @@ def fit_and_align(fasta_file,
             _batch_size = get_adaptive_batch_size(model_length, fasta_file.max_len)
         else:
             _batch_size = batch_size
+        _batch_size = min(_batch_size, n)
         if finished:    
             train_indices = np.arange(n)
         else:
