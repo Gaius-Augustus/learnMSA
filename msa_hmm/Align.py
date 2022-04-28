@@ -6,6 +6,7 @@ import msa_hmm.Utility as ut
 import msa_hmm.Fasta as fasta
 import msa_hmm.Training as train
 import msa_hmm.MsaHmmLayer as msa_hmm
+from msa_hmm.Configuration import as_str
 
 
 @tf.function
@@ -675,23 +676,8 @@ def get_adaptive_batch_size(model_length, max_len):
     
 # Constructs an alignment for the given fasta file
 def fit_and_align(fasta_file, 
+                  config,
                   subset=None,
-                  transition_init="default",
-                  flank_init="default",
-                  emission_init="background",
-                  alpha_flank=7000,
-                  alpha_single=1e9,
-                  alpha_frag=1e4,
-                  max_surgery_runs=4,
-                  surgery_quantile=0.5,
-                  min_surgery_seqs=1e4,
-                  len_mul=0.8,
-                  batch_size="adaptive",
-                  use_prior=True,
-                  dirichlet_mix_comp_count=1,
-                  use_anc_probs=True,
-                  tau_init=0.0,
-                  keep_tau=False,
                   verbose=True):
     total_time_start = time.time()
     n = fasta_file.num_seq
@@ -699,39 +685,24 @@ def fit_and_align(fasta_file,
         subset = np.arange(n)
     if verbose:
         print(n, "sequences of max. length", fasta_file.max_len)
-        print("Configuration:")
-        print("Transition init:", transition_init, 
-             " flank init:", flank_init,
-             " emission init:", emission_init,
-             " alpha flank:", alpha_flank,
-             " alpha single:", alpha_single,
-             " alpha frag:", alpha_frag,
-             " max surgery runs:", max_surgery_runs,
-             " surgery quantile:", surgery_quantile,
-             " min surgery seqs:", min_surgery_seqs,
-             " len mul:", len_mul,
-             " use prior:", use_prior,
-             " dirichlet mix comp count:", dirichlet_mix_comp_count,
-             " use anc.probs.:", use_anc_probs,
-             " tau init:", tau_init)
     #ignore short sequences for all surgery iterations except the last
-    k = int(min(n*surgery_quantile, 
-                max(0, n-min_surgery_seqs)))
+    k = int(min(n*config["surgery_quantile"], 
+                max(0, n-config["min_surgery_seqs"])))
     #a rough estimate of a set of only full-length sequences
     full_length_estimate = [i for l,i in sorted(zip(fasta_file.seq_lens, list(range(n))))[k:]]   
     full_length_estimate = np.array(full_length_estimate)  
     #initial model length
     model_length = np.quantile(fasta_file.seq_lens, q=0.5)
-    model_length *= len_mul
+    model_length *= config["len_mul"]
     model_length = int(np.floor(model_length))
     #model surgery
-    finished=max_surgery_runs==1
-    for i in range(max_surgery_runs):
-        if batch_size == "adaptive":
+    finished=config["max_surgery_runs"]==1
+    for i in range(config["max_surgery_runs"]):
+        if config["batch_size"] == "adaptive":
             _batch_size = get_adaptive_batch_size(model_length, fasta_file.max_len)
         else:
-            _batch_size = batch_size
-        _batch_size = min(_batch_size, n)
+            _batch_size = config["batch_size"]
+        #_batch_size = min(_batch_size, n)
         if finished:    
             train_indices = np.arange(n)
         else:
@@ -739,16 +710,16 @@ def fit_and_align(fasta_file,
         model, history = train.fit_model(fasta_file=fasta_file,
                                          indices=train_indices,
                                          model_length=model_length, 
-                                         emission_init=emission_init,
-                                         transition_init=transition_init,
-                                         flank_init=flank_init,
-                                         alpha_flank=alpha_flank, 
-                                         alpha_single=alpha_single, 
-                                         alpha_frag=alpha_frag,
-                                         use_prior=use_prior,
-                                         dirichlet_mix_comp_count=dirichlet_mix_comp_count,
-                                         use_anc_probs=use_anc_probs,
-                                         tau_init=tau_init,
+                                         emission_init=config["emission_init"],
+                                         transition_init=config["transition_init"],
+                                         flank_init=config["flank_init"],
+                                         alpha_flank=config["alpha_flank"], 
+                                         alpha_single=config["alpha_single"], 
+                                         alpha_frag=config["alpha_frag"],
+                                         use_prior=config["use_prior"],
+                                         dirichlet_mix_comp_count=config["dirichlet_mix_comp_count"],
+                                         use_anc_probs=config["use_anc_probs"],
+                                         tau_init=config["tau_init"],
                                          trainable_kernels={},
                                          batch_size=_batch_size, 
                                          learning_rate=0.1,
@@ -759,13 +730,13 @@ def fit_and_align(fasta_file,
                                   train_indices,
                                   batch_size=2*_batch_size, 
                                   model=model,
-                                  use_anc_probs=use_anc_probs)
+                                  use_anc_probs=config["use_anc_probs"])
         else:
             alignment = Alignment(fasta_file,
                                    subset,
                                    batch_size=2*_batch_size, 
                                    model=model,
-                                   use_anc_probs=use_anc_probs,
+                                   use_anc_probs=config["use_anc_probs"],
                                    build="lazy")
         if finished:
             break
@@ -775,7 +746,7 @@ def fit_and_align(fasta_file,
                                                                                         ins_long=100000, 
                                                                                         k=32, 
                                                                                         match_prior_threshold=1)
-        finished = (pos_expand.size == 0 and pos_discard.size == 0) or (i == max_surgery_runs-2)
+        finished = (pos_expand.size == 0 and pos_discard.size == 0) or (i == config["max_surgery_runs"]-2)
         if verbose:
             print("expansions:", list(zip(pos_expand, expansion_lens)))
             print("discards:", pos_discard)
@@ -785,7 +756,7 @@ def fit_and_align(fasta_file,
                                                               alignment.msa_hmm_layer.transition_init, 
                                                               alignment.msa_hmm_layer.flank_init)
         model_length = emission_init.shape[0]
-        if use_anc_probs and keep_tau:
+        if config["use_anc_probs"] and config["keep_tau"]:
             if finished:
                 tau_init = np.zeros(n)
                 tau_init[full_length_estimate] = alignment.anc_probs_layer.tau.numpy()
@@ -795,13 +766,20 @@ def fit_and_align(fasta_file,
     return alignment
 
 
-def fit_and_align_n(fasta_file, num_runs, verbose=True, **kwargs):
+
+def fit_and_align_n(fasta_file, 
+                    num_runs, 
+                    config,
+                    subset=None,
+                    verbose=True):
     if verbose:
         print("Training of", num_runs, "independent models on file", os.path.basename(fasta_file.filename))
+        print("Configuration:")
+        print(as_str(config))
     results = []
     for i in range(num_runs):
         t_s = time.time()
-        alignment = fit_and_align(fasta_file, verbose=verbose, **kwargs)
+        alignment = fit_and_align(fasta_file, config, subset, verbose)
         t_a = time.time()
          #compute loglik
         #estimate the ll only on a subset of maximum size 200.000
@@ -824,6 +802,6 @@ def fit_and_align_n(fasta_file, num_runs, verbose=True, **kwargs):
         if verbose:
             print("Time for alignment:", t_a-t_s)
             print("Time for estimating loglik:", time.time()-t_a)
-            print("Fitted a model with loglik =", loglik)
+            print("Fitted a model with loglik =", loglik + prior)
         results.append((loglik + prior, alignment))
     return results

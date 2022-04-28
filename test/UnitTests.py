@@ -693,7 +693,11 @@ class TestAlignment(unittest.TestCase):
         fasta_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/egf.fasta", gaps=False, contains_lower_case=True)
         ref_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/egf.ref", gaps=True, contains_lower_case=True)
         ref_subset = np.array([fasta_file.seq_ids.index(sid) for sid in ref_file.seq_ids])
-        loglik, alignment = msa_hmm.align.fit_and_align_n(fasta_file, num_runs=1, subset=ref_subset, verbose=False)[0]
+        loglik, alignment = msa_hmm.align.fit_and_align_n(fasta_file, 
+                                                          num_runs=1, 
+                                                          config=msa_hmm.config.default,
+                                                          subset=ref_subset, 
+                                                          verbose=False)[0]
         #some friendly thresholds to check if the alignments does make sense at all
         self.assertTrue(loglik > -70)
         self.assertTrue(alignment.msa_hmm_layer.length > 25)

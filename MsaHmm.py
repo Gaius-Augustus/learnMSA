@@ -31,7 +31,8 @@ args = parser.parse_args()
 #import after argparsing to avoid long delay if argument requirements are not met or help is printed
 import msa_hmm
 import numpy as np
-    
+
+config = msa_hmm.config.default    
     
 fasta_file = msa_hmm.fasta.Fasta(args.input_file, 
                          gaps=False, 
@@ -43,7 +44,7 @@ if args.ref_file != "":
 else:
     subset = None
     
-results = msa_hmm.align.fit_and_align_n(fasta_file, args.num_runs, args.verbose, subset=subset)
+results = msa_hmm.align.fit_and_align_n(fasta_file, args.num_runs, config, subset, args.verbose)
 
 
 best = np.argmax([ll for ll,_ in results])
