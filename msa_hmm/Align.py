@@ -685,6 +685,11 @@ def fit_and_align(fasta_file,
         subset = np.arange(n)
     if verbose:
         print(n, "sequences of max. length", fasta_file.max_len)
+    #config valus that may be reset during model surgery
+    emission_init = config["emission_init"]
+    transition_init = config["transition_init"]
+    flank_init = config["flank_init"]
+    tau_init = config["tau_init"]
     #ignore short sequences for all surgery iterations except the last
     k = int(min(n*config["surgery_quantile"], 
                 max(0, n-config["min_surgery_seqs"])))
@@ -702,7 +707,7 @@ def fit_and_align(fasta_file,
             _batch_size = get_adaptive_batch_size(model_length, fasta_file.max_len)
         else:
             _batch_size = config["batch_size"]
-        #_batch_size = min(_batch_size, n)
+        _batch_size = min(_batch_size, int(n/2))
         if finished:    
             train_indices = np.arange(n)
         else:
@@ -710,16 +715,16 @@ def fit_and_align(fasta_file,
         model, history = train.fit_model(fasta_file=fasta_file,
                                          indices=train_indices,
                                          model_length=model_length, 
-                                         emission_init=config["emission_init"],
-                                         transition_init=config["transition_init"],
-                                         flank_init=config["flank_init"],
+                                         emission_init=emission_init,
+                                         transition_init=transition_init,
+                                         flank_init=flank_init,
                                          alpha_flank=config["alpha_flank"], 
                                          alpha_single=config["alpha_single"], 
                                          alpha_frag=config["alpha_frag"],
                                          use_prior=config["use_prior"],
                                          dirichlet_mix_comp_count=config["dirichlet_mix_comp_count"],
                                          use_anc_probs=config["use_anc_probs"],
-                                         tau_init=config["tau_init"],
+                                         tau_init=tau_init,
                                          trainable_kernels={},
                                          batch_size=_batch_size, 
                                          learning_rate=0.1,
