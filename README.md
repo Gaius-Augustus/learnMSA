@@ -3,7 +3,9 @@
 ## Introduction
 An aligner for potentially millions of protein sequences, based on a novel gradient descent training approach for profile Hidden Markov Models (pHMMs). We take advantage of TensorFlows automatic differentiation to differentiate the forward algorithm, i.e. compute gradients over all possible alignments.
 
-Our benchmarks suggest that pHMM training is more robust with respect to scale-up in sequence numbers than traditional MSA methods. Our alignments have accuracy competitive to state of the art aligners if the number of sequences is large enough and can be done in competitive time using a GPU. If the sequence number is the millions, we produce alignments with better accuracy and are many times faster than state of the art aligners. We think that our tool can be a first step towards a future-proof framework for ultra large MSA that lends itself to a variety of opportunities for further improvements.
+![alt text](https://github.com/Ung0d/MSA-HMM-Analysis/blob/main/fig/boxplots_sp_homfam.png?raw=true)
+
+Our benchmarks suggest that pHMM training is more robust with respect to scale-up in sequence numbers than traditional MSA methods. Our alignments have accuracy competitive to state of the art aligners if the number of sequences is large enough and can be done in competitive time using a GPU. If the sequence number is in the millions, we produce alignments with better accuracy and are many times faster than state of the art aligners. We think that our tool can be a first step towards a future-proof framework for ultra large MSA that lends itself to a variety of opportunities for further improvements.
 
 ***When should I use it?***
 
