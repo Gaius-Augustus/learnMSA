@@ -7,6 +7,7 @@ default = {
     "alpha_single" : 1e9,
     "alpha_frag" : 1e4,
     "max_surgery_runs" : 4,
+    "length_init_qunatile" : 0.5,
     "surgery_quantile" : 0.5,
     "min_surgery_seqs" : 1e4,
     "len_mul" : 0.8,

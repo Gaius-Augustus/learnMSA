@@ -123,9 +123,9 @@ def plot_hmm(alignment,
     nx.draw_networkx_labels(G, label_pos, labels=node_labels, font_size=8)
 
     if seq_i != -1:
-        sequence = alignment.fasta_file.get_raw_seq(alignment.indices[seq_i])
-        sequence = np.append(sequence, msa_hmm.fasta.s) #append terminal symbol
-        sequence = np.expand_dims(sequence, 0)
+        ds = msa_hmm.train.make_dataset(alignment.fasta_file, batch_size=1, shuffle=False, indices=alignment.indices[seq_i:seq_i+1])
+        for (seq, mask, ind), _ in ds:
+            sequence = alignment.anc_probs_layer(seq, mask, ind)  
         hidden_seq = msa_hmm.align.viterbi(sequence, hmm_cell)
         hidden_seq = list(hidden_seq[0])
         for i in range(len(hidden_seq)):
