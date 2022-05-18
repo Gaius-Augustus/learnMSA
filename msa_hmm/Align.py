@@ -697,7 +697,7 @@ def fit_and_align(fasta_file,
     full_length_estimate = [i for l,i in sorted(zip(fasta_file.seq_lens, list(range(n))))[k:]]   
     full_length_estimate = np.array(full_length_estimate)  
     #initial model length
-    model_length = np.quantile(fasta_file.seq_lens, q=config["length_init_qunatile"])
+    model_length = np.quantile(fasta_file.seq_lens, q=config["length_init_quantile"])
     model_length *= config["len_mul"]
     model_length = int(np.floor(model_length))
     #model surgery
