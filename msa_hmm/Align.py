@@ -745,6 +745,10 @@ def fit_and_align(fasta_file,
                                    build="lazy")
         if finished:
             break
+        if i == 0:
+            emission_init_0 = alignment.msa_hmm_layer.emission_init
+            transition_init_0 = alignment.msa_hmm_layer.transition_init
+            flank_init_0 = alignment.msa_hmm_layer.flank_init
         pos_expand, expansion_lens, pos_discard = get_discard_or_expand_positions(alignment, 
                                                                                         del_t=0.5, 
                                                                                         ins_t=0.5,
@@ -757,9 +761,9 @@ def fit_and_align(fasta_file,
             print("discards:", pos_discard)
         transition_init, emission_init, init_flank = update_kernels(alignment, 
                                                               pos_expand, expansion_lens, pos_discard,
-                                                              alignment.msa_hmm_layer.emission_init, 
-                                                              alignment.msa_hmm_layer.transition_init, 
-                                                              alignment.msa_hmm_layer.flank_init)
+                                                              emission_init_0, 
+                                                              transition_init_0, 
+                                                              flank_init_0)
         model_length = emission_init.shape[0]
         if config["use_anc_probs"] and config["keep_tau"]:
             if finished:
