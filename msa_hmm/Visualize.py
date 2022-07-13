@@ -9,13 +9,13 @@ import msa_hmm
 
 
 def make_logo(alignment, ax):
-    hmm_cell = alignment.msa_hmm_layer.C
+    hmm_cell = alignment.msa_hmm_layer.cell
     
     logomaker_alphabet = ["A", "C", "D", "E", "F", "G", "H", "I", "K", "L", "M", "N", "P", "Q", "R", "S", "T", "V", "W", "Y"]
     logomaker_perm = np.array([msa_hmm.fasta.alphabet.index(aa) for aa in logomaker_alphabet], dtype=int)
 
     #reduce to std AA alphabet 
-    emissions = hmm_cell.make_B().numpy()[1:hmm_cell.length+1,:20][:,logomaker_perm]
+    emissions = hmm_cell.make_B()[0].numpy()[1:hmm_cell.length+1,:20][:,logomaker_perm]
 
     information_content = tf.keras.losses.KLDivergence(reduction=tf.keras.losses.Reduction.NONE)(
                                                          emissions,
@@ -52,7 +52,7 @@ def plot_hmm(alignment,
                active_transition_color="#000000",
                inactive_transition_color="#E0E0E0"
                 ):
-    hmm_cell = alignment.msa_hmm_layer.C
+    hmm_cell = alignment.msa_hmm_layer.cell
     
     G = nx.DiGraph()
     indices_dict = hmm_cell.sparse_transition_indices_explicit()
@@ -90,7 +90,7 @@ def plot_hmm(alignment,
                                 for edge,p,v in zip(indices, probs[transition_type], values[transition_type]) 
                                     if p > edge_show_threshold})
 
-    B = hmm_cell.make_B().numpy()
+    B = hmm_cell.make_B()[0].numpy()
     node_labels = {}
     for i in range(hmm_cell.length):
         sort = np.argsort(-B[i+1, :25])
@@ -103,7 +103,7 @@ def plot_hmm(alignment,
 
     ax.figure.set_size_inches(hmm_cell.length, 7)
     
-    p = tf.math.sigmoid(hmm_cell.flank_init)
+    p = tf.math.sigmoid(hmm_cell.flank_init_kernel)
     #ax.text(-4*spacing, 0, "Init: \n (%.2f, %.2f)" % (p, 1-p), fontsize=12)
     ax.text(-2.5*spacing, -spacing/2, "Insertions", fontsize=20)
     ax.text(-2.5*spacing, -1.5*spacing, "Deletions", fontsize=20)
@@ -125,9 +125,10 @@ def plot_hmm(alignment,
     nx.draw_networkx_labels(G, label_pos, labels=node_labels, font_size=8)
     
     for k, (seq_i, path_color) in enumerate(zip(seq_indices, path_colors)):
-        ds = msa_hmm.train.make_dataset(alignment.fasta_file, batch_size=1, shuffle=False, indices=np.array([seq_i]))
-        for (seq, mask, ind), _ in ds:
-            sequence = alignment.anc_probs_layer(seq, mask, ind)  
+        batch_gen = msa_hmm.train.DefaultBatchGenerator(alignment.fasta_file)
+        ds = msa_hmm.train.make_dataset(np.array([seq_i]), batch_gen, batch_size=1, shuffle=False)
+        for x, _ in ds:
+            sequence = alignment.encoder_model(x)  
         hidden_seq = msa_hmm.align.viterbi(sequence, hmm_cell)
         hidden_seq = list(hidden_seq[0])
         for i in range(len(hidden_seq)):

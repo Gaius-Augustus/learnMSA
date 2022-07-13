@@ -32,10 +32,11 @@ class TestMsaHmmCell(unittest.TestCase):
                                    "end_to_unannotated_segment" : [0.2], 
                                   "end_to_right_flank" : [0.7], 
                                   "end_to_terminal" : [0.1]}
-        transition_init_kernel = {part_name : np.log(p) 
+        transition_init_kernel = {part_name : tf.constant_initializer(np.log(p))
                                   for part_name,p in transition_init_kernel.items()}
-        emission_init_kernel = np.zeros((length, msa_hmm.fasta.s-1))
-        hmm_cell = msa_hmm.MsaHmmCell(length, emission_init_kernel, transition_init_kernel)
+        emission_init_kernel = tf.constant_initializer(np.zeros((length, msa_hmm.fasta.s-1)))
+        hmm_cell = msa_hmm.MsaHmmCell(length, emission_init=emission_init_kernel, transition_init=transition_init_kernel)
+        hmm_cell.build((None,None))
         A = hmm_cell.make_A()
         # [LEFT_FLANK, MATCH x length, INSERT x length-1, UNANNOTATED_SEGMENT, RIGHT_FLANK, TERMINAL]
         A_ref = np.zeros((hmm_cell.num_states, hmm_cell.num_states))
@@ -98,9 +99,14 @@ def string_to_one_hot(s):
 
 
 def get_all_seqs(fasta_file):
-    ds = msa_hmm.train.make_dataset(fasta_file, fasta_file.num_seq, shuffle=False)
-    for (seq, std_aa_mask, _), _ in ds:
-        return seq.numpy(), std_aa_mask.numpy()
+    indices = np.arange(fasta_file.num_seq)
+    batch_generator = msa_hmm.train.DefaultBatchGenerator(fasta_file)
+    ds = msa_hmm.train.make_dataset(indices, 
+                                    batch_generator, 
+                                    batch_size=fasta_file.num_seq,
+                                    shuffle=False)
+    for (seq, _), _ in ds:
+        return seq.numpy()
 
 class TestMSAHMM(unittest.TestCase):
     
@@ -112,8 +118,9 @@ class TestMSAHMM(unittest.TestCase):
     def test_matrices(self):
         length=32
         hmm_cell = msa_hmm.MsaHmmCell(length=length, 
-                                      emission_init=msa_hmm.kernel.make_emission_init_kernel(length),
-                                      transition_init=msa_hmm.kernel.make_transition_init_kernel(length, **msa_hmm.kernel.transition_init_kernels["default"]))
+                                      emission_init=msa_hmm.config.make_default_emission_init(),
+                                      transition_init=msa_hmm.config.make_default_transition_init())
+        hmm_cell.build((None,None))
         A = hmm_cell.make_A()
         A_sum = np.sum(A, -1)
         for a in A_sum:
@@ -126,26 +133,27 @@ class TestMSAHMM(unittest.TestCase):
             
     def test_cell(self):
         length = 4
-        emission_init = string_to_one_hot("ACGT").numpy()*10
-        transition_init = msa_hmm.kernel.make_transition_init_kernel(length,
-                                    MM = 2, 
-                                    MI = 0,
-                                    MD = 0,
-                                    II = 0,
-                                    IM = 0,
-                                    DM = 0,
-                                    DD = 0,
-                                    FC = 0,
-                                    FE = 3,
-                                    R = 0,
-                                    RF = 0, 
-                                    T = 0)
+        emission_init = tf.constant_initializer(string_to_one_hot("ACGT").numpy() * 10)
+        transition_init = msa_hmm.config.make_default_transition_init(MM = 2, 
+                                                                    MI = 0,
+                                                                    MD = 0,
+                                                                    II = 0,
+                                                                    IM = 0,
+                                                                    DM = 0,
+                                                                    DD = 0,
+                                                                    FC = 0,
+                                                                    FE = 3,
+                                                                    R = 0,
+                                                                    RF = 0, 
+                                                                    T = 0)
         hmm_cell = msa_hmm.MsaHmmCell(length=length,  
                                       emission_init=emission_init,
                                       transition_init=transition_init)
+        hmm_cell.build((None, None))
         hmm_cell.init_cell()
-        fasta_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/simple.fa", gaps = False, contains_lower_case = True)
-        sequences, std_aa_mask = get_all_seqs(fasta_file)
+        filename = os.path.dirname(__file__)+"/data/simple.fa"
+        fasta_file = msa_hmm.fasta.Fasta(filename, gaps = False, contains_lower_case = True)
+        sequences = get_all_seqs(fasta_file)
         self.assertEqual(sequences.shape, (1,5,len(msa_hmm.fasta.alphabet)))
         forward, loglik = hmm_cell.get_initial_state(batch_size=1)
         self.assertEqual(loglik[0], 0)
@@ -159,8 +167,9 @@ class TestMSAHMM(unittest.TestCase):
         self.assertEqual(np.argmax(forward[0]), 2*length+2)
         
         hmm_cell.init_cell()
-        fasta_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/length_diff.fa", gaps = False, contains_lower_case = True)
-        sequences, std_aa_mask = get_all_seqs(fasta_file)
+        filename = os.path.dirname(__file__)+"/data/length_diff.fa"
+        fasta_file = msa_hmm.fasta.Fasta(filename, gaps = False, contains_lower_case = True)
+        sequences = get_all_seqs(fasta_file)
         self.assertEqual(sequences.shape, (2,10,len(msa_hmm.fasta.alphabet)))
         forward, loglik = hmm_cell.get_initial_state(batch_size=1)
         for i in range(length):
@@ -186,23 +195,23 @@ class TestMSAHMM(unittest.TestCase):
             
     def test_viterbi(self):
         length = 5
-        emission_init = string_to_one_hot("FELIX").numpy()*20
-        transition_init = msa_hmm.kernel.make_transition_init_kernel(length,
-                                    MM = 0, 
-                                    MI = 0,
-                                    MD = 0,
-                                    II = 0,
-                                    IM = 0,
-                                    DM = 0,
-                                    DD = 0,
-                                    FC = 0,
-                                    FE = 0,
-                                    R = 0,
-                                    RF = 0, 
-                                    T = 0)
+        emission_init = tf.constant_initializer(string_to_one_hot("FELIX").numpy()*20)
+        transition_init = msa_hmm.config.make_default_transition_init(MM = 0, 
+                                                                    MI = 0,
+                                                                    MD = 0,
+                                                                    II = 0,
+                                                                    IM = 0,
+                                                                    DM = 0,
+                                                                    DD = 0,
+                                                                    FC = 0,
+                                                                    FE = 0,
+                                                                    R = 0,
+                                                                    RF = 0, 
+                                                                    T = 0)
         hmm_cell = msa_hmm.MsaHmmCell(length=length, 
                                       emission_init=emission_init,
                                       transition_init=transition_init)
+        hmm_cell.build((None, None))
         fasta_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/felix.fa", gaps = False, contains_lower_case = True)
         ref_seqs = np.array([[1,2,3,4,5,12,12,12,12,12,12,12,12,12,12],
                              [0,0,0,1,2,3,4,5,12,12,12,12,12,12,12],
@@ -212,24 +221,27 @@ class TestMSAHMM(unittest.TestCase):
                              [1,2,7,7,7,3,4,5,12,12,12,12,12,12,12],
                              [1,6,6,2,3,8,4,9,9,9,5,12,12,12,12],
                              [1,2,3,8,8,8,4,5,11,11,11,12,12,12,12]])
-        sequences, std_aa_mask = get_all_seqs(fasta_file)
+        sequences = get_all_seqs(fasta_file)
         state_seqs_max_lik = msa_hmm.align.viterbi(sequences, hmm_cell)
         # states : [LEFT_FLANK, MATCH x length, INSERT x length-1, UNANNOTATED_SEGMENT, RIGHT_FLANK, END]
         for i in range(fasta_file.num_seq):
             self.assert_vec(state_seqs_max_lik[i], ref_seqs[i])
         #this produces a result identical to above, but runs viterbi batch wise 
         #to avoid memory overflow  
+        batch_generator = msa_hmm.train.OnlySequencesBatchGenerator(fasta_file)
         state_seqs_max_lik2 = msa_hmm.align.get_state_seqs_max_lik(fasta_file,
-                                                           np.arange(fasta_file.num_seq),
-                                                           batch_size=2,
-                                                           msa_hmm_cell=hmm_cell)
+                                                                   batch_generator,
+                                                                   np.arange(fasta_file.num_seq),
+                                                                   batch_size=2,
+                                                                   msa_hmm_cell=hmm_cell)
         for i in range(fasta_file.num_seq):
             self.assert_vec(state_seqs_max_lik2[i], ref_seqs[i])
         indices = np.array([0,4,5])
         state_seqs_max_lik3 = msa_hmm.align.get_state_seqs_max_lik(fasta_file,
-                                                           indices, #try a subset
-                                                           batch_size=2,
-                                                           msa_hmm_cell=hmm_cell)
+                                                                   batch_generator,
+                                                                   indices, #try a subset
+                                                                   batch_size=2,
+                                                                   msa_hmm_cell=hmm_cell)
         max_len = np.amax(fasta_file.seq_lens[indices])+1
         for i,j in enumerate(indices):
             self.assert_vec(state_seqs_max_lik3[i], ref_seqs[j, :max_len])
@@ -386,21 +398,61 @@ class TestMSAHMM(unittest.TestCase):
                 
 class TestAncProbs(unittest.TestCase):
     
-    def test_anc_probs(self):
-        fasta_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/simple.fa", gaps = False, contains_lower_case = True)
-        sequences, std_aa_mask = get_all_seqs(fasta_file)
-        anc_probs_layer = msa_hmm.AncProbsLayer(num_seqs=sequences.shape[0], tau_init=1.0)
-        anc_prob_seqs = anc_probs_layer(sequences, std_aa_mask, [0])
+    def assert_anc_probs(self, anc_prob_seqs, Q):
         p = np.zeros(26)
         p[:20] = msa_hmm.ut.read_paml_file()[2]
         #test rate matrix property
-        for i in range(anc_probs_layer.Q.shape[0]-1):
-            for j in range(anc_probs_layer.Q.shape[0]-1):
-                np.testing.assert_almost_equal(anc_probs_layer.Q[i,j] * p[i], 
-                                               anc_probs_layer.Q[j,i] * p[j])
+        for i in range(Q.shape[0]-1):
+            for j in range(Q.shape[0]-1):
+                np.testing.assert_almost_equal(Q[i,j] * p[i], 
+                                               Q[j,i] * p[j])
         #todo: maybe use known properties of amino acids (e.g. polar, charged, aromatic) to test distributions
         #after some time tau
         
+    
+    def test_anc_probs(self):                 
+        filename = os.path.dirname(__file__)+"/data/simple.fa"
+        fasta_file = msa_hmm.fasta.Fasta(filename, gaps = False, contains_lower_case = True)
+        sequences = get_all_seqs(fasta_file)
+        anc_probs_layer = msa_hmm.AncProbsLayer(num_seqs=sequences.shape[0], tau_init=tf.constant_initializer(1.0))
+        anc_prob_seqs = anc_probs_layer(sequences, [0])
+        self.assert_anc_probs(anc_prob_seqs, anc_probs_layer.Q)
+        
+        
+    def test_encoder_model(self):
+        #test if everything still works if adding the encoder-model abstraction layer      
+        filename = os.path.dirname(__file__)+"/data/simple.fa"
+        fasta_file = msa_hmm.fasta.Fasta(filename, gaps = False, contains_lower_case = True)
+        model_length = 10
+        model = msa_hmm.train.default_model_generator(fasta_file.num_seq, model_length, msa_hmm.config.default)
+        batch_gen = msa_hmm.train.DefaultBatchGenerator(fasta_file)
+        ind = np.arange(fasta_file.num_seq)
+        msa = msa_hmm.Alignment(fasta_file, batch_gen, ind, batch_size=fasta_file.num_seq, model=model)
+        ds = msa_hmm.train.make_dataset(ind, batch_gen, batch_size=fasta_file.num_seq, shuffle=False)
+        for x,_ in ds:
+            anc_prob_seqs = msa.encoder_model(x)
+            self.assert_anc_probs(anc_prob_seqs, msa.encoder_model.layers[-1].Q)
+            
+        
+class TestData(unittest.TestCase):
+    
+    def assert_vec(self, x, y):
+        self.assertEqual(x.shape, y.shape)
+        self.assertTrue(np.all(x == y), str(x) + " not equal to " + str(y))
+        
+    def test_default_batch_gen(self):
+        filename = os.path.dirname(__file__)+"/data/felix_insert_delete.fa"
+        fasta_file = msa_hmm.fasta.Fasta(filename, gaps = False, contains_lower_case = True)
+        batch_gen = msa_hmm.train.DefaultBatchGenerator(fasta_file)
+        test_batches = [[0], [1], [4], [0,2], [0,1,2,3,4], [2,3,4]]
+        alphabet = np.array(msa_hmm.fasta.alphabet)
+        for ind in test_batches:
+            ind = np.array(ind)
+            ref = [fasta_file.aminoacid_seq_str(i) for i in ind]
+            s,i = batch_gen(ind) 
+            self.assert_vec(i, ind)
+            for i,(r,j) in enumerate(zip(ref, ind)):
+                self.assertEqual("".join(alphabet[np.argmax(s[i,:fasta_file.seq_lens[j]], axis=-1)]), r)
         
         
 class TestModelSurgery(unittest.TestCase):
@@ -415,42 +467,43 @@ class TestModelSurgery(unittest.TestCase):
         self.assertTrue(np.all(x == y), str(x) + " not equal to " + str(y))
         
     def test_discard_or_expand_positions(self):
-        emission_init = string_to_one_hot("FELIC").numpy()*10
-        transition_init = msa_hmm.kernel.make_transition_init_kernel(5,
-                                    MM = 0, 
-                                    MI = 0,
-                                    MD = -1,
-                                    II = 1,
-                                    IM = 0,
-                                    DM = 1,
-                                    DD = 0,
-                                    FC = 0,
-                                    FE = 0,
-                                    R = 0,
-                                    RF = 0, 
-                                    T = 0,
-                                    EN1 = 1,
-                                    EN = 0,
-                                    EX = 0)
-        model,_,_ = msa_hmm.train.make_model(model_length=5, 
-                                             num_seq=10, 
-                                             emission_init=emission_init,
-                                             transition_init=transition_init,
-                                             flank_init="default",
-                                             alpha_flank=1e3, 
-                                             alpha_single=1e9, 
-                                             alpha_frag=1e3,
-                                             use_anc_probs=False)
-        fasta_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/felix_insert_delete.fa", gaps = False, contains_lower_case = True)
+        config = dict(msa_hmm.config.default)
+        config["emission_init"] = tf.constant_initializer(string_to_one_hot("FELIC").numpy()*10)
+        config["transition_init"] = msa_hmm.config.make_default_transition_init(MM = 0, 
+                                                                                MI = 0,
+                                                                                MD = -1,
+                                                                                II = 1,
+                                                                                IM = 0,
+                                                                                DM = 1,
+                                                                                DD = 0,
+                                                                                FC = 0,
+                                                                                FE = 0,
+                                                                                R = 0,
+                                                                                RF = 0, 
+                                                                                T = 0)
+        config["transition_init"]["match_to_match"] = tf.constant_initializer(0)
+        config["transition_init"]["match_to_insert"] = tf.constant_initializer(0)
+        config["transition_init"]["match_to_delete"] = tf.constant_initializer(-1)
+        config["transition_init"]["begin_to_match"] = tf.constant_initializer([1,0,0,0,0])
+        config["transition_init"]["match_to_end"] = tf.constant_initializer(0)
+        config["alpha_flank"] = 1e3         
+        config["alpha_single"] = 1e9
+        config["alpha_frag"] = 1e3
+        model = msa_hmm.train.default_model_generator(num_seq=5, 
+                                                          model_length=5,
+                                                          config=config)
+        filename = os.path.dirname(__file__)+"/data/felix_insert_delete.fa"
+        fasta_file = msa_hmm.fasta.Fasta(filename, gaps = False, contains_lower_case = True)
+        batch_gen = msa_hmm.train.DefaultBatchGenerator(fasta_file)
         alignment = msa_hmm.Alignment(fasta_file, 
+                                      batch_gen,
                                       np.arange(fasta_file.num_seq),
                                       32, 
-                                      model,
-                                      use_anc_probs=False)
+                                      model)
         #a simple alignment to test detection of
         #sparse and unconserved columns and frequent or very long insertions
         ref_seqs = [
-            "F.-..........LnnnI-aaaFELnICnnn",
+            "F.-..........LnnnI-aaaFELnICnnn",             
             "-.EnnnnnnnnnnLnn.I-aaaFE-.ICnnn",
             "-.-..........Lnn.I-...---.--nnn",
             "-.-..........-...ICaaaF--.I-nnn",
@@ -492,29 +545,31 @@ class TestModelSurgery(unittest.TestCase):
         self.assert_vec(d, [1,2,3,4])
         self.assert_vec(e, [1,2,3,4])
         self.assert_vec(l, [10,2,1,3])
-        emission_init2 = string_to_one_hot("A").numpy()*10
-        transition_init2 = msa_hmm.kernel.make_transition_init_kernel(5,
-                                    MM = 77, 
-                                    MI = 77,
-                                    MD = 77,
-                                    II = 77,
-                                    IM = 77,
-                                    DM = 77,
-                                    DD = 77,
-                                    FC = 77,
-                                    FE = 77,
-                                    R = 77,
-                                    RF = 77, 
-                                    T = 77,
-                                    EN1 = 77,
-                                    EN = 77,
-                                    EX = 77)
+        emission_init2 = [tf.constant_initializer(string_to_one_hot("A").numpy()*10)]
+        transition_init2 = {"begin_to_match" : tf.constant_initializer(77),
+                            "match_to_end" : tf.constant_initializer(77),
+                            "match_to_match" : tf.constant_initializer(77),
+                            "match_to_insert" : tf.constant_initializer(77),
+                            "insert_to_match" : tf.constant_initializer(77),
+                            "insert_to_insert" : tf.constant_initializer(77),
+                            "match_to_delete" : tf.constant_initializer(77),
+                            "delete_to_match" : tf.constant_initializer(77),
+                            "delete_to_delete" : tf.constant_initializer(77),
+                            "left_flank_loop" : tf.constant_initializer(77),
+                            "left_flank_exit" : tf.constant_initializer(77),
+                            "right_flank_loop" : tf.constant_initializer(77),
+                            "right_flank_exit" : tf.constant_initializer(77),
+                            "unannotated_segment_loop" : tf.constant_initializer(77),
+                            "unannotated_segment_exit" : tf.constant_initializer(77),
+                            "end_to_unannotated_segment" : tf.constant_initializer(77),
+                            "end_to_right_flank" : tf.constant_initializer(77),
+                            "end_to_terminal" : tf.constant_initializer(77) }
         transitions_new, emissions_new,_ = msa_hmm.align.update_kernels(alignment, 
                                                               pos_expand, expansion_lens, pos_discard,
-                                                              emission_init2, transition_init2, 0.0)
+                                                              emission_init2, transition_init2, tf.constant_initializer(0.0))
         ref_consensus = "FE"+"A"*9+"LAI"+"A"*3
-        self.assertEqual(emissions_new.shape[0], len(ref_consensus))
-        self.assert_vec(emissions_new, string_to_one_hot(ref_consensus).numpy()*10)
+        self.assertEqual(emissions_new[0].shape[0], len(ref_consensus))
+        self.assert_vec(emissions_new[0], string_to_one_hot(ref_consensus).numpy()*10)
         self.assert_vec(transitions_new["begin_to_match"], [1,0]+[77]*9+[0,77,0,77,77,77])
         self.assert_vec(transitions_new["match_to_end"], [0,0]+[77]*9+[0,77,0,77,77,77])
         self.assert_vec(transitions_new["match_to_match"], [0]+[77]*15)
@@ -648,40 +703,37 @@ class TestModelSurgery(unittest.TestCase):
         self.assert_vec(l, [4,5])
         self.assert_vec(d, np.arange(9))
         
+    def test_whole_surgery(self):
+        pass
+        
         
 
 class TestAlignment(unittest.TestCase):
     
     def test_subalignment(self):
         length=5
-        emission_init = string_to_one_hot("FELIX").numpy()*20
-        transition_init = msa_hmm.kernel.make_transition_init_kernel(length,
-                                    MM = 0, 
-                                    MI = 0,
-                                    MD = 0,
-                                    II = 0,
-                                    IM = 0,
-                                    DM = 0,
-                                    DD = 0,
-                                    FC = 0,
-                                    FE = 0,
-                                    R = 0,
-                                    RF = 0, 
-                                    T = 0)
-        model,_,_ = msa_hmm.train.make_model(model_length=length, 
-                                             num_seq=8, 
-                                             emission_init=emission_init,
-                                             transition_init=transition_init,
-                                             flank_init="default",
-                                             alpha_flank=1e3, 
-                                             alpha_single=1e9, 
-                                             alpha_frag=1e3,
-                                             use_anc_probs=False)
+        config = dict(msa_hmm.config.default)
+        config["emission_init"] = tf.constant_initializer(string_to_one_hot("FELIX").numpy()*20)
+        config["transition_init"] = msa_hmm.config.make_default_transition_init(MM = 0, 
+                                                                        MI = 0,
+                                                                        MD = 0,
+                                                                        II = 0,
+                                                                        IM = 0,
+                                                                        DM = 0,
+                                                                        DD = 0,
+                                                                        FC = 0,
+                                                                        FE = 0,
+                                                                        R = 0,
+                                                                        RF = 0, 
+                                                                        T = 0)
+        model = msa_hmm.train.default_model_generator(num_seq=8, model_length=length, config=config)
     
         #subalignment
-        fasta_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/felix.fa", gaps=False, contains_lower_case=True)
+        filename = os.path.dirname(__file__)+"/data/felix.fa"
+        fasta_file = msa_hmm.fasta.Fasta(filename, gaps=False, contains_lower_case=True)
         subset = np.array([0,2,5])
-        subalignment = msa_hmm.Alignment(fasta_file, subset, 32, model, use_anc_probs=False)
+        batch_gen = msa_hmm.train.DefaultBatchGenerator(fasta_file)
+        subalignment = msa_hmm.Alignment(fasta_file, batch_gen, subset, 32, model)
         subalignment_strings = subalignment.to_string(add_block_sep=False)
         ref_subalignment = ["FE...LIX...", "FE...LIXbac", "FEabcLIX..."]
         for s,r in zip(subalignment_strings, ref_subalignment):
@@ -690,17 +742,19 @@ class TestAlignment(unittest.TestCase):
     #this test aims to test the high level alignment function by feeding real world data to it
     #and checking if the resulting alignment meets some friendly thresholds 
     def test_alignment_egf(self):
-        fasta_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/egf.fasta", gaps=False, contains_lower_case=True)
-        ref_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/egf.ref", gaps=True, contains_lower_case=True)
+        train_filename = os.path.dirname(__file__)+"/data/egf.fasta"
+        ref_filename = os.path.dirname(__file__)+"/data/egf.ref"
+        fasta_file = msa_hmm.fasta.Fasta(train_filename, gaps=False, contains_lower_case=True)
+        ref_file = msa_hmm.fasta.Fasta(ref_filename, gaps=True, contains_lower_case=True)
         ref_subset = np.array([fasta_file.seq_ids.index(sid) for sid in ref_file.seq_ids])
-        loglik, alignment = msa_hmm.align.fit_and_align_n(fasta_file, 
-                                                          num_runs=1, 
-                                                          config=msa_hmm.config.default,
+        loglik, alignment = msa_hmm.align.fit_and_align_n(1,
+                                                          fasta_file, 
+                                                          config=dict(msa_hmm.config.default),
                                                           subset=ref_subset, 
                                                           verbose=False)[0]
         #some friendly thresholds to check if the alignments does make sense at all
         self.assertTrue(loglik > -70)
-        self.assertTrue(alignment.msa_hmm_layer.length > 25)
+        self.assertTrue(alignment.msa_hmm_layer.cell.length > 25)
         alignment.to_file(os.path.dirname(__file__)+"/data/egf.out.fasta")
         pred_fasta_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/egf.out.fasta", gaps=True, contains_lower_case=True)
         p,r = pred_fasta_file.precision_recall(ref_file)

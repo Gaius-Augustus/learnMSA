@@ -1,7 +1,7 @@
+import os
 import tensorflow as tf
 import numpy as np
-import msa_hmm.Utility as ut
-import msa_hmm.Fasta as fasta
+import msa_hmm.DirichletMixture as dm
 
 
 # terminology
@@ -17,19 +17,79 @@ import msa_hmm.Fasta as fasta
 #                  computed by a matrix multiplication.
 
 
+# default dirichlet mixture prior for amino acid match distributions 
+class AminoAcidPrior():
+    def __init__(self, comp_count=1):
+        PRIOR_PATH = os.path.dirname(__file__)+"/trained_prior/"
+        model, DMP = dm.make_model(comp_count, 20, -1, trainable=False)
+        model.load_weights(
+            PRIOR_PATH+str(comp_count)+"_components_prior_pdf/ckpt").expect_partial()
+        self.emission_dirichlet_mix = dm.DirichletMixturePrior(comp_count, 20, -1,
+                                            DMP.alpha_kernel.numpy(),
+                                            DMP.q_kernel.numpy(),
+                                            trainable=False)
+        
+    
+    def __call__(self, B):
+        model_length = int((tf.shape(B)[0]-2)/2)
+        B = B[1:model_length+1,:20]
+        B /= tf.reduce_sum(B, axis=-1, keepdims=True)
+        prior = self.emission_dirichlet_mix.log_pdf(B)
+        return prior 
+
 
 # MSA HMM Cell based on https://github.com/mslehre/classify-seqs/blob/main/HMMCell.py
 class MsaHmmCell(tf.keras.layers.Layer):
     def __init__(self,
-                length, # length of the consensus, defines the number of hidden states
-                emission_init=None,
-                transition_init={}, # a dictionary that maps part_names to arrays of the respective part length
-                                        # missing values will default to zero-arrays
-                flank_init=0,
-                trainable_kernels={} #can be used to omit parameter updates for certain kernels by adding "kernel_id" : False
+                length, # number of match states
+                input_dim=25, 
+                emission_init = tf.keras.initializers.Zeros(),
+                transition_init={"begin_to_match" : tf.keras.initializers.Zeros(), 
+                                 "match_to_end" : tf.keras.initializers.Zeros(),
+                                 "match_to_match" : tf.keras.initializers.Zeros(), 
+                                 "match_to_insert" : tf.keras.initializers.Zeros(),
+                                 "insert_to_match" : tf.keras.initializers.Zeros(), 
+                                 "insert_to_insert" : tf.keras.initializers.Zeros(),
+                                 "match_to_delete" : tf.keras.initializers.Zeros(), 
+                                 "delete_to_match" : tf.keras.initializers.Zeros(),
+                                 "delete_to_delete" : tf.keras.initializers.Zeros(),
+                                 "left_flank_loop" : tf.keras.initializers.Zeros(), 
+                                 "left_flank_exit" : tf.keras.initializers.Zeros(),
+                                 "unannotated_segment_loop" : tf.keras.initializers.Zeros(), 
+                                 "unannotated_segment_exit" : tf.keras.initializers.Zeros(),
+                                 "right_flank_loop" : tf.keras.initializers.Zeros(), 
+                                 "right_flank_exit" : tf.keras.initializers.Zeros(),
+                                 "end_to_unannotated_segment" : tf.keras.initializers.Zeros(), 
+                                 "end_to_right_flank" : tf.keras.initializers.Zeros(), 
+                                 "end_to_terminal" : tf.keras.initializers.Zeros()},
+                insertion_init = tf.keras.initializers.Zeros(),
+                flank_init = tf.keras.initializers.Zeros(),
+                 
+                 #function of form f(B, inputs) that defines how the emission probabilities are computed
+                 #per default, categorical dists are assumed
+                emission_func = tf.linalg.matvec, 
+                emission_prior = AminoAcidPrior(),
+                alpha_flank = 7e3,
+                alpha_single = 1e9,
+                alpha_frag = 1e4,
+                 
+                 #can be used to omit parameter updates for certain kernels by adding "kernel_id" : False
+                frozen_kernels={}, 
+                frozen_insertions=True,
+                **kwargs
                 ):
-        super(MsaHmmCell, self).__init__(dtype=ut.dtype)
+        super(MsaHmmCell, self).__init__(name="MsaHmmCell", dtype=tf.float64, **kwargs)
         self.length = length 
+        self.input_dim = input_dim #without terminal symbol
+        self.alpha_flank = alpha_flank
+        self.alpha_single = alpha_single
+        self.alpha_frag = alpha_frag
+        self.emission_init = emission_init
+        self.transition_init = transition_init
+        self.insertion_init = insertion_init
+        self.flank_init = flank_init
+        self.emission_func = emission_func
+        self.emission_prior = emission_prior
         #number of explicit (emitting states, i.e. without flanking states and deletions)
         self.num_states = 2 * length + 3 
         self.num_states_implicit = self.num_states + self.length + 2
@@ -38,16 +98,25 @@ class MsaHmmCell(tf.keras.layers.Layer):
         #sub-arrays of the complete transition kernel for convenience
         #describes name and length for kernels of the categorical transition distributions
         #for states or families of states
-        self.explicit_transition_kernel_parts = [("begin_to_match", self.length), ("match_to_end", self.length),
-                                                ("match_to_match", self.length-1), ("match_to_insert", self.length-1),
-                                                ("insert_to_match", self.length-1), ("insert_to_insert", self.length-1),
+        self.explicit_transition_kernel_parts = [("begin_to_match", self.length), 
+                                                 ("match_to_end", self.length),
+                                                 ("match_to_match", self.length-1), 
+                                                 ("match_to_insert", self.length-1),
+                                                 ("insert_to_match", self.length-1), 
+                                                 ("insert_to_insert", self.length-1),
                                                 #consider begin and end states as additional match states:
-                                                ("match_to_delete", self.length), ("delete_to_match", self.length),
-                                                ("delete_to_delete", self.length-1),
-                                                 ("left_flank_loop", 1), ("left_flank_exit", 1),
-                                                 ("unannotated_segment_loop", 1), ("unannotated_segment_exit", 1),
-                                                 ("right_flank_loop", 1), ("right_flank_exit", 1),
-                                                 ("end_to_unannotated_segment", 1), ("end_to_right_flank", 1), ("end_to_terminal", 1)]
+                                                 ("match_to_delete", self.length), 
+                                                 ("delete_to_match", self.length),
+                                                 ("delete_to_delete", self.length-1),
+                                                 ("left_flank_loop", 1), 
+                                                 ("left_flank_exit", 1),
+                                                 ("unannotated_segment_loop", 1), 
+                                                 ("unannotated_segment_exit", 1),
+                                                 ("right_flank_loop", 1), 
+                                                 ("right_flank_exit", 1),
+                                                 ("end_to_unannotated_segment", 1), 
+                                                 ("end_to_right_flank", 1), 
+                                                 ("end_to_terminal", 1)]
         self.implicit_transition_parts = ([("left_flank_loop", 1),
                                            ("left_flank_to_match", self.length),
                                            ("left_flank_to_right_flank", 1),
@@ -68,39 +137,67 @@ class MsaHmmCell(tf.keras.layers.Layer):
                                            ("right_flank_loop", 1),
                                            ("right_flank_exit", 1),
                                            ("terminal_self_loop", 1)])
-        _assert_transition_init_kernel(transition_init, self.explicit_transition_kernel_parts)
-        self.end_state_emission = tf.one_hot([fasta.s-1], fasta.s, dtype=ut.dtype) # end state can only emit the end symbol
-        #we add weights only for the match states
-        #the end state and all insertion states will emit based on a constant background distribution
-        if emission_init is None:
-            emission_init = np.zeros((self.length, fasta.s-1))
-        self.emission_kernel = self.add_weight(
-            shape=(self.length, fasta.s-1), 
-            initializer=tf.constant_initializer(emission_init), 
-            name='emission_kernel',
-            dtype=ut.dtype) # closely related to the emission matrix
+        
+        _assert_transition_init_kernel(self.transition_init, self.explicit_transition_kernel_parts)
+        
+        # support multiple emissions
+        if not hasattr(self.emission_init, '__iter__'):
+            self.emission_init = [self.emission_init]
+        if not hasattr(self.insertion_init, '__iter__'):
+            self.insertion_init = [self.insertion_init]
+        if not hasattr(self.input_dim, '__iter__'):
+            self.input_dim = [self.input_dim]
+        if not hasattr(self.emission_func, '__iter__'):
+            self.emission_func = [self.emission_func]
+        if not hasattr(self.emission_prior, '__iter__'):
+            self.emission_prior = [self.emission_prior]
+            
+        self.load_priors()
+        
+        self.epsilon = np.finfo(np.float64).tiny
+        self.frozen_kernels = frozen_kernels
+        self.frozen_insertions = frozen_insertions
+            
+            
+    def build(self, input_shape):
         # The (sparse) kernel is subdivided in groups of transitions.
         # To avoid error-prone slicing of a long array into smaller parts,
         # we store the parts as a dictionary and concatenate them later in the correct order.
         # The kernel is closely related to the transition matrix in the implicit model with deletion states.
         self.transition_kernel = {}
         for part_name, length in self.explicit_transition_kernel_parts:
-            if part_name == "unannotated_segment_loop" or part_name == "right_flank_loop":
+            if part_name == "unannotated_segment_loop" or part_name == "right_flank_loop": #tied flanks
                 self.transition_kernel[part_name] = self.transition_kernel["left_flank_loop"]
-            elif part_name == "unannotated_segment_exit" or part_name == "right_flank_exit":
+            elif part_name == "unannotated_segment_exit" or part_name == "right_flank_exit": #tied flanks
                 self.transition_kernel[part_name] = self.transition_kernel["left_flank_exit"]
             else:
                 self.transition_kernel[part_name] = self.add_weight(shape=[length], 
-                                        initializer=tf.constant_initializer(
-                                            transition_init.get(part_name, np.zeros(length))),
+                                        initializer = self.transition_init[part_name],
                                         name="transition_kernel_"+part_name,
-                                        trainable=trainable_kernels.get(part_name, True),
-                                        dtype=ut.dtype)
+                                        trainable=not self.frozen_kernels.get(part_name, False),
+                                        dtype=self.dtype)
+                
+        # closely related to the emission matrix of the match states
+        self.emission_kernel = [self.add_weight(
+                                        shape=(self.length, s), 
+                                        initializer=init, 
+                                        name="emission_kernel"+str(i),
+                                        dtype=self.dtype) 
+                                           for i, (init, s) in enumerate(zip(self.emission_init, self.input_dim))]
+        
+        self.insertion_kernel = [self.add_weight(
+                                shape=(s),
+                                initializer=init,
+                                name="insertion_kernel"+str(i),
+                                trainable=not self.frozen_insertions,
+                                dtype=self.dtype) 
+                                 for i, (init, s) in enumerate(zip(self.insertion_init, self.input_dim))]
+        
         # closely related to the initial probability of the left flank state
-        self.flank_init = self.add_weight(shape=(1),
-                                         initializer=tf.constant_initializer(flank_init),
+        self.flank_init_kernel = self.add_weight(shape=(1),
+                                         initializer=self.flank_init,
                                          name="init_logit",
-                                         dtype=ut.dtype)
+                                         dtype=self.dtype)
         
         
         
@@ -143,7 +240,8 @@ class MsaHmmCell(tf.keras.layers.Layer):
 
     #returns 2D indices for the (linear) kernel of a sparse (3L+3 x 3L+3) transition matrix with silent states
     #assumes the following ordering of states:
-    # [LEFT_FLANK, MATCH x length, INSERT x length-1, UNANNOTATED_SEGMENT, RIGHT_FLANK, TERMINAL, BEGIN, END, DELETE x length]
+    # [LEFT_FLANK, MATCH x length, INSERT x length-1, UNANNOTATED_SEGMENT, 
+    #  RIGHT_FLANK, TERMINAL, BEGIN, END, DELETE x length]
     def sparse_transition_indices_explicit(self):
         a = np.arange(self.length+1)
         left_flank = 0
@@ -184,7 +282,8 @@ class MsaHmmCell(tf.keras.layers.Layer):
         
         
     def make_transition_kernel(self):
-        return tf.concat([self.transition_kernel[part_name] for part_name,_ in self.explicit_transition_kernel_parts], axis=0)
+        return tf.concat([self.transition_kernel[part_name] 
+                          for part_name,_ in self.explicit_transition_kernel_parts], axis=0)
                                 
             
     def make_probs(self):
@@ -219,10 +318,10 @@ class MsaHmmCell(tf.keras.layers.Layer):
         DD = tf.concat([[1], probs["delete_to_delete"]], axis=0)
         #compute the cumulative products in log-space to avoid underflow
         DD_cumprod = tf.math.cumprod(DD)
-        DD = tf.expand_dims(DD_cumprod, 0) / tf.expand_dims(tf.math.maximum(DD_cumprod, 1e-100), 1)
+        DD = tf.expand_dims(DD_cumprod, 0) / tf.expand_dims(tf.math.maximum(DD_cumprod, self.epsilon), 1)
         DM = tf.expand_dims(probs["delete_to_match"], 0)
         M_skip = MD * DD * DM 
-        upper_triangle = tf.linalg.band_part(tf.ones([self.length-2]*2, dtype=ut.dtype), 0, -1)
+        upper_triangle = tf.linalg.band_part(tf.ones([self.length-2]*2, dtype=self.dtype), 0, -1)
         entry_add = probs["begin_to_match"] + tf.concat([[0], M_skip[0, :-1]], axis=0)
         exit_add = probs["match_to_end"] + tf.concat([M_skip[1:,-1], [0]], axis=0)
         imp_probs = {}
@@ -246,7 +345,7 @@ class MsaHmmCell(tf.keras.layers.Layer):
         imp_probs["unannotated_segment_loop"] = probs["unannotated_segment_loop"] + (probs["unannotated_segment_exit"] * M_skip[0, -1] * probs["end_to_unannotated_segment"])
         imp_probs["unannotated_segment_to_right_flank"] = probs["unannotated_segment_exit"] * M_skip[0, -1] * probs["end_to_right_flank"]
         imp_probs["unannotated_segment_to_terminal"] = probs["unannotated_segment_exit"] * M_skip[0, -1] * probs["end_to_terminal"]
-        imp_probs["terminal_self_loop"] = tf.ones((1), dtype=ut.dtype)
+        imp_probs["terminal_self_loop"] = tf.ones((1), dtype=self.dtype)
         return imp_probs
     
     
@@ -271,22 +370,22 @@ class MsaHmmCell(tf.keras.layers.Layer):
         
         
     def make_B(self):
-        match_emissions = tf.nn.softmax(self.emission_kernel, axis=-1, name="B")
-        insertions_emissions = tf.stack([ut.background_distribution]*(self.length+2))
-        return  tf.concat([
-                      tf.concat([insertions_emissions[:1], 
-                                 tf.zeros((1, 1), dtype=ut.dtype)], axis=-1),
-                      tf.concat([match_emissions, 
-                                 tf.zeros((self.length, 1), dtype=ut.dtype)], axis=-1), 
-                      tf.concat([insertions_emissions[1:], 
-                                 tf.zeros((self.length+1, 1), dtype=ut.dtype)], axis=-1),
-                      self.end_state_emission
-                     ], axis=0, name="B")
+        B = []
+        for s, em, ins in zip(self.input_dim, self.emission_kernel, self.insertion_kernel):
+            emissions = tf.concat([tf.expand_dims(ins, 0), 
+                                   em, 
+                                   tf.stack([ins]*(self.length+1))] , axis=0)
+            emissions = tf.nn.softmax(emissions)
+            emissions = tf.concat([emissions, tf.zeros_like(emissions[:,:1])], axis=-1) 
+            end_state_emission = tf.one_hot([s], s+1, dtype=self.dtype) 
+            emissions = tf.concat([emissions, end_state_emission], axis=0)
+            B.append(emissions)
+        return B
     
     
     # [LEFT_FLANK, MATCH x length, INSERT x length-1, UNANNOTATED_SEGMENT, RIGHT_FLANK, TERMINAL]
     def make_initial_distribution(self):
-        init_flank_prob = tf.math.sigmoid(self.flank_init)
+        init_flank_prob = tf.math.sigmoid(self.flank_init_kernel)
         probs = self.make_probs()
         imp_probs = self.make_implicit_probs()
         init_match = imp_probs["left_flank_to_match"] * (1-init_flank_prob) / probs["left_flank_exit"] 
@@ -295,13 +394,22 @@ class MsaHmmCell(tf.keras.layers.Layer):
         init_terminal = imp_probs["left_flank_to_terminal"] * (1-init_flank_prob) / probs["left_flank_exit"] 
         return tf.expand_dims(tf.concat([init_flank_prob, 
                                          init_match, 
-                                         tf.zeros(self.length-1, dtype=ut.dtype), 
+                                         tf.zeros(self.length-1, dtype=self.dtype), 
                                          init_unannotated_segment, init_right_flank, init_terminal], axis=0), 0)
+    
+    
+    def emission_probs(self, inputs):
+        E = self.emission_func[0](self.B[0], inputs[:,:self.input_dim[0]+1])
+        i = self.input_dim[0]+1
+        for s, em_func, emissions in zip(self.input_dim[1:], self.emission_func[1:], self.B[1:]):
+            E *= em_func(b, inputs[:,i:i+s+1])
+            i += s+1
+        return E
 
     
     def call(self, inputs, states, training=None):
         old_forward, old_loglik = states
-        E = tf.linalg.matvec(self.B, inputs)
+        E = self.emission_probs(inputs)
         if self.init:
             forward = tf.multiply(E, old_forward, name="forward")
             self.init = False
@@ -317,15 +425,88 @@ class MsaHmmCell(tf.keras.layers.Layer):
     
     def get_initial_state(self, inputs=None, batch_size=None, _dtype=None):
         init_dist = tf.repeat(self.make_initial_distribution(), repeats=batch_size, axis=0)
-        loglik = tf.zeros((batch_size, 1), dtype=ut.dtype)
+        loglik = tf.zeros((batch_size, 1), dtype=self.dtype)
         S = [init_dist, loglik]
         return S
+    
+    
+    def load_priors(self):
+        #euqivalent to the alpha parameters of a dirichlet mixture -1 .
+        #these values are crutial when jointly optimizing the main model with the additional
+        #"Plan7" states and transitions
+        #favors high probability of staying one of the 3 flaking states
+        self.alpha_flank = tf.constant(self.alpha_flank, dtype=self.dtype) 
+        #favors high probability for a single main model hit (avoid looping paths)
+        self.alpha_single = tf.constant(self.alpha_single, dtype=self.dtype) 
+        #favors models with high prob. to enter at the first match and exit after the last match
+        self.alpha_frag = tf.constant(self.alpha_frag, dtype=self.dtype) 
+        
+        PRIOR_PATH = os.path.dirname(__file__)+"/trained_prior/"
+        
+        model, DMP = dm.make_model(1, 3, -1, trainable=False)
+        model.load_weights(
+            PRIOR_PATH+"transition_priors/match/ckpt").expect_partial()
+        self.match_dirichlet = dm.DirichletMixturePrior(1, 3, -1,
+                                            DMP.alpha_kernel.numpy(),
+                                            DMP.q_kernel.numpy(),
+                                            trainable=False)
+        
+        model, DMP = dm.make_model(1, 2, -1, trainable=False)
+        model.load_weights(
+            PRIOR_PATH+"transition_priors/insert/ckpt").expect_partial()
+        self.insert_dirichlet = dm.DirichletMixturePrior(1, 2, -1,
+                                            DMP.alpha_kernel.numpy(),
+                                            DMP.q_kernel.numpy(),
+                                            trainable=False)
+        
+        model, DMP = dm.make_model(1, 2, -1, trainable=False)
+        model.load_weights(
+            PRIOR_PATH+"transition_priors/delete/ckpt").expect_partial()
+        self.delete_dirichlet = dm.DirichletMixturePrior(1, 2, -1,
+                                            DMP.alpha_kernel.numpy(),
+                                            DMP.q_kernel.numpy(),
+                                            trainable=False) 
+    
+    
+    def get_prior_log_density(self):    
+        probs = self.make_probs()
+        log_probs = {part_name : tf.math.log(p) for part_name, p in probs.items()}
+        prior = 0
+        #emissions
+        for emission, em_prior in zip(self.B, self.emission_prior):
+            prior += tf.reduce_sum(em_prior(emission))
+        #match state transitions
+        p_match = tf.stack([probs["match_to_match"],
+                            probs["match_to_insert"],
+                            probs["match_to_delete"][1:]], axis=-1)
+        p_match_sum = tf.reduce_sum(p_match, axis=-1, keepdims=True)
+        prior += tf.reduce_sum(self.match_dirichlet.log_pdf(p_match / p_match_sum))
+        #insert state transitions
+        p_insert = tf.stack([probs["insert_to_match"],
+                           probs["insert_to_insert"]], axis=-1)
+        prior += tf.reduce_sum(self.insert_dirichlet.log_pdf(p_insert))
+        #delete state transitions
+        p_delete = tf.stack([probs["delete_to_match"][:-1],
+                           probs["delete_to_delete"]], axis=-1)
+        prior += tf.reduce_sum(self.delete_dirichlet.log_pdf(p_delete))
+        #other transitions
+        prior += self.alpha_flank * log_probs["unannotated_segment_loop"]
+        prior += self.alpha_flank * log_probs["right_flank_loop"]
+        prior += self.alpha_flank * log_probs["left_flank_loop"]
+        prior += self.alpha_flank * tf.math.log(probs["end_to_right_flank"])
+        prior += self.alpha_flank * tf.math.log(tf.math.sigmoid(self.flank_init_kernel))
+        prior += self.alpha_single * tf.math.log(probs["end_to_right_flank"] + probs["end_to_terminal"])
+        #uniform entry/exit prior
+        enex = tf.expand_dims(probs["begin_to_match"], 1) * tf.expand_dims(probs["match_to_end"], 0)
+        enex = tf.linalg.band_part(enex, 0, -1)
+        enex = tf.math.log(1 - enex) 
+        prior += self.alpha_frag * (tf.reduce_sum(enex) - enex[0, -1])
+        return prior
         
         
             
 def _assert_transition_init_kernel(kernel_init, parts):
+    for part_name,_ in parts:
+        assert part_name in kernel_init, "No initializer found for kernel " + part_name + "."
     for part_name in kernel_init.keys():
         assert part_name in [part[0] for part in parts], part_name + " is in the kernel init dict but there is no kernel part matching it. Wrong spelling?"
-    for part_name,l in parts:
-        if part_name in kernel_init:
-            assert kernel_init[part_name].size == l, "\"" + part_name + "\" initializer has length " + str(kernel_init[part_name].size) + " but kernel length is " + str(l)
