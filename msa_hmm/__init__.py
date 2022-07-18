@@ -9,4 +9,3 @@ import msa_hmm.MsaHmmLayer as kernel
 from msa_hmm.MsaHmmLayer import MsaHmmLayer
 import msa_hmm.Visualize as vis
 import msa_hmm.Configuration as config
-
