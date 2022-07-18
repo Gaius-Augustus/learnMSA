@@ -130,7 +130,7 @@ def fit_model(model_generator,
     history = model.fit(dataset, 
                         epochs=epochs,
                         steps_per_epoch=steps,
-                        verbose = 2*int(verbose))
+                        verbose = 1*int(verbose))
     tf.get_logger().setLevel('INFO')
     return model, history
 

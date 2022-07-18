@@ -13,12 +13,12 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         super(MsaHmmLayer, self).__init__(name=name, dtype=dtype, **kwargs)
         self.num_seq = num_seq
         self.cell = cell
+        self.rnn = tf.keras.layers.RNN(self.cell, return_sequences=True, return_state=True)
         self.use_prior = use_prior 
 
         
     def build(self, input_shape):
-        self.cell.build(input_shape)
-        self.rnn = tf.keras.layers.RNN(self.cell, return_sequences=True, return_state=True)
+        self.rnn.build(input_shape) #also builds the cell
         
         
     def call(self, inputs, training=False):

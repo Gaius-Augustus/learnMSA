@@ -36,6 +36,17 @@ class AminoAcidPrior():
         B /= tf.reduce_sum(B, axis=-1, keepdims=True)
         prior = self.emission_dirichlet_mix.log_pdf(B)
         return prior 
+    
+    
+def make_default_emission_matrix(s, em, ins, length, dtype):
+    emissions = tf.concat([tf.expand_dims(ins, 0), 
+                           em, 
+                           tf.stack([ins]*(length+1))] , axis=0)
+    emissions = tf.nn.softmax(emissions)
+    emissions = tf.concat([emissions, tf.zeros_like(emissions[:,:1])], axis=-1) 
+    end_state_emission = tf.one_hot([s], s+1, dtype=dtype) 
+    emissions = tf.concat([emissions, end_state_emission], axis=0)
+    return emissions
 
 
 # MSA HMM Cell based on https://github.com/mslehre/classify-seqs/blob/main/HMMCell.py
@@ -68,6 +79,7 @@ class MsaHmmCell(tf.keras.layers.Layer):
                  #function of form f(B, inputs) that defines how the emission probabilities are computed
                  #per default, categorical dists are assumed
                 emission_func = tf.linalg.matvec, 
+                emission_matrix_generator = make_default_emission_matrix,
                 emission_prior = AminoAcidPrior(),
                 alpha_flank = 7e3,
                 alpha_single = 1e9,
@@ -89,6 +101,7 @@ class MsaHmmCell(tf.keras.layers.Layer):
         self.insertion_init = insertion_init
         self.flank_init = flank_init
         self.emission_func = emission_func
+        self.emission_matrix_generator = emission_matrix_generator
         self.emission_prior = emission_prior
         #number of explicit (emitting states, i.e. without flanking states and deletions)
         self.num_states = 2 * length + 3 
@@ -149,6 +162,8 @@ class MsaHmmCell(tf.keras.layers.Layer):
             self.input_dim = [self.input_dim]
         if not hasattr(self.emission_func, '__iter__'):
             self.emission_func = [self.emission_func]
+        if not hasattr(self.emission_matrix_generator, '__iter__'):
+            self.emission_matrix_generator = [self.emission_matrix_generator]
         if not hasattr(self.emission_prior, '__iter__'):
             self.emission_prior = [self.emission_prior]
             
@@ -371,15 +386,8 @@ class MsaHmmCell(tf.keras.layers.Layer):
         
     def make_B(self):
         B = []
-        for s, em, ins in zip(self.input_dim, self.emission_kernel, self.insertion_kernel):
-            emissions = tf.concat([tf.expand_dims(ins, 0), 
-                                   em, 
-                                   tf.stack([ins]*(self.length+1))] , axis=0)
-            emissions = tf.nn.softmax(emissions)
-            emissions = tf.concat([emissions, tf.zeros_like(emissions[:,:1])], axis=-1) 
-            end_state_emission = tf.one_hot([s], s+1, dtype=self.dtype) 
-            emissions = tf.concat([emissions, end_state_emission], axis=0)
-            B.append(emissions)
+        for gen, s, em, ins in zip(self.emission_matrix_generator, self.input_dim, self.emission_kernel, self.insertion_kernel):
+            B.append(gen(s, em, ins, self.length, self.dtype))
         return B
     
     
