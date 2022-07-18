@@ -15,19 +15,17 @@ Our primary focus is on large numbers of protein sequences (starting at 10.000, 
 ## Installation
 
 Requirements:
-- python 3.x (todo: version test)
 - [TensorFlow GPU](https://www.tensorflow.org/install/gpu) requirements (OPTIONAL, but RECOMMENDED for proteins longer than 100 residues)
 - [TensorFlow](https://github.com/tensorflow/tensorflow)
-- [networkx](https://networkx.org/) (OPTIONAL, only for pHMM visualization)
-- [logomaker](https://logomaker.readthedocs.io/en/latest/) (OPTIONAL, only for pHMM visualization)
+- [networkx](https://networkx.org/) 
+- [logomaker](https://logomaker.readthedocs.io/en/latest/) 
+- tested Python versions: 3.7.13, 3.9.2, 3.9.12
+- tested TensorFlow versions: 2.5, 2.7, 2.8, 2.9 [TensorFlow 2.6 is currently not supported]
 
 1. Clone the repository: 
   <code>git clone https://github.com/Ung0d/MSA-HMM</code>
-3. Install dependencies 
-
-      Just alignments: <code>pip install tensorflow==2.5.0</code>
-
-      With pHMM visualization: <code>pip install tensorflow==2.5.0 logomaker networkx</code>
+3. Install dependencies:
+  <code>pip install tensorflow logomaker networkx</code>
       
 ## Getting Started
 
