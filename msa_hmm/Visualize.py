@@ -110,7 +110,6 @@ def plot_hmm(alignment,
     edge_colors = [G[u][v]['color'] for u,v in G.edges()]
     nx.draw_networkx_edges(G, pos, 
                             node_size=10, 
-                            arrowstyle="fancy", 
                             width=1, 
                             edge_color=edge_colors, 
                             ax=ax) 
@@ -169,7 +168,6 @@ def plot_hmm(alignment,
                                 edgelist=edgelist, 
                                 edge_color = path_color, 
                                 node_size=10, 
-                                arrowstyle=ArrowStyle.Fancy(head_length=.4, head_width=.9, tail_width=.4), 
                                 width=6, 
                                 min_target_margin=5,
                                 ax=ax)
