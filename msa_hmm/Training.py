@@ -139,7 +139,12 @@ def fit_model(fasta_file,
     if verbose:
         print("Using", num_gpu, "GPUs.")
     if num_gpu > 1:       
+        
+        #workaround: https://github.com/tensorflow/tensorflow/issues/50487
+        import atexit
         mirrored_strategy = tf.distribute.MirroredStrategy()    
+        atexit.register(mirrored_strategy._extended._collective_ops._pool.close) # type: ignore
+        
         with mirrored_strategy.scope():
             model, msa_hmm_layer, anc_probs_layer = make_and_compile()
     else:
