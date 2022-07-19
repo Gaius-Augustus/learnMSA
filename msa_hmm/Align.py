@@ -759,7 +759,7 @@ def fit_and_align(fasta_file,
         if verbose:
             print("expansions:", list(zip(pos_expand, expansion_lens)))
             print("discards:", pos_discard)
-        transition_init, emission_init, init_flank = update_kernels(alignment, 
+        transition_init, emission_init, flank_init = update_kernels(alignment, 
                                                               pos_expand, expansion_lens, pos_discard,
                                                               emission_init_0, 
                                                               transition_init_0, 
