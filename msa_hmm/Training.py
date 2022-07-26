@@ -102,7 +102,7 @@ def fit_model(fasta_file,
     tf.get_logger().setLevel('ERROR')
     optimizer = tf.optimizers.Adam(learning_rate)
     if verbose:
-        print("Fitting a model of length", model_length, "on", indices.shape[0], "sequences.")
+        print("Fitting a model of length", model_length, "on", indices.shape[0], "sequences")
         print("Batch size=",batch_size, "Learning rate=",learning_rate)
     def make_and_compile():
         model, msa_hmm_layer, anc_probs_layer = make_model(num_seq=fasta_file.num_seq,
