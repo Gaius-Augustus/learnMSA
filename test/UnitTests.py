@@ -432,8 +432,9 @@ class TestModelSurgery(unittest.TestCase):
                                     EN1 = 1,
                                     EN = 0,
                                     EX = 0)
-        model,_,_ = msa_hmm.train.make_model(model_length=5, 
-                                             num_seq=10, 
+        model,_,_ = msa_hmm.train.make_model(num_seq=10,
+                                             effective_num_seq=10, 
+                                             model_length=5, 
                                              emission_init=emission_init,
                                              transition_init=transition_init,
                                              flank_init="default",
@@ -668,8 +669,9 @@ class TestAlignment(unittest.TestCase):
                                     R = 0,
                                     RF = 0, 
                                     T = 0)
-        model,_,_ = msa_hmm.train.make_model(model_length=length, 
-                                             num_seq=8, 
+        model,_,_ = msa_hmm.train.make_model(num_seq=8, 
+                                             effective_num_seq=8,
+                                             model_length=length, 
                                              emission_init=emission_init,
                                              transition_init=transition_init,
                                              flank_init="default",

@@ -8,23 +8,8 @@ import msa_hmm.Fasta as fasta
 
 
 
-# def read_seqs(filename, gaps=False):
-#     fasta_file = fasta.Fasta(filename, gaps = gaps, contains_lower_case = True)
-#     selected_sequences = list(range(len(fasta_file.raw_seq))) #all and in order
-#     #one hot sequences with removed gaps, shorter sequences are padded with zeros
-#     sequences = fasta_file.one_hot_sequences(subset = selected_sequences)
-#     num_seq = sequences.shape[0]
-#     len_seq = sequences.shape[1]
-#     #replace zero- with end-symbol-padding and make every sequence be succeeded by at least one terminal symbol
-#     padding = np.all(sequences==0, -1)
-#     padding = np.expand_dims(padding.astype(np.float32), -1)
-#     sequences = np.concatenate([sequences, padding], axis=-1)
-#     sequences = np.concatenate([sequences, np.expand_dims(np.eye(fasta.s)[[fasta.s-1]*num_seq], 1)], axis=1)
-#     am_sequences = np.argmax(sequences, -1) 
-#     std_aa_mask = np.expand_dims(am_sequences < 20, -1).astype(np.float32)
-#     return sequences, std_aa_mask, fasta_file
-
 def make_model(num_seq,
+               effective_num_seq,
                model_length, 
                emission_init,
                transition_init,
@@ -41,7 +26,7 @@ def make_model(num_seq,
     mask = tf.keras.Input(shape=(None,1), name="mask", dtype=ut.dtype)
     subset = tf.keras.Input(shape=(), name="subset", dtype=tf.int32)
     msa_hmm_layer = MsaHmmLayer(length=model_length,
-                                num_seq=num_seq,
+                                num_seq=effective_num_seq,
                                 emission_init=emission_init,
                                 transition_init=transition_init,
                                 flank_init=flank_init,
@@ -120,7 +105,8 @@ def fit_model(fasta_file,
         print("Fitting a model of length", model_length, "on", indices.shape[0], "sequences.")
         print("Batch size=",batch_size, "Learning rate=",learning_rate)
     def make_and_compile():
-        model, msa_hmm_layer, anc_probs_layer = make_model(num_seq=indices.shape[0],
+        model, msa_hmm_layer, anc_probs_layer = make_model(num_seq=fasta_file.num_seq,
+                                                           effective_num_seq=indices.shape[0],
                                                            model_length=model_length, 
                                                            emission_init=emission_init,
                                                            transition_init=transition_init,
