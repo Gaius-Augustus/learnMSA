@@ -8,8 +8,8 @@ import msa_hmm.Utility as ut
 
 
 
-
 def default_model_generator(num_seq,
+                            effective_num_seq,
                             model_length, 
                             config,
                             alphabet_size=25):
@@ -26,7 +26,7 @@ def default_model_generator(num_seq,
                               alpha_single = config["alpha_single"],
                               alpha_frag = config["alpha_frag"],
                               frozen_insertions = config["frozen_insertions"])
-    msa_hmm_layer = MsaHmmLayer(msa_hmm_cell, num_seq)
+    msa_hmm_layer = MsaHmmLayer(msa_hmm_cell, effective_num_seq)
     anc_probs_layer = AncProbsLayer(num_seq, config["encoder_initializer"][0])
     
     if config["use_anc_probs"]:
@@ -94,6 +94,7 @@ def make_dataset(indices, batch_generator, batch_size=512, shuffle=True):
 
 def fit_model(model_generator,
               batch_generator,
+              fasta_file,
               indices,
               model_length, 
               config,
@@ -103,26 +104,31 @@ def fit_model(model_generator,
     tf.keras.backend.clear_session() #frees occupied memory 
     tf.get_logger().setLevel('ERROR')
     optimizer = tf.optimizers.Adam(config["learning_rate"])
-    num_seq = indices.shape[0]
     if verbose:
-        print("Fitting a model of length", model_length, "on", num_seq, "sequences.")
+        print("Fitting a model of length", model_length, "on", indices.shape[0], "sequences.")
         print("Batch size=", batch_size, "Learning rate=", config["learning_rate"])
     def make_and_compile():
-        model = model_generator(num_seq,
-                                model_length, 
-                                config)
+        model = model_generator(num_seq=fasta_file.num_seq,
+                                effective_num_seq=indices.shape[0],
+                                model_length=model_length,
+                                config=config)
         model.compile(optimizer=optimizer)
         return model
     num_gpu = len([x.name for x in device_lib.list_local_devices() if x.device_type == 'GPU']) 
     if verbose:
         print("Using", num_gpu, "GPUs.")
     if num_gpu > 1:       
+        
+        #workaround: https://github.com/tensorflow/tensorflow/issues/50487
+        import atexit
         mirrored_strategy = tf.distribute.MirroredStrategy()    
+        atexit.register(mirrored_strategy._extended._collective_ops._pool.close) # type: ignore
+        
         with mirrored_strategy.scope():
             model = make_and_compile()
     else:
          model = make_and_compile()
-    steps = max(30, int(250*np.sqrt(num_seq)/batch_size))
+    steps = max(30, int(250*np.sqrt(fasta_file.num_seq)/batch_size))
     dataset = make_dataset(indices, 
                            batch_generator, 
                            batch_size,

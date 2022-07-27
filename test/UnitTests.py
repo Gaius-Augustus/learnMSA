@@ -424,7 +424,10 @@ class TestAncProbs(unittest.TestCase):
         filename = os.path.dirname(__file__)+"/data/simple.fa"
         fasta_file = msa_hmm.fasta.Fasta(filename, gaps = False, contains_lower_case = True)
         model_length = 10
-        model = msa_hmm.train.default_model_generator(fasta_file.num_seq, model_length, msa_hmm.config.default)
+        model = msa_hmm.train.default_model_generator(num_seq=fasta_file.num_seq, 
+                                                      effective_num_seq=fasta_file.num_seq, 
+                                                      model_length=model_length, 
+                                                      config=msa_hmm.config.default)
         batch_gen = msa_hmm.train.DefaultBatchGenerator(fasta_file)
         ind = np.arange(fasta_file.num_seq)
         msa = msa_hmm.Alignment(fasta_file, batch_gen, ind, batch_size=fasta_file.num_seq, model=model)
@@ -489,12 +492,43 @@ class TestModelSurgery(unittest.TestCase):
         config["alpha_flank"] = 1e3         
         config["alpha_single"] = 1e9
         config["alpha_frag"] = 1e3
-        model = msa_hmm.train.default_model_generator(num_seq=5, 
+        model = msa_hmm.train.default_model_generator(num_seq=10, 
+                                                         effective_num_seq=10, 
                                                           model_length=5,
                                                           config=config)
         filename = os.path.dirname(__file__)+"/data/felix_insert_delete.fa"
         fasta_file = msa_hmm.fasta.Fasta(filename, gaps = False, contains_lower_case = True)
         batch_gen = msa_hmm.train.DefaultBatchGenerator(fasta_file)
+# =======
+#         emission_init = string_to_one_hot("FELIC").numpy()*10
+#         transition_init = msa_hmm.kernel.make_transition_init_kernel(5,
+#                                     MM = 0, 
+#                                     MI = 0,
+#                                     MD = -1,
+#                                     II = 1,
+#                                     IM = 0,
+#                                     DM = 1,
+#                                     DD = 0,
+#                                     FC = 0,
+#                                     FE = 0,
+#                                     R = 0,
+#                                     RF = 0, 
+#                                     T = 0,
+#                                     EN1 = 1,
+#                                     EN = 0,
+#                                     EX = 0)
+#         model,_,_ = msa_hmm.train.make_model(num_seq=10,
+#                                              effective_num_seq=10, 
+#                                              model_length=5, 
+#                                              emission_init=emission_init,
+#                                              transition_init=transition_init,
+#                                              flank_init="default",
+#                                              alpha_flank=1e3, 
+#                                              alpha_single=1e9, 
+#                                              alpha_frag=1e3,
+#                                              use_anc_probs=False)
+#         fasta_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/felix_insert_delete.fa", gaps = False, contains_lower_case = True)
+# >>>>>>> main
         alignment = msa_hmm.Alignment(fasta_file, 
                                       batch_gen,
                                       np.arange(fasta_file.num_seq),
@@ -726,7 +760,36 @@ class TestAlignment(unittest.TestCase):
                                                                         R = 0,
                                                                         RF = 0, 
                                                                         T = 0)
-        model = msa_hmm.train.default_model_generator(num_seq=8, model_length=length, config=config)
+        model = msa_hmm.train.default_model_generator(num_seq=8, 
+                                                      effective_num_seq=8,
+                                                      model_length=length, 
+                                                      config=config)
+# =======
+#         emission_init = string_to_one_hot("FELIX").numpy()*20
+#         transition_init = msa_hmm.kernel.make_transition_init_kernel(length,
+#                                     MM = 0, 
+#                                     MI = 0,
+#                                     MD = 0,
+#                                     II = 0,
+#                                     IM = 0,
+#                                     DM = 0,
+#                                     DD = 0,
+#                                     FC = 0,
+#                                     FE = 0,
+#                                     R = 0,
+#                                     RF = 0, 
+#                                     T = 0)
+#         model,_,_ = msa_hmm.train.make_model(num_seq=8, 
+#                                              effective_num_seq=8,
+#                                              model_length=length, 
+#                                              emission_init=emission_init,
+#                                              transition_init=transition_init,
+#                                              flank_init="default",
+#                                              alpha_flank=1e3, 
+#                                              alpha_single=1e9, 
+#                                              alpha_frag=1e3,
+#                                              use_anc_probs=False)
+# >>>>>>> main
     
         #subalignment
         filename = os.path.dirname(__file__)+"/data/felix.fa"

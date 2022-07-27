@@ -728,6 +728,7 @@ def fit_and_align(fasta_file,
             train_indices = full_length_estimate
         model, history = train.fit_model(model_generator,
                                           batch_generator,
+                                          fasta_file,
                                           train_indices,
                                           model_length, 
                                           config,
