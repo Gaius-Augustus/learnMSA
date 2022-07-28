@@ -1,3 +1,5 @@
+#the configuration can be changed by experienced users
+#proper command line support for these parameters will be added in the future
 default = {
     
     "transition_init" : "default",
