@@ -5,7 +5,7 @@ Multiple sequence alignment formulated as a statistical machine learning problem
 
 ![alt text](https://github.com/Ung0d/MSA-HMM-Analysis/blob/main/fig/boxplots_sp_homfam.png?raw=true)
 
-On ultra-large data we produce alignments with better accuracy and are (occasionally multiple times) faster than state of the art aligners. We think that our tool can be a first step towards a future-proof framework for ultra large MSA that lends itself to a variety of opportunities for further improvements.
+On ultra-large (millions of sequences) data we produce alignments with better accuracy and are (occasionally multiple times) faster than state of the art aligners. We think that our tool can be a first step towards a future-proof framework for ultra large MSA that lends itself to a variety of opportunities for further improvements.
 
 ***When should I use it?***
 
