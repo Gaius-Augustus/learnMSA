@@ -26,14 +26,14 @@ def viterbi_transitions(hmm_cell, gamma_prev, sequences_i, log_A_val, indices_0,
 
 # implements the log-version to prevent underflow
 # utilizes sparse matrix format for a speedup
-def viterbi_dyn_prog(sequences, hmm_cell, epsilon=np.finfo(np.float32).tiny):
+def viterbi_dyn_prog(sequences, hmm_cell, epsilon=np.finfo(np.float64).tiny):
     A = hmm_cell.make_A_sparse()
     init = hmm_cell.make_initial_distribution()
     n = sequences.shape[0]
     m = A.shape[0]
     len_seq = sequences.shape[1]
     log_A_val = tf.expand_dims(tf.math.log(A.values), 0)
-    log_A_val = tf.cast(log_A_val, dtype=tf.float32)
+    log_A_val = log_A_val
     indices_0 = A.indices[:,0]
     grid = tf.meshgrid(tf.range(n, dtype=tf.int64) * m,
                        A.indices[:,1], indexing='ij')
@@ -58,12 +58,12 @@ def viterbi_backtracking_step(q, gamma_state, log_A_dense):
     return tf.math.argmax(A_q + gamma_state, axis=-1)
 
     
-def viterbi_backtracking(hmm_cell, gamma, epsilon=np.finfo(np.float32).tiny):
+def viterbi_backtracking(hmm_cell, gamma, epsilon=np.finfo(np.float64).tiny):
     A = hmm_cell.make_A_sparse()
     n = gamma.shape[0]
     l = gamma.shape[1]
     log_A_dense = tf.math.log(tf.sparse.to_dense(A) + epsilon)
-    log_A_dense = tf.cast(log_A_dense, dtype=tf.float32)
+    log_A_dense = log_A_dense
     state_seqs_max_lik = []
     q = tf.math.argmax(gamma[:,-1], axis=-1)
     for i in range(l):
@@ -77,12 +77,13 @@ def viterbi_backtracking(hmm_cell, gamma, epsilon=np.finfo(np.float32).tiny):
 # pos. i of the returned sequences is the active state of the HMM after observing pos. i of the input
 # runs in batches to avoid memory overflow for large data
 def viterbi(sequences, hmm_cell, batch_size=64):
+    sequences = tf.cast(sequences, tf.float64)
     hmm_cell.init_cell()
     k = 0
-    gamma = np.zeros((sequences.shape[0], sequences.shape[1], hmm_cell.num_states), dtype=np.float32)
+    gamma = np.zeros((sequences.shape[0], sequences.shape[1], hmm_cell.num_states), dtype=np.float64)
     while k < sequences.shape[0]:
         if len(sequences.shape) == 2:
-            gamma[k:k+batch_size] = viterbi_dyn_prog(tf.one_hot(sequences[k:k+batch_size], fasta.s, dtype=tf.float32), hmm_cell)
+            gamma[k:k+batch_size] = viterbi_dyn_prog(tf.one_hot(sequences[k:k+batch_size], fasta.s, dtype=tf.float64), hmm_cell)
         else:
             gamma[k:k+batch_size] = viterbi_dyn_prog(sequences[k:k+batch_size], hmm_cell)
         k+=batch_size
