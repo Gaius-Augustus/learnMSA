@@ -101,6 +101,8 @@ def get_adaptive_batch_size(model_length, max_len):
         return 128
 
 
+#the configuration can be changed by experienced users
+#proper command line support for these parameters will be added in the future
 default = {
     
     "transition_init" : make_default_transition_init(),
