@@ -4,7 +4,6 @@ import copy
 import random
 import tensorflow as tf
 import msa_hmm.DirichletMixture as dm
-import msa_hmm.Utility as ut
 
     
 dtype = tf.float64
