@@ -2,9 +2,9 @@ import os
 import tensorflow as tf
 import numpy as np
 from tensorflow.python.client import device_lib
-from msa_hmm.MsaHmmCell import MsaHmmCell
-import msa_hmm.Utility as ut
-import msa_hmm.DirichletMixture as dm
+from learnMSA.msa_hmm.MsaHmmCell import MsaHmmCell
+import learnMSA.msa_hmm.Utility as ut
+import learnMSA.msa_hmm.DirichletMixture as dm
 
 class MsaHmmLayer(tf.keras.layers.Layer):
     def __init__(self, 

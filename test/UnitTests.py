@@ -5,8 +5,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 import unittest
 import numpy as np
 import tensorflow as tf
-import msa_hmm
-
+from learnMSA import msa_hmm 
 
 class TestMsaHmmCell(unittest.TestCase):
     

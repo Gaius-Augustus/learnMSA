@@ -9,14 +9,14 @@ setup(
     description="learnMSA: Learning and Aligning large Protein Families",
     packages=find_packages(
         where=".",
-        include=["msa_hmm"]
+        include=["learnMSA", "learnMSA.run", "learnMSA.msa_hmm"]
     ),
     install_requires=["tensorflow>=2.5.0",
                       "networkx",
                       "logomaker" ],
     include_package_data=True,
-    package_data={'': ["trained_prior/*/*", "trained_prior/transition_priors/*/*"]},
+    package_data={'': ["msa_hmm/trained_prior/*/*", "msa_hmm/trained_prior/transition_priors/*/*"]},
     entry_points={
         "console_scripts": [
-            "learnMSA = msa_hmm:learnMSA", ] }
+            "learnMSA = learnMSA.run:run_main", ] }
 )

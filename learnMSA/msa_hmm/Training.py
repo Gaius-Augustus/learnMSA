@@ -1,10 +1,10 @@
 import tensorflow as tf
 from tensorflow.python.client import device_lib
 import numpy as np
-from msa_hmm.MsaHmmLayer import MsaHmmLayer
-from msa_hmm.AncProbsLayer import AncProbsLayer
-import msa_hmm.Utility as ut
-import msa_hmm.Fasta as fasta
+from learnMSA.msa_hmm.MsaHmmLayer import MsaHmmLayer
+from learnMSA.msa_hmm.AncProbsLayer import AncProbsLayer
+import learnMSA.msa_hmm.Utility as ut
+import learnMSA.msa_hmm.Fasta as fasta
 
 
 

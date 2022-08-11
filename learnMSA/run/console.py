@@ -1,12 +1,11 @@
+import os
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3" 
 import numpy as np
 import sys
 import time
 from argparse import ArgumentParser
-import msa_hmm
-import tensorflow as tf
-from tensorflow.python.client import device_lib
 
-def learnMSA():
+def run_main():
     class MsaHmmArgumentParser(ArgumentParser):
         def error(self, message):
             sys.stderr.write('error: %s\n' % message)
@@ -25,12 +24,24 @@ def learnMSA():
                         help="Filepath for a reference alignment; if present, SP and TC scores are computed.")
     parser.add_argument("-b", "--batch", dest="batch_size", type=int, default=-1,
                         help="Default: Adaptive, depending on model length. Can be lowered if memory issues with the default settings occur.")
+    parser.add_argument("-d", "--cuda_visible_devices", dest="cuda_visible_devices", type=str, default="default",
+                        help="Controls the GPU devices visible to learnMSA as a comma-separated list of device IDs. The value -1 forces learnMSA to run on CPU. Per default, learnMSA attempts to use all available GPUs.")
     args = parser.parse_args()
+    
+    #import after argparsing to avoid long delay with -h option
+    if not args.cuda_visible_devices == "default":
+        os.environ["CUDA_VISIBLE_DEVICES"] = args.cuda_visible_devices  
+    from .. import msa_hmm
+    import tensorflow as tf
+    from tensorflow.python.client import device_lib
     
     if not args.silent:
         GPUS = [x.physical_device_desc for x in device_lib.list_local_devices() if x.device_type == 'GPU']
         if len(GPUS) == 0:
-            print("It seems like no GPU is installed. Running on CPU instead. Expect slower performance especially for longer models.")
+            if args.cuda_visible_devices == "-1" or args.cuda_visible_devices == "":
+                print("GPUs disabled by user. Running on CPU instead. Expect slower performance especially for longer models.")
+            else:
+                print("It seems like no GPU is installed. Running on CPU instead. Expect slower performance especially for longer models.")
         else:
             print("Using GPU(s):", GPUS)
 
@@ -80,3 +91,7 @@ def learnMSA():
         
         if not args.silent:
             print("SP score =", r, "TC score =", tc)
+            
+            
+if __name__ == '__main__':
+    run_main()

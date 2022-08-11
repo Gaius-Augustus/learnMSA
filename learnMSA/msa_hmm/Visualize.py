@@ -5,7 +5,7 @@ import networkx as nx
 import pandas as pd
 import numpy as np
 import tensorflow as tf
-import msa_hmm
+import learnMSA.msa_hmm
 
 
 def make_logo(alignment, ax):

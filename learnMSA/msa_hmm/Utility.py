@@ -3,7 +3,7 @@ import numpy as np
 import copy
 import random
 import tensorflow as tf
-import msa_hmm.DirichletMixture as dm
+import learnMSA.msa_hmm.DirichletMixture as dm
 
     
 dtype = tf.float64

@@ -2,11 +2,11 @@ import tensorflow as tf
 import numpy as np
 import time
 import os
-import msa_hmm.Utility as ut
-import msa_hmm.Fasta as fasta
-import msa_hmm.Training as train
-import msa_hmm.MsaHmmLayer as msa_hmm
-from msa_hmm.Configuration import as_str
+import learnMSA.msa_hmm.Utility as ut
+import learnMSA.msa_hmm.Fasta as fasta
+import learnMSA.msa_hmm.Training as train
+import learnMSA.msa_hmm.MsaHmmLayer as msa_hmm
+from learnMSA.msa_hmm.Configuration import as_str
 
 
 @tf.function

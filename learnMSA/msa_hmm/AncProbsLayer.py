@@ -1,7 +1,7 @@
 import tensorflow as tf
 import numpy as np
-import msa_hmm.Utility as ut
-import msa_hmm.Fasta as fasta
+import learnMSA.msa_hmm.Utility as ut
+import learnMSA.msa_hmm.Fasta as fasta
 
 
 TAU_MAX = 2.5
