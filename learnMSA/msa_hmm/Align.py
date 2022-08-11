@@ -674,11 +674,23 @@ def get_adaptive_batch_size(model_length, max_len):
         return 128
 
     
+
+    
+SEQ_COUNT_WARNING_THRESHOLD = 1000
+
+
 # Constructs an alignment for the given fasta file
 def fit_and_align(fasta_file, 
                   config,
                   subset=None,
                   verbose=True):
+    
+    if fasta_file.gaps:
+        raise Warning(f"The file {fasta_file.filename} already contains gaps. Realining the raw sequences.")
+    
+    if fasta_file.num_seq < SEQ_COUNT_WARNING_THRESHOLD:
+        print(f"Warning: You are aligning {fasta_file.num_seq} sequences, although learnMSA is designed for large scale alignments. We recommend to have a sufficiently deep training dataset of at least {SEQ_COUNT_WARNING_THRESHOLD} sequences for accurate results.")
+        
     total_time_start = time.time()
     n = fasta_file.num_seq
     if subset is None:

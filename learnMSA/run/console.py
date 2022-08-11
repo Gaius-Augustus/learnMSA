@@ -1,9 +1,13 @@
 import os
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3" 
 import numpy as np
 import sys
 import time
 from argparse import ArgumentParser
+
+#hide tensorflow messages and warnings
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3" 
+#hide traceback in case of an exception
+sys.tracebacklimit = 0
 
 def run_main():
     class MsaHmmArgumentParser(ArgumentParser):
@@ -51,12 +55,10 @@ def run_main():
     
     config["batch_size"] = args.batch_size if args.batch_size > 0 else "adaptive"
 
-    fasta_file = msa_hmm.fasta.Fasta(args.input_file, 
-                             gaps=False, 
-                             contains_lower_case=True)  
+    fasta_file = msa_hmm.fasta.Fasta(args.input_file)  
 
     if args.ref_file != "":
-        ref_fasta = msa_hmm.fasta.Fasta(args.ref_file, gaps=True, contains_lower_case=True)
+        ref_fasta = msa_hmm.fasta.Fasta(args.ref_file)
         subset = np.array([fasta_file.seq_ids.index(sid) for sid in ref_fasta.seq_ids])
     else:
         subset = None
@@ -83,9 +85,7 @@ def run_main():
         print("Wrote file", args.output_file)
 
     if args.ref_file != "":
-        out_file = msa_hmm.fasta.Fasta(args.output_file, 
-                                 gaps=True, 
-                                 contains_lower_case=True) 
+        out_file = msa_hmm.fasta.Fasta(args.output_file) 
         _,r = out_file.precision_recall(ref_fasta)
         tc = out_file.tc_score(ref_fasta)
         

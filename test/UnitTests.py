@@ -143,10 +143,10 @@ class TestMSAHMM(unittest.TestCase):
                                       emission_init=emission_init,
                                       transition_init=transition_init)
         hmm_cell.init_cell()
-        fasta_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/simple.fa", gaps = False, contains_lower_case = True)
+        fasta_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/simple.fa")
         sequences, std_aa_mask = get_all_seqs(fasta_file)
-        self.assertEqual(sequences.shape, (1,5,len(msa_hmm.fasta.alphabet)))
-        forward, loglik = hmm_cell.get_initial_state(batch_size=1)
+        self.assertEqual(sequences.shape, (2,5,len(msa_hmm.fasta.alphabet)))
+        forward, loglik = hmm_cell.get_initial_state(batch_size=2)
         self.assertEqual(loglik[0], 0)
         #next match state should always yield highest probability
         for i in range(length):
@@ -158,7 +158,7 @@ class TestMSAHMM(unittest.TestCase):
         self.assertEqual(np.argmax(forward[0]), 2*length+2)
         
         hmm_cell.init_cell()
-        fasta_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/length_diff.fa", gaps = False, contains_lower_case = True)
+        fasta_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/length_diff.fa")
         sequences, std_aa_mask = get_all_seqs(fasta_file)
         self.assertEqual(sequences.shape, (2,10,len(msa_hmm.fasta.alphabet)))
         forward, loglik = hmm_cell.get_initial_state(batch_size=1)
@@ -202,7 +202,7 @@ class TestMSAHMM(unittest.TestCase):
         hmm_cell = msa_hmm.MsaHmmCell(length=length, 
                                       emission_init=emission_init,
                                       transition_init=transition_init)
-        fasta_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/felix.fa", gaps = False, contains_lower_case = True)
+        fasta_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/felix.fa")
         ref_seqs = np.array([[1,2,3,4,5,12,12,12,12,12,12,12,12,12,12],
                              [0,0,0,1,2,3,4,5,12,12,12,12,12,12,12],
                              [1,2,3,4,5,11,11,11,12,12,12,12,12,12,12],
@@ -386,7 +386,7 @@ class TestMSAHMM(unittest.TestCase):
 class TestAncProbs(unittest.TestCase):
     
     def test_anc_probs(self):
-        fasta_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/simple.fa", gaps = False, contains_lower_case = True)
+        fasta_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/simple.fa")
         sequences, std_aa_mask = get_all_seqs(fasta_file)
         anc_probs_layer = msa_hmm.AncProbsLayer(num_seqs=sequences.shape[0], tau_init=1.0)
         anc_prob_seqs = anc_probs_layer(sequences, std_aa_mask, [0])
@@ -441,7 +441,7 @@ class TestModelSurgery(unittest.TestCase):
                                              alpha_single=1e9, 
                                              alpha_frag=1e3,
                                              use_anc_probs=False)
-        fasta_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/felix_insert_delete.fa", gaps = False, contains_lower_case = True)
+        fasta_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/felix_insert_delete.fa")
         alignment = msa_hmm.Alignment(fasta_file, 
                                       np.arange(fasta_file.num_seq),
                                       32, 
@@ -680,7 +680,7 @@ class TestAlignment(unittest.TestCase):
                                              use_anc_probs=False)
     
         #subalignment
-        fasta_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/felix.fa", gaps=False, contains_lower_case=True)
+        fasta_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/felix.fa")
         subset = np.array([0,2,5])
         subalignment = msa_hmm.Alignment(fasta_file, subset, 32, model, use_anc_probs=False)
         subalignment_strings = subalignment.to_string(add_block_sep=False)
@@ -691,8 +691,8 @@ class TestAlignment(unittest.TestCase):
     #this test aims to test the high level alignment function by feeding real world data to it
     #and checking if the resulting alignment meets some friendly thresholds 
     def test_alignment_egf(self):
-        fasta_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/egf.fasta", gaps=False, contains_lower_case=True)
-        ref_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/egf.ref", gaps=True, contains_lower_case=True)
+        fasta_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/egf.fasta")
+        ref_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/egf.ref")
         ref_subset = np.array([fasta_file.seq_ids.index(sid) for sid in ref_file.seq_ids])
         loglik, alignment = msa_hmm.align.fit_and_align_n(fasta_file, 
                                                           num_runs=1, 
@@ -703,7 +703,7 @@ class TestAlignment(unittest.TestCase):
         self.assertTrue(loglik > -70)
         self.assertTrue(alignment.msa_hmm_layer.length > 25)
         alignment.to_file(os.path.dirname(__file__)+"/data/egf.out.fasta")
-        pred_fasta_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/egf.out.fasta", gaps=True, contains_lower_case=True)
+        pred_fasta_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/egf.out.fasta")
         p,r = pred_fasta_file.precision_recall(ref_file)
         tc = pred_fasta_file.tc_score(ref_file)
         #based on experience, any half decent hyperparameter choice should yield at least these scores
