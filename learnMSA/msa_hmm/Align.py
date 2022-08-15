@@ -676,7 +676,7 @@ def get_adaptive_batch_size(model_length, max_len):
     
 
     
-SEQ_COUNT_WARNING_THRESHOLD = 1000
+SEQ_COUNT_WARNING_THRESHOLD = 100
 
 
 # Constructs an alignment for the given fasta file
