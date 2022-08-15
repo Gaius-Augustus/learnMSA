@@ -16,6 +16,8 @@ setup(
                       "logomaker" ],
     include_package_data=True,
     package_data={'': ["msa_hmm/trained_prior/*/*", "msa_hmm/trained_prior/transition_priors/*/*"]},
+    license="MIT",
+    license_files = ("LICENSE.md"),
     entry_points={
         "console_scripts": [
             "learnMSA = learnMSA.run:run_main", ] }

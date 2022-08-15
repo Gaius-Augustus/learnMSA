@@ -2,32 +2,30 @@ import os
 import numpy as np
 import sys
 import time
-from argparse import ArgumentParser
+import argparse
+from pathlib import Path
 
 #hide tensorflow messages and warnings
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3" 
-#hide traceback in case of an exception
-sys.tracebacklimit = 0
 
 def run_main():
-    class MsaHmmArgumentParser(ArgumentParser):
+    class MsaHmmArgumentParser(argparse.ArgumentParser):
         def error(self, message):
             sys.stderr.write('error: %s\n' % message)
             self.print_help()
             sys.exit(2)
 
-    parser = MsaHmmArgumentParser()
+    parser = MsaHmmArgumentParser(description="learnMSA - multiple alignment of protein sequences")
     parser.add_argument("-i", "--in_file", dest="input_file", type=str, required=True,
-                        help="Unaligned input sequence file in fasta format.")
+                        help="Input sequence file in fasta format.")
     parser.add_argument("-o", "--out_file", dest="output_file", type=str, required=True,
                         help="Filepath for the output alignment.")
-    parser.add_argument("-n", "--num_runs", dest="num_runs", type=int, default=5,
-                        help="Number of trained models.")
-    parser.add_argument("-s", "--silent", dest="silent", action='store_true', help="Prevents any output.")
-    parser.add_argument("-r", "--ref_file", dest="ref_file", type=str, default="",
-                        help="Filepath for a reference alignment; if present, SP and TC scores are computed.")
+    parser.add_argument("-n", "--num_runs", dest="num_runs", type=int, default=1,
+                        help="Number of trained models (default 1).")
+    parser.add_argument("-s", "--silent", dest="silent", action='store_true', help="Prevents output to stdout.")
+    parser.add_argument("-r", "--ref_file", dest="ref_file", type=str, default="", help=argparse.SUPPRESS) #useful for debudding, do not expose to users
     parser.add_argument("-b", "--batch", dest="batch_size", type=int, default=-1,
-                        help="Default: Adaptive, depending on model length. Can be lowered if memory issues with the default settings occur.")
+                        help="Should be lowered if memory issues with the default settings occur. Default: Adaptive, depending on model length (128-512).")
     parser.add_argument("-d", "--cuda_visible_devices", dest="cuda_visible_devices", type=str, default="default",
                         help="Controls the GPU devices visible to learnMSA as a comma-separated list of device IDs. The value -1 forces learnMSA to run on CPU. Per default, learnMSA attempts to use all available GPUs.")
     args = parser.parse_args()
@@ -74,23 +72,24 @@ def run_main():
     best_ll, best_alignment = results[best]
     
     if not args.silent:
-        print("Computed alignments with likelihoods:", [ll for ll,_ in results])
-        print("Best model has likelihood:", best_ll)
+        print("Computed alignments with likelihoods:", ["%.4f" % ll for ll,_ in results])
+        print("Best model has likelihood:", "%.4f" % best_ll)
 
     t = time.time()
+    Path(os.path.dirname(args.output_file)).mkdir(parents=True, exist_ok=True)
     best_alignment.to_file(args.output_file)
     
     if not args.silent:
-        print("time for generating output:", time.time()-t)
+        print("time for generating output:", "%.4f" % (time.time()-t))
         print("Wrote file", args.output_file)
 
     if args.ref_file != "":
         out_file = msa_hmm.fasta.Fasta(args.output_file) 
         _,r = out_file.precision_recall(ref_fasta)
-        tc = out_file.tc_score(ref_fasta)
+        #tc = out_file.tc_score(ref_fasta)
         
         if not args.silent:
-            print("SP score =", r, "TC score =", tc)
+            print("SP score =", r)#, "TC score =", tc)
             
             
 if __name__ == '__main__':

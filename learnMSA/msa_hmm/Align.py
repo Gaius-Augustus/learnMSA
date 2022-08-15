@@ -686,7 +686,7 @@ def fit_and_align(fasta_file,
                   verbose=True):
     
     if fasta_file.gaps:
-        raise Warning(f"The file {fasta_file.filename} already contains gaps. Realining the raw sequences.")
+        print(f"Warning: The file {fasta_file.filename} already contains gaps. Realining the raw sequences.")
     
     if fasta_file.num_seq < SEQ_COUNT_WARNING_THRESHOLD:
         print(f"Warning: You are aligning {fasta_file.num_seq} sequences, although learnMSA is designed for large scale alignments. We recommend to have a sufficiently deep training dataset of at least {SEQ_COUNT_WARNING_THRESHOLD} sequences for accurate results.")
@@ -821,8 +821,8 @@ def fit_and_align_n(fasta_file,
         loglik /= ll_subset.size
         prior = alignment.msa_hmm_layer.get_prior_log_density().numpy()[0]/fasta_file.num_seq
         if verbose:
-            print("Time for alignment:", t_a-t_s)
-            print("Time for estimating loglik:", time.time()-t_a)
-            print("Fitted a model with loglik =", loglik + prior)
+            print("Time for alignment:", "%.4f" % (t_a-t_s))
+            print("Time for estimating loglik:", "%.4f" % (time.time()-t_a))
+            print("Fitted a model with loglik =", "%.4f" % (loglik + prior))
         results.append((loglik + prior, alignment))
     return results

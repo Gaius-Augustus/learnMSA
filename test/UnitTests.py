@@ -712,5 +712,43 @@ class TestAlignment(unittest.TestCase):
         self.assertTrue(tc > 0.1)
         
         
+class ConsoleTest(unittest.TestCase):
+        
+    def test_error_handling(self):
+        import subprocess
+        
+        single_seq = "test/data/single_sequence.fasta"
+        faulty_format = "test/data/faulty_format.fasta"
+        empty_seq = "test/data/empty_sequence.fasta"
+        unknown_symbol = "test/data/unknown_symbol.fasta"
+        faulty_msa = "test/data/faulty_msa.fasta"
+        
+        single_seq_expected_err = f"File {single_seq} contains only a single sequence."
+        faulty_format_expected_err = f"Can not read sequences from file {faulty_format}. Expected a file in FASTA format containing at least 2 sequences."
+        empty_seq_expected_err = f"File {empty_seq} contains an empty sequence: \'zweite Sequenz\'."
+        unknown_symbol_expected_err = f"In file {unknown_symbol}: Found unknown character(s) J in sequence \'erste Sequenz\'. Allowed alphabet: ARNDCQEGHILKMFPSTWYVBZXUO."
+        faulty_msa_expected_err = f"In file {faulty_msa}: Although they contain gaps, the input sequences have different lengths. The file seems to contain a malformed alignment."
+        
+        test = subprocess.Popen(["python", "learnMSA.py", "--silent", "-o", "test.out", "-i", single_seq], stderr=subprocess.PIPE)
+        output = test.communicate()[1].strip().decode('ascii')
+        self.assertEqual(single_seq_expected_err, output)
+        
+        test = subprocess.Popen(["python", "learnMSA.py", "--silent", "-o", "test.out", "-i", faulty_format], stderr=subprocess.PIPE)
+        output = test.communicate()[1].strip().decode('ascii')
+        self.assertEqual(faulty_format_expected_err, output)
+        
+        test = subprocess.Popen(["python", "learnMSA.py", "--silent", "-o", "test.out", "-i", empty_seq], stderr=subprocess.PIPE)
+        output = test.communicate()[1].strip().decode('ascii')
+        self.assertEqual(empty_seq_expected_err, output)
+        
+        test = subprocess.Popen(["python", "learnMSA.py", "--silent", "-o", "test.out", "-i", unknown_symbol], stderr=subprocess.PIPE)
+        output = test.communicate()[1].strip().decode('ascii')
+        self.assertEqual(unknown_symbol_expected_err, output)
+        
+        test = subprocess.Popen(["python", "learnMSA.py", "--silent", "-o", "test.out", "-i", faulty_msa], stderr=subprocess.PIPE)
+        output = test.communicate()[1].strip().decode('ascii')
+        self.assertEqual(faulty_msa_expected_err, output)
+        
+        
 if __name__ == '__main__':
     unittest.main()

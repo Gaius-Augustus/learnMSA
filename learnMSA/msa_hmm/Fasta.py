@@ -79,15 +79,15 @@ class Fasta:
     def validate(self):
         gaps = False
         if len(self.raw_seq) == 1:
-            raise ValueError(f"File {self.filename} contains only a single sequence.") 
+            raise SystemExit(f"File {self.filename} contains only a single sequence.") 
             
         if len(self.raw_seq) == 0:
-            raise ValueError(f"Can not read sequences from file {self.filename}. Expected a file in FASTA format containing at least 2 sequences.") 
+            raise SystemExit(f"Can not read sequences from file {self.filename}. Expected a file in FASTA format containing at least 2 sequences.") 
         
         #check for alphabet problems and empty sequences
         for sid, seq in zip(self.seq_ids, self.raw_seq):
             if len(seq) == 0:
-                raise ValueError(f"File {self.filename} contains an empty sequence: \'{sid}\'.") 
+                raise SystemExit(f"File {self.filename} contains an empty sequence: \'{sid}\'.") 
             for aa in alphabet[:-1]:
                 seq = seq.replace(aa, "")
                 seq = seq.replace(aa.lower(), "")
@@ -99,13 +99,13 @@ class Fasta:
                     seq = seq.replace(gap, "")
                 if not seq == "":
                     alphabet_str = "".join(alphabet[:-1])
-                    raise ValueError(f"In file {self.filename}: Found unknown character(s) {unique} in sequence \'{sid}\'. Allowed alphabet: {alphabet_str}.") 
+                    raise SystemExit(f"In file {self.filename}: Found unknown character(s) {unique} in sequence \'{sid}\'. Allowed alphabet: {alphabet_str}.") 
                
         if gaps:
             #validate alignment
             for seq in self.raw_seq[1:]:
                 if len(seq) != len(self.raw_seq[0]):
-                    raise ValueError(f"In file {self.filename}: Although they contain gaps, the input sequences have different lengths. The file seems to contain a malformed alignment.") 
+                    raise SystemExit(f"In file {self.filename}: Although they contain gaps, the input sequences have different lengths. The file seems to contain a malformed alignment.") 
         return gaps
     
     
