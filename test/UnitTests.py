@@ -7,6 +7,24 @@ import numpy as np
 import tensorflow as tf
 from learnMSA import msa_hmm 
 
+
+
+class TestFasta(unittest.TestCase):
+
+    def test_parser(self):
+        fasta = msa_hmm.fasta.Fasta("test/data/egf.fasta")
+        self.assertEqual(fasta.num_seq, 7774)
+        self.assertEqual(fasta.aminoacid_seq_str(0), "CDPNPCYNHGTCSLRATGYTCSCLPRYTGEH")
+        self.assertEqual(fasta.aminoacid_seq_str(9), "NACDRVRCQNGGTCQLKTLEDYTCSCANGYTGDH")
+        self.assertEqual(fasta.aminoacid_seq_str(27), "CNNPCDASPCLNGGTCVPVNAQNYTCTCTNDYSGQN")
+        self.assertEqual(fasta.aminoacid_seq_str(-1), "TASCQDMSCSKQGECLETIGNYTCSCYPGFYGPECEYVRE")
+        
+        fasta2 = msa_hmm.fasta.Fasta("test/data/PF00008_uniprot.fasta")
+        self.assertEqual(fasta2.aminoacid_seq_str(0), "PSPCQNGGLCFMSGDDTDYTCACPTGFSG")
+        self.assertEqual(fasta2.aminoacid_seq_str(7), "SSPCQNGGMCFMSGDDTDYTCACPTGFSG")
+        self.assertEqual(fasta2.aminoacid_seq_str(-1), "CSSSPCNAEGTVRCEDKKGDFLCHCFTGWAGAR")
+        
+
 class TestMsaHmmCell(unittest.TestCase):
     
    
