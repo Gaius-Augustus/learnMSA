@@ -136,9 +136,11 @@ def fit_model(fasta_file,
     else:
          model, msa_hmm_layer, anc_probs_layer = make_and_compile()
     steps = max(30, int(250*np.sqrt(indices.shape[0])/batch_size))
+    callbacks = [tf.keras.callbacks.TerminateOnNaN()]
     history = model.fit(make_dataset(fasta_file, batch_size, True, indices), 
                           epochs=epochs,
                           steps_per_epoch=steps,
+                          callbacks=callbacks,
                           verbose = 2*int(verbose))
     tf.get_logger().setLevel('INFO')
     return model, history

@@ -695,8 +695,6 @@ def fit_and_align(fasta_file,
     n = fasta_file.num_seq
     if subset is None:
         subset = np.arange(n)
-    if verbose:
-        print(n, "sequences of max. length", fasta_file.max_len)
     #config valus that may be reset during model surgery
     emission_init = config["emission_init"]
     transition_init = config["transition_init"]
@@ -711,7 +709,7 @@ def fit_and_align(fasta_file,
     #initial model length
     model_length = np.quantile(fasta_file.seq_lens, q=config["length_init_quantile"])
     model_length *= config["len_mul"]
-    model_length = int(np.floor(model_length))
+    model_length = max(3, int(np.floor(model_length)))
     #model surgery
     finished=config["max_surgery_runs"]==1
     for i in range(config["max_surgery_runs"]):
@@ -719,7 +717,7 @@ def fit_and_align(fasta_file,
             _batch_size = get_adaptive_batch_size(model_length, fasta_file.max_len)
         else:
             _batch_size = config["batch_size"]
-        _batch_size = min(_batch_size, int(n/2))
+        _batch_size = min(_batch_size, n)
         if finished:    
             train_indices = np.arange(n)
         else:
@@ -777,6 +775,8 @@ def fit_and_align(fasta_file,
                                                               transition_init_0, 
                                                               flank_init_0)
         model_length = emission_init.shape[0]
+        if model_length < 3: 
+            raise SystemExit("A problem occured during model surgery: The model is too short (length <= 2). This might indicate that there is a problem with your sequences.") 
         if config["use_anc_probs"] and config["keep_tau"]:
             if finished:
                 tau_init = np.zeros(n)
@@ -823,6 +823,6 @@ def fit_and_align_n(fasta_file,
         if verbose:
             print("Time for alignment:", "%.4f" % (t_a-t_s))
             print("Time for estimating loglik:", "%.4f" % (time.time()-t_a))
-            print("Fitted a model with loglik =", "%.4f" % (loglik + prior))
+            print("Fitted a model has MAP estimate =", "%.4f" % (loglik + prior))
         results.append((loglik + prior, alignment))
     return results

@@ -72,8 +72,8 @@ def run_main():
     best_ll, best_alignment = results[best]
     
     if not args.silent:
-        print("Computed alignments with likelihoods:", ["%.4f" % ll for ll,_ in results])
-        print("Best model has likelihood:", "%.4f" % best_ll)
+        print("Computed alignments with MAP estimates:", ["%.4f" % ll for ll,_ in results])
+        print("Best model has MAP estimate:", "%.4f" % best_ll)
 
     t = time.time()
     Path(os.path.dirname(args.output_file)).mkdir(parents=True, exist_ok=True)

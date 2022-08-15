@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="learnMSA",
-    version="1.0",
+    version="4.0",
     url="https://github.com/Ung0d/MSA-HMM",
     author="Felix Becker",
     author_email="beckerfelix94@gmail.com",

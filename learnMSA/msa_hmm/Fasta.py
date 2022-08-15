@@ -24,7 +24,6 @@ class Fasta:
                  filename, #fasta file to parse
                 ):
         self.filename = filename
-        self.seq_ids = []
         self.gaps = False
         self.read_seqs(filename)
         if self.gaps:
@@ -36,6 +35,7 @@ class Fasta:
         #read seqs as strings
         with open(filename) as f:
             content = f.readlines()
+        self.seq_ids = []
         self.raw_seq = []
         for line in content:
             line = line.strip()
@@ -83,6 +83,16 @@ class Fasta:
             
         if len(self.raw_seq) == 0:
             raise SystemExit(f"Can not read sequences from file {self.filename}. Expected a file in FASTA format containing at least 2 sequences.") 
+                    
+        #validate seq ids (required for anc.probs. to work correctly)
+        if len(self.raw_seq) != len(self.seq_ids):
+            raise SystemExit(f"Can not parse file {self.filename}. Please check if the FASTA format is correct.")
+        for sid in self.seq_ids:
+            if sid == "":
+                raise SystemExit(f"File {self.filename} contains an empty sequence ID, which is not allowed.") 
+        if len(self.seq_ids) > len(set(self.seq_ids)):
+            raise SystemExit(f"File {self.filename} contains dublicated sequence IDs. learnMSA requires unique sequence IDs.") 
+            
         
         #check for alphabet problems and empty sequences
         for sid, seq in zip(self.seq_ids, self.raw_seq):
