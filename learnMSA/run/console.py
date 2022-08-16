@@ -56,7 +56,7 @@ def run_main():
     fasta_file = msa_hmm.fasta.Fasta(args.input_file)  
 
     if args.ref_file != "":
-        ref_fasta = msa_hmm.fasta.Fasta(args.ref_file)
+        ref_fasta = msa_hmm.fasta.Fasta(args.ref_file, aligned=True)
         subset = np.array([fasta_file.seq_ids.index(sid) for sid in ref_fasta.seq_ids])
     else:
         subset = None
@@ -84,7 +84,7 @@ def run_main():
         print("Wrote file", args.output_file)
 
     if args.ref_file != "":
-        out_file = msa_hmm.fasta.Fasta(args.output_file) 
+        out_file = msa_hmm.fasta.Fasta(args.output_file, aligned=True) 
         _,r = out_file.precision_recall(ref_fasta)
         #tc = out_file.tc_score(ref_fasta)
         

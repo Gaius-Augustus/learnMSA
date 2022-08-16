@@ -22,9 +22,10 @@ def replace_in_strings(seqs, c_old, c_new):
 class Fasta:
     def __init__(self, 
                  filename, #fasta file to parse
+                 aligned = False #automatically assumes an alignment if gaps are found, this flag only has to be set manually, if the file contains a gapless alignment
                 ):
         self.filename = filename
-        self.gaps = False
+        self.aligned = aligned
         self.read_seqs(filename)
         if self.gaps:
             self.compute_targets()
@@ -77,7 +78,7 @@ class Fasta:
         
         
     def validate(self):
-        gaps = False
+        gaps = self.aligned
         if len(self.raw_seq) == 1:
             raise SystemExit(f"File {self.filename} contains only a single sequence.") 
             
