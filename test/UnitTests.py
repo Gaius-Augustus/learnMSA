@@ -5,8 +5,25 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 import unittest
 import numpy as np
 import tensorflow as tf
-import msa_hmm
+from learnMSA import msa_hmm 
 
+
+
+class TestFasta(unittest.TestCase):
+
+    def test_parser(self):
+        fasta = msa_hmm.fasta.Fasta("test/data/egf.fasta")
+        self.assertEqual(fasta.num_seq, 7774)
+        self.assertEqual(fasta.aminoacid_seq_str(0), "CDPNPCYNHGTCSLRATGYTCSCLPRYTGEH")
+        self.assertEqual(fasta.aminoacid_seq_str(9), "NACDRVRCQNGGTCQLKTLEDYTCSCANGYTGDH")
+        self.assertEqual(fasta.aminoacid_seq_str(27), "CNNPCDASPCLNGGTCVPVNAQNYTCTCTNDYSGQN")
+        self.assertEqual(fasta.aminoacid_seq_str(-1), "TASCQDMSCSKQGECLETIGNYTCSCYPGFYGPECEYVRE")
+        
+        fasta2 = msa_hmm.fasta.Fasta("test/data/PF00008_uniprot.fasta")
+        self.assertEqual(fasta2.aminoacid_seq_str(0), "PSPCQNGGLCFMSGDDTDYTCACPTGFSG")
+        self.assertEqual(fasta2.aminoacid_seq_str(7), "SSPCQNGGMCFMSGDDTDYTCACPTGFSG")
+        self.assertEqual(fasta2.aminoacid_seq_str(-1), "CSSSPCNAEGTVRCEDKKGDFLCHCFTGWAGAR")
+        
 
 class TestMsaHmmCell(unittest.TestCase):
     
@@ -152,10 +169,10 @@ class TestMSAHMM(unittest.TestCase):
         hmm_cell.build((None, None))
         hmm_cell.init_cell()
         filename = os.path.dirname(__file__)+"/data/simple.fa"
-        fasta_file = msa_hmm.fasta.Fasta(filename, gaps = False, contains_lower_case = True)
+        fasta_file = msa_hmm.fasta.Fasta(filename)
         sequences = get_all_seqs(fasta_file)
-        self.assertEqual(sequences.shape, (1,5,len(msa_hmm.fasta.alphabet)))
-        forward, loglik = hmm_cell.get_initial_state(batch_size=1)
+        self.assertEqual(sequences.shape, (2,5,len(msa_hmm.fasta.alphabet)))
+        forward, loglik = hmm_cell.get_initial_state(batch_size=2)
         self.assertEqual(loglik[0], 0)
         #next match state should always yield highest probability
         for i in range(length):
@@ -168,7 +185,7 @@ class TestMSAHMM(unittest.TestCase):
         
         hmm_cell.init_cell()
         filename = os.path.dirname(__file__)+"/data/length_diff.fa"
-        fasta_file = msa_hmm.fasta.Fasta(filename, gaps = False, contains_lower_case = True)
+        fasta_file = msa_hmm.fasta.Fasta(filename)
         sequences = get_all_seqs(fasta_file)
         self.assertEqual(sequences.shape, (2,10,len(msa_hmm.fasta.alphabet)))
         forward, loglik = hmm_cell.get_initial_state(batch_size=1)
@@ -212,7 +229,7 @@ class TestMSAHMM(unittest.TestCase):
                                       emission_init=emission_init,
                                       transition_init=transition_init)
         hmm_cell.build((None, None))
-        fasta_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/felix.fa", gaps = False, contains_lower_case = True)
+        fasta_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/felix.fa")
         ref_seqs = np.array([[1,2,3,4,5,12,12,12,12,12,12,12,12,12,12],
                              [0,0,0,1,2,3,4,5,12,12,12,12,12,12,12],
                              [1,2,3,4,5,11,11,11,12,12,12,12,12,12,12],
@@ -412,7 +429,7 @@ class TestAncProbs(unittest.TestCase):
     
     def test_anc_probs(self):                 
         filename = os.path.dirname(__file__)+"/data/simple.fa"
-        fasta_file = msa_hmm.fasta.Fasta(filename, gaps = False, contains_lower_case = True)
+        fasta_file = msa_hmm.fasta.Fasta(filename)
         sequences = get_all_seqs(fasta_file)
         anc_probs_layer = msa_hmm.AncProbsLayer(num_seqs=sequences.shape[0], tau_init=tf.constant_initializer(1.0))
         anc_prob_seqs = anc_probs_layer(sequences, [0])
@@ -422,7 +439,7 @@ class TestAncProbs(unittest.TestCase):
     def test_encoder_model(self):
         #test if everything still works if adding the encoder-model abstraction layer      
         filename = os.path.dirname(__file__)+"/data/simple.fa"
-        fasta_file = msa_hmm.fasta.Fasta(filename, gaps = False, contains_lower_case = True)
+        fasta_file = msa_hmm.fasta.Fasta(filename)
         model_length = 10
         model = msa_hmm.train.default_model_generator(num_seq=fasta_file.num_seq, 
                                                       effective_num_seq=fasta_file.num_seq, 
@@ -445,7 +462,7 @@ class TestData(unittest.TestCase):
         
     def test_default_batch_gen(self):
         filename = os.path.dirname(__file__)+"/data/felix_insert_delete.fa"
-        fasta_file = msa_hmm.fasta.Fasta(filename, gaps = False, contains_lower_case = True)
+        fasta_file = msa_hmm.fasta.Fasta(filename)
         batch_gen = msa_hmm.train.DefaultBatchGenerator(fasta_file)
         test_batches = [[0], [1], [4], [0,2], [0,1,2,3,4], [2,3,4]]
         alphabet = np.array(msa_hmm.fasta.alphabet)
@@ -497,38 +514,8 @@ class TestModelSurgery(unittest.TestCase):
                                                           model_length=5,
                                                           config=config)
         filename = os.path.dirname(__file__)+"/data/felix_insert_delete.fa"
-        fasta_file = msa_hmm.fasta.Fasta(filename, gaps = False, contains_lower_case = True)
+        fasta_file = msa_hmm.fasta.Fasta(filename)
         batch_gen = msa_hmm.train.DefaultBatchGenerator(fasta_file)
-# =======
-#         emission_init = string_to_one_hot("FELIC").numpy()*10
-#         transition_init = msa_hmm.kernel.make_transition_init_kernel(5,
-#                                     MM = 0, 
-#                                     MI = 0,
-#                                     MD = -1,
-#                                     II = 1,
-#                                     IM = 0,
-#                                     DM = 1,
-#                                     DD = 0,
-#                                     FC = 0,
-#                                     FE = 0,
-#                                     R = 0,
-#                                     RF = 0, 
-#                                     T = 0,
-#                                     EN1 = 1,
-#                                     EN = 0,
-#                                     EX = 0)
-#         model,_,_ = msa_hmm.train.make_model(num_seq=10,
-#                                              effective_num_seq=10, 
-#                                              model_length=5, 
-#                                              emission_init=emission_init,
-#                                              transition_init=transition_init,
-#                                              flank_init="default",
-#                                              alpha_flank=1e3, 
-#                                              alpha_single=1e9, 
-#                                              alpha_frag=1e3,
-#                                              use_anc_probs=False)
-#         fasta_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/felix_insert_delete.fa", gaps = False, contains_lower_case = True)
-# >>>>>>> main
         alignment = msa_hmm.Alignment(fasta_file, 
                                       batch_gen,
                                       np.arange(fasta_file.num_seq),
@@ -764,36 +751,10 @@ class TestAlignment(unittest.TestCase):
                                                       effective_num_seq=8,
                                                       model_length=length, 
                                                       config=config)
-# =======
-#         emission_init = string_to_one_hot("FELIX").numpy()*20
-#         transition_init = msa_hmm.kernel.make_transition_init_kernel(length,
-#                                     MM = 0, 
-#                                     MI = 0,
-#                                     MD = 0,
-#                                     II = 0,
-#                                     IM = 0,
-#                                     DM = 0,
-#                                     DD = 0,
-#                                     FC = 0,
-#                                     FE = 0,
-#                                     R = 0,
-#                                     RF = 0, 
-#                                     T = 0)
-#         model,_,_ = msa_hmm.train.make_model(num_seq=8, 
-#                                              effective_num_seq=8,
-#                                              model_length=length, 
-#                                              emission_init=emission_init,
-#                                              transition_init=transition_init,
-#                                              flank_init="default",
-#                                              alpha_flank=1e3, 
-#                                              alpha_single=1e9, 
-#                                              alpha_frag=1e3,
-#                                              use_anc_probs=False)
-# >>>>>>> main
     
         #subalignment
         filename = os.path.dirname(__file__)+"/data/felix.fa"
-        fasta_file = msa_hmm.fasta.Fasta(filename, gaps=False, contains_lower_case=True)
+        fasta_file = msa_hmm.fasta.Fasta(filename)
         subset = np.array([0,2,5])
         batch_gen = msa_hmm.train.DefaultBatchGenerator(fasta_file)
         subalignment = msa_hmm.Alignment(fasta_file, batch_gen, subset, 32, model)
@@ -807,8 +768,8 @@ class TestAlignment(unittest.TestCase):
     def test_alignment_egf(self):
         train_filename = os.path.dirname(__file__)+"/data/egf.fasta"
         ref_filename = os.path.dirname(__file__)+"/data/egf.ref"
-        fasta_file = msa_hmm.fasta.Fasta(train_filename, gaps=False, contains_lower_case=True)
-        ref_file = msa_hmm.fasta.Fasta(ref_filename, gaps=True, contains_lower_case=True)
+        fasta_file = msa_hmm.fasta.Fasta(train_filename)
+        ref_file = msa_hmm.fasta.Fasta(ref_filename, aligned=True)
         ref_subset = np.array([fasta_file.seq_ids.index(sid) for sid in ref_file.seq_ids])
         loglik, alignment = msa_hmm.align.fit_and_align_n(1,
                                                           fasta_file, 
@@ -819,13 +780,51 @@ class TestAlignment(unittest.TestCase):
         self.assertTrue(loglik > -70)
         self.assertTrue(alignment.msa_hmm_layer.cell.length > 25)
         alignment.to_file(os.path.dirname(__file__)+"/data/egf.out.fasta")
-        pred_fasta_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/egf.out.fasta", gaps=True, contains_lower_case=True)
+        pred_fasta_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/egf.out.fasta")
         p,r = pred_fasta_file.precision_recall(ref_file)
         tc = pred_fasta_file.tc_score(ref_file)
         #based on experience, any half decent hyperparameter choice should yield at least these scores
         self.assertTrue(p > 0.7)
         self.assertTrue(r > 0.7)
         self.assertTrue(tc > 0.1)
+        
+        
+class ConsoleTest(unittest.TestCase):
+        
+    def test_error_handling(self):
+        import subprocess
+        
+        single_seq = "test/data/single_sequence.fasta"
+        faulty_format = "test/data/faulty_format.fasta"
+        empty_seq = "test/data/empty_sequence.fasta"
+        unknown_symbol = "test/data/unknown_symbol.fasta"
+        faulty_msa = "test/data/faulty_msa.fasta"
+        
+        single_seq_expected_err = f"File {single_seq} contains only a single sequence."
+        faulty_format_expected_err = f"Can not read sequences from file {faulty_format}. Expected a file in FASTA format containing at least 2 sequences."
+        empty_seq_expected_err = f"File {empty_seq} contains an empty sequence: \'zweite Sequenz\'."
+        unknown_symbol_expected_err = f"In file {unknown_symbol}: Found unknown character(s) J in sequence \'erste Sequenz\'. Allowed alphabet: ARNDCQEGHILKMFPSTWYVBZXUO."
+        faulty_msa_expected_err = f"In file {faulty_msa}: Although they contain gaps, the input sequences have different lengths. The file seems to contain a malformed alignment."
+        
+        test = subprocess.Popen(["python", "learnMSA.py", "--silent", "-o", "test.out", "-i", single_seq], stderr=subprocess.PIPE)
+        output = test.communicate()[1].strip().decode('ascii')
+        self.assertEqual(single_seq_expected_err, output)
+        
+        test = subprocess.Popen(["python", "learnMSA.py", "--silent", "-o", "test.out", "-i", faulty_format], stderr=subprocess.PIPE)
+        output = test.communicate()[1].strip().decode('ascii')
+        self.assertEqual(faulty_format_expected_err, output)
+        
+        test = subprocess.Popen(["python", "learnMSA.py", "--silent", "-o", "test.out", "-i", empty_seq], stderr=subprocess.PIPE)
+        output = test.communicate()[1].strip().decode('ascii')
+        self.assertEqual(empty_seq_expected_err, output)
+        
+        test = subprocess.Popen(["python", "learnMSA.py", "--silent", "-o", "test.out", "-i", unknown_symbol], stderr=subprocess.PIPE)
+        output = test.communicate()[1].strip().decode('ascii')
+        self.assertEqual(unknown_symbol_expected_err, output)
+        
+        test = subprocess.Popen(["python", "learnMSA.py", "--silent", "-o", "test.out", "-i", faulty_msa], stderr=subprocess.PIPE)
+        output = test.communicate()[1].strip().decode('ascii')
+        self.assertEqual(faulty_msa_expected_err, output)
         
         
 if __name__ == '__main__':

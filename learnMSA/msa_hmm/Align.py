@@ -2,11 +2,11 @@ import tensorflow as tf
 import numpy as np
 import time
 import os
-import msa_hmm.Utility as ut
-import msa_hmm.Fasta as fasta
-import msa_hmm.Training as train
-import msa_hmm.MsaHmmLayer as msa_hmm
-from msa_hmm.Configuration import as_str
+import learnMSA.msa_hmm.Utility as ut
+import learnMSA.msa_hmm.Fasta as fasta
+import learnMSA.msa_hmm.Training as train
+import learnMSA.msa_hmm.MsaHmmLayer as msa_hmm
+from learnMSA.msa_hmm.Configuration import as_str
 
 
 @tf.function
@@ -690,8 +690,12 @@ def update_kernels(alignment,
                                                   transition_dummy["match_to_end"][0])
     return transitions_new, emissions_new, init_flank_new
 
+
     
-# Constructs an alignment 
+SEQ_COUNT_WARNING_THRESHOLD = 100
+
+
+# Constructs an alignment
 def fit_and_align(fasta_file, 
                   config,
                   model_generator=None,
@@ -702,12 +706,17 @@ def fit_and_align(fasta_file,
         model_generator = train.default_model_generator
     if batch_generator is None:
         batch_generator = train.DefaultBatchGenerator(fasta_file)
+    
+    if fasta_file.gaps:
+        print(f"Warning: The file {fasta_file.filename} already contains gaps. Realining the raw sequences.")
+    
+    if fasta_file.num_seq < SEQ_COUNT_WARNING_THRESHOLD:
+        print(f"Warning: You are aligning {fasta_file.num_seq} sequences, although learnMSA is designed for large scale alignments. We recommend to have a sufficiently deep training dataset of at least {SEQ_COUNT_WARNING_THRESHOLD} sequences for accurate results.")
+        
     total_time_start = time.time()
     n = fasta_file.num_seq
     if subset is None:
         subset = np.arange(n)
-    if verbose:
-        print(n, "sequences of max. length", fasta_file.max_len)
     #ignore short sequences for all surgery iterations except the last
     k = int(min(n*config["surgery_quantile"], 
                 max(0, n-config["min_surgery_seqs"])))
@@ -717,12 +726,12 @@ def fit_and_align(fasta_file,
     #initial model length
     model_length = np.quantile(fasta_file.seq_lens, q=config["length_init_quantile"])
     model_length *= config["len_mul"]
-    model_length = int(np.floor(model_length))
+    model_length = max(3, int(np.floor(model_length)))
     #model surgery
     finished=config["max_surgery_runs"]==1
     for i in range(config["max_surgery_runs"]):
         batch_size = config["batch_size"](model_length, fasta_file.max_len)
-        batch_size = min(batch_size, int(n/2))
+        batch_size = min(batch_size, n)
         if finished:    
             train_indices = np.arange(n)
         else:
@@ -777,6 +786,8 @@ def fit_and_align(fasta_file,
         model_length = emission_init[0].shape[0]
         if config["keep_encoder"]:
             config["encoder_initializer"] = [tf.constant_initializer(l.weights) for l in alignment.encoder_model.layers]
+        if model_length < 3: 
+            raise SystemExit("A problem occured during model surgery: The model is too short (length <= 2). This might indicate that there is a problem with your sequences.") 
     alignment.total_time = time.time() - total_time_start
     return alignment
 
@@ -826,8 +837,8 @@ def fit_and_align_n(num_runs,
         loglik /= ll_subset.size
         prior = alignment.msa_hmm_layer.cell.get_prior_log_density().numpy()[0]/fasta_file.num_seq
         if verbose:
-            print("Time for alignment:", t_a-t_s)
-            print("Time for estimating loglik:", time.time()-t_a)
-            print("Fitted a model with loglik =", loglik + prior)
+            print("Time for alignment:", "%.4f" % (t_a-t_s))
+            print("Time for estimating loglik:", "%.4f" % (time.time()-t_a))
+            print("Fitted a model has MAP estimate =", "%.4f" % (loglik + prior))
         results.append((loglik + prior, alignment))
     return results

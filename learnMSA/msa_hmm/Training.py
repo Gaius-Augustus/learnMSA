@@ -1,10 +1,10 @@
 import tensorflow as tf
 from tensorflow.python.client import device_lib
 import numpy as np
-from msa_hmm.MsaHmmCell import MsaHmmCell
-from msa_hmm.MsaHmmLayer import MsaHmmLayer
-from msa_hmm.AncProbsLayer import AncProbsLayer
-import msa_hmm.Utility as ut
+from learnMSA.msa_hmm.MsaHmmCell import MsaHmmCell
+from learnMSA.msa_hmm.MsaHmmLayer import MsaHmmLayer
+from learnMSA.msa_hmm.AncProbsLayer import AncProbsLayer
+import learnMSA.msa_hmm.Utility as ut
 
 
 
@@ -128,14 +128,16 @@ def fit_model(model_generator,
             model = make_and_compile()
     else:
          model = make_and_compile()
-    steps = max(30, int(250*np.sqrt(fasta_file.num_seq)/batch_size))
+    steps = max(30, int(250*np.sqrt(indices.shape[0])/batch_size))
     dataset = make_dataset(indices, 
                            batch_generator, 
                            batch_size,
                            shuffle=True)
+    callbacks = [tf.keras.callbacks.TerminateOnNaN()]
     history = model.fit(dataset, 
                         epochs=epochs,
                         steps_per_epoch=steps,
+                          callbacks=callbacks,
                         verbose = 1*int(verbose))
     tf.get_logger().setLevel('INFO')
     return model, history

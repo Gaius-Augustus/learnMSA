@@ -10,7 +10,6 @@ s = len(alphabet)
     
 ind_dtype = np.uint16
 
-
 def replace_in_strings(seqs, c_old, c_new):
     for i in range(len(seqs)):
         seqs[i] = seqs[i].replace(c_old, c_new)
@@ -23,51 +22,44 @@ def replace_in_strings(seqs, c_old, c_new):
 class Fasta:
     def __init__(self, 
                  filename, #fasta file to parse
-                 gaps = True, #does the file contain gaps or just raw sequences?
-                 contains_lower_case = False, #expect lower case AA encodings?
+                 aligned = False #automatically assumes an alignment if gaps are found, this flag only has to be set manually, if the file contains a gapless alignment
                 ):
         self.filename = filename
-        self.seq_ids = []
-        self.valid = self.read_seqs(filename, gaps, contains_lower_case)
-        if self.valid and gaps:
+        self.aligned = aligned
+        self.read_seqs(filename)
+        if self.gaps:
             self.compute_targets()
 
             
             
-    def read_seqs(self, filename, gaps, contains_lower_case):
+    def read_seqs(self, filename):
         #read seqs as strings
         with open(filename) as f:
             content = f.readlines()
+        self.seq_ids = []
         self.raw_seq = []
-        seq_open = False
         for line in content:
             line = line.strip()
             if len(line)>0:
                 if line[0]=='>':
-                    seq_open = True
                     self.seq_ids.append(line[1:])
-                elif seq_open:
-                    self.raw_seq.append(line)
-                    seq_open = False
-                else:
+                    self.raw_seq.append("")
+                elif len(self.raw_seq) > 0:
                     self.raw_seq[-1] += line
-
-        #ignore files containing "/" 
-        for seq in self.raw_seq:
-            if not seq.find("/") == -1:
-                return False
-
-        if gaps:
+                        
+                    
+        self.gaps = self.validate()
+        
+        if self.gaps:    
             self.alignment_len = len(self.raw_seq[0])
             replace_in_strings(self.raw_seq, '.', '-')
             
         for i,c in enumerate(alphabet[:-1]):
             replace_in_strings(self.raw_seq, c, str(i)+' ')
-            if contains_lower_case:
-                replace_in_strings(self.raw_seq, c.lower(), str(i)+' ')
+            replace_in_strings(self.raw_seq, c.lower(), str(i)+' ')
 
         #can store sequences with gaps as matrix
-        if gaps:
+        if self.gaps:
             self.ref_seq = copy.deepcopy(self.raw_seq)
             self.ref_seq = [s.replace('-',str(len(alphabet)-1)+' ') for s in self.ref_seq]
             self.ref_seq = np.reshape(np.fromstring("".join(self.ref_seq), dtype=int, sep=' '), (len(self.ref_seq), self.alignment_len))
@@ -83,7 +75,49 @@ class Fasta:
         self.total_len = np.sum(self.seq_lens)
         self.max_len = np.amax(self.seq_lens)
         self.num_seq = len(self.seq_lens)
-        return True
+        
+        
+    def validate(self):
+        gaps = self.aligned
+        if len(self.raw_seq) == 1:
+            raise SystemExit(f"File {self.filename} contains only a single sequence.") 
+            
+        if len(self.raw_seq) == 0:
+            raise SystemExit(f"Can not read sequences from file {self.filename}. Expected a file in FASTA format containing at least 2 sequences.") 
+                    
+        #validate seq ids (required for anc.probs. to work correctly)
+        if len(self.raw_seq) != len(self.seq_ids):
+            raise SystemExit(f"Can not parse file {self.filename}. Please check if the FASTA format is correct.")
+        for sid in self.seq_ids:
+            if sid == "":
+                raise SystemExit(f"File {self.filename} contains an empty sequence ID, which is not allowed.") 
+        if len(self.seq_ids) > len(set(self.seq_ids)):
+            raise SystemExit(f"File {self.filename} contains dublicated sequence IDs. learnMSA requires unique sequence IDs.") 
+            
+        
+        #check for alphabet problems and empty sequences
+        for sid, seq in zip(self.seq_ids, self.raw_seq):
+            if len(seq) == 0:
+                raise SystemExit(f"File {self.filename} contains an empty sequence: \'{sid}\'.") 
+            for aa in alphabet[:-1]:
+                seq = seq.replace(aa, "")
+                seq = seq.replace(aa.lower(), "")
+            if not seq == "":
+                unique = "".join(set(seq))
+                if "-" in unique or "." in unique:
+                    gaps = True
+                for gap in ["-", "."]:
+                    seq = seq.replace(gap, "")
+                if not seq == "":
+                    alphabet_str = "".join(alphabet[:-1])
+                    raise SystemExit(f"In file {self.filename}: Found unknown character(s) {unique} in sequence \'{sid}\'. Allowed alphabet: {alphabet_str}.") 
+               
+        if gaps:
+            #validate alignment
+            for seq in self.raw_seq[1:]:
+                if len(seq) != len(self.raw_seq[0]):
+                    raise SystemExit(f"In file {self.filename}: Although they contain gaps, the input sequences have different lengths. The file seems to contain a malformed alignment.") 
+        return gaps
     
     
     def get_raw_seq(self, i):

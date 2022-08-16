@@ -1,0 +1,1 @@
+from learnMSA.run.console import run_main

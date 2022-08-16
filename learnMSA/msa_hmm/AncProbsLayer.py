@@ -1,6 +1,6 @@
 import tensorflow as tf
 import numpy as np
-import msa_hmm.Utility as ut
+import learnMSA.msa_hmm.Utility as ut
 
 
 class TauConstraint(tf.keras.constraints.Constraint):

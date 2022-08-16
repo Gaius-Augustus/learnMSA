@@ -1,7 +1,7 @@
 import os
 import tensorflow as tf
 import numpy as np
-import msa_hmm.DirichletMixture as dm
+import learnMSA.msa_hmm.DirichletMixture as dm
 
 
 # terminology
