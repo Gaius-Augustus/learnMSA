@@ -167,6 +167,8 @@ class MsaHmmCell(tf.keras.layers.Layer):
         if not hasattr(self.emission_prior, '__iter__'):
             self.emission_prior = [self.emission_prior]
             
+        assert all(len(self.emission_init) == len(x) for x in [self.insertion_init, self.input_dim, self.emission_func, self.emission_matrix_generator, self.emission_prior]), "emission_init, insertion_init, input_dim, emission_func, emission_matrix_generator, emission_prior must have all the same length"
+            
         self.load_priors()
         
         self.epsilon = np.finfo(np.float64).tiny
@@ -410,7 +412,7 @@ class MsaHmmCell(tf.keras.layers.Layer):
         E = self.emission_func[0](self.B[0], inputs[:,:self.input_dim[0]+1])
         i = self.input_dim[0]+1
         for s, em_func, emissions in zip(self.input_dim[1:], self.emission_func[1:], self.B[1:]):
-            E *= em_func(b, inputs[:,i:i+s+1])
+            E *= em_func(emissions, inputs[:,i:i+s+1])
             i += s+1
         return E
 
