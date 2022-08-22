@@ -1,6 +1,6 @@
 import numpy as np
 import tensorflow as tf
-import msa_hmm.Utility as ut
+import learnMSA.msa_hmm.Utility as ut
 
 
 def as_str(config, items_per_line=3):
