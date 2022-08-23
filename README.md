@@ -1,54 +1,59 @@
+*The tool is under active development and feedback is appreciated.*
+
 # learnMSA: Learning and Aligning large Protein Families
 
 ## Introduction
-Multiple sequence alignment formulated as a statistical machine learning problem, where an optimal profile hidden Markov model for a potentially very large family of protein sequences is searched and an alignment is decoded. We take advantage of TensorFlows automatic differentiation to differentiate the forward algorithm, i.e. compute gradients over all possible alignments.
-
-![alt text](https://github.com/Ung0d/MSA-HMM-Analysis/blob/main/fig/boxplots_sp_homfam.png?raw=true)
-
-On ultra-large (millions of sequences) data we produce alignments with better accuracy and are (occasionally multiple times) faster than state of the art aligners. We think that our tool can be a first step towards a future-proof framework for ultra large MSA that lends itself to a variety of opportunities for further improvements.
-
-***When should I use it?***
-
-Our primary focus is on large numbers of protein sequences (starting at 10.000) with reasonable length. The tool is under active development. 
-
+Multiple sequence alignment formulated as a statistical machine learning problem, where an optimal profile hidden Markov model for a potentially very large family of protein sequences is searched and an alignment is decoded. We use an automatically differentiable variant of the Forward algorithm.
 
 ## Installation
+
+#### Using Bioconda:
+  
+  With [Bioconda channels](https://bioconda.github.io/) set up:
+  
+  <code>conda install learnMSA</code>
+  
+  or to install and run in a clean environment:
+  
+  <code>conda create -n learnMSA learnMSA</code>
+  
+  <code>conda activate learnMSA</code>
 
 #### Using pip:
 
   <code>pip install learnMSA</code>
   
-This installs learnMSA as a python package with all dependencies and also enables command line use:
+#### Command line use after installing with Bioconda or pip:
 
-  <code>learnMSA -i INPUT_FILE -o OUTPUT_FILE</code>
+<code>learnMSA -i INPUT_FILE -o OUTPUT_FILE</code>
   
-  <code>learnMSA -h</code>
-
+<code>learnMSA -h</code>
 
 #### Manual installation:
 
 Requirements:
-- [TensorFlow GPU](https://www.tensorflow.org/install/gpu) requirements (optional, but recommended for proteins longer than 100 residues)
-- [TensorFlow](https://github.com/tensorflow/tensorflow)
+- meet the [TensorFlow GPU](https://www.tensorflow.org/install/gpu) requirements (optional, but recommended for proteins longer than 100 residues)
+- [TensorFlow](https://github.com/tensorflow/tensorflow) (tested versions: 2.5, >=2.7)
 - [networkx](https://networkx.org/) 
 - [logomaker](https://logomaker.readthedocs.io/en/latest/) 
-- tested Python versions: 3.7.13, 3.9.2, 3.9.12
-- tested TensorFlow versions: 2.5 - 2.9
+- python >= 3.7
 
 1. Clone the repository: 
-  <code>git clone https://github.com/Ung0d/MSA-HMM</code>
-3. Install dependencies:
+
+  <code>git clone https://github.com/Gaius-Augustus/learnMSA</code>
+  
+2. Install dependencies:
+
   <code>pip install tensorflow logomaker networkx</code>
+  
+3. Run:
 
-Command line usage after manual installation:
+  <code>cd learnMSA</code>
+  
+  <code>python3 learnMSA.py --help</code>
+  
 
-<code>cd MSA-HMM</code>
-
-<code>python3 MsaHmm.py -i INPUT_FILE -o OUTPUT_FILE </code>
-
-The output directory has to exist. Currently, no other format than fasta is supported.
-
-Interactive notebook with visualization:
+#### Interactive notebook with visualization:
 
 Run the notebook <code>MsaHmm.ipynb</code> with juypter.
 
