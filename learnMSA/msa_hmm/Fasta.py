@@ -92,7 +92,7 @@ class Fasta:
             if sid == "":
                 raise SystemExit(f"File {self.filename} contains an empty sequence ID, which is not allowed.") 
         if len(self.seq_ids) > len(set(self.seq_ids)):
-            raise SystemExit(f"File {self.filename} contains dublicated sequence IDs. learnMSA requires unique sequence IDs.") 
+            raise SystemExit(f"File {self.filename} contains duplicated sequence IDs. learnMSA requires unique sequence IDs.") 
             
         
         #check for alphabet problems and empty sequences
