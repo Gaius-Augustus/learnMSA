@@ -1,4 +1,4 @@
-*The tool is under active development and feedback is appreciated.*
+*This repository is no longer actively maintained. Please find learnMSA [here](https://github.com/Gaius-Augustus/learnMSA).*
 
 # learnMSA: Learning and Aligning large Protein Families
 
