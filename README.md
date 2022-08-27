@@ -9,15 +9,19 @@ Multiple sequence alignment formulated as a statistical machine learning problem
 
 #### Using Bioconda:
   
-  With [Bioconda channels](https://bioconda.github.io/) set up:
+  If you haven't done it yet, set up [Bioconda channels](https://bioconda.github.io/) first.
   
-  <code>conda install learnMSA</code>
-  
-  or to install and run in a clean environment:
+  We recommend to install in a clean environment:
   
   <code>conda create -n learnMSA learnMSA</code>
   
-  <code>conda activate learnMSA</code>
+  which creates an environment called learnMSA and installs the package learnMSA.
+  
+  To run learnMSA, you have to activate the environment first:
+  
+  <code>conda activate learnMSA</code>.
+  
+  If you do not want to use environments, we recommend to use [Miniconda](https://docs.conda.io/en/latest/miniconda.html).
 
 #### Using pip:
 
@@ -56,4 +60,3 @@ Requirements:
 #### Interactive notebook with visualization:
 
 Run the notebook <code>MsaHmm.ipynb</code> with juypter.
-
