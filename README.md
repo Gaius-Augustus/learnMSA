@@ -1,5 +1,3 @@
-*This repository is no longer actively maintained. Please find learnMSA [here](https://github.com/Gaius-Augustus/learnMSA).*
-
 # learnMSA: Learning and Aligning large Protein Families
 
 ## Introduction
@@ -21,7 +19,7 @@ Multiple sequence alignment formulated as a statistical machine learning problem
   
   <code>conda activate learnMSA</code>.
   
-  If you do not want to use environments, we recommend to use [Miniconda](https://docs.conda.io/en/latest/miniconda.html).
+  If you do not want to use environments, we recommend to use [Miniconda](https://docs.conda.io/en/latest/miniconda.html) to have a clean base environment.
 
 #### Using pip:
 
