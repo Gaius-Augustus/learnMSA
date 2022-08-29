@@ -1,8 +1,12 @@
 from setuptools import setup, find_packages
 
+version_file_path = "learnMSA/_version.py"
+with open(version_file_path, "rt") as version_file:
+    version = version_file.readlines()[0].split("=")[1].strip()
+
 setup(
     name="learnMSA",
-    version="1.0.1",
+    version=version,
     url="https://github.com/Gaius-Augustus/learnMSA",
     author="Felix Becker",
     author_email="beckerfelix94@gmail.com",

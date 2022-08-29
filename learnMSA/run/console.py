@@ -2,7 +2,6 @@ import os
 import numpy as np
 import sys
 import time
-import pkg_resources
 import argparse
 from matplotlib import pyplot as plt
 from pathlib import Path
@@ -10,7 +9,9 @@ from pathlib import Path
 #hide tensorflow messages and warnings
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3" 
 
-version = pkg_resources.get_distribution("learnMSA").version
+version_file_path = "learnMSA/_version.py"
+with open(version_file_path, "rt") as version_file:
+    version = version_file.readlines()[0].split("=")[1].strip()
 
 def run_main():
     class MsaHmmArgumentParser(argparse.ArgumentParser):
