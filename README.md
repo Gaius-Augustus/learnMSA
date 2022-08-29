@@ -58,4 +58,3 @@ Requirements:
 #### Interactive notebook with visualization:
 
 Run the notebook <code>MsaHmm.ipynb</code> with juypter.
-
