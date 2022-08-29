@@ -2,12 +2,14 @@
 
 # learnMSA: Learning and Aligning large Protein Families
 
-## Introduction
+# Introduction
 Multiple sequence alignment formulated as a statistical machine learning problem, where an optimal profile hidden Markov model for a potentially very large family of protein sequences is searched and an alignment is decoded. We use an automatically differentiable variant of the Forward algorithm.
 
-## Installation
+# Installation
 
-#### Using Bioconda:
+Choose according to your preference:
+
+## Using Bioconda
   
   If you haven't done it yet, set up [Bioconda channels](https://bioconda.github.io/) first.
   
@@ -23,20 +25,33 @@ Multiple sequence alignment formulated as a statistical machine learning problem
   
   If you do not want to use environments, we recommend to use [Miniconda](https://docs.conda.io/en/latest/miniconda.html) to have a clean base environment.
 
-#### Using pip:
+## Using pip
 
   <code>pip install learnMSA</code>
   
-#### Command line use after installing with Bioconda or pip:
+## With GPU support
+
+*Optional, but recommended for proteins longer than 100 residues. The instructions above may be sufficient if the cudnn and cudatoolkit packages are already installed on your system.*
+
+You have to meet the [TensorFlow GPU](https://www.tensorflow.org/install/gpu) requirements. A GPU installation out of the box (including cudnn and cudatoolkit) is possible by typing:
+
+```
+conda create -n learnMSA tensorflow-gpu
+conda activate learnMSA
+pip install learnMSA
+```
+
+LearnMSA will notify you whether it finds any GPUs it can use or it will fall back to CPU.
+
+## Command line use after installing with Bioconda or pip
 
 <code>learnMSA -i INPUT_FILE -o OUTPUT_FILE</code>
   
 <code>learnMSA -h</code>
 
-#### Manual installation:
+## Manual installation
 
 Requirements:
-- meet the [TensorFlow GPU](https://www.tensorflow.org/install/gpu) requirements (optional, but recommended for proteins longer than 100 residues)
 - [TensorFlow](https://github.com/tensorflow/tensorflow) (tested versions: 2.5, >=2.7)
 - [networkx](https://networkx.org/) 
 - [logomaker](https://logomaker.readthedocs.io/en/latest/) 
@@ -57,6 +72,6 @@ Requirements:
   <code>python3 learnMSA.py --help</code>
   
 
-#### Interactive notebook with visualization:
+## Interactive notebook with visualization:
 
 Run the notebook <code>MsaHmm.ipynb</code> with juypter.
