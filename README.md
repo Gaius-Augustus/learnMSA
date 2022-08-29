@@ -1,3 +1,5 @@
+Activate development of learnMSA has moved to [this](https://github.com/Gaius-Augustus/learnMSA) repository.
+
 # learnMSA: Learning and Aligning large Protein Families
 
 ## Introduction
