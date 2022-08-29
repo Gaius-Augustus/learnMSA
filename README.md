@@ -1,4 +1,4 @@
-*Our tool is under activate development and feedback is very much appreciated.*
+*Our tool is under active development and feedback is very much appreciated.*
 
 # learnMSA: Learning and Aligning large Protein Families
 
