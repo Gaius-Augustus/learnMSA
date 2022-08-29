@@ -52,3 +52,4 @@ class AncProbsLayer(tf.keras.layers.Layer):
         part_std = ut.make_anc_probs(inputs, tf.cast(self.Q, ut.dtype), tau_subset) * mask
         part_other = inputs * (1-mask)
         return part_std + part_other
+        

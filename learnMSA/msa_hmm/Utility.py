@@ -54,6 +54,15 @@ def make_anc_probs(sequences, Q, tau):
     P = tf.linalg.expm(tauQ) # P[r,i,j] = P(X(tau_r) = j | X(0) = i)
     ancprobs = tf.matmul(sequences, P) # Einstein sum, compute all ancestral character probs simultaneously
     return ancprobs
+
+
+def write_tau_to_file(filepath, anc_probs_layer, fasta_file, delim="\t"):
+    tau = anc_probs_layer.get_tau()
+    assert tf.size(tau) == len(fasta_file.seq_ids), (f"The number of sequence ids in fasta file {fasta_file.filename}"
+                                                     " differs from the number of evolutionary times.")
+    with open(filepath, "w") as file:
+        for i, t in zip(fasta_file.seq_ids, tau):
+            file.write(i+delim+"%.6f" % t+"\n")
     
 ##################################################################################################
 ##################################################################################################

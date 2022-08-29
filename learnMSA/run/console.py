@@ -2,11 +2,15 @@ import os
 import numpy as np
 import sys
 import time
+import pkg_resources
 import argparse
+from matplotlib import pyplot as plt
 from pathlib import Path
 
 #hide tensorflow messages and warnings
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3" 
+
+version = pkg_resources.get_distribution("learnMSA").version
 
 def run_main():
     class MsaHmmArgumentParser(argparse.ArgumentParser):
@@ -15,7 +19,7 @@ def run_main():
             self.print_help()
             sys.exit(2)
 
-    parser = MsaHmmArgumentParser(description="learnMSA - multiple alignment of protein sequences")
+    parser = MsaHmmArgumentParser(description=f"learnMSA - multiple alignment of protein sequences (version {version})")
     parser.add_argument("-i", "--in_file", dest="input_file", type=str, required=True,
                         help="Input sequence file in fasta format.")
     parser.add_argument("-o", "--out_file", dest="output_file", type=str, required=True,
@@ -28,6 +32,12 @@ def run_main():
                         help="Should be lowered if memory issues with the default settings occur. Default: Adaptive, depending on model length (128-512).")
     parser.add_argument("-d", "--cuda_visible_devices", dest="cuda_visible_devices", type=str, default="default",
                         help="Controls the GPU devices visible to learnMSA as a comma-separated list of device IDs. The value -1 forces learnMSA to run on CPU. Per default, learnMSA attempts to use all available GPUs.")
+    parser.add_argument("-t", "--tau_out", dest="tau_out", type=str, default="",
+                        help="Optionally produce a file with the evolutionary times learned in the ancestral probabilities layer.")
+    parser.add_argument("-L", "--logo_out", dest="logo_out", type=str, default="",
+                        help="Optionally plot a consensus logo of the learned model.")
+    parser.add_argument("-p", "--hmm_plot_out", dest="hmm_plot_out", type=str, default="",
+                        help="Optionally plot the learned model.")
     args = parser.parse_args()
     
     #import after argparsing to avoid long delay with -h option
@@ -90,6 +100,34 @@ def run_main():
         
         if not args.silent:
             print("SP score =", r)#, "TC score =", tc)
+            
+    if not args.tau_out == "":
+        Path(os.path.dirname(args.tau_out)).mkdir(parents=True, exist_ok=True)
+        if not best_alignment.anc_probs_layer == None:
+            msa_hmm.ut.write_tau_to_file(args.tau_out, best_alignment.anc_probs_layer, fasta_file)
+            print("Wrote file", args.tau_out)
+        else:
+            print("Warning: No ancestral probability output can be produced, because the ancestral"
+                  " probability layer is missing from the model. Was the default configuration changed?")
+    
+    
+    if not args.logo_out == "":
+        Path(os.path.dirname(args.logo_out)).mkdir(parents=True, exist_ok=True)
+        fig, ax = plt.subplots()
+        msa_hmm.vis.make_logo(best_alignment, ax)
+        plt.show()
+        fig.savefig(args.logo_out, bbox_inches='tight')
+        print("Wrote file", args.logo_out)
+    
+    
+    if not args.hmm_plot_out == "":
+        Path(os.path.dirname(args.hmm_plot_out)).mkdir(parents=True, exist_ok=True)
+        fig = plt.figure(frameon=False)
+        ax = fig.add_axes([0, 0, 1, 1])
+        msa_hmm.vis.plot_hmm(best_alignment, ax) 
+        plt.show()
+        plt.savefig(args.hmm_plot_out, bbox_inches='tight') 
+        print("Wrote file", args.hmm_plot_out)
             
             
 if __name__ == '__main__':
