@@ -26,7 +26,7 @@ def default_model_generator(num_seq,
                               alpha_single = config["alpha_single"],
                               alpha_frag = config["alpha_frag"],
                               frozen_insertions = config["frozen_insertions"])
-    msa_hmm_layer = MsaHmmLayer(msa_hmm_cell, effective_num_seq)
+    msa_hmm_layer = MsaHmmLayer(msa_hmm_cell, effective_num_seq, use_prior = config["use_prior"])
     anc_probs_layer = AncProbsLayer(num_seq, config["encoder_initializer"][0])
     
     if config["use_anc_probs"]:
