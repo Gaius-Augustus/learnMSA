@@ -276,7 +276,7 @@ class Alignment():
             if layer.name.startswith("MsaHmmLayer"):
                 encoder_out = model.layers[i].output
                 self.msa_hmm_layer = layer
-        self.encoder_model = tf.keras.Model(inputs=self.model.inputs, outputs=[encoder_out])
+                self.encoder_model = tf.keras.Model(inputs=self.model.inputs, outputs=[encoder_out])
         assert self.encoder_model is not None, "Can not find a MsaHmmLayer in the specified model."
         self.output_alphabet = np.array((fasta.alphabet[:-1] + 
                                         [gap_symbol] + 
