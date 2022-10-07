@@ -171,7 +171,7 @@ class MsaHmmCell(tf.keras.layers.Layer):
             
         self.load_priors()
         
-        self.epsilon = np.finfo(np.float64).tiny
+        self.epsilon = 1e-100#np.finfo(np.float64).tiny
         self.frozen_kernels = frozen_kernels
         self.frozen_insertions = frozen_insertions
             

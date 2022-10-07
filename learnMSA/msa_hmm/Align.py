@@ -812,7 +812,7 @@ def fit_and_align_n(num_runs,
     for i in range(num_runs):
         t_s = time.time()
         alignment = fit_and_align(fasta_file, 
-                                  config, 
+                                  dict(config), #copy the dict, fit_and_align may change its contents
                                   model_generator,
                                   batch_generator,
                                   subset, 
