@@ -128,12 +128,14 @@ def fit_model(model_generator,
             model = make_and_compile()
     else:
          model = make_and_compile()
-    steps = max(30, int(250*np.sqrt(indices.shape[0])/batch_size))
+    steps = max(10, int(100*np.sqrt(indices.shape[0])/batch_size))
     dataset = make_dataset(indices, 
                            batch_generator, 
                            batch_size,
                            shuffle=True)
-    callbacks = [tf.keras.callbacks.TerminateOnNaN()]
+    termiante_on_nan = tf.keras.callbacks.TerminateOnNaN()
+    early_stopping = tf.keras.callbacks.EarlyStopping("loss", patience=1)
+    callbacks = [termiante_on_nan, early_stopping]
     history = model.fit(dataset, 
                         epochs=epochs,
                         steps_per_epoch=steps,

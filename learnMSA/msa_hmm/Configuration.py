@@ -1,6 +1,7 @@
 import numpy as np
 import tensorflow as tf
 import learnMSA.msa_hmm.Utility as ut
+import learnMSA.msa_hmm.MsaHmmCell as cell
 
 
 def as_str(config, items_per_line=3):
@@ -119,12 +120,17 @@ default = {
     "len_mul" : 0.8,
     "batch_size" : get_adaptive_batch_size,
     "learning_rate" : 0.1,
-    "epochs" : [2, 1, 3],
+    "epochs" : [10, 2, 10],
     "use_prior" : True,
     "dirichlet_mix_comp_count" : 1,
     "use_anc_probs" : True,
-    "keep_encoder" : False,
     "encoder_initializer" : [tf.keras.initializers.Zeros()],
-    "frozen_insertions" : True
+    "frozen_insertions" : True,
+    "surgery_del" : 0.5,
+    "surgery_ins" : 0.5,
+    "emission_func" : tf.linalg.matvec,
+    "emission_matrix_generator" : cell.make_default_emission_matrix,
+    "emission_prior" : cell.AminoAcidPrior(),
+    "kernel_dim" : "alphabet_size"
     
 }

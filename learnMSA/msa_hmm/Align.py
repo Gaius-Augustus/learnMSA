@@ -695,6 +695,26 @@ def update_kernels(alignment,
 SEQ_COUNT_WARNING_THRESHOLD = 100
 
 
+
+def compute_loglik(alignment, max_ll_estimate = 200000):
+    #compute loglik
+    #estimate the ll only on a subset of maximum size 200.000
+    #otherwise for millions of sequences this step takes rather long for
+    #very little benefit
+    ll_subset = np.arange(alignment.fasta_file.num_seq)
+    np.random.shuffle(ll_subset)
+    ll_subset = ll_subset[:max_ll_estimate]
+    ds = train.make_dataset(ll_subset, 
+                            alignment.batch_generator,
+                            alignment.batch_size, 
+                            shuffle=False)
+    loglik = 0
+    for x, _ in ds:
+        loglik += np.sum(alignment.model(x))
+    loglik /= ll_subset.size
+    prior = alignment.msa_hmm_layer.cell.get_prior_log_density().numpy()[0]/alignment.fasta_file.num_seq
+    return loglik, prior
+
 # Constructs an alignment
 def fit_and_align(fasta_file, 
                   config,
@@ -729,6 +749,8 @@ def fit_and_align(fasta_file,
     model_length = max(3, int(np.floor(model_length)))
     #model surgery
     finished=config["max_surgery_runs"]==1
+    best_loglik = best_prior = -np.inf
+    best_alignment = None
     for i in range(config["max_surgery_runs"]):
         batch_size = config["batch_size"](model_length, fasta_file.max_len)
         batch_size = min(batch_size, n)
@@ -745,15 +767,29 @@ def fit_and_align(fasta_file,
                                           batch_size=batch_size, 
                                           epochs=config["epochs"][0 if i==0 else 1 if not finished else 2],
                                           verbose=verbose)
-        if not finished:
+        if finished:
+            alignment = Alignment(fasta_file,
+                                   batch_generator,
+                                   subset,
+                                   batch_size=2*batch_size, 
+                                   model=model,
+                                   build="lazy")
+        else:
             alignment = Alignment(fasta_file,
                                   batch_generator,
                                   train_indices,
                                   batch_size=2*batch_size, 
                                   model=model)
-        else:
-            alignment = Alignment(fasta_file,
-                                  batch_generator,
+        
+        loglik, prior = compute_loglik(alignment)
+        
+        if verbose:
+            print("Fitted a model with MAP estimate =", "%.4f" % (loglik + prior))
+        
+        if loglik + prior > best_loglik + best_prior:
+            best_loglik, best_prior = loglik, prior
+            best_alignment = Alignment(fasta_file,
+                                   batch_generator,
                                    subset,
                                    batch_size=2*batch_size, 
                                    model=model,
@@ -765,8 +801,8 @@ def fit_and_align(fasta_file,
             transition_init_0 = alignment.msa_hmm_layer.cell.transition_init
             flank_init_0 = alignment.msa_hmm_layer.cell.flank_init
         pos_expand, expansion_lens, pos_discard = get_discard_or_expand_positions(alignment, 
-                                                                                        del_t=0.5, 
-                                                                                        ins_t=0.5,
+                                                                                        del_t=config["surgery_del"], 
+                                                                                        ins_t=config["surgery_ins"],
                                                                                         ins_long=100000, 
                                                                                         k=32, 
                                                                                         match_prior_threshold=1)
@@ -784,12 +820,16 @@ def fit_and_align(fasta_file,
         config["flank_init"] = tf.constant_initializer(flank_init)
         config["insertion_init"] = [tf.constant_initializer(i.numpy()) for i in alignment.msa_hmm_layer.cell.insertion_kernel]
         model_length = emission_init[0].shape[0]
-        if config["keep_encoder"]:
-            config["encoder_initializer"] = [tf.constant_initializer(l.weights) for l in alignment.encoder_model.layers]
+        if "encoder_weight_extractor" in config:
+            if verbose:
+                print("Used the encoder_weight_extractor callback to pass the encoder parameters to the next iteration.")
+            config["encoder_initializer"] = config["encoder_weight_extractor"](alignment.encoder_model, pos_expand, expansion_lens, pos_discard)
+        elif verbose:
+            print("Re-initialized the encoder parameters.")
         if model_length < 3: 
             raise SystemExit("A problem occured during model surgery: The model is too short (length <= 2). This might indicate that there is a problem with your sequences.") 
-    alignment.total_time = time.time() - total_time_start
-    return alignment
+    best_alignment.total_time = time.time() - total_time_start
+    return best_alignment, best_loglik, best_prior
 
 
 
@@ -811,34 +851,13 @@ def fit_and_align_n(num_runs,
     results = []
     for i in range(num_runs):
         t_s = time.time()
-        alignment = fit_and_align(fasta_file, 
-                                  dict(config), #copy the dict, fit_and_align may change its contents
-                                  model_generator,
-                                  batch_generator,
-                                  subset, 
-                                  verbose)
-        t_a = time.time()
-         #compute loglik
-        #estimate the ll only on a subset of maximum size 200.000
-        #otherwise for millions of sequences this step takes rather long for
-        #very little benefit
-        max_ll_estimate = 200000
-        ll_subset = np.arange(fasta_file.num_seq)
-        np.random.shuffle(ll_subset)
-        ll_subset = ll_subset[:max_ll_estimate]
-        ds = train.make_dataset(ll_subset, 
-                                batch_generator,
-                                #larger batch size than during training for additional speedup
-                                2*alignment.batch_size, 
-                                shuffle=False)
-        loglik = 0
-        for x, _ in ds:
-            loglik += np.sum(alignment.model(x))
-        loglik /= ll_subset.size
-        prior = alignment.msa_hmm_layer.cell.get_prior_log_density().numpy()[0]/fasta_file.num_seq
+        alignment, loglik, prior = fit_and_align(fasta_file, 
+                                                  dict(config), #copy the dict, fit_and_align may change its contents
+                                                  model_generator,
+                                                  batch_generator,
+                                                  subset, 
+                                                  verbose)
         if verbose:
-            print("Time for alignment:", "%.4f" % (t_a-t_s))
-            print("Time for estimating loglik:", "%.4f" % (time.time()-t_a))
-            print("Fitted a model has MAP estimate =", "%.4f" % (loglik + prior))
+            print("Time for alignment:", "%.4f" % (time.time()-t_s))
         results.append((loglik + prior, alignment))
     return results

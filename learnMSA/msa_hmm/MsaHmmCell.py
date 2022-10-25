@@ -37,7 +37,12 @@ class AminoAcidPrior():
         prior = self.emission_dirichlet_mix.log_pdf(B)
         return prior 
     
+class NullPrior():
+    def __call__(self, B):
+        model_length = int((tf.shape(B)[0]-2)/2)
+        return tf.zeros((model_length), dtype=B.dtype)
     
+
 def make_default_emission_matrix(s, em, ins, length, dtype):
     emissions = tf.concat([tf.expand_dims(ins, 0), 
                            em, 
@@ -49,11 +54,13 @@ def make_default_emission_matrix(s, em, ins, length, dtype):
     return emissions
 
 
+
+
 # MSA HMM Cell based on https://github.com/mslehre/classify-seqs/blob/main/HMMCell.py
 class MsaHmmCell(tf.keras.layers.Layer):
     def __init__(self,
                 length, # number of match states
-                input_dim=25, 
+                kernel_dim=25, 
                 emission_init = tf.keras.initializers.Zeros(),
                 transition_init={"begin_to_match" : tf.keras.initializers.Zeros(), 
                                  "match_to_end" : tf.keras.initializers.Zeros(),
@@ -92,7 +99,7 @@ class MsaHmmCell(tf.keras.layers.Layer):
                 ):
         super(MsaHmmCell, self).__init__(name="MsaHmmCell", dtype=tf.float64, **kwargs)
         self.length = length 
-        self.input_dim = input_dim #without terminal symbol
+        self.kernel_dim = kernel_dim
         self.alpha_flank = alpha_flank
         self.alpha_single = alpha_single
         self.alpha_frag = alpha_frag
@@ -158,16 +165,16 @@ class MsaHmmCell(tf.keras.layers.Layer):
             self.emission_init = [self.emission_init]
         if not hasattr(self.insertion_init, '__iter__'):
             self.insertion_init = [self.insertion_init]
-        if not hasattr(self.input_dim, '__iter__'):
-            self.input_dim = [self.input_dim]
-        if not hasattr(self.emission_func, '__iter__'):
-            self.emission_func = [self.emission_func]
+        if not hasattr(self.kernel_dim, '__iter__'):
+            self.kernel_dim = [self.kernel_dim]
+#         if not hasattr(self.emission_func, '__iter__'):
+#             self.emission_func = [self.emission_func]
         if not hasattr(self.emission_matrix_generator, '__iter__'):
             self.emission_matrix_generator = [self.emission_matrix_generator]
         if not hasattr(self.emission_prior, '__iter__'):
             self.emission_prior = [self.emission_prior]
             
-        assert all(len(self.emission_init) == len(x) for x in [self.insertion_init, self.input_dim, self.emission_func, self.emission_matrix_generator, self.emission_prior]), "emission_init, insertion_init, input_dim, emission_func, emission_matrix_generator, emission_prior must have all the same length"
+        assert all(len(self.emission_init) == len(x) for x in [self.emission_init, self.insertion_init, self.kernel_dim, self.emission_matrix_generator, self.emission_prior]), "emission_init, insertion_init, kernel_dim, emission_matrix_generator, emission_prior must have all the same length" 
             
         self.load_priors()
         
@@ -200,7 +207,7 @@ class MsaHmmCell(tf.keras.layers.Layer):
                                         initializer=init, 
                                         name="emission_kernel"+str(i),
                                         dtype=self.dtype) 
-                                           for i, (init, s) in enumerate(zip(self.emission_init, self.input_dim))]
+                                           for i, (init, s) in enumerate(zip(self.emission_init, self.kernel_dim))]
         
         self.insertion_kernel = [self.add_weight(
                                 shape=(s),
@@ -208,7 +215,7 @@ class MsaHmmCell(tf.keras.layers.Layer):
                                 name="insertion_kernel"+str(i),
                                 trainable=not self.frozen_insertions,
                                 dtype=self.dtype) 
-                                 for i, (init, s) in enumerate(zip(self.insertion_init, self.input_dim))]
+                                 for i, (init, s) in enumerate(zip(self.insertion_init, self.kernel_dim))]
         
         # closely related to the initial probability of the left flank state
         self.flank_init_kernel = self.add_weight(shape=(1),
@@ -388,7 +395,7 @@ class MsaHmmCell(tf.keras.layers.Layer):
         
     def make_B(self):
         B = []
-        for gen, s, em, ins in zip(self.emission_matrix_generator, self.input_dim, self.emission_kernel, self.insertion_kernel):
+        for gen, s, em, ins in zip(self.emission_matrix_generator, self.kernel_dim, self.emission_kernel, self.insertion_kernel):
             B.append(gen(s, em, ins, self.length, self.dtype))
         return B
     
@@ -407,16 +414,9 @@ class MsaHmmCell(tf.keras.layers.Layer):
                                          tf.zeros(self.length-1, dtype=self.dtype), 
                                          init_unannotated_segment, init_right_flank, init_terminal], axis=0), 0)
     
-    
     def emission_probs(self, inputs):
-        E = self.emission_func[0](self.B[0], inputs[:,:self.input_dim[0]+1])
-        i = self.input_dim[0]+1
-        for s, em_func, emissions in zip(self.input_dim[1:], self.emission_func[1:], self.B[1:]):
-            E *= em_func(emissions, inputs[:,i:i+s+1])
-            i += s+1
-        return E
+        return self.emission_func(self.B, inputs)
 
-    
     def call(self, inputs, states, training=None):
         old_forward, old_loglik = states
         E = self.emission_probs(inputs)
@@ -478,39 +478,55 @@ class MsaHmmCell(tf.keras.layers.Layer):
                                             trainable=False) 
     
     
-    def get_prior_log_density(self):    
+    def get_prior_log_density(self, add_metrics=False):    
         probs = self.make_probs()
         log_probs = {part_name : tf.math.log(p) for part_name, p in probs.items()}
-        prior = 0
         #emissions
-        for emission, em_prior in zip(self.B, self.emission_prior):
-            prior += tf.reduce_sum(em_prior(emission))
+        em_dirichlets = [tf.reduce_sum(em_prior(emission)) for emission, em_prior in zip(self.B, self.emission_prior)]
         #match state transitions
         p_match = tf.stack([probs["match_to_match"],
                             probs["match_to_insert"],
                             probs["match_to_delete"][1:]], axis=-1)
         p_match_sum = tf.reduce_sum(p_match, axis=-1, keepdims=True)
-        prior += tf.reduce_sum(self.match_dirichlet.log_pdf(p_match / p_match_sum))
+        match_dirichlet = tf.reduce_sum(self.match_dirichlet.log_pdf(p_match / p_match_sum))
         #insert state transitions
         p_insert = tf.stack([probs["insert_to_match"],
                            probs["insert_to_insert"]], axis=-1)
-        prior += tf.reduce_sum(self.insert_dirichlet.log_pdf(p_insert))
+        insert_dirichlet = tf.reduce_sum(self.insert_dirichlet.log_pdf(p_insert))
         #delete state transitions
         p_delete = tf.stack([probs["delete_to_match"][:-1],
                            probs["delete_to_delete"]], axis=-1)
-        prior += tf.reduce_sum(self.delete_dirichlet.log_pdf(p_delete))
+        delete_dirichlet = tf.reduce_sum(self.delete_dirichlet.log_pdf(p_delete))
         #other transitions
-        prior += self.alpha_flank * log_probs["unannotated_segment_loop"]
-        prior += self.alpha_flank * log_probs["right_flank_loop"]
-        prior += self.alpha_flank * log_probs["left_flank_loop"]
-        prior += self.alpha_flank * tf.math.log(probs["end_to_right_flank"])
-        prior += self.alpha_flank * tf.math.log(tf.math.sigmoid(self.flank_init_kernel))
-        prior += self.alpha_single * tf.math.log(probs["end_to_right_flank"] + probs["end_to_terminal"])
+        flank_prior = self.alpha_flank * log_probs["unannotated_segment_loop"] #todo: handle as extra case?
+        flank_prior += self.alpha_flank * log_probs["right_flank_loop"]
+        flank_prior += self.alpha_flank * log_probs["left_flank_loop"]
+        flank_prior += self.alpha_flank * tf.math.log(probs["end_to_right_flank"])
+        flank_prior += self.alpha_flank * tf.math.log(tf.math.sigmoid(self.flank_init_kernel))
+        #uni-hit
+        hit_prior = self.alpha_single * tf.math.log(probs["end_to_right_flank"] + probs["end_to_terminal"])
         #uniform entry/exit prior
-        enex = tf.expand_dims(probs["begin_to_match"], 1) * tf.expand_dims(probs["match_to_end"], 0)
-        enex = tf.linalg.band_part(enex, 0, -1)
-        enex = tf.math.log(1 - enex) 
-        prior += self.alpha_frag * (tf.reduce_sum(enex) - enex[0, -1])
+        btm = probs["begin_to_match"] / (1- probs["match_to_delete"][0])
+        enex_prior = tf.expand_dims(btm, 1) * tf.expand_dims(probs["match_to_end"], 0)
+        enex_prior = tf.linalg.band_part(enex_prior, 0, -1)
+        enex_prior = tf.math.log(1 - enex_prior) 
+        enex_prior = self.alpha_frag * (tf.reduce_sum(enex_prior) - enex_prior[0, -1])
+        prior =(sum(em_dirichlets) +
+                match_dirichlet +
+                insert_dirichlet +
+                delete_dirichlet +
+                flank_prior +
+                hit_prior +
+                enex_prior)
+        if add_metrics:
+            for i,d in enumerate(em_dirichlets):
+                self.add_metric(d, "em_dirichlets_"+str(i))
+            self.add_metric(match_dirichlet, "match_dirichlet")
+            self.add_metric(insert_dirichlet, "insert_dirichlet")
+            self.add_metric(delete_dirichlet, "delete_dirichlet")
+            self.add_metric(flank_prior, "flank_prior")
+            self.add_metric(hit_prior, "hit_prior")
+            self.add_metric(enex_prior, "enex_prior")
         return prior
         
         

@@ -30,7 +30,7 @@ class MsaHmmLayer(tf.keras.layers.Layer):
                                 training=training)
         loglik_mean = tf.reduce_mean(loglik) 
         if self.use_prior:
-            prior = self.cell.get_prior_log_density()
+            prior = self.cell.get_prior_log_density(add_metrics=False)
             prior /= self.num_seq
             MAP = loglik_mean + prior
             self.add_loss(tf.squeeze(-MAP))
