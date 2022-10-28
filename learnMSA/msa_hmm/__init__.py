@@ -5,6 +5,7 @@ import learnMSA.msa_hmm.Training as train
 import learnMSA.msa_hmm.Utility as ut
 import learnMSA.msa_hmm.MsaHmmCell as cell
 from learnMSA.msa_hmm.MsaHmmCell import MsaHmmCell
+import learnMSA.msa_hmm.AncProbsLayer as anc_probs
 from learnMSA.msa_hmm.AncProbsLayer import AncProbsLayer
 import learnMSA.msa_hmm.MsaHmmLayer as kernel
 from learnMSA.msa_hmm.MsaHmmLayer import MsaHmmLayer

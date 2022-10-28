@@ -2,6 +2,8 @@ import numpy as np
 import tensorflow as tf
 import learnMSA.msa_hmm.Utility as ut
 import learnMSA.msa_hmm.MsaHmmCell as cell
+import learnMSA.msa_hmm.Fasta as fasta
+import learnMSA.msa_hmm.AncProbsLayer as anc_probs
 
 
 def as_str(config, items_per_line=3):
@@ -100,7 +102,9 @@ def get_adaptive_batch_size(model_length, max_len):
         return 256
     else:
         return 128
-
+    
+R, p = anc_probs.parse_paml(anc_probs.paml_lines, fasta.alphabet[:-1])
+exchangeability_init = anc_probs.inverse_softplus(R + 1e-32)
 
 #the configuration can be changed by experienced users
 #proper command line support for these parameters will be added in the future
@@ -124,7 +128,10 @@ default = {
     "use_prior" : True,
     "dirichlet_mix_comp_count" : 1,
     "use_anc_probs" : True,
-    "encoder_initializer" : [tf.keras.initializers.Zeros()],
+    "trainable_exchangeabilities" : False,
+    "encoder_initializer" : [tf.constant_initializer(-3), 
+                             tf.constant_initializer(exchangeability_init)],
+    "background_distribution" : p,
     "frozen_insertions" : True,
     "surgery_del" : 0.5,
     "surgery_ins" : 0.5,

@@ -1,9 +1,7 @@
 import os
 import numpy as np
 import sys
-import time
 import argparse
-from pathlib import Path
 
 #hide tensorflow messages and warnings
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3" 
@@ -52,44 +50,13 @@ def run_main():
     config = dict(msa_hmm.config.default)
     
     config["batch_size"] = args.batch_size if args.batch_size > 0 else "adaptive"
-
-    fasta_file = msa_hmm.fasta.Fasta(args.input_file)  
-
-    if args.ref_file != "":
-        ref_fasta = msa_hmm.fasta.Fasta(args.ref_file, aligned=True)
-        subset = np.array([fasta_file.seq_ids.index(sid) for sid in ref_fasta.seq_ids])
-    else:
-        subset = None
-
-    try:
-        results = msa_hmm.align.fit_and_align_n(fasta_file, args.num_runs, config, subset, not args.silent)
-    except tf.errors.ResourceExhaustedError as e:
-        print("Out of memory. A resource was exhausted.")
-        print("Try reducing the batch size (-b). The current batch size was: "+str(config["batch_size"])+".")
-        sys.exit(e.error_code)
-
-    best = np.argmax([ll for ll,_ in results])
-    best_ll, best_alignment = results[best]
     
-    if not args.silent:
-        print("Computed alignments with MAP estimates:", ["%.4f" % ll for ll,_ in results])
-        print("Best model has MAP estimate:", "%.4f" % best_ll)
-
-    t = time.time()
-    Path(os.path.dirname(args.output_file)).mkdir(parents=True, exist_ok=True)
-    best_alignment.to_file(args.output_file)
-    
-    if not args.silent:
-        print("time for generating output:", "%.4f" % (time.time()-t))
-        print("Wrote file", args.output_file)
-
-    if args.ref_file != "":
-        out_file = msa_hmm.fasta.Fasta(args.output_file, aligned=True) 
-        _,r = out_file.precision_recall(ref_fasta)
-        #tc = out_file.tc_score(ref_fasta)
-        
-        if not args.silent:
-            print("SP score =", r)#, "TC score =", tc)
+    best_alignment = msa_hmm.align.run_learnMSA(num_runs = args.num_runs,
+                                                train_filename = args.input_file,
+                                                out_filename = args.output_file,
+                                                config = config, 
+                                                ref_filename = args.ref_file,
+                                                verbose = not args.silent)
             
             
 if __name__ == '__main__':

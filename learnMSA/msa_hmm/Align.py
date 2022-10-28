@@ -7,6 +7,7 @@ import learnMSA.msa_hmm.Fasta as fasta
 import learnMSA.msa_hmm.Training as train
 import learnMSA.msa_hmm.MsaHmmLayer as msa_hmm
 from learnMSA.msa_hmm.Configuration import as_str
+from pathlib import Path
 
 
 @tf.function
@@ -77,7 +78,6 @@ def viterbi_backtracking(hmm_cell, gamma, epsilon=np.finfo(np.float64).tiny):
 # pos. i of the returned sequences is the active state of the HMM after observing pos. i of the input
 # runs in batches to avoid memory overflow for large data
 def viterbi(sequences, hmm_cell, batch_size=64):
-    sequences = tf.cast(sequences, tf.float64)
     hmm_cell.init_cell()
     k = 0
     gamma = np.zeros((sequences.shape[0], sequences.shape[1], hmm_cell.num_states), dtype=np.float64)
@@ -85,6 +85,7 @@ def viterbi(sequences, hmm_cell, batch_size=64):
         if len(sequences.shape) == 2:
             gamma[k:k+batch_size] = viterbi_dyn_prog(tf.one_hot(sequences[k:k+batch_size], fasta.s, dtype=tf.float64), hmm_cell)
         else:
+            sequences = tf.cast(sequences, tf.float64)
             gamma[k:k+batch_size] = viterbi_dyn_prog(sequences[k:k+batch_size], hmm_cell)
         k+=batch_size
        # tf.keras.backend.clear_session()
@@ -861,3 +862,57 @@ def fit_and_align_n(num_runs,
             print("Time for alignment:", "%.4f" % (time.time()-t_s))
         results.append((loglik + prior, alignment))
     return results
+
+
+def run_learnMSA(num_runs, 
+                 train_filename,
+                 out_filename,
+                 config, 
+                 model_generator=None,
+                 batch_generator=None,
+                 ref_filename="", 
+                 verbose=True):
+    # load the file
+    fasta_file = fasta.Fasta(train_filename)  
+    # optionally load the reference and find the corresponding sequences in the train file
+    if ref_filename != "":
+        ref_fasta = fasta.Fasta(ref_filename, aligned=True)
+        subset = np.array([fasta_file.seq_ids.index(sid) for sid in ref_fasta.seq_ids])
+    else:
+        subset = None
+    try:
+        results = fit_and_align_n(num_runs,
+                                    fasta_file, 
+                                    config=config,
+                                    model_generator=model_generator,
+                                    subset=subset, 
+                                    verbose=verbose)
+    except tf.errors.ResourceExhaustedError as e:
+        print("Out of memory. A resource was exhausted.")
+        print("Try reducing the batch size (-b). The current batch size was: "+str(config["batch_size"])+".")
+        sys.exit(e.error_code)
+        
+    best = np.argmax([ll for ll,_ in results])
+    best_ll, best_alignment = results[best]
+    if verbose:
+        print("Computed alignments with likelihoods:", ["%.4f" % ll for ll,_ in results])
+        print("Best model has likelihood:", "%.4f" % best_ll)
+        
+    t = time.time()
+    Path(os.path.dirname(out_filename)).mkdir(parents=True, exist_ok=True)
+    best_alignment.to_file(out_filename)
+    
+    if verbose:
+        print("time for generating output:", "%.4f" % (time.time()-t))
+        print("Wrote file", out_filename)
+
+    if ref_filename != "":
+        out_file = fasta.Fasta(out_filename, aligned=True) 
+        _,sp = out_file.precision_recall(ref_fasta)
+        #tc = out_file.tc_score(ref_fasta)
+        if verbose:
+            print("SP score =", sp)
+        return best_alignment, sp
+    else:
+        return best_alignment
+    

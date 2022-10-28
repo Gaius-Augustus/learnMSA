@@ -171,6 +171,7 @@ class TestMSAHMM(unittest.TestCase):
         filename = os.path.dirname(__file__)+"/data/simple.fa"
         fasta_file = msa_hmm.fasta.Fasta(filename)
         sequences = get_all_seqs(fasta_file)
+        sequences = tf.one_hot(sequences, len(msa_hmm.fasta.alphabet))
         self.assertEqual(sequences.shape, (2,5,len(msa_hmm.fasta.alphabet)))
         forward, loglik = hmm_cell.get_initial_state(batch_size=2)
         self.assertEqual(loglik[0], 0)
@@ -187,6 +188,7 @@ class TestMSAHMM(unittest.TestCase):
         filename = os.path.dirname(__file__)+"/data/length_diff.fa"
         fasta_file = msa_hmm.fasta.Fasta(filename)
         sequences = get_all_seqs(fasta_file)
+        sequences = tf.one_hot(sequences, len(msa_hmm.fasta.alphabet))
         self.assertEqual(sequences.shape, (2,10,len(msa_hmm.fasta.alphabet)))
         forward, loglik = hmm_cell.get_initial_state(batch_size=1)
         for i in range(length):
@@ -333,7 +335,6 @@ class TestMSAHMM(unittest.TestCase):
         self.assert_vec(right_flank[0], np.array([0,0,3,1, 1,0,0, 3]))
         self.assert_vec(right_flank[1], np.array([5,8,5,13,4,8,11,8]))
         
-        sequences_ind = np.argmax(sequences, axis=-1)
         s = msa_hmm.fasta.s
         a = msa_hmm.fasta.alphabet.index("A")+s
         b = msa_hmm.fasta.alphabet.index("B")+s
@@ -345,7 +346,7 @@ class TestMSAHMM(unittest.TestCase):
         X = msa_hmm.fasta.alphabet.index("X")
         GAP = s-1
         gap = 2*s-1
-        left_flank_block = msa_hmm.align.get_insertion_block(sequences_ind, 
+        left_flank_block = msa_hmm.align.get_insertion_block(sequences, 
                                                      left_flank[0], 
                                                      np.amax(left_flank[0]),
                                                      left_flank[1],
@@ -359,7 +360,7 @@ class TestMSAHMM(unittest.TestCase):
                                         [gap]*3, 
                                         [gap]*3])
         self.assert_vec(left_flank_block, ref_left_flank_block)
-        right_flank_block = msa_hmm.align.get_insertion_block(sequences_ind, 
+        right_flank_block = msa_hmm.align.get_insertion_block(sequences, 
                                                              right_flank[0], 
                                                              np.amax(right_flank[0]),
                                                              right_flank[1])
@@ -374,7 +375,7 @@ class TestMSAHMM(unittest.TestCase):
         self.assert_vec(right_flank_block, ref_right_flank_block)
         ins_lens = core_blocks[0][1][:,1]
         ins_start = core_blocks[0][2][:,1]
-        ins_block = msa_hmm.align.get_insertion_block(sequences_ind, 
+        ins_block = msa_hmm.align.get_insertion_block(sequences, 
                                                       ins_lens, 
                                                       np.amax(ins_lens),
                                                       ins_start)
@@ -405,7 +406,7 @@ class TestMSAHMM(unittest.TestCase):
                                     [GAP]*5,
                                     [GAP]*5])]
         for (C,IL,IS,f), ref in zip(core_blocks, ref_core_blocks):
-            alignment_block = msa_hmm.align.get_alignment_block(sequences_ind, 
+            alignment_block = msa_hmm.align.get_alignment_block(sequences, 
                                                                 C,IL,np.amax(IL, axis=0),IS)
             self.assert_vec(alignment_block, ref)
             
@@ -431,9 +432,14 @@ class TestAncProbs(unittest.TestCase):
         filename = os.path.dirname(__file__)+"/data/simple.fa"
         fasta_file = msa_hmm.fasta.Fasta(filename)
         sequences = get_all_seqs(fasta_file)
-        anc_probs_layer = msa_hmm.AncProbsLayer(num_seqs=sequences.shape[0], tau_init=tf.constant_initializer(1.0))
+        anc_probs_layer = msa_hmm.AncProbsLayer(sequences.shape[0],
+                                                1,
+                                                frequencies=msa_hmm.config.default["background_distribution"],
+                                                rate_init=msa_hmm.config.default["encoder_initializer"][0],
+                                                exchangeability_init=msa_hmm.config.default["encoder_initializer"][1],
+                                                trainable_exchangeabilities=msa_hmm.config.default["trainable_exchangeabilities"])
         anc_prob_seqs = anc_probs_layer(sequences, [0])
-        self.assert_anc_probs(anc_prob_seqs, anc_probs_layer.Q)
+        self.assert_anc_probs(anc_prob_seqs, tf.squeeze(anc_probs_layer.make_Q()))
         
         
     def test_encoder_model(self):
@@ -451,7 +457,7 @@ class TestAncProbs(unittest.TestCase):
         ds = msa_hmm.train.make_dataset(ind, batch_gen, batch_size=fasta_file.num_seq, shuffle=False)
         for x,_ in ds:
             anc_prob_seqs = msa.encoder_model(x)
-            self.assert_anc_probs(anc_prob_seqs, msa.encoder_model.layers[-1].Q)
+            self.assert_anc_probs(anc_prob_seqs, tf.squeeze(msa.encoder_model.layers[-1].make_Q()))
             
         
 class TestData(unittest.TestCase):
@@ -472,7 +478,7 @@ class TestData(unittest.TestCase):
             s,i = batch_gen(ind) 
             self.assert_vec(i, ind)
             for i,(r,j) in enumerate(zip(ref, ind)):
-                self.assertEqual("".join(alphabet[np.argmax(s[i,:fasta_file.seq_lens[j]], axis=-1)]), r)
+                self.assertEqual("".join(alphabet[s[i,:fasta_file.seq_lens[j]]]), r)
         
         
 class TestModelSurgery(unittest.TestCase):

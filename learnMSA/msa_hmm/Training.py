@@ -6,18 +6,33 @@ from learnMSA.msa_hmm.MsaHmmLayer import MsaHmmLayer
 from learnMSA.msa_hmm.AncProbsLayer import AncProbsLayer
 import learnMSA.msa_hmm.Utility as ut
 
+# boilerplate code for model generation 
+# in the following we test different models that only vary in the anc_probs_layer
+def generic_model_generator(encoder_layers,
+                            msa_hmm_layer):
+    """A generic model generator function that can be used to construct an actual callback for the pipeline.
+    Args:
+        encoder_layers: A list of layers with compatible inputs and outputs and the last output is compatible with msa_hmm_layer.
+        msa_hmm_layer
+    """
+    sequences = tf.keras.Input(shape=(None,), name="sequences", dtype=tf.uint8)
+    indices = tf.keras.Input(shape=(), name="indices", dtype=tf.int32)
+    forward_seq = sequences
+    for layer in encoder_layers:
+        forward_seq = layer(forward_seq, indices)
+    loglik = msa_hmm_layer(forward_seq)
+    model = tf.keras.Model(inputs=[sequences, indices], 
+                        outputs=[tf.keras.layers.Lambda(lambda x: x, name="loglik")(loglik)])
+    return model
 
-
-def default_model_generator(num_seq,
-                            effective_num_seq,
-                            model_length, 
-                            config,
-                            alphabet_size=25):
-    sequences = tf.keras.Input(shape=(None, alphabet_size+1), name="sequences", dtype=tf.float32)
-    subset = tf.keras.Input(shape=(), name="subset", dtype=tf.int32)
-    
+def make_msa_hmm_layer(effective_num_seq,
+                                model_length, 
+                                config,
+                                alphabet_size=25):
+    """Constructs a cell and a MSA HMM layer given a config.
+    """
     msa_hmm_cell = MsaHmmCell(model_length,    
-                              input_dim = alphabet_size, 
+                              kernel_dim = alphabet_size if config["kernel_dim"] == "alphabet_size" else config["kernel_dim"], 
                               emission_init = config["emission_init"],
                               transition_init = config["transition_init"],
                               insertion_init = config["insertion_init"],
@@ -25,19 +40,40 @@ def default_model_generator(num_seq,
                               alpha_flank = config["alpha_flank"],
                               alpha_single = config["alpha_single"],
                               alpha_frag = config["alpha_frag"],
+                              emission_func = config["emission_func"],
+                              emission_matrix_generator = config["emission_matrix_generator"],
+                              emission_prior = config["emission_prior"], 
                               frozen_insertions = config["frozen_insertions"])
-    msa_hmm_layer = MsaHmmLayer(msa_hmm_cell, effective_num_seq, use_prior = config["use_prior"])
-    anc_probs_layer = AncProbsLayer(num_seq, config["encoder_initializer"][0])
-    
-    if config["use_anc_probs"]:
-        forward_seq = anc_probs_layer(sequences, subset)
-    else:
-        forward_seq = sequences
-    loglik = msa_hmm_layer(forward_seq)
-    
-    model = tf.keras.Model(inputs=[sequences, subset], 
-                        outputs=[tf.keras.layers.Lambda(lambda x: x, name="loglik")(loglik)])
+    msa_hmm_layer = MsaHmmLayer(msa_hmm_cell, effective_num_seq)
+    return msa_hmm_layer
+
+def make_anc_probs_layer(num_seq, config):
+    anc_probs_layer = AncProbsLayer(num_seq,
+                                    1,
+                                    frequencies=config["background_distribution"],
+                                    rate_init=config["encoder_initializer"][0],
+                                    exchangeability_init=config["encoder_initializer"][1],
+                                    trainable_exchangeabilities=config["trainable_exchangeabilities"])
+    return anc_probs_layer
+
+def default_model_generator(num_seq,
+                            effective_num_seq,
+                            model_length, 
+                            config,
+                            alphabet_size=25):
+    """A callback that constructs the default learnMSA model.
+    Args:
+        num_seq: The total number of sequences to align.
+        effective_num_seq: The actual number of sequences currently used for training (model surgery might use only a subset).
+        model_length: Length of the pHMM.
+        config: Dictionary storing the configuration.
+        alphabet_size: Number of symbols without the terminal symbol (i.e. 25 for amino acids).
+    """
+    msa_hmm_layer = make_msa_hmm_layer(effective_num_seq, model_length, config, alphabet_size)
+    anc_probs_layer = make_anc_probs_layer(num_seq, config)
+    model = generic_model_generator([anc_probs_layer], msa_hmm_layer)
     return model
+
                             
     
 class DefaultBatchGenerator():
@@ -47,14 +83,13 @@ class DefaultBatchGenerator():
         
     def __call__(self, indices):
         max_len = np.max(self.fasta_file.seq_lens[indices])
-        batch = np.zeros((indices.shape[0], max_len+1)) + self.alphabet_size
+        batch = np.zeros((indices.shape[0], max_len+1), dtype=np.uint8) + self.alphabet_size
         for i,j in enumerate(indices):
             batch[i, :self.fasta_file.seq_lens[j]] = self.fasta_file.get_raw_seq(j)
-        batch = tf.one_hot(batch, self.alphabet_size+1)
         return batch, indices
     
     def get_out_types(self):
-        return (tf.float32, tf.int64)  
+        return (tf.uint8, tf.int64)  
     
     
 class OnlySequencesBatchGenerator():
