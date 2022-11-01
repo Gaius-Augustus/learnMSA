@@ -96,9 +96,9 @@ def make_default_transition_init(MM=1,
 #simple adpative batch size depending on sequence length
 #longer models and sequences require much more memory
 def get_adaptive_batch_size(model_length, max_len):
-    if max_len * model_length < 320 * 350:
+    if max_len * model_length < 200 * 200:
         return 512
-    if max_len * model_length < 700 * 650:
+    if max_len * model_length < 500 * 500:
         return 256
     else:
         return 128
@@ -138,6 +138,9 @@ default = {
     "emission_func" : tf.linalg.matvec,
     "emission_matrix_generator" : cell.make_default_emission_matrix,
     "emission_prior" : cell.AminoAcidPrior(),
-    "kernel_dim" : "alphabet_size"
-    
+    "kernel_dim" : "alphabet_size",
+    "num_rate_matrices" : 1,
+    "per_matrix_rate" : False,
+    "matrix_rate_l2" : 0.0,
+    "shared_rate_matrix" : False
 }

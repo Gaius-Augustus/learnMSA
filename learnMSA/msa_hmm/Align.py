@@ -495,7 +495,10 @@ def get_discard_or_expand_positions(alignment,
     #emissions
     p = []
     for emission, prior in zip(alignment.msa_hmm_layer.cell.make_B(), alignment.msa_hmm_layer.cell.emission_prior):
-        p.append(prior(emission))
+        p_val = prior(emission)
+        if p_val.shape[0] > alignment.msa_hmm_layer.cell.length:
+            p_val = p_val[1:alignment.msa_hmm_layer.cell.length+1]
+        p.append(p_val)
     prior_val = np.sum(np.stack(p), axis=0)
     min_prior, max_prior = np.min(prior_val), np.max(prior_val)
     prior_threshold = min_prior + match_prior_threshold * (max_prior - min_prior)

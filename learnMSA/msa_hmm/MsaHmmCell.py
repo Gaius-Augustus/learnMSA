@@ -115,6 +115,8 @@ class MsaHmmCell(tf.keras.layers.Layer):
         self.num_states_implicit = self.num_states + self.length + 2
         self.state_size = (self.num_states, 1)
         self.output_size = self.num_states
+        self.frozen_kernels = frozen_kernels
+        self.frozen_insertions = frozen_insertions
         #sub-arrays of the complete transition kernel for convenience
         #describes name and length for kernels of the categorical transition distributions
         #for states or families of states
@@ -173,14 +175,14 @@ class MsaHmmCell(tf.keras.layers.Layer):
             self.emission_matrix_generator = [self.emission_matrix_generator]
         if not hasattr(self.emission_prior, '__iter__'):
             self.emission_prior = [self.emission_prior]
+        if not hasattr(self.frozen_insertions, '__iter__'):
+            self.frozen_insertions = [self.frozen_insertions]
             
         assert all(len(self.emission_init) == len(x) for x in [self.emission_init, self.insertion_init, self.kernel_dim, self.emission_matrix_generator, self.emission_prior]), "emission_init, insertion_init, kernel_dim, emission_matrix_generator, emission_prior must have all the same length" 
             
         self.load_priors()
         
         self.epsilon = 1e-100#np.finfo(np.float64).tiny
-        self.frozen_kernels = frozen_kernels
-        self.frozen_insertions = frozen_insertions
             
             
     def build(self, input_shape):
@@ -203,22 +205,22 @@ class MsaHmmCell(tf.keras.layers.Layer):
                 
         # closely related to the emission matrix of the match states
         self.emission_kernel = [self.add_weight(
-                                        shape=(self.length, s), 
+                                        shape=[self.length, s], 
                                         initializer=init, 
                                         name="emission_kernel"+str(i),
                                         dtype=self.dtype) 
                                            for i, (init, s) in enumerate(zip(self.emission_init, self.kernel_dim))]
         
         self.insertion_kernel = [self.add_weight(
-                                shape=(s),
+                                shape=[s],
                                 initializer=init,
                                 name="insertion_kernel"+str(i),
-                                trainable=not self.frozen_insertions,
+                                trainable=not frozen,
                                 dtype=self.dtype) 
-                                 for i, (init, s) in enumerate(zip(self.insertion_init, self.kernel_dim))]
+                                 for i, (init, s, frozen) in enumerate(zip(self.insertion_init, self.kernel_dim, self.frozen_insertions))]
         
         # closely related to the initial probability of the left flank state
-        self.flank_init_kernel = self.add_weight(shape=(1),
+        self.flank_init_kernel = self.add_weight(shape=[1],
                                          initializer=self.flank_init,
                                          name="init_logit",
                                          dtype=self.dtype)

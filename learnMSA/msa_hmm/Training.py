@@ -49,11 +49,15 @@ def make_msa_hmm_layer(effective_num_seq,
 
 def make_anc_probs_layer(num_seq, config):
     anc_probs_layer = AncProbsLayer(num_seq,
-                                    1,
+                                    config["num_rate_matrices"],
                                     frequencies=config["background_distribution"],
                                     rate_init=config["encoder_initializer"][0],
                                     exchangeability_init=config["encoder_initializer"][1],
-                                    trainable_exchangeabilities=config["trainable_exchangeabilities"])
+                                    trainable_exchangeabilities=config["trainable_exchangeabilities"],
+                                    per_matrix_rate=config["per_matrix_rate"],
+                                     matrix_rate_init=config["encoder_initializer"][2] if len(config["encoder_initializer"]) > 2 else None,
+                                     matrix_rate_l2=config["matrix_rate_l2"],
+                                     shared_matrix=config["shared_rate_matrix"])
     return anc_probs_layer
 
 def default_model_generator(num_seq,
