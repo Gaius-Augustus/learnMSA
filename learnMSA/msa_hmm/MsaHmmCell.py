@@ -192,9 +192,9 @@ class MsaHmmCell(tf.keras.layers.Layer):
         # The kernel is closely related to the transition matrix in the implicit model with deletion states.
         self.transition_kernel = {}
         for part_name, length in self.explicit_transition_kernel_parts:
-            if part_name == "unannotated_segment_loop" or part_name == "right_flank_loop": #tied flanks
+            if part_name == "right_flank_loop": #tied flanks
                 self.transition_kernel[part_name] = self.transition_kernel["left_flank_loop"]
-            elif part_name == "unannotated_segment_exit" or part_name == "right_flank_exit": #tied flanks
+            elif part_name == "right_flank_exit": #tied flanks
                 self.transition_kernel[part_name] = self.transition_kernel["left_flank_exit"]
             else:
                 self.transition_kernel[part_name] = self.add_weight(shape=[length], 

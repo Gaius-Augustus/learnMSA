@@ -416,7 +416,7 @@ class TestMSAHMM(unittest.TestCase):
                 
 class TestAncProbs(unittest.TestCase):
     
-    def assert_anc_probs(self, anc_prob_seqs, Q):
+    def assert_anc_probs(self, anc_prob_seqs, Q, expected_sum):
         p = np.zeros(26)
         p[:20] = msa_hmm.ut.read_paml_file()[2]
         #test rate matrix property
@@ -424,6 +424,7 @@ class TestAncProbs(unittest.TestCase):
             for j in range(Q.shape[0]-1):
                 np.testing.assert_almost_equal(Q[i,j] * p[i], 
                                                Q[j,i] * p[j])
+        np.testing.assert_almost_equal( np.sum(anc_prob_seqs, -1, keepdims=True), expected_sum)
         #todo: maybe use known properties of amino acids (e.g. polar, charged, aromatic) to test distributions
         #after some time tau
         
@@ -434,12 +435,23 @@ class TestAncProbs(unittest.TestCase):
         sequences = get_all_seqs(fasta_file)
         anc_probs_layer = msa_hmm.AncProbsLayer(sequences.shape[0],
                                                 1,
-                                                frequencies=msa_hmm.config.default["background_distribution"],
+                                                equilibrium_init=msa_hmm.config.default["encoder_initializer"][2],
                                                 rate_init=msa_hmm.config.default["encoder_initializer"][0],
                                                 exchangeability_init=msa_hmm.config.default["encoder_initializer"][1],
-                                                trainable_exchangeabilities=msa_hmm.config.default["trainable_exchangeabilities"])
+                                                trainable_rate_matrices=msa_hmm.config.default["trainable_rate_matrices"])
         anc_prob_seqs = anc_probs_layer(sequences, [0])
-        self.assert_anc_probs(anc_prob_seqs, tf.squeeze(anc_probs_layer.make_Q()))
+        self.assert_anc_probs(anc_prob_seqs, tf.squeeze(anc_probs_layer.make_Q()), 1.)
+        anc_probs_layer2 = msa_hmm.AncProbsLayer(sequences.shape[0],
+                                                1,
+                                                equilibrium_init=msa_hmm.config.default["encoder_initializer"][2],
+                                                rate_init=msa_hmm.config.default["encoder_initializer"][0],
+                                                exchangeability_init=msa_hmm.config.default["encoder_initializer"][1],
+                                                trainable_rate_matrices=msa_hmm.config.default["trainable_rate_matrices"],
+                                                equilibrium_sample=True)
+        anc_prob_seqs2 = anc_probs_layer2(sequences, [0])
+        oh_sequences = tf.one_hot(sequences[:,:-1], 20) #assuming the test file only contains the 20 standard AAs
+        expected_freqs = tf.linalg.matvec(anc_probs_layer2.make_p(), oh_sequences)
+        self.assert_anc_probs(anc_prob_seqs2[:,:-1], tf.squeeze(anc_probs_layer.make_Q()), expected_freqs)
         
         
     def test_encoder_model(self):
@@ -451,13 +463,24 @@ class TestAncProbs(unittest.TestCase):
                                                       effective_num_seq=fasta_file.num_seq, 
                                                       model_length=model_length, 
                                                       config=msa_hmm.config.default)
+        config2 = dict(msa_hmm.config.default)
+        config2["equilibrium_sample"] = True
+        model2 = msa_hmm.train.default_model_generator(num_seq=fasta_file.num_seq, 
+                                                      effective_num_seq=fasta_file.num_seq, 
+                                                      model_length=model_length, 
+                                                      config=config2)
         batch_gen = msa_hmm.train.DefaultBatchGenerator(fasta_file)
         ind = np.arange(fasta_file.num_seq)
         msa = msa_hmm.Alignment(fasta_file, batch_gen, ind, batch_size=fasta_file.num_seq, model=model)
+        msa2 = msa_hmm.Alignment(fasta_file, batch_gen, ind, batch_size=fasta_file.num_seq, model=model2)
         ds = msa_hmm.train.make_dataset(ind, batch_gen, batch_size=fasta_file.num_seq, shuffle=False)
         for x,_ in ds:
             anc_prob_seqs = msa.encoder_model(x)
-            self.assert_anc_probs(anc_prob_seqs, tf.squeeze(msa.encoder_model.layers[-1].make_Q()))
+            anc_prob_seqs2 = msa2.encoder_model(x)
+            self.assert_anc_probs(anc_prob_seqs, tf.squeeze(msa.encoder_model.layers[-1].make_Q()), 1.)
+            oh_sequences = tf.one_hot(x[0][:,:-1], 20) #assuming the test file only contains the 20 standard AAs
+            expected_freqs = tf.linalg.matvec(msa2.encoder_model.layers[-1].make_p(), oh_sequences)
+            self.assert_anc_probs(anc_prob_seqs2[:,:-1], tf.squeeze(msa2.encoder_model.layers[-1].make_Q()), expected_freqs)
             
         
 class TestData(unittest.TestCase):

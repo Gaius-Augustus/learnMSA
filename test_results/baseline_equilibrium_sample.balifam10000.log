@@ -1,0 +1,24 @@
+Training of 5 independent models on file PF00079.10000.fasta
+Configuration:
+transition_init : {'begin_to_match': <learnMSA.msa_hmm.Configuration.EntryInitializer object at 0x7f53f07639a0>, 'match_to_end': <learnMSA.msa_hmm.Configuration.ExitInitializer object at 0x7f540099d9d0>, 'match_to_match': <learnMSA.msa_hmm.Configuration.MatchTransitionInitializer object at 0x7f540099dbb0>, 'match_to_insert': <learnMSA.msa_hmm.Configuration.MatchTransitionInitializer object at 0x7f540099dd30>, 'insert_to_match': <tensorflow.python.ops.init_ops_v2.Constant object at 0x7f540099d700>, 'insert_to_insert': <tensorflow.python.ops.init_ops_v2.Constant object at 0x7f540099dcd0>, 'match_to_delete': <learnMSA.msa_hmm.Configuration.MatchTransitionInitializer object at 0x7f540099dca0>, 'delete_to_match': <tensorflow.python.ops.init_ops_v2.Constant object at 0x7f550c188e20>, 'delete_to_delete': <tensorflow.python.ops.init_ops_v2.Constant object at 0x7f550c188160>, 'left_flank_loop': <tensorflow.python.ops.init_ops_v2.Constant object at 0x7f550c188610>, 'left_flank_exit': <tensorflow.python.ops.init_ops_v2.Constant object at 0x7f550c1889d0>, 'right_flank_loop': <tensorflow.python.ops.init_ops_v2.Constant object at 0x7f550c188970>, 'right_flank_exit': <tensorflow.python.ops.init_ops_v2.Constant object at 0x7f550c1885b0>, 'unannotated_segment_loop': <tensorflow.python.ops.init_ops_v2.Constant object at 0x7f550c188eb0>, 'unannotated_segment_exit': <tensorflow.python.ops.init_ops_v2.Constant object at 0x7f550c188400>, 'end_to_unannotated_segment': <tensorflow.python.ops.init_ops_v2.Constant object at 0x7f550c188d90>, 'end_to_right_flank': <tensorflow.python.ops.init_ops_v2.Constant object at 0x7f550c1885e0>, 'end_to_terminal': <tensorflow.python.ops.init_ops_v2.Constant object at 0x7f550c1888e0>} , flank_init : <tensorflow.python.keras.initializers.initializers_v2.Zeros object at 0x7f550c188ac0> , emission_init : <learnMSA.msa_hmm.Configuration.EmissionInitializer object at 0x7f550c188fa0>
+ , insertion_init : <tensorflow.python.ops.init_ops_v2.Constant object at 0x7f550c188d30> , alpha_flank : 7000 , alpha_single : 1000000000.0
+ , alpha_frag : 10000.0 , max_surgery_runs : 4 , length_init_quantile : 0.5
+ , surgery_quantile : 0.5 , min_surgery_seqs : 10000.0 , len_mul : 0.8
+ , batch_size : <function get_adaptive_batch_size at 0x7f53f069c310> , learning_rate : 0.1 , epochs : [10, 2, 10]
+ , use_prior : True , dirichlet_mix_comp_count : 1 , use_anc_probs : True
+ , trainable_rate_matrices : False , encoder_initializer : [<tensorflow.python.ops.init_ops_v2.Constant object at 0x7f550c1887f0>, <tensorflow.python.ops.init_ops_v2.Constant object at 0x7f550c188850>, <tensorflow.python.ops.init_ops_v2.Constant object at 0x7f550c188dc0>] , frozen_insertions : True
+ , surgery_del : 0.5 , surgery_ins : 0.5 , emission_func : <function matvec at 0x7f5516f75790>
+ , emission_matrix_generator : <function make_default_emission_matrix at 0x7f550b8ecca0> , emission_prior : <learnMSA.msa_hmm.MsaHmmCell.AminoAcidPrior object at 0x7f550c188c70> , kernel_dim : alphabet_size
+ , num_rate_matrices : 1 , per_matrix_rate : False , matrix_rate_l2 : 0.0
+ , shared_rate_matrix : False , equilibrium_sample : True
+Fitting a model of length 289 on 10000 sequences.
+Batch size= 256 Learning rate= 0.1
+Using 1 GPUs.
+Epoch 1/10
+39/39 - 33s - loss: 1634.5366 - loglik: -1.6330e+03 - logprior: -1.5383e+00
+Epoch 2/10
+39/39 - 31s - loss: 1510.2363 - loglik: -1.5083e+03 - logprior: -1.9586e+00
+Epoch 3/10
+39/39 - 32s - loss: 1498.3813 - loglik: -1.4965e+03 - logprior: -1.9123e+00
+Epoch 4/10
+39/39 - 32s - loss: 1497.8334 - loglik: -1.4960e+03 - logprior: -1.8407e+00

@@ -798,6 +798,8 @@ def fit_and_align(fasta_file,
                                    batch_size=2*batch_size, 
                                    model=model,
                                    build="lazy")
+            best_alignment.loglik = best_loglik
+            best_alignment.prior = best_prior
         if finished:
             break
         if i == 0:
@@ -899,7 +901,7 @@ def run_learnMSA(num_runs,
     best_ll, best_alignment = results[best]
     if verbose:
         print("Computed alignments with likelihoods:", ["%.4f" % ll for ll,_ in results])
-        print("Best model has likelihood:", "%.4f" % best_ll)
+        print("Best model has likelihood:", "%.4f" % best_ll, " (prior=", "%.4f" % best_alignment.prior ,")")
         
     t = time.time()
     Path(os.path.dirname(out_filename)).mkdir(parents=True, exist_ok=True)

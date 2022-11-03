@@ -103,7 +103,7 @@ def get_adaptive_batch_size(model_length, max_len):
     else:
         return 128
     
-R, p = anc_probs.parse_paml(anc_probs.paml_lines, fasta.alphabet[:-1])
+R, p = anc_probs.parse_paml(anc_probs.LG_paml, fasta.alphabet[:-1])
 exchangeability_init = anc_probs.inverse_softplus(R + 1e-32)
 
 #the configuration can be changed by experienced users
@@ -128,10 +128,10 @@ default = {
     "use_prior" : True,
     "dirichlet_mix_comp_count" : 1,
     "use_anc_probs" : True,
-    "trainable_exchangeabilities" : False,
+    "trainable_rate_matrices" : False,
     "encoder_initializer" : [tf.constant_initializer(-3), 
-                             tf.constant_initializer(exchangeability_init)],
-    "background_distribution" : p,
+                             tf.constant_initializer(exchangeability_init),
+                             tf.constant_initializer(np.log(p))],
     "frozen_insertions" : True,
     "surgery_del" : 0.5,
     "surgery_ins" : 0.5,
@@ -142,5 +142,6 @@ default = {
     "num_rate_matrices" : 1,
     "per_matrix_rate" : False,
     "matrix_rate_l2" : 0.0,
-    "shared_rate_matrix" : False
+    "shared_rate_matrix" : False,
+    "equilibrium_sample" : False
 }

@@ -1,0 +1,63 @@
+Training of 5 independent models on file cys.fasta
+Configuration:
+transition_init : {'begin_to_match': <learnMSA.msa_hmm.Configuration.EntryInitializer object at 0x7f3ca483acd0>, 'match_to_end': <learnMSA.msa_hmm.Configuration.ExitInitializer object at 0x7f3ca483af40>, 'match_to_match': <learnMSA.msa_hmm.Configuration.MatchTransitionInitializer object at 0x7f3b7c54f5e0>, 'match_to_insert': <learnMSA.msa_hmm.Configuration.MatchTransitionInitializer object at 0x7f3b7c54fbb0>, 'insert_to_match': <tensorflow.python.ops.init_ops_v2.Constant object at 0x7f3b7c54f9d0>, 'insert_to_insert': <tensorflow.python.ops.init_ops_v2.Constant object at 0x7f3b7c54fc10>, 'match_to_delete': <learnMSA.msa_hmm.Configuration.MatchTransitionInitializer object at 0x7f3b7c54f8e0>, 'delete_to_match': <tensorflow.python.ops.init_ops_v2.Constant object at 0x7f3b7c54f790>, 'delete_to_delete': <tensorflow.python.ops.init_ops_v2.Constant object at 0x7f3b7c54f400>, 'left_flank_loop': <tensorflow.python.ops.init_ops_v2.Constant object at 0x7f3b7c54fc70>, 'left_flank_exit': <tensorflow.python.ops.init_ops_v2.Constant object at 0x7f3b7c54f160>, 'right_flank_loop': <tensorflow.python.ops.init_ops_v2.Constant object at 0x7f3b7c54f040>, 'right_flank_exit': <tensorflow.python.ops.init_ops_v2.Constant object at 0x7f3b7c54f1c0>, 'unannotated_segment_loop': <tensorflow.python.ops.init_ops_v2.Constant object at 0x7f3b7c54f0d0>, 'unannotated_segment_exit': <tensorflow.python.ops.init_ops_v2.Constant object at 0x7f3b7c54f490>, 'end_to_unannotated_segment': <tensorflow.python.ops.init_ops_v2.Constant object at 0x7f3b7c54f580>, 'end_to_right_flank': <tensorflow.python.ops.init_ops_v2.Constant object at 0x7f3b7c54fd30>, 'end_to_terminal': <tensorflow.python.ops.init_ops_v2.Constant object at 0x7f3b7c54ffa0>} , flank_init : <tensorflow.python.keras.initializers.initializers_v2.Zeros object at 0x7f3b7c54ff70> , emission_init : <learnMSA.msa_hmm.Configuration.EmissionInitializer object at 0x7f3b7c54fd00>
+ , insertion_init : <tensorflow.python.ops.init_ops_v2.Constant object at 0x7f3b7c54fc40> , alpha_flank : 7000 , alpha_single : 1000000000.0
+ , alpha_frag : 10000.0 , max_surgery_runs : 4 , length_init_quantile : 0.5
+ , surgery_quantile : 0.5 , min_surgery_seqs : 10000.0 , len_mul : 0.8
+ , batch_size : <function get_adaptive_batch_size at 0x7f3b9003f310> , learning_rate : 0.1 , epochs : [10, 2, 10]
+ , use_prior : True , dirichlet_mix_comp_count : 1 , use_anc_probs : True
+ , trainable_rate_matrices : False , encoder_initializer : [<tensorflow.python.ops.init_ops_v2.Constant object at 0x7f3b7c54f760>, <tensorflow.python.ops.init_ops_v2.Constant object at 0x7f3b7c54fd90>, <tensorflow.python.ops.init_ops_v2.Constant object at 0x7f3b7c54faf0>] , frozen_insertions : True
+ , surgery_del : 0.5 , surgery_ins : 0.5 , emission_func : <function matvec at 0x7f3caf63e790>
+ , emission_matrix_generator : <function make_default_emission_matrix at 0x7f3ca4004310> , emission_prior : <learnMSA.msa_hmm.MsaHmmCell.AminoAcidPrior object at 0x7f3b7c54fee0> , kernel_dim : alphabet_size
+ , num_rate_matrices : 1 , per_matrix_rate : False , matrix_rate_l2 : 0.0
+ , shared_rate_matrix : False , equilibrium_sample : True
+Fitting a model of length 172 on 4316 sequences.
+Batch size= 256 Learning rate= 0.1
+Using 1 GPUs.
+Epoch 1/10
+25/25 - 9s - loss: 1130.9148 - loglik: -1.1261e+03 - logprior: -4.8648e+00
+Epoch 2/10
+25/25 - 6s - loss: 1016.8287 - loglik: -1.0151e+03 - logprior: -1.7725e+00
+Epoch 3/10
+25/25 - 6s - loss: 999.1144 - loglik: -9.9717e+02 - logprior: -1.9436e+00
+Epoch 4/10
+25/25 - 6s - loss: 997.5325 - loglik: -9.9571e+02 - logprior: -1.8211e+00
+Epoch 5/10
+25/25 - 6s - loss: 995.8016 - loglik: -9.9399e+02 - logprior: -1.8073e+00
+Epoch 6/10
+25/25 - 6s - loss: 991.3544 - loglik: -9.8955e+02 - logprior: -1.7999e+00
+Epoch 7/10
+25/25 - 6s - loss: 995.6584 - loglik: -9.9386e+02 - logprior: -1.7974e+00
+Fitted a model with MAP estimate = -993.8101
+expansions: [(9, 3), (10, 1), (11, 2), (31, 1), (32, 2), (33, 1), (35, 2), (36, 1), (47, 3), (58, 1), (60, 1), (62, 2), (74, 1), (75, 1), (80, 1), (82, 1), (83, 2), (85, 1), (89, 1), (92, 1), (95, 1), (98, 1), (101, 1), (112, 2), (114, 1), (123, 2), (126, 2), (137, 1), (138, 2), (139, 1), (149, 1), (159, 1), (163, 1), (167, 2)]
+discards: [0]
+Re-initialized the encoder parameters.
+Fitting a model of length 219 on 4316 sequences.
+Batch size= 256 Learning rate= 0.1
+Using 1 GPUs.
+Epoch 1/2
+25/25 - 10s - loss: 992.5930 - loglik: -9.8579e+02 - logprior: -6.7990e+00
+Epoch 2/2
+25/25 - 8s - loss: 979.5721 - loglik: -9.7712e+02 - logprior: -2.4556e+00
+Fitted a model with MAP estimate = -975.9649
+expansions: [(0, 3)]
+discards: [  0   9  44  61  62  81 107 143 177]
+Re-initialized the encoder parameters.
+Fitting a model of length 213 on 4316 sequences.
+Batch size= 256 Learning rate= 0.1
+Using 1 GPUs.
+Epoch 1/2
+25/25 - 10s - loss: 984.4009 - loglik: -9.8014e+02 - logprior: -4.2568e+00
+Epoch 2/2
+25/25 - 7s - loss: 977.1258 - loglik: -9.7676e+02 - logprior: -3.6390e-01
+Fitted a model with MAP estimate = -975.3256
+expansions: [(60, 2)]
+discards: [0 2]
+Re-initialized the encoder parameters.
+Fitting a model of length 213 on 4316 sequences.
+Batch size= 256 Learning rate= 0.1
+Using 1 GPUs.
+Epoch 1/10
+25/25 - 10s - loss: 983.6568 - loglik: -9.7742e+02 - logprior: -6.2353e+00
+Epoch 2/10
+25/25 - 7s - loss: 980.2813 - loglik: -9.7907e+02 - logprior: -1.2132e+00
