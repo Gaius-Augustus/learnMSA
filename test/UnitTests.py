@@ -416,71 +416,175 @@ class TestMSAHMM(unittest.TestCase):
                 
 class TestAncProbs(unittest.TestCase):
     
-    def assert_anc_probs(self, anc_prob_seqs, Q, expected_sum):
-        p = np.zeros(26)
-        p[:20] = msa_hmm.ut.read_paml_file()[2]
-        #test rate matrix property
+    def __init__(self, *args, **kwargs):
+        super(TestAncProbs, self).__init__(*args, **kwargs)
+        self.paml_all = [msa_hmm.anc_probs.LG_paml] + msa_hmm.anc_probs.LG4X_paml
+        self.A = msa_hmm.fasta.alphabet[:20]
+    
+    def assert_vec(self, x, y, almost=False):
+        for i,(a,b) in enumerate(zip(x.shape, y.shape)):
+            self.assertTrue(a==b or a==1 or b==1, f"{a} {b} (dim {i})")
+        self.assertEqual(x.dtype, y.dtype)
+        if almost:
+            np.testing.assert_almost_equal(x, y, decimal=5)
+        else:
+            self.assertTrue(np.all(x == y), str(x) + " not equal to " + str(y))
+    
+    def parse_a(self, string):
+        return np.array([float(x) for x in string.split()], dtype=np.float32)
+    
+    def assert_equilibrium(self, p):
+        np.testing.assert_almost_equal(np.sum(p), 1., decimal=5)
+    
+    def assert_symmetric(self, matrix):
+        self.assertEqual(matrix.shape[-1], matrix.shape[-2])
+        n = matrix.shape[-1]
+        for i in range(n):
+            self.assertEqual(matrix[i,i], 0.)
+            for j in range(i+1,n):
+                self.assertEqual(matrix[i,j], matrix[j,i])
+            
+    def assert_rate_matrix(self, Q, p):
         for i in range(Q.shape[0]-1):
             for j in range(Q.shape[0]-1):
                 np.testing.assert_almost_equal(Q[i,j] * p[i], 
                                                Q[j,i] * p[j])
-        np.testing.assert_almost_equal( np.sum(anc_prob_seqs, -1, keepdims=True), expected_sum)
+        
+    def assert_anc_probs(self, anc_prob_seqs, expected_sum, expected_anc_probs=None):
+        self.assert_vec( np.sum(anc_prob_seqs, -1, keepdims=True), expected_sum, almost=True)
+        if expected_anc_probs is not None:
+            self.assert_vec( anc_prob_seqs, expected_anc_probs, almost=True)
         #todo: maybe use known properties of amino acids (e.g. polar, charged, aromatic) to test distributions
         #after some time tau
         
-    
+    def assert_anc_probs_layer(self, anc_probs_layer):
+        anc_probs_layer.build(None)
+        p = anc_probs_layer.make_p()
+        R = anc_probs_layer.make_R()
+        Q = anc_probs_layer.make_Q()
+        for equi in p:
+            self.assert_equilibrium(equi)
+        for exchange in R:
+            self.assert_symmetric(exchange)
+        for rate,equi in zip(Q,p):
+            self.assert_rate_matrix(rate,equi)
+                
+    def test_paml_parsing(self):
+        R1, p1 = msa_hmm.anc_probs.parse_paml(msa_hmm.anc_probs.LG4X_paml[0], self.A)
+        true_p1_str = """0.147383 0.017579 0.058208 0.017707 0.026331 
+                        0.041582 0.017494 0.027859 0.011849 0.076971 
+                        0.147823 0.019535 0.037132 0.029940 0.008059 
+                        0.088179 0.089653 0.006477 0.032308 0.097931"""
+        true_X_row_1 = "0.295719"
+        true_X_row_4 = "1.029289 0.576016 0.251987 0.189008"
+        true_X_row_19 = """0.916683 0.102065 0.043986 0.080708 0.885230 
+                            0.072549 0.206603 0.306067 0.205944 5.381403 
+                            0.561215 0.112593 0.693307 0.400021 0.584622 
+                            0.089177 0.755865 0.133790 0.154902"""
+        self.assert_vec(p1, self.parse_a(true_p1_str))
+        self.assert_vec(R1[1,:1], self.parse_a(true_X_row_1))
+        self.assert_vec(R1[4,:4], self.parse_a(true_X_row_4))
+        self.assert_vec(R1[19,:19], self.parse_a(true_X_row_19))
+        for R,p in map(msa_hmm.anc_probs.parse_paml, self.paml_all, [self.A]*len(self.paml_all)):
+            self.assert_equilibrium(p)
+            self.assert_symmetric(R)
+            
+    def test_rate_matrices(self):
+        for R,p in map(msa_hmm.anc_probs.parse_paml, self.paml_all, [self.A]*len(self.paml_all)):
+            Q = msa_hmm.anc_probs.make_rate_matrix(R,p)
+            self.assert_rate_matrix(Q, p)
+            
+    def get_test_configs(self, sequences):
+        #assuming sequences only contain the 20 standard AAs
+        oh_sequences = tf.one_hot(sequences, 20) 
+        inv_sp_R = msa_hmm.config.default["encoder_initializer"][1]((1,20,20))
+        log_p = msa_hmm.config.default["encoder_initializer"][2]((1,20))
+        p = tf.nn.softmax(log_p)
+        cases = []
+        for equilibrium_sample in [True, False]:
+            for rate_init in [-100., -3., 100.]:
+                for num_matrices in [1,3]:
+                    case = {}
+                    config = dict(msa_hmm.config.default)
+                    config["equilibrium_sample"] = equilibrium_sample
+                    config["num_rate_matrices"] = num_matrices
+                    if num_matrices > 1:
+                        R_stack = np.concatenate([inv_sp_R]*num_matrices, axis=0)
+                        p_stack = np.concatenate([log_p]*num_matrices, axis=0)
+                        config["encoder_initializer"] = (config["encoder_initializer"][:1] + 
+                                                       [tf.constant_initializer(R_stack),
+                                                        tf.constant_initializer(p_stack)] )
+                    config["encoder_initializer"] = ([tf.constant_initializer(rate_init)] + 
+                                                     config["encoder_initializer"][1:])
+                    case["config"] = config 
+                    if rate_init == -100.:
+                        case["expected_anc_probs"] = tf.one_hot(sequences, 26).numpy()
+                    elif rate_init == 100.:
+                        anc = np.concatenate([p, np.zeros((1,6), dtype=np.float32)], axis=-1)
+                        anc = np.concatenate([anc] * sequences.shape[0] * sequences.shape[1], axis=1)
+                        anc = np.reshape(anc, (sequences.shape[0], sequences.shape[1], 26))
+                        case["expected_anc_probs"] = anc 
+                    if equilibrium_sample:
+                        expected_freq = tf.linalg.matvec(p, oh_sequences).numpy()
+                        case["expected_freq"] = expected_freq
+                        if rate_init != -3.:
+                            case["expected_anc_probs"] *= expected_freq
+                        case["expected_freq"] = np.stack([case["expected_freq"]]*num_matrices, axis=-2)
+                    else:
+                        case["expected_freq"] = np.ones((), dtype=np.float32)
+                    if "expected_anc_probs" in case:
+                        case["expected_anc_probs"] = np.stack([case["expected_anc_probs"]]*num_matrices, axis=-2)
+                    cases.append(case)
+        return cases
+            
     def test_anc_probs(self):                 
         filename = os.path.dirname(__file__)+"/data/simple.fa"
         fasta_file = msa_hmm.fasta.Fasta(filename)
-        sequences = get_all_seqs(fasta_file)
-        anc_probs_layer = msa_hmm.AncProbsLayer(sequences.shape[0],
-                                                1,
-                                                equilibrium_init=msa_hmm.config.default["encoder_initializer"][2],
-                                                rate_init=msa_hmm.config.default["encoder_initializer"][0],
-                                                exchangeability_init=msa_hmm.config.default["encoder_initializer"][1],
-                                                trainable_rate_matrices=msa_hmm.config.default["trainable_rate_matrices"])
-        anc_prob_seqs = anc_probs_layer(sequences, [0])
-        self.assert_anc_probs(anc_prob_seqs, tf.squeeze(anc_probs_layer.make_Q()), 1.)
-        anc_probs_layer2 = msa_hmm.AncProbsLayer(sequences.shape[0],
-                                                1,
-                                                equilibrium_init=msa_hmm.config.default["encoder_initializer"][2],
-                                                rate_init=msa_hmm.config.default["encoder_initializer"][0],
-                                                exchangeability_init=msa_hmm.config.default["encoder_initializer"][1],
-                                                trainable_rate_matrices=msa_hmm.config.default["trainable_rate_matrices"],
-                                                equilibrium_sample=True)
-        anc_prob_seqs2 = anc_probs_layer2(sequences, [0])
-        oh_sequences = tf.one_hot(sequences[:,:-1], 20) #assuming the test file only contains the 20 standard AAs
-        expected_freqs = tf.linalg.matvec(anc_probs_layer2.make_p(), oh_sequences)
-        self.assert_anc_probs(anc_prob_seqs2[:,:-1], tf.squeeze(anc_probs_layer.make_Q()), expected_freqs)
-        
+        sequences = get_all_seqs(fasta_file)[:,:-1]
+        n = sequences.shape[0]
+        for case in self.get_test_configs(sequences):
+            anc_probs_layer = msa_hmm.train.make_anc_probs_layer(n, case["config"])
+            self.assert_anc_probs_layer(anc_probs_layer)
+            anc_prob_seqs = anc_probs_layer(sequences, np.arange(n)).numpy()
+            b,l,_ = tf.shape(anc_prob_seqs)
+            anc_prob_seqs = tf.reshape(anc_prob_seqs, (b,l,case["config"]["num_rate_matrices"],26))
+            if "expected_anc_probs" in case:
+                self.assert_anc_probs(anc_prob_seqs, case["expected_freq"], case["expected_anc_probs"])
+            else:
+                self.assert_anc_probs(anc_prob_seqs, case["expected_freq"])
+                
         
     def test_encoder_model(self):
         #test if everything still works if adding the encoder-model abstraction layer      
         filename = os.path.dirname(__file__)+"/data/simple.fa"
         fasta_file = msa_hmm.fasta.Fasta(filename)
+        sequences = get_all_seqs(fasta_file)[:,:-1]
+        n = sequences.shape[0]
+        ind = np.arange(n)
         model_length = 10
-        model = msa_hmm.train.default_model_generator(num_seq=fasta_file.num_seq, 
-                                                      effective_num_seq=fasta_file.num_seq, 
-                                                      model_length=model_length, 
-                                                      config=msa_hmm.config.default)
-        config2 = dict(msa_hmm.config.default)
-        config2["equilibrium_sample"] = True
-        model2 = msa_hmm.train.default_model_generator(num_seq=fasta_file.num_seq, 
-                                                      effective_num_seq=fasta_file.num_seq, 
-                                                      model_length=model_length, 
-                                                      config=config2)
         batch_gen = msa_hmm.train.DefaultBatchGenerator(fasta_file)
-        ind = np.arange(fasta_file.num_seq)
-        msa = msa_hmm.Alignment(fasta_file, batch_gen, ind, batch_size=fasta_file.num_seq, model=model)
-        msa2 = msa_hmm.Alignment(fasta_file, batch_gen, ind, batch_size=fasta_file.num_seq, model=model2)
-        ds = msa_hmm.train.make_dataset(ind, batch_gen, batch_size=fasta_file.num_seq, shuffle=False)
-        for x,_ in ds:
-            anc_prob_seqs = msa.encoder_model(x)
-            anc_prob_seqs2 = msa2.encoder_model(x)
-            self.assert_anc_probs(anc_prob_seqs, tf.squeeze(msa.encoder_model.layers[-1].make_Q()), 1.)
-            oh_sequences = tf.one_hot(x[0][:,:-1], 20) #assuming the test file only contains the 20 standard AAs
-            expected_freqs = tf.linalg.matvec(msa2.encoder_model.layers[-1].make_p(), oh_sequences)
-            self.assert_anc_probs(anc_prob_seqs2[:,:-1], tf.squeeze(msa2.encoder_model.layers[-1].make_Q()), expected_freqs)
+        ds = msa_hmm.train.make_dataset(ind, batch_gen, batch_size=n, shuffle=False)
+        for case in self.get_test_configs(sequences):
+            model = msa_hmm.train.default_model_generator(num_seq=n, 
+                                                          effective_num_seq=n, 
+                                                          model_length=model_length, 
+                                                          config=case["config"])
+            msa = msa_hmm.Alignment(fasta_file, 
+                                    batch_gen, 
+                                    ind, 
+                                    batch_size=n, 
+                                    model=model,
+                                    build="lazy")
+            self.assert_anc_probs_layer(msa.encoder_model.layers[-1])
+            for x,_ in ds:
+                 anc_prob_seqs = msa.encoder_model(x).numpy()[:,:-1]
+            b,l,_ = tf.shape(anc_prob_seqs)
+            anc_prob_seqs = tf.reshape(anc_prob_seqs, (b,l,case["config"]["num_rate_matrices"],26))
+            if "expected_anc_probs" in case:
+                self.assert_anc_probs(anc_prob_seqs,  case["expected_freq"], case["expected_anc_probs"])
+            else:
+                self.assert_anc_probs(anc_prob_seqs,  case["expected_freq"])
+        
             
         
 class TestData(unittest.TestCase):
@@ -800,9 +904,12 @@ class TestAlignment(unittest.TestCase):
         fasta_file = msa_hmm.fasta.Fasta(train_filename)
         ref_file = msa_hmm.fasta.Fasta(ref_filename, aligned=True)
         ref_subset = np.array([fasta_file.seq_ids.index(sid) for sid in ref_file.seq_ids])
+        config = dict(msa_hmm.config.default)
+        config["max_surgery_runs"] = 2 #do minimal surgery but do not skip altogether
+        config["epochs"] = [5,1,5]
         loglik, alignment = msa_hmm.align.fit_and_align_n(1,
                                                           fasta_file, 
-                                                          config=dict(msa_hmm.config.default),
+                                                          config=config,
                                                           subset=ref_subset, 
                                                           verbose=False)[0]
         #some friendly thresholds to check if the alignments does make sense at all

@@ -178,7 +178,7 @@ class MsaHmmCell(tf.keras.layers.Layer):
         if not hasattr(self.frozen_insertions, '__iter__'):
             self.frozen_insertions = [self.frozen_insertions]
             
-        assert all(len(self.emission_init) == len(x) for x in [self.emission_init, self.insertion_init, self.kernel_dim, self.emission_matrix_generator, self.emission_prior]), "emission_init, insertion_init, kernel_dim, emission_matrix_generator, emission_prior must have all the same length" 
+        assert all(len(self.emission_init) == len(x) for x in [self.emission_init, self.insertion_init, self.kernel_dim, self.emission_matrix_generator, self.emission_prior, self.frozen_insertions]), "emission_init, insertion_init, kernel_dim, emission_matrix_generator, emission_prior, frozen_insertions must have all the same length" 
             
         self.load_priors()
         
