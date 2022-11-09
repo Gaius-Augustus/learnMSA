@@ -209,7 +209,7 @@ def plot_anc_probs(alignment,
     for a,(s,i) in enumerate(itertools.product(seqs, pos)):
         sns.barplot(x=msa_hmm.fasta.alphabet[:20], y=ancs[s,i,:20], ax=axes[a]);
         if a % m == 0:
-            axes[a].annotate(f"tau={'%.3f'%tau[s]} ->", (0.3,0.9))
+            axes[a].annotate(f"tau={'%.3f'%tau[s]} ->", (0.3,0.9*axes[a].get_ylim()[1]))
     f.suptitle(title, fontsize=16)
     
     
