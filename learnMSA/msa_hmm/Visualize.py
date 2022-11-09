@@ -6,6 +6,8 @@ import pandas as pd
 import numpy as np
 import tensorflow as tf
 from learnMSA import msa_hmm
+import itertools
+import seaborn as sns
 
 
 def make_logo(alignment, ax):
@@ -182,3 +184,48 @@ def plot_hmm(alignment,
         for line in leg.get_lines():
             line.set_linewidth(8.0)
     plt.subplots_adjust(left=0.4, right=0.6, top=0.9, bottom=0.1)
+    
+    
+def plot_anc_probs(alignment, 
+                   seqs=[0,1,2], 
+                   pos=list(range(6)), 
+                   rescale=True, 
+                   title="Site-wise ancestral probabilities"):
+    n, m = len(seqs), len(pos)
+    ds = msa_hmm.train.make_dataset(alignment.indices[seqs], 
+                                    alignment.batch_generator,
+                                    batch_size=n, 
+                                    shuffle=False)
+    for x,_ in ds:
+        ancs = alignment.encoder_model(x).numpy()
+    i = [l.name for l in alignment.encoder_model.layers].index("AncProbsLayer")
+    anc_probs_layer = alignment.encoder_model.layers[i]
+    tau = anc_probs_layer.make_tau(alignment.indices)
+    if rescale:
+        ancs /= np.sum(ancs, -1, keepdims=True)
+    f, axes = plt.subplots(n, m, sharey=True)
+    axes = axes.flatten()
+    f.set_size_inches(3+3*m, 2*n)
+    for a,(s,i) in enumerate(itertools.product(seqs, pos)):
+        sns.barplot(x=msa_hmm.fasta.alphabet[:20], y=ancs[s,i,:20], ax=axes[a]);
+        if a % m == 0:
+            axes[a].annotate(f"tau={'%.3f'%tau[s]} ->", (0.3,0.9))
+    f.suptitle(title, fontsize=16)
+    
+    
+def plot_rate_matrices(alignment,
+                    title="normalized rate matrix (1 time unit = 1 expected mutation per site)"):
+    i = [l.name for l in alignment.encoder_model.layers].index("AncProbsLayer")
+    anc_probs_layer = alignment.encoder_model.layers[i]
+    Q = anc_probs_layer.make_Q()
+    k = Q.shape[0]
+    f, axes = plt.subplots(1, k, sharey=True)
+    f.set_size_inches(10*k, 10.5)
+    if k > 1:
+        axes = axes.flatten()
+    else:
+        axes = [axes]
+    for i,ax in enumerate(axes):
+        a = msa_hmm.fasta.alphabet[:20]
+        sns.heatmap(Q[i], linewidth=0.5, ax=ax, xticklabels=a, yticklabels=a)
+    f.suptitle(title, fontsize=16)

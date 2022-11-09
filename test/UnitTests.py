@@ -457,11 +457,14 @@ class TestAncProbs(unittest.TestCase):
         #todo: maybe use known properties of amino acids (e.g. polar, charged, aromatic) to test distributions
         #after some time tau
         
-    def assert_anc_probs_layer(self, anc_probs_layer):
+    def assert_anc_probs_layer(self, anc_probs_layer, config):
         anc_probs_layer.build(None)
         p = anc_probs_layer.make_p()
         R = anc_probs_layer.make_R()
         Q = anc_probs_layer.make_Q()
+        self.assertEqual(p.shape[0], config["num_rate_matrices"])
+        self.assertEqual(R.shape[0], config["num_rate_matrices"])
+        self.assertEqual(Q.shape[0], config["num_rate_matrices"])
         for equi in p:
             self.assert_equilibrium(equi)
         for exchange in R:
@@ -544,7 +547,7 @@ class TestAncProbs(unittest.TestCase):
         n = sequences.shape[0]
         for case in self.get_test_configs(sequences):
             anc_probs_layer = msa_hmm.train.make_anc_probs_layer(n, case["config"])
-            self.assert_anc_probs_layer(anc_probs_layer)
+            self.assert_anc_probs_layer(anc_probs_layer, case["config"])
             anc_prob_seqs = anc_probs_layer(sequences, np.arange(n)).numpy()
             b,l,_ = tf.shape(anc_prob_seqs)
             anc_prob_seqs = tf.reshape(anc_prob_seqs, (b,l,case["config"]["num_rate_matrices"],26))
@@ -575,7 +578,7 @@ class TestAncProbs(unittest.TestCase):
                                     batch_size=n, 
                                     model=model,
                                     build="lazy")
-            self.assert_anc_probs_layer(msa.encoder_model.layers[-1])
+            self.assert_anc_probs_layer(msa.encoder_model.layers[-1], case["config"])
             for x,_ in ds:
                  anc_prob_seqs = msa.encoder_model(x).numpy()[:,:-1]
             b,l,_ = tf.shape(anc_prob_seqs)
