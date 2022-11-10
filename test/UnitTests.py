@@ -539,11 +539,15 @@ class TestAncProbs(unittest.TestCase):
                         case["expected_anc_probs"] = np.stack([case["expected_anc_probs"]]*num_matrices, axis=-2)
                     cases.append(case)
         return cases
-            
-    def test_anc_probs(self):                 
+    
+    def get_simple_seq(self):      
         filename = os.path.dirname(__file__)+"/data/simple.fa"
         fasta_file = msa_hmm.fasta.Fasta(filename)
         sequences = get_all_seqs(fasta_file)[:,:-1]
+        return sequences, fasta_file
+            
+    def test_anc_probs(self):                 
+        sequences, fasta_file = self.get_simple_seq()
         n = sequences.shape[0]
         for case in self.get_test_configs(sequences):
             anc_probs_layer = msa_hmm.train.make_anc_probs_layer(n, case["config"])
@@ -559,9 +563,7 @@ class TestAncProbs(unittest.TestCase):
         
     def test_encoder_model(self):
         #test if everything still works if adding the encoder-model abstraction layer      
-        filename = os.path.dirname(__file__)+"/data/simple.fa"
-        fasta_file = msa_hmm.fasta.Fasta(filename)
-        sequences = get_all_seqs(fasta_file)[:,:-1]
+        sequences, fasta_file = self.get_simple_seq()
         n = sequences.shape[0]
         ind = np.arange(n)
         model_length = 10
@@ -587,6 +589,24 @@ class TestAncProbs(unittest.TestCase):
                 self.assert_anc_probs(anc_prob_seqs,  case["expected_freq"], case["expected_anc_probs"])
             else:
                 self.assert_anc_probs(anc_prob_seqs,  case["expected_freq"])
+                
+    def test_transposed(self):
+        sequences, fasta_file = self.get_simple_seq()
+        n = sequences.shape[0]
+        config = dict(msa_hmm.config.default)
+        anc_probs_layer = msa_hmm.train.make_anc_probs_layer(1, config)
+        msa_hmm_layer = msa_hmm.train.make_msa_hmm_layer(n, 10, config)
+        msa_hmm_layer.build(sequences.shape)
+        B = msa_hmm_layer.cell.make_B()[0]
+        config["transposed"] = True
+        anc_probs_layer_transposed = msa_hmm.train.make_anc_probs_layer(n, config)
+        anc_prob_seqs = anc_probs_layer_transposed(sequences, np.arange(n)).numpy()
+        anc_prob_seqs = tf.cast(anc_prob_seqs, B.dtype)
+        anc_prob_B = anc_probs_layer(tf.expand_dims(B[:,:20], 0), [0])
+        anc_prob_B = tf.squeeze(anc_prob_B)
+        prob1 = tf.linalg.matvec(B, anc_prob_seqs)
+        prob2 = tf.linalg.matvec(anc_prob_B, tf.one_hot(sequences, 20, dtype=anc_prob_B.dtype))
+        np.testing.assert_almost_equal(prob1.numpy(), prob2.numpy())
         
             
         

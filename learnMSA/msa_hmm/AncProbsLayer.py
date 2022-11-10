@@ -49,10 +49,10 @@ def make_rate_matrix(exchangeabilities, equilibrium, epsilon=1e-16):
     Q /= tf.maximum(mue, epsilon)
     return Q
     
-def make_anc_probs(sequences, exchangeabilities, equilibrium, tau, equilibrium_sample=False):
+def make_anc_probs(sequences, exchangeabilities, equilibrium, tau, equilibrium_sample=False, transposed=False):
     """Computes ancestral probabilities simultaneously for all sites and rate matrices.
     Args:
-        sequences: Sequences in one hot format. Shape: (b, L)
+        sequences: Sequences either as integers (faster embedding lookup) or in vector format. Shape: (b, L) or (b, L, s)
         exchangeabilities: A stack of symmetric exchangeability matrices. Shape: (k, s, s)
         equilibrium: A stack of equilibrium distributions. Shape: (k, s)
         tau: Evolutionary times for all sequences (1 time unit = 1 expected mutation per site). Shape: (b) or (b,k)
@@ -70,11 +70,20 @@ def make_anc_probs(sequences, exchangeabilities, equilibrium, tau, equilibrium_s
     if equilibrium_sample:
         equilibrium = tf.reshape(equilibrium, (1,k,s,1))
         P *= equilibrium
-    P = tf.transpose(P, [0,2,1,3])
-    P = tf.reshape(P, (-1, k, s))
-    sequences = tf.cast(sequences, tf.int32)
-    sequences += tf.expand_dims( tf.range(b) * s, -1)
-    ancprobs = tf.nn.embedding_lookup(P, sequences)
+    if len(sequences.shape) == 2: #assume index format
+        if transposed:
+            P = tf.transpose(P, [0,3,1,2])
+        else:
+            P = tf.transpose(P, [0,2,1,3])
+        P = tf.reshape(P, (-1, k, s))
+        sequences = tf.cast(sequences, tf.int32)
+        sequences += tf.expand_dims( tf.range(b) * s, -1)
+        ancprobs = tf.nn.embedding_lookup(P, sequences)
+    else: #assume vector format
+        if transposed:
+            ancprobs = tf.einsum("bLz,bksz->bLks", sequences, P)
+        else:
+            ancprobs = tf.einsum("bLz,bkzs->bLks", sequences, P)
     return ancprobs
     
 class AncProbsLayer(tf.keras.layers.Layer): 
@@ -93,6 +102,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
         shared_matrix: Make all weight matrices internally use the same weights. Only useful in combination with num_matrices > 1 and per_matrix_rate = True. 
         equilibrium_sample: If true, a 2-staged process is assumed where an amino acid is first sampled from the equilibirium distribution
                     and the ancestral probabilities are computed afterwards.
+        transposed: Transposes the probability matrix P = e^tQ. 
         name: Layer name.
     """
 
@@ -108,6 +118,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
                  matrix_rate_l2=0.0,
                  shared_matrix=False,
                  equilibrium_sample=False,
+                 transposed=False,
                  name="AncProbsLayer",
                  **kwargs):
         super(AncProbsLayer, self).__init__(name=name, **kwargs)
@@ -122,6 +133,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
         self.matrix_rate_l2 = matrix_rate_l2 
         self.shared_matrix = shared_matrix
         self.equilibrium_sample = equilibrium_sample
+        self.transposed = transposed
     
     def build(self, input_shape=None):
         self.tau_kernel = self.add_weight(shape=[self.num_rates], 
@@ -179,14 +191,18 @@ class AncProbsLayer(tf.keras.layers.Layer):
     def call(self, inputs, rate_indices):
         """ Computes anchestral probabilities of the inputs.
         Args:
-            inputs: Input sequences. Shape: (b, L)
+            inputs: Input sequences. Shape: (b, L) or (b, L, s)
             rate_indices: Indices that map each input sequences to an evolutionary times.
         """
-        mask = inputs < 20
-        only_std_aa_inputs = inputs * tf.cast(mask, inputs.dtype)
-        mask = tf.cast(mask, self.dtype)
-        mask = tf.expand_dims(mask, -1)
-        mask = tf.expand_dims(mask, -1)
+        input_indices = len(inputs.shape) == 2 
+        if input_indices:
+            mask = inputs < 20
+            only_std_aa_inputs = inputs * tf.cast(mask, inputs.dtype)
+            mask = tf.cast(mask, self.dtype)
+            mask = tf.expand_dims(mask, -1)
+            mask = tf.expand_dims(mask, -1)
+        else:
+            only_std_aa_inputs = inputs
         tau_subset = self.make_tau(rate_indices)
         if self.per_matrix_rate:
             per_matrix_rates = self.make_per_matrix_rate()
@@ -197,17 +213,19 @@ class AncProbsLayer(tf.keras.layers.Layer):
             self.add_loss(self.matrix_rate_l2 * reg)
         else:
             mut_rates = tau_subset
-        reg_tau = tf.reduce_sum(tf.square(self.tau_kernel + 6.))
+        reg_tau = tf.reduce_sum(tf.square(self.tau_kernel + 3.))
         self.add_loss(self.matrix_rate_l2 * reg_tau)
         anc_probs = make_anc_probs(only_std_aa_inputs, 
                                    self.make_R(), 
                                    self.make_p(), 
                                    mut_rates,
-                                   self.equilibrium_sample)
-        anc_probs *= mask
-        anc_probs = tf.pad(anc_probs, [[0,0], [0,0], [0,0], [0,6]])
-        rest = tf.expand_dims(tf.one_hot(inputs, 26), -2) * (1-mask)
-        anc_probs += rest
+                                   self.equilibrium_sample,
+                                   self.transposed)
+        if input_indices:
+            anc_probs *= mask
+            anc_probs = tf.pad(anc_probs, [[0,0], [0,0], [0,0], [0,6]])
+            rest = tf.expand_dims(tf.one_hot(inputs, 26), -2) * (1-mask)
+            anc_probs += rest
         anc_probs = tf.reshape(anc_probs, (tf.shape(inputs)[0], tf.shape(inputs)[1],-1) )
         return anc_probs
 

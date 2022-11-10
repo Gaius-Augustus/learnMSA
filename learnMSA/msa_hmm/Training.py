@@ -58,7 +58,8 @@ def make_anc_probs_layer(num_seq, config):
                                      matrix_rate_init=config["encoder_initializer"][3] if len(config["encoder_initializer"]) > 3 else None,
                                      matrix_rate_l2=config["matrix_rate_l2"],
                                      shared_matrix=config["shared_rate_matrix"],
-                                     equilibrium_sample=config["equilibrium_sample"])
+                                     equilibrium_sample=config["equilibrium_sample"],
+                                     transposed=config["transposed"])
     return anc_probs_layer
 
 def default_model_generator(num_seq,

@@ -143,5 +143,6 @@ default = {
     "per_matrix_rate" : False,
     "matrix_rate_l2" : 0.0,
     "shared_rate_matrix" : False,
-    "equilibrium_sample" : False
+    "equilibrium_sample" : False,
+    "transposed" : False
 }
