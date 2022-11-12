@@ -18,7 +18,8 @@ class EmissionInitializer(tf.keras.initializers.Initializer):
     def __call__(self, shape, dtype=None, **kwargs):
         assert len(shape) == 2, "EmissionInitializer only supports 2D shapes."
         assert shape[-1] == self.dist.size, f"Last dimension of shape must match the size of the initial distribution. Shape={shape} dist.size={self.dist.size}"
-        return tf.reshape(tf.tile(self.dist, shape[:1]), shape)
+        dist = tf.cast(self.dist, dtype)
+        return tf.reshape(tf.tile(dist, shape[:1]), shape)
     
 
 class EntryInitializer(tf.keras.initializers.Initializer):
@@ -47,12 +48,19 @@ class MatchTransitionInitializer(tf.keras.initializers.Initializer):
     
     
     
+R, p = anc_probs.parse_paml(anc_probs.LG_paml, fasta.alphabet[:-1])
+p_padded = np.pad(np.squeeze(p), (0,5))
+exchangeability_init = anc_probs.inverse_softplus(R + 1e-32)
+    
+    
 def make_default_emission_init():
-    return EmissionInitializer(np.log(ut.background_distribution))
+    return EmissionInitializer(np.log(p_padded+1e-16))
+    #return EmissionInitializer(np.log(ut.background_distribution))
 
 
 def make_default_insertion_init():
-    return tf.constant_initializer(np.log(ut.background_distribution))
+    return tf.constant_initializer(np.log(p_padded+1e-16))
+    #return tf.constant_initializer(np.log(ut.background_distribution))
 
 
 def make_default_flank_init():
@@ -102,9 +110,6 @@ def get_adaptive_batch_size(model_length, max_len):
         return 256
     else:
         return 128
-    
-R, p = anc_probs.parse_paml(anc_probs.LG_paml, fasta.alphabet[:-1])
-exchangeability_init = anc_probs.inverse_softplus(R + 1e-32)
 
 #the configuration can be changed by experienced users
 #proper command line support for these parameters will be added in the future

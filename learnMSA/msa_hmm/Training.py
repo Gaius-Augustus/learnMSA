@@ -43,8 +43,10 @@ def make_msa_hmm_layer(effective_num_seq,
                               emission_func = config["emission_func"],
                               emission_matrix_generator = config["emission_matrix_generator"],
                               emission_prior = config["emission_prior"], 
-                              frozen_insertions = config["frozen_insertions"])
-    msa_hmm_layer = MsaHmmLayer(msa_hmm_cell, effective_num_seq)
+                              frozen_insertions = config["frozen_insertions"],
+                              dtype=tf.float64)
+    msa_hmm_layer = MsaHmmLayer(msa_hmm_cell, effective_num_seq,
+                              dtype=tf.float64)
     return msa_hmm_layer
 
 def make_anc_probs_layer(num_seq, config):

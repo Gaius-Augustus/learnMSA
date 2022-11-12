@@ -644,7 +644,10 @@ class TestModelSurgery(unittest.TestCase):
         
     def test_discard_or_expand_positions(self):
         config = dict(msa_hmm.config.default)
-        config["emission_init"] = tf.constant_initializer(string_to_one_hot("FELIC").numpy()*10)
+        emission_init = string_to_one_hot("FELIC").numpy()*10
+        insert_init= np.squeeze(string_to_one_hot("A") + string_to_one_hot("N"))*10
+        config["emission_init"] = tf.constant_initializer(emission_init)
+        config["insertion_init"] = tf.constant_initializer(insert_init)
         config["transition_init"] = msa_hmm.config.make_default_transition_init(MM = 0, 
                                                                                 MI = 0,
                                                                                 MD = -1,
@@ -890,7 +893,10 @@ class TestAlignment(unittest.TestCase):
     def test_subalignment(self):
         length=5
         config = dict(msa_hmm.config.default)
-        config["emission_init"] = tf.constant_initializer(string_to_one_hot("FELIX").numpy()*20)
+        emission_init = string_to_one_hot("FELIX").numpy()*20
+        insert_init= np.squeeze(string_to_one_hot("A") + string_to_one_hot("B") + string_to_one_hot("C"))*20
+        config["emission_init"] = tf.constant_initializer(emission_init)
+        config["insertion_init"] = tf.constant_initializer(insert_init)
         config["transition_init"] = msa_hmm.config.make_default_transition_init(MM = 0, 
                                                                         MI = 0,
                                                                         MD = 0,
