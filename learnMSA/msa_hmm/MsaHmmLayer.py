@@ -7,7 +7,7 @@ class MsaHmmLayer(tf.keras.layers.Layer):
                  num_seq,
                  use_prior=True,
                  name="MsaHmmLayer",
-                 dtype=tf.float64,
+                 dtype=tf.float32,
                  **kwargs
                 ):
         super(MsaHmmLayer, self).__init__(name=name, dtype=dtype, **kwargs)

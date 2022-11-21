@@ -2,7 +2,6 @@ import tensorflow as tf
 import numpy as np
 import time
 import os
-import learnMSA.msa_hmm.Utility as ut
 import learnMSA.msa_hmm.Fasta as fasta
 import learnMSA.msa_hmm.Training as train
 import learnMSA.msa_hmm.MsaHmmLayer as msa_hmm
@@ -29,16 +28,15 @@ def viterbi_transitions(hmm_cell, gamma_prev, sequences_i, log_A_val, indices_0,
 # utilizes sparse matrix format for a speedup
 def viterbi_dyn_prog(sequences, hmm_cell, epsilon=np.finfo(np.float32).tiny):
     epsilon = tf.cast(epsilon, hmm_cell.dtype)
-    A = hmm_cell.make_A_sparse()
     init = hmm_cell.make_initial_distribution()
     n = sequences.shape[0]
-    m = A.shape[0]
+    m = hmm_cell.num_states
     len_seq = sequences.shape[1]
-    log_A_val = tf.expand_dims(tf.math.log(A.values), 0)
-    log_A_val = log_A_val
-    indices_0 = A.indices[:,0]
+    log_A_sparse = hmm_cell.make_log_A_sparse()
+    log_A_val = log_A_sparse.values
+    indices_0 = log_A_sparse.indices[:,0]
     grid = tf.meshgrid(tf.range(n, dtype=tf.int64) * m,
-                       A.indices[:,1], indexing='ij')
+                       log_A_sparse.indices[:,1], indexing='ij')
     indices_1 = tf.add_n(grid)
     b0 = hmm_cell.emission_probs(tf.cast(sequences[:,0], hmm_cell.dtype))
     gamma0 = tf.math.log(init+epsilon) + tf.math.log(b0+epsilon)
@@ -60,12 +58,10 @@ def viterbi_backtracking_step(q, gamma_state, log_A_dense):
     return tf.math.argmax(A_q + gamma_state, axis=-1)
 
     
-def viterbi_backtracking(hmm_cell, gamma, epsilon=np.finfo(np.float64).tiny):
-    A = hmm_cell.make_A_sparse()
+def viterbi_backtracking(hmm_cell, gamma, epsilon=np.finfo(np.float32).tiny):
     n = gamma.shape[0]
     l = gamma.shape[1]
-    log_A_dense = tf.math.log(tf.sparse.to_dense(A) + epsilon)
-    log_A_dense = log_A_dense
+    log_A_dense = hmm_cell.make_log_A()
     state_seqs_max_lik = []
     q = tf.math.argmax(gamma[:,-1], axis=-1)
     for i in range(l):
@@ -84,7 +80,7 @@ def viterbi(sequences, hmm_cell, batch_size=64):
     gamma = np.zeros((sequences.shape[0], sequences.shape[1], hmm_cell.num_states), dtype=hmm_cell.dtype)
     while k < sequences.shape[0]:
         if len(sequences.shape) == 2:
-            gamma[k:k+batch_size] = viterbi_dyn_prog(tf.one_hot(sequences[k:k+batch_size], fasta.s, dtype=tf.float64), hmm_cell)
+            gamma[k:k+batch_size] = viterbi_dyn_prog(tf.one_hot(sequences[k:k+batch_size], fasta.s, dtype=hmm_cell.dtype), hmm_cell)
         else:
             sequences = tf.cast(sequences, hmm_cell.dtype)
             gamma[k:k+batch_size] = viterbi_dyn_prog(sequences[k:k+batch_size], hmm_cell)

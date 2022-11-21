@@ -4,7 +4,6 @@ import numpy as np
 from learnMSA.msa_hmm.MsaHmmCell import MsaHmmCell
 from learnMSA.msa_hmm.MsaHmmLayer import MsaHmmLayer
 from learnMSA.msa_hmm.AncProbsLayer import AncProbsLayer
-import learnMSA.msa_hmm.Utility as ut
 
 # boilerplate code for model generation 
 # in the following we test different models that only vary in the anc_probs_layer
@@ -44,9 +43,11 @@ def make_msa_hmm_layer(effective_num_seq,
                               emission_matrix_generator = config["emission_matrix_generator"],
                               emission_prior = config["emission_prior"], 
                               frozen_insertions = config["frozen_insertions"],
-                              dtype=tf.float64)
-    msa_hmm_layer = MsaHmmLayer(msa_hmm_cell, effective_num_seq,
-                              dtype=tf.float64)
+                              dtype=tf.float32)
+    msa_hmm_layer = MsaHmmLayer(msa_hmm_cell, 
+                                effective_num_seq,
+                                use_prior=config["use_prior"],
+                                dtype=tf.float32)
     return msa_hmm_layer
 
 def make_anc_probs_layer(num_seq, config):

@@ -18,10 +18,11 @@ def make_logo(alignment, ax):
 
     #reduce to std AA alphabet 
     emissions = hmm_cell.make_B()[0].numpy()[1:hmm_cell.length+1,:20][:,logomaker_perm]
-
+    length = alignment.msa_hmm_layer.cell.length
+    background = alignment.msa_hmm_layer.cell.emission_init[0]((length,25), dtype=alignment.msa_hmm_layer.dtype)[0, :20]
     information_content = tf.keras.losses.KLDivergence(reduction=tf.keras.losses.Reduction.NONE)(
                                                          emissions,
-                                                         np.expand_dims(msa_hmm.ut.background_distribution[:20], 0))
+                                                         np.expand_dims(background, 0))
     information_content = tf.expand_dims(information_content, -1).numpy()
 
     information_content_df = pd.DataFrame(information_content * emissions, 

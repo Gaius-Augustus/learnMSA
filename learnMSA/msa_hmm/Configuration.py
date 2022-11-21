@@ -1,6 +1,5 @@
 import numpy as np
 import tensorflow as tf
-import learnMSA.msa_hmm.Utility as ut
 import learnMSA.msa_hmm.MsaHmmCell as cell
 import learnMSA.msa_hmm.Fasta as fasta
 import learnMSA.msa_hmm.AncProbsLayer as anc_probs
@@ -55,12 +54,10 @@ exchangeability_init = anc_probs.inverse_softplus(R + 1e-32)
     
 def make_default_emission_init():
     return EmissionInitializer(np.log(p_padded+1e-16))
-    #return EmissionInitializer(np.log(ut.background_distribution))
 
 
 def make_default_insertion_init():
     return tf.constant_initializer(np.log(p_padded+1e-16))
-    #return tf.constant_initializer(np.log(ut.background_distribution))
 
 
 def make_default_flank_init():

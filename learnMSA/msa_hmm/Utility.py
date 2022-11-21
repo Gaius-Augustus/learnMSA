@@ -19,7 +19,7 @@ emission_dirichlet_mix = dm.DirichletMixturePrior(DIRICHLET_COMP_COUNT, 20, -1,
                                     DMP.q_kernel.numpy(),
                                     trainable=False)
 background_distribution = emission_dirichlet_mix.expectation()
-#the prior was trained on example distributions over the 20 amino acid alpahbet
+#the prior was trained on example distributions over the 20 amino acid alphabet
 #the additional frequencies for 'B', 'Z',  'X', 'U', 'O' were derived from Pfam
 background_distribution = np.concatenate([background_distribution, [2.03808244e-05, 1.02731819e-05, 7.92076933e-04, 5.84256792e-08, 1e-32]], axis=0)
 background_distribution /= np.sum(background_distribution)

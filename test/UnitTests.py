@@ -6,6 +6,7 @@ import unittest
 import numpy as np
 import tensorflow as tf
 from learnMSA import msa_hmm 
+import itertools
 
 
 
@@ -96,7 +97,10 @@ class TestMsaHmmCell(unittest.TestCase):
         A_ref[10,10] = 1
         for i in range(hmm_cell.num_states):
             for j in range(hmm_cell.num_states):
-                np.testing.assert_almost_equal(A[i,j], A_ref[i,j], err_msg=str(i)+","+str(j))
+                np.testing.assert_almost_equal(A[i,j], 
+                                               A_ref[i,j], 
+                                               decimal=5,
+                                               err_msg=str(i)+","+str(j))
         
         imp_probs = hmm_cell.make_implicit_probs()
         for part_name in imp_probs.keys():
@@ -934,7 +938,7 @@ class TestAlignment(unittest.TestCase):
         ref_file = msa_hmm.fasta.Fasta(ref_filename, aligned=True)
         ref_subset = np.array([fasta_file.seq_ids.index(sid) for sid in ref_file.seq_ids])
         config = dict(msa_hmm.config.default)
-        config["max_surgery_runs"] = 2 #do minimal surgery but do not skip altogether
+        config["max_surgery_runs"] = 2 #do minimal surgery 
         config["epochs"] = [5,1,5]
         loglik, alignment = msa_hmm.align.fit_and_align_n(1,
                                                           fasta_file, 
@@ -991,6 +995,53 @@ class ConsoleTest(unittest.TestCase):
         output = test.communicate()[1].strip().decode('ascii')
         self.assertEqual(faulty_msa_expected_err, output)
         
+class DirichletTest(unittest.TestCase):
+        
+    def test_dirichlet_log_pdf_single(self):
+        epsilon = 1e-16
+        alphas = np.array([ [1., 1., 1.], [1., 2, 3], [50., 50., 50.], [100., 1., 10.] ])
+        probs = np.array([[.2, .3, .5], [1.-2*epsilon, epsilon, epsilon], [.8, .1, .1], [.3, .3, .4]])
+        expected = np.array([[0.693146, 0.693146, 0.693146, 0.693146],
+                            [1.5040779, -106.42974, -2.8134103, 1.0577908], 
+                            [-5.509186, -3444.141, -70.27524, 3.4245605], 
+                            [-127.1859, -293.1855, -4.427696, -89.05315]])
+        q = np.array([1.])
+        for e, alpha in zip(expected, alphas):
+            alpha = np.expand_dims(alpha, 0)
+            log_pdf = msa_hmm.dm.dirichlet_log_pdf(probs, alpha, q)
+            np.testing.assert_almost_equal(log_pdf, e, decimal=3)
+            alpha_init = tf.constant_initializer(msa_hmm.anc_probs.inverse_softplus(alpha))
+            mix_init = tf.constant_initializer(np.log(q))
+            mean_log_pdf = msa_hmm.dm.DirichletMixtureLayer(1,3,
+                                                            alpha_init=alpha_init,
+                                                            mix_init=mix_init)(probs)
+            np.testing.assert_almost_equal(mean_log_pdf, np.mean(e), decimal=3)
+            
+    def test_dirichlet_log_pdf_mix(self):
+        epsilon = 1e-16
+        alpha = np.array([ [1., 1., 1.], [1., 2, 3], [50., 50., 50.], [100., 1., 10.] ])
+        probs = np.array([[.2, .3, .5], [1.-2*epsilon, epsilon, epsilon], [.8, .1, .1], [.3, .3, .4]])
+        
+        expected = np.array([0.48613059, -0.69314836, -0.65780917,  2.1857463])
+        q = np.array([0.25, 0.25, 0.25, 0.25])
+        log_pdf = msa_hmm.dm.dirichlet_log_pdf(probs, alpha, q)
+        np.testing.assert_almost_equal(log_pdf, expected, decimal=3)
+        alpha_init = tf.constant_initializer(msa_hmm.anc_probs.inverse_softplus(alpha))
+        mix_init = tf.constant_initializer(np.log(q))
+        mean_log_pdf = msa_hmm.dm.DirichletMixtureLayer(4, 3,
+                                                        alpha_init=alpha_init,
+                                                        mix_init=mix_init)(probs)
+        np.testing.assert_almost_equal(mean_log_pdf, np.mean(expected), decimal=3)
+        
+        expected2 = np.array([0.39899244, 0.33647106, 0.33903092, 1.36464418])
+        q2 = np.array([0.7, 0.02, 0.08, 0.2])
+        log_pdf2 = msa_hmm.dm.dirichlet_log_pdf(probs, alpha, q2)
+        np.testing.assert_almost_equal(log_pdf2, expected2, decimal=3)
+        mix_init2 = tf.constant_initializer(np.log(q2))
+        mean_log_pdf2 = msa_hmm.dm.DirichletMixtureLayer(4, 3,
+                                                        alpha_init=alpha_init,
+                                                        mix_init=mix_init2)(probs)
+        np.testing.assert_almost_equal(mean_log_pdf2, np.mean(expected2), decimal=3)
         
 if __name__ == '__main__':
     unittest.main()
