@@ -75,3 +75,7 @@ Requirements:
 ## Interactive notebook with visualization:
 
 Run the notebook <code>MsaHmm.ipynb</code> with juypter.
+
+# Publications
+
+Becker F, Stanke M. **learnMSA: learning and aligning large protein families**. *GigaScience*. 2022
