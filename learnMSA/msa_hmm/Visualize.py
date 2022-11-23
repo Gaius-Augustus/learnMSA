@@ -17,9 +17,9 @@ def make_logo(alignment, ax):
     logomaker_perm = np.array([msa_hmm.fasta.alphabet.index(aa) for aa in logomaker_alphabet], dtype=int)
 
     #reduce to std AA alphabet 
-    emissions = hmm_cell.make_B()[0].numpy()[1:hmm_cell.length+1,:20][:,logomaker_perm]
+    emissions = hmm_cell.emitter[0].make_B().numpy()[1:hmm_cell.length+1,:20][:,logomaker_perm]
     length = alignment.msa_hmm_layer.cell.length
-    background = alignment.msa_hmm_layer.cell.emission_init[0]((length,25), dtype=alignment.msa_hmm_layer.dtype)[0, :20]
+    background = alignment.msa_hmm_layer.cell.emitter[0].emission_init((length,25), dtype=alignment.msa_hmm_layer.dtype)[0, :20]
     information_content = tf.keras.losses.KLDivergence(reduction=tf.keras.losses.Reduction.NONE)(
                                                          emissions,
                                                          np.expand_dims(background, 0))
@@ -58,8 +58,8 @@ def plot_hmm(alignment,
     hmm_cell = alignment.msa_hmm_layer.cell
     
     G = nx.DiGraph()
-    indices_dict = hmm_cell.sparse_transition_indices_explicit()
-    probs = hmm_cell.make_probs()
+    indices_dict = hmm_cell.transitioner.sparse_transition_indices_explicit
+    probs = hmm_cell.transitioner.make_probs()
     for transition_type, indices in indices_dict.items():
         if transition_type == "begin_to_match" or transition_type == "match_to_end":
             continue
@@ -85,7 +85,7 @@ def plot_hmm(alignment,
     if label_probs:
         values = probs
     else:
-        values = {part_name : kernel.numpy() for part_name, kernel in hmm_cell.transition_kernel.items()}
+        values = {part_name : kernel.numpy() for part_name, kernel in hmm_cell.transitioner.transition_kernel.items()}
     for transition_type, indices in indices_dict.items():
         if transition_type == "begin_to_match" or transition_type == "match_to_end":
             continue
@@ -93,7 +93,7 @@ def plot_hmm(alignment,
                                 for edge,p,v in zip(indices, probs[transition_type], values[transition_type]) 
                                     if p > edge_show_threshold})
 
-    B = hmm_cell.make_B()[0].numpy()
+    B = hmm_cell.emitter[0].make_B().numpy()
     node_labels = {}
     for i in range(hmm_cell.length):
         sort = np.argsort(-B[i+1, :25])
@@ -106,7 +106,7 @@ def plot_hmm(alignment,
 
     ax.figure.set_size_inches(hmm_cell.length, 7)
     
-    p = tf.math.sigmoid(hmm_cell.flank_init_kernel)
+    p = tf.math.sigmoid(hmm_cell.transitioner.flank_init_kernel)
     #ax.text(-4*spacing, 0, "Init: \n (%.2f, %.2f)" % (p, 1-p), fontsize=12)
     ax.text(-2.5*spacing, -spacing/2, "Insertions", fontsize=20)
     ax.text(-2.5*spacing, -1.5*spacing, "Deletions", fontsize=20)

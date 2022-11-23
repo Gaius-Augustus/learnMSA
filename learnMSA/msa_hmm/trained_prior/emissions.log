@@ -216,3 +216,37 @@ Fitted a model for k = 32 with loglik = 53.71635453510279
 Saving best model for k = 32 with loglik = 53.76615787086714 to file 
 Fitted a model for k = 64 with loglik = 56.09761620685681 
 Fitted a model for k = 64 with loglik = 55.99630706635542 
+Fitted a model for k = 64 with loglik = 56.14019367790225 
+Fitted a model for k = 64 with loglik = 56.14497541988745 
+Fitted a model for k = 64 with loglik = 56.23694136230027 
+Saving best model for k = 64 with loglik = 56.23694136230027 to file 
+Fitted a model for k = 64 with loglik = 56.089868397831886 
+Fitted a model for k = 64 with loglik = 56.209940738661246 
+Fitted a model for k = 64 with loglik = 56.291586506780675 
+Fitted a model for k = 64 with loglik = 56.01131677695405 
+Fitted a model for k = 64 with loglik = 56.11384935104417 
+Saving best model for k = 64 with loglik = 56.291586506780675 to file 
+Fitted a model for k = 128 with loglik = 58.37538743605623 
+Fitted a model for k = 128 with loglik = 58.64852132362216 
+Fitted a model for k = 128 with loglik = 58.533423759978525 
+Fitted a model for k = 128 with loglik = 58.44928190575314 
+Fitted a model for k = 128 with loglik = 58.508800224366766 
+Saving best model for k = 128 with loglik = 58.64852132362216 to file 
+Fitted a model for k = 128 with loglik = 58.373490454839704 
+Fitted a model for k = 128 with loglik = 58.54709587574577 
+Fitted a model for k = 128 with loglik = 58.51686347489552 
+Fitted a model for k = 128 with loglik = 58.48862463083717 
+Fitted a model for k = 128 with loglik = 58.52239228958262 
+Saving best model for k = 128 with loglik = 58.54709587574577 to file 
+Fitted a model for k = 256 with loglik = 58.16385189732656 
+Fitted a model for k = 256 with loglik = 57.89007977373672 
+Fitted a model for k = 256 with loglik = 58.02714384885611 
+Fitted a model for k = 256 with loglik = 57.98474612855215 
+Fitted a model for k = 256 with loglik = 57.99690154094441 
+Saving best model for k = 256 with loglik = 58.16385189732656 to file 
+Fitted a model for k = 256 with loglik = 60.57925088262235 
+Fitted a model for k = 256 with loglik = 60.47817130370576 
+Fitted a model for k = 256 with loglik = 60.460365968208485 
+Fitted a model for k = 256 with loglik = 60.51491372559356 
+Fitted a model for k = 256 with loglik = 60.54498025417471 
+Saving best model for k = 256 with loglik = 60.57925088262235 to file 

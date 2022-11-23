@@ -5,7 +5,7 @@ import os
 import learnMSA.msa_hmm.Fasta as fasta
 import learnMSA.msa_hmm.Training as train
 import learnMSA.msa_hmm.MsaHmmLayer as msa_hmm
-from learnMSA.msa_hmm.Configuration import as_str
+from learnMSA.msa_hmm.Configuration import as_str, assert_config
 from pathlib import Path
 
 
@@ -32,7 +32,7 @@ def viterbi_dyn_prog(sequences, hmm_cell, epsilon=np.finfo(np.float32).tiny):
     n = sequences.shape[0]
     m = hmm_cell.num_states
     len_seq = sequences.shape[1]
-    log_A_sparse = hmm_cell.make_log_A_sparse()
+    log_A_sparse = hmm_cell.transitioner.make_log_A_sparse()
     log_A_val = log_A_sparse.values
     indices_0 = log_A_sparse.indices[:,0]
     grid = tf.meshgrid(tf.range(n, dtype=tf.int64) * m,
@@ -61,7 +61,7 @@ def viterbi_backtracking_step(q, gamma_state, log_A_dense):
 def viterbi_backtracking(hmm_cell, gamma, epsilon=np.finfo(np.float32).tiny):
     n = gamma.shape[0]
     l = gamma.shape[1]
-    log_A_dense = hmm_cell.make_log_A()
+    log_A_dense = hmm_cell.transitioner.make_log_A()
     state_seqs_max_lik = []
     q = tf.math.argmax(gamma[:,-1], axis=-1)
     for i in range(l):
@@ -75,7 +75,7 @@ def viterbi_backtracking(hmm_cell, gamma, epsilon=np.finfo(np.float32).tiny):
 # pos. i of the returned sequences is the active state of the HMM after observing pos. i of the input
 # runs in batches to avoid memory overflow for large data
 def viterbi(sequences, hmm_cell, batch_size=64):
-    hmm_cell.init_cell()
+    hmm_cell.recurrent_init()
     k = 0
     gamma = np.zeros((sequences.shape[0], sequences.shape[1], hmm_cell.num_states), dtype=hmm_cell.dtype)
     while k < sequences.shape[0]:
@@ -491,8 +491,8 @@ def get_discard_or_expand_positions(alignment,
     #find match states with low prior
     #emissions
     p = []
-    for emission, prior in zip(alignment.msa_hmm_layer.cell.make_B(), alignment.msa_hmm_layer.cell.emission_prior):
-        p_val = prior(emission)
+    for em in alignment.msa_hmm_layer.cell.emitter:
+        p_val = em.get_prior_log_density()
         if p_val.shape[0] > alignment.msa_hmm_layer.cell.length:
             p_val = p_val[1:alignment.msa_hmm_layer.cell.length+1]
         p.append(p_val)
@@ -609,9 +609,9 @@ def update_kernels(alignment,
                     transition_dummy,
                     init_flank_dummy):
     L = alignment.msa_hmm_layer.cell.length
-    emissions = [k.numpy() for k in alignment.msa_hmm_layer.cell.emission_kernel]
+    emissions = [em.emission_kernel.numpy() for em in alignment.msa_hmm_layer.cell.emitter]
     transitions = { key : kernel.numpy() 
-                         for key, kernel in alignment.msa_hmm_layer.cell.transition_kernel.items()}
+                         for key, kernel in alignment.msa_hmm_layer.cell.transitioner.transition_kernel.items()}
     dtype = alignment.msa_hmm_layer.cell.dtype
     emission_dummy = [d((1, em.shape[-1]), dtype).numpy() for d,em in zip(emission_dummy, emissions)]
     transition_dummy = { key : transition_dummy[key](t.shape, dtype).numpy() for key, t in transitions.items()}
@@ -723,6 +723,7 @@ def fit_and_align(fasta_file,
                   batch_generator=None,
                   subset=None,
                   verbose=True):
+    assert_config(config)
     if model_generator is None:
         model_generator = train.default_model_generator
     if batch_generator is None:
@@ -800,9 +801,10 @@ def fit_and_align(fasta_file,
         if finished:
             break
         if i == 0:
-            emission_init_0 = alignment.msa_hmm_layer.cell.emission_init
-            transition_init_0 = alignment.msa_hmm_layer.cell.transition_init
-            flank_init_0 = alignment.msa_hmm_layer.cell.flank_init
+            emission_init_0 = [em.emission_init 
+                               for em in alignment.msa_hmm_layer.cell.emitter]
+            transition_init_0 = alignment.msa_hmm_layer.cell.transitioner.transition_init
+            flank_init_0 = alignment.msa_hmm_layer.cell.transitioner.flank_init
         pos_expand, expansion_lens, pos_discard = get_discard_or_expand_positions(alignment, 
                                                                                         del_t=config["surgery_del"], 
                                                                                         ins_t=config["surgery_ins"],
@@ -818,10 +820,20 @@ def fit_and_align(fasta_file,
                                                               emission_init_0, 
                                                               transition_init_0, 
                                                               flank_init_0)
-        config["emission_init"] = [tf.constant_initializer(e) for e in emission_init]
-        config["transition_init"] = {key : tf.constant_initializer(t) for key,t in transition_init.items()}
-        config["flank_init"] = tf.constant_initializer(flank_init)
-        config["insertion_init"] = [tf.constant_initializer(i.numpy()) for i in alignment.msa_hmm_layer.cell.insertion_kernel]
+        
+        config["emitter"] = []
+        for em, e_init in zip(alignment.msa_hmm_layer.cell.emitter, emission_init):
+            em_dup = em.duplicate()
+            em_dup.emission_init = tf.constant_initializer(e_init) 
+            em_dup.insertion_init = tf.constant_initializer(em.insertion_kernel.numpy())
+            config["emitter"].append(em_dup)
+        
+        trans_dup = alignment.msa_hmm_layer.cell.transitioner.duplicate()
+        trans_dup.transition_init = {key : tf.constant_initializer(t) 
+                                     for key,t in transition_init.items()}
+        trans_dup.flank_init = tf.constant_initializer(flank_init)
+        config["transitioner"] = trans_dup
+        
         model_length = emission_init[0].shape[0]
         if "encoder_weight_extractor" in config:
             if verbose:

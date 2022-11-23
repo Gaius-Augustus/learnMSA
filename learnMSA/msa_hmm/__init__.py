@@ -2,6 +2,8 @@ import learnMSA.msa_hmm.Align as align
 from learnMSA.msa_hmm.Align import Alignment
 import learnMSA.msa_hmm.Fasta as fasta
 import learnMSA.msa_hmm.Training as train
+import learnMSA.msa_hmm.Emitter as emit
+import learnMSA.msa_hmm.Transitioner as trans
 import learnMSA.msa_hmm.MsaHmmCell as cell
 from learnMSA.msa_hmm.MsaHmmCell import MsaHmmCell
 import learnMSA.msa_hmm.AncProbsLayer as anc_probs
@@ -11,3 +13,5 @@ from learnMSA.msa_hmm.MsaHmmLayer import MsaHmmLayer
 import learnMSA.msa_hmm.Visualize as vis
 import learnMSA.msa_hmm.Configuration as config
 import learnMSA.msa_hmm.DirichletMixture as dm
+import learnMSA.msa_hmm.Initializers as initializers
+import learnMSA.msa_hmm.Priors as priors

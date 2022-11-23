@@ -8,8 +8,6 @@ import tensorflow as tf
 from learnMSA import msa_hmm 
 import itertools
 
-
-
 class TestFasta(unittest.TestCase):
 
     def test_parser(self):
@@ -31,7 +29,7 @@ class TestMsaHmmCell(unittest.TestCase):
    
     def test_A(self):
         length = 4
-        transition_init_kernel = {"begin_to_match" : [0.6, 0.1, 0.1, 0.1],
+        transition_init = {"begin_to_match" : [0.6, 0.1, 0.1, 0.1],
                                   "match_to_end" : [0.01, 0.05, 0.05, 1],
                                   "match_to_match" : [0.97, 0.5, 0.6], 
                                   "match_to_insert" : [0.01, 0.05, 0.3],
@@ -50,12 +48,14 @@ class TestMsaHmmCell(unittest.TestCase):
                                    "end_to_unannotated_segment" : [0.2], 
                                   "end_to_right_flank" : [0.7], 
                                   "end_to_terminal" : [0.1]}
-        transition_init_kernel = {part_name : tf.constant_initializer(np.log(p))
-                                  for part_name,p in transition_init_kernel.items()}
-        emission_init_kernel = tf.constant_initializer(np.zeros((length, msa_hmm.fasta.s-1)))
-        hmm_cell = msa_hmm.MsaHmmCell(length, emission_init=emission_init_kernel, transition_init=transition_init_kernel)
-        hmm_cell.build((None,None))
-        A = hmm_cell.make_A()
+        transition_kernel_initializers = {part_name : tf.constant_initializer(np.log(p))
+                                  for part_name,p in transition_init.items()}
+        emission_kernel_initializer = tf.constant_initializer(np.zeros((length, msa_hmm.fasta.s-1)))
+        emitter = msa_hmm.emit.ProfileHMMEmitter(emission_init = emission_kernel_initializer)
+        transitioner = msa_hmm.trans.ProfileHMMTransitioner(transition_init = transition_kernel_initializers)
+        hmm_cell = msa_hmm.MsaHmmCell(length, emitter, transitioner)
+        hmm_cell.build((None,26))
+        A = hmm_cell.transitioner.make_A()
         # [LEFT_FLANK, MATCH x length, INSERT x length-1, UNANNOTATED_SEGMENT, RIGHT_FLANK, TERMINAL]
         A_ref = np.zeros((hmm_cell.num_states, hmm_cell.num_states))
         A_ref[0,0] = .6
@@ -102,13 +102,13 @@ class TestMsaHmmCell(unittest.TestCase):
                                                decimal=5,
                                                err_msg=str(i)+","+str(j))
         
-        imp_probs = hmm_cell.make_implicit_probs()
-        for part_name in imp_probs.keys():
-            self.assertTrue(part_name in [part[0] for part in hmm_cell.implicit_transition_parts], 
+        imp_log_probs = hmm_cell.transitioner.make_implicit_log_probs()
+        for part_name in imp_log_probs.keys():
+            self.assertTrue(part_name in [part[0] for part in hmm_cell.transitioner.implicit_transition_parts], 
                             part_name + " is in the kernel but not under the expected kernel parts. Wrong spelling?")
-        for part_name,l in hmm_cell.implicit_transition_parts:
-            if part_name in imp_probs:
-                kernel_length = tf.size(imp_probs[part_name]).numpy()
+        for part_name,l in hmm_cell.transitioner.implicit_transition_parts:
+            if part_name in imp_log_probs:
+                kernel_length = tf.size(imp_log_probs[part_name]).numpy()
                 self.assertTrue(kernel_length == l, 
                                 "\"" + part_name + "\" implicit probs array has length " + str(kernel_length) + " but kernel length is " + str(l))
                 
@@ -138,15 +138,13 @@ class TestMSAHMM(unittest.TestCase):
     
     def test_matrices(self):
         length=32
-        hmm_cell = msa_hmm.MsaHmmCell(length=length, 
-                                      emission_init=msa_hmm.config.make_default_emission_init(),
-                                      transition_init=msa_hmm.config.make_default_transition_init())
-        hmm_cell.build((None,None))
-        A = hmm_cell.make_A()
+        hmm_cell = msa_hmm.MsaHmmCell(length=length)
+        hmm_cell.build((None,26))
+        A = hmm_cell.transitioner.make_A()
         A_sum = np.sum(A, -1)
         for a in A_sum:
             np.testing.assert_almost_equal(a, 1.0)
-        B = hmm_cell.make_B()
+        B = hmm_cell.emitter[0].make_B()
         B_sum = np.sum(B, -1)
         for b in B_sum:
             np.testing.assert_almost_equal(b, 1.0)
@@ -155,7 +153,7 @@ class TestMSAHMM(unittest.TestCase):
     def test_cell(self):
         length = 4
         emission_init = tf.constant_initializer(string_to_one_hot("ACGT").numpy() * 10)
-        transition_init = msa_hmm.config.make_default_transition_init(MM = 2, 
+        transition_init = msa_hmm.initializers.make_default_transition_init(MM = 2, 
                                                                     MI = 0,
                                                                     MD = 0,
                                                                     II = 0,
@@ -167,11 +165,13 @@ class TestMSAHMM(unittest.TestCase):
                                                                     R = 0,
                                                                     RF = 0, 
                                                                     T = 0)
-        hmm_cell = msa_hmm.MsaHmmCell(length=length,  
-                                      emission_init=emission_init,
-                                      transition_init=transition_init)
-        hmm_cell.build((None, None))
-        hmm_cell.init_cell()
+        emitter = msa_hmm.emit.ProfileHMMEmitter(emission_init = emission_init, 
+                                                 insertion_init = tf.keras.initializers.Zeros())
+        transitioner = msa_hmm.trans.ProfileHMMTransitioner(transition_init = transition_init, 
+                                                            flank_init = tf.keras.initializers.Zeros())
+        hmm_cell = msa_hmm.MsaHmmCell(length, emitter, transitioner)
+        hmm_cell.build((None, 26))
+        hmm_cell.recurrent_init()
         filename = os.path.dirname(__file__)+"/data/simple.fa"
         fasta_file = msa_hmm.fasta.Fasta(filename)
         sequences = get_all_seqs(fasta_file)
@@ -188,7 +188,7 @@ class TestMSAHMM(unittest.TestCase):
         _, (forward, loglik) = hmm_cell(sequences[:,4], (forward, loglik))
         self.assertEqual(np.argmax(forward[0]), 2*length+2)
         
-        hmm_cell.init_cell()
+        hmm_cell.recurrent_init()
         filename = os.path.dirname(__file__)+"/data/length_diff.fa"
         fasta_file = msa_hmm.fasta.Fasta(filename)
         sequences = get_all_seqs(fasta_file)
@@ -219,7 +219,7 @@ class TestMSAHMM(unittest.TestCase):
     def test_viterbi(self):
         length = 5
         emission_init = tf.constant_initializer(string_to_one_hot("FELIX").numpy()*20)
-        transition_init = msa_hmm.config.make_default_transition_init(MM = 0, 
+        transition_init = msa_hmm.initializers.make_default_transition_init(MM = 0, 
                                                                     MI = 0,
                                                                     MD = 0,
                                                                     II = 0,
@@ -231,10 +231,12 @@ class TestMSAHMM(unittest.TestCase):
                                                                     R = 0,
                                                                     RF = 0, 
                                                                     T = 0)
-        hmm_cell = msa_hmm.MsaHmmCell(length=length, 
-                                      emission_init=emission_init,
-                                      transition_init=transition_init)
-        hmm_cell.build((None, None))
+        emitter = msa_hmm.emit.ProfileHMMEmitter(emission_init = emission_init, 
+                                                 insertion_init = tf.keras.initializers.Zeros())
+        transitioner = msa_hmm.trans.ProfileHMMTransitioner(transition_init = transition_init, 
+                                                            flank_init = tf.keras.initializers.Zeros())
+        hmm_cell = msa_hmm.MsaHmmCell(length, emitter, transitioner)
+        hmm_cell.build((None, 26))
         fasta_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/felix.fa")
         ref_seqs = np.array([[1,2,3,4,5,12,12,12,12,12,12,12,12,12,12],
                              [0,0,0,1,2,3,4,5,12,12,12,12,12,12,12],
@@ -462,7 +464,7 @@ class TestAncProbs(unittest.TestCase):
         #after some time tau
         
     def assert_anc_probs_layer(self, anc_probs_layer, config):
-        anc_probs_layer.build(None)
+        anc_probs_layer.build()
         p = anc_probs_layer.make_p()
         R = anc_probs_layer.make_R()
         Q = anc_probs_layer.make_Q()
@@ -574,10 +576,14 @@ class TestAncProbs(unittest.TestCase):
         batch_gen = msa_hmm.train.DefaultBatchGenerator(fasta_file)
         ds = msa_hmm.train.make_dataset(ind, batch_gen, batch_size=n, shuffle=False)
         for case in self.get_test_configs(sequences):
+            # the default emitter initializers expect 25 as last dimension which is not compatible with num_matrix=3
+            config = dict(case["config"])
+            config["emitter"] = msa_hmm.emit.ProfileHMMEmitter(emission_init = tf.constant_initializer(0.), 
+                                                               insertion_init = tf.constant_initializer(0.))
             model = msa_hmm.train.default_model_generator(num_seq=n, 
                                                           effective_num_seq=n, 
                                                           model_length=model_length, 
-                                                          config=case["config"])
+                                                          config=config)
             msa = msa_hmm.Alignment(fasta_file, 
                                     batch_gen, 
                                     ind, 
@@ -600,8 +606,8 @@ class TestAncProbs(unittest.TestCase):
         config = dict(msa_hmm.config.default)
         anc_probs_layer = msa_hmm.train.make_anc_probs_layer(1, config)
         msa_hmm_layer = msa_hmm.train.make_msa_hmm_layer(n, 10, config)
-        msa_hmm_layer.build(sequences.shape)
-        B = msa_hmm_layer.cell.make_B()[0]
+        msa_hmm_layer.build((None, None, 26))
+        B = msa_hmm_layer.cell.emitter[0].make_B()
         config["transposed"] = True
         anc_probs_layer_transposed = msa_hmm.train.make_anc_probs_layer(n, config)
         anc_prob_seqs = anc_probs_layer_transposed(sequences, np.arange(n)).numpy()
@@ -650,28 +656,26 @@ class TestModelSurgery(unittest.TestCase):
         config = dict(msa_hmm.config.default)
         emission_init = string_to_one_hot("FELIC").numpy()*10
         insert_init= np.squeeze(string_to_one_hot("A") + string_to_one_hot("N"))*10
-        config["emission_init"] = tf.constant_initializer(emission_init)
-        config["insertion_init"] = tf.constant_initializer(insert_init)
-        config["transition_init"] = msa_hmm.config.make_default_transition_init(MM = 0, 
-                                                                                MI = 0,
-                                                                                MD = -1,
-                                                                                II = 1,
-                                                                                IM = 0,
-                                                                                DM = 1,
-                                                                                DD = 0,
-                                                                                FC = 0,
-                                                                                FE = 0,
-                                                                                R = 0,
-                                                                                RF = 0, 
-                                                                                T = 0)
-        config["transition_init"]["match_to_match"] = tf.constant_initializer(0)
-        config["transition_init"]["match_to_insert"] = tf.constant_initializer(0)
-        config["transition_init"]["match_to_delete"] = tf.constant_initializer(-1)
-        config["transition_init"]["begin_to_match"] = tf.constant_initializer([1,0,0,0,0])
-        config["transition_init"]["match_to_end"] = tf.constant_initializer(0)
-        config["alpha_flank"] = 1e3         
-        config["alpha_single"] = 1e9
-        config["alpha_frag"] = 1e3
+        transition_init = msa_hmm.initializers.make_default_transition_init(MM = 0, 
+                                                                            MI = 0,
+                                                                            MD = -1,
+                                                                            II = 1,
+                                                                            IM = 0,
+                                                                            DM = 1,
+                                                                            DD = 0,
+                                                                            FC = 0,
+                                                                            FE = 0,
+                                                                            R = 0,
+                                                                            RF = 0, 
+                                                                            T = 0)
+        transition_init["match_to_match"] = tf.constant_initializer(0)
+        transition_init["match_to_insert"] = tf.constant_initializer(0)
+        transition_init["match_to_delete"] = tf.constant_initializer(-1)
+        transition_init["begin_to_match"] = tf.constant_initializer([1,0,0,0,0])
+        transition_init["match_to_end"] = tf.constant_initializer(0)
+        config["emitter"] = msa_hmm.emit.ProfileHMMEmitter(emission_init = tf.constant_initializer(emission_init), 
+                                                           insertion_init = tf.constant_initializer(insert_init))
+        config["transitioner"] = msa_hmm.trans.ProfileHMMTransitioner(transition_init = transition_init)
         model = msa_hmm.train.default_model_generator(num_seq=10, 
                                                          effective_num_seq=10, 
                                                           model_length=5,
@@ -899,20 +903,21 @@ class TestAlignment(unittest.TestCase):
         config = dict(msa_hmm.config.default)
         emission_init = string_to_one_hot("FELIX").numpy()*20
         insert_init= np.squeeze(string_to_one_hot("A") + string_to_one_hot("B") + string_to_one_hot("C"))*20
-        config["emission_init"] = tf.constant_initializer(emission_init)
-        config["insertion_init"] = tf.constant_initializer(insert_init)
-        config["transition_init"] = msa_hmm.config.make_default_transition_init(MM = 0, 
-                                                                        MI = 0,
-                                                                        MD = 0,
-                                                                        II = 0,
-                                                                        IM = 0,
-                                                                        DM = 0,
-                                                                        DD = 0,
-                                                                        FC = 0,
-                                                                        FE = 0,
-                                                                        R = 0,
-                                                                        RF = 0, 
-                                                                        T = 0)
+        config["emitter"] = msa_hmm.emit.ProfileHMMEmitter(emission_init = tf.constant_initializer(emission_init), 
+                                                           insertion_init = tf.constant_initializer(insert_init))
+        config["transitioner"] = msa_hmm.trans.ProfileHMMTransitioner(transition_init =(
+                            msa_hmm.initializers.make_default_transition_init(MM = 0, 
+                                                                            MI = 0,
+                                                                            MD = 0,
+                                                                            II = 0,
+                                                                            IM = 0,
+                                                                            DM = 0,
+                                                                            DD = 0,
+                                                                            FC = 0,
+                                                                            FE = 0,
+                                                                            R = 0,
+                                                                            RF = 0, 
+                                                                            T = 0)))
         model = msa_hmm.train.default_model_generator(num_seq=8, 
                                                       effective_num_seq=8,
                                                       model_length=length, 

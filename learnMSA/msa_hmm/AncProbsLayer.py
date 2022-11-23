@@ -226,7 +226,9 @@ class AncProbsLayer(tf.keras.layers.Layer):
             anc_probs = tf.pad(anc_probs, [[0,0], [0,0], [0,0], [0,6]])
             rest = tf.expand_dims(tf.one_hot(inputs, 26), -2) * (1-mask)
             anc_probs += rest
-        anc_probs = tf.reshape(anc_probs, (tf.shape(inputs)[0], tf.shape(inputs)[1],-1) )
+            anc_probs = tf.reshape(anc_probs, (tf.shape(inputs)[0], tf.shape(inputs)[1], 26 * self.num_matrices) )
+        else:
+            anc_probs = tf.reshape(anc_probs, (tf.shape(inputs)[0], tf.shape(inputs)[1], 20 * self.num_matrices) )
         return anc_probs
 
 # the default rate matrix ("LG")

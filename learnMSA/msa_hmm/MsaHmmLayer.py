@@ -22,7 +22,7 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         
         
     def call(self, inputs, training=False):
-        self.cell.init_cell()
+        self.cell.recurrent_init()
         inputs = tf.cast(inputs, self.dtype)
         initial_state = self.cell.get_initial_state(batch_size=tf.shape(inputs)[0])
         _, _, loglik = self.rnn(inputs, 

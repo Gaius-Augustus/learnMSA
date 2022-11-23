@@ -4,6 +4,7 @@ import numpy as np
 from learnMSA.msa_hmm.MsaHmmCell import MsaHmmCell
 from learnMSA.msa_hmm.MsaHmmLayer import MsaHmmLayer
 from learnMSA.msa_hmm.AncProbsLayer import AncProbsLayer
+from learnMSA.msa_hmm.Configuration import assert_config
 
 # boilerplate code for model generation 
 # in the following we test different models that only vary in the anc_probs_layer
@@ -25,25 +26,13 @@ def generic_model_generator(encoder_layers,
     return model
 
 def make_msa_hmm_layer(effective_num_seq,
-                                model_length, 
-                                config,
-                                alphabet_size=25):
+                        model_length, 
+                        config,
+                        alphabet_size=25):
     """Constructs a cell and a MSA HMM layer given a config.
     """
-    msa_hmm_cell = MsaHmmCell(model_length,    
-                              kernel_dim = alphabet_size if config["kernel_dim"] == "alphabet_size" else config["kernel_dim"], 
-                              emission_init = config["emission_init"],
-                              transition_init = config["transition_init"],
-                              insertion_init = config["insertion_init"],
-                              flank_init = config["flank_init"],
-                              alpha_flank = config["alpha_flank"],
-                              alpha_single = config["alpha_single"],
-                              alpha_frag = config["alpha_frag"],
-                              emission_func = config["emission_func"],
-                              emission_matrix_generator = config["emission_matrix_generator"],
-                              emission_prior = config["emission_prior"], 
-                              frozen_insertions = config["frozen_insertions"],
-                              dtype=tf.float32)
+    assert_config(config)
+    msa_hmm_cell = MsaHmmCell(model_length, config["emitter"], config["transitioner"])
     msa_hmm_layer = MsaHmmLayer(msa_hmm_cell, 
                                 effective_num_seq,
                                 use_prior=config["use_prior"],
@@ -51,6 +40,7 @@ def make_msa_hmm_layer(effective_num_seq,
     return msa_hmm_layer
 
 def make_anc_probs_layer(num_seq, config):
+    assert_config(config)
     anc_probs_layer = AncProbsLayer(num_seq,
                                     config["num_rate_matrices"],
                                     equilibrium_init=config["encoder_initializer"][2],
@@ -145,6 +135,7 @@ def fit_model(model_generator,
               batch_size, 
               epochs,
               verbose=True):
+    assert_config(config)
     tf.keras.backend.clear_session() #frees occupied memory 
     tf.get_logger().setLevel('ERROR')
     optimizer = tf.optimizers.Adam(config["learning_rate"])
