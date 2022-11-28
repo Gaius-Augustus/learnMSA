@@ -22,15 +22,19 @@ class AminoAcidPrior():
     def __call__(self, B):
         """Computes log pdf values for each match state.
         Args:
-        B: The emission matrix. Assumes that the 20 std amino acids are the first 20 positions of dim 2 
-            and that the states are ordered the standard way as seen in MsaHmmCell. Shape: (q, s)
+        B: A stack of k emission matrices. Assumes that the 20 std amino acids are the first 20 positions of the last dimension
+            and that the states are ordered the standard way as seen in MsaHmmCell. Shape: (k, q, s)
         Returns:
-        A tensor with the log pdf values of this Dirichlet mixture. Shape: (q)
+        A tensor with the log pdf values of this Dirichlet mixture. Shape: (k, model_length)
         """
-        model_length = int((tf.shape(B)[0]-2)/2)
-        B = B[1:model_length+1,:20]
+        k = tf.shape(B)[0]
+        model_length = int((tf.shape(B)[1]-2)/2)
+        s = tf.shape(B)[2]
+        B = B[:,1:model_length+1,:20]
         B /= tf.reduce_sum(B, axis=-1, keepdims=True)
+        B = tf.reshape(B, (-1, s))
         prior = self.emission_dirichlet_mix.log_pdf(B)
+        prior = tf.reshape(prior, (k, model_length))
         return prior 
     
     def __repr__(self):
@@ -44,8 +48,9 @@ class NullPrior():
         pass
     
     def __call__(self, B):
-        model_length = int((tf.shape(B)[0]-2)/2)
-        return tf.zeros((model_length), dtype=B.dtype)
+        k = tf.shape(B)[0]
+        model_length = int((tf.shape(B)[1]-2)/2)
+        return tf.zeros((k, model_length), dtype=B.dtype)
     
     def __repr__(self):
         return f"NullPrior()"
@@ -96,49 +101,54 @@ class ProfileHMMTransitionPrior():
         delete_model = dm.load_mixture_model(delete_model_path, self.delete_comp, 2, trainable=False, dtype=dtype)
         self.delete_dirichlet = delete_model.layers[-1]
         
-    def __call__(self, probs, flank_init_prob):
+    def __call__(self, probs_list, flank_init_prob_list):
         """Computes log pdf values for each transition prior.
         Args:
-        probs: A dictionary that maps transition type to probabilities.
+        probs_list: A list of dictionaries that map transition type to probabilities per model.
+        flank_init_prob_list: A list of flank init probabilities per model.
         Returns:
             A dictionary that maps prior names to prior values.
         """
-        log_probs = {part_name : tf.math.log(p) for part_name, p in probs.items()}
-        #match state transitions
-        p_match = tf.stack([probs["match_to_match"],
-                            probs["match_to_insert"],
-                            probs["match_to_delete"][1:]], axis=-1)
-        p_match_sum = tf.reduce_sum(p_match, axis=-1, keepdims=True)
-        match_dirichlet = tf.reduce_sum(self.match_dirichlet.log_pdf(p_match / p_match_sum))
-        #insert state transitions
-        p_insert = tf.stack([probs["insert_to_match"],
-                           probs["insert_to_insert"]], axis=-1)
-        insert_dirichlet = tf.reduce_sum(self.insert_dirichlet.log_pdf(p_insert))
-        #delete state transitions
-        p_delete = tf.stack([probs["delete_to_match"][:-1],
-                           probs["delete_to_delete"]], axis=-1)
-        delete_dirichlet = tf.reduce_sum(self.delete_dirichlet.log_pdf(p_delete))
-        #other transitions
-        flank_prior = self.alpha_flank * log_probs["unannotated_segment_loop"] #todo: handle as extra case?
-        flank_prior += self.alpha_flank * log_probs["right_flank_loop"]
-        flank_prior += self.alpha_flank * log_probs["left_flank_loop"]
-        flank_prior += self.alpha_flank * tf.math.log(probs["end_to_right_flank"])
-        flank_prior += self.alpha_flank * tf.math.log(flank_init_prob)
-        #uni-hit
-        hit_prior = self.alpha_single * tf.math.log(probs["end_to_right_flank"] + probs["end_to_terminal"])
-        #uniform entry/exit prior
-        btm = probs["begin_to_match"] / (1- probs["match_to_delete"][0])
-        enex_prior = tf.expand_dims(btm, 1) * tf.expand_dims(probs["match_to_end"], 0)
-        enex_prior = tf.linalg.band_part(enex_prior, 0, -1)
-        enex_prior = tf.math.log(1 - enex_prior) 
-        enex_prior = self.alpha_frag * (tf.reduce_sum(enex_prior) - enex_prior[0, -1])
-        return {
+        match_dirichlet = insert_dirichlet = delete_dirichlet = flank_prior = hit_prior = enex_prior = 0
+        for probs, flank_init_prob in zip(probs_list, flank_init_prob_list):
+            log_probs = {part_name : tf.math.log(p) for part_name, p in probs.items()}
+            #match state transitions
+            p_match = tf.stack([probs["match_to_match"],
+                                probs["match_to_insert"],
+                                probs["match_to_delete"][1:]], axis=-1)
+            p_match_sum = tf.reduce_sum(p_match, axis=-1, keepdims=True)
+            match_dirichlet += tf.reduce_sum(self.match_dirichlet.log_pdf(p_match / p_match_sum))
+            #insert state transitions
+            p_insert = tf.stack([probs["insert_to_match"],
+                               probs["insert_to_insert"]], axis=-1)
+            insert_dirichlet += tf.reduce_sum(self.insert_dirichlet.log_pdf(p_insert))
+            #delete state transitions
+            p_delete = tf.stack([probs["delete_to_match"][:-1],
+                               probs["delete_to_delete"]], axis=-1)
+            delete_dirichlet += tf.reduce_sum(self.delete_dirichlet.log_pdf(p_delete))
+            #other transitions
+            flank_prior += self.alpha_flank * log_probs["unannotated_segment_loop"] #todo: handle as extra case?
+            flank_prior += self.alpha_flank * log_probs["right_flank_loop"]
+            flank_prior += self.alpha_flank * log_probs["left_flank_loop"]
+            flank_prior += self.alpha_flank * tf.math.log(probs["end_to_right_flank"])
+            flank_prior += self.alpha_flank * tf.math.log(flank_init_prob)
+            #uni-hit
+            hit_prior += self.alpha_single * tf.math.log(probs["end_to_right_flank"] + probs["end_to_terminal"])
+            #uniform entry/exit prior
+            btm = probs["begin_to_match"] / (1- probs["match_to_delete"][0])
+            enex = tf.expand_dims(btm, 1) * tf.expand_dims(probs["match_to_end"], 0)
+            enex = tf.linalg.band_part(enex, 0, -1)
+            enex = tf.math.log(1 - enex) 
+            enex_prior += self.alpha_frag * (tf.reduce_sum(enex) - enex[0, -1])
+        prior_val = {
             "match_prior" : match_dirichlet,
             "insert_prior" : insert_dirichlet,
             "delete_prior" : delete_dirichlet,
             "flank_prior" : flank_prior,
             "hit_prior" : hit_prior,
             "enex_prior" : enex_prior}
+        num_models = tf.constant(len(probs_list), dtype=probs_list[0]["match_to_match"].dtype)
+        prior_val = { name : val/num_models for name,val in prior_val.items() }
     
     def __repr__(self):
         return f"ProfileHMMTransitionPrior(match_comp={self.match_comp}, insert_comp={self.insert_comp}, delete_comp={self.delete_comp}, alpha_flank={self.alpha_flank}, alpha_single={self.alpha_single}, alpha_frag={self.alpha_frag})"

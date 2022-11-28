@@ -57,7 +57,7 @@ class TestMsaHmmCell(unittest.TestCase):
         hmm_cell.build((None,26))
         A = hmm_cell.transitioner.make_A()
         # [LEFT_FLANK, MATCH x length, INSERT x length-1, UNANNOTATED_SEGMENT, RIGHT_FLANK, TERMINAL]
-        A_ref = np.zeros((hmm_cell.num_states, hmm_cell.num_states))
+        A_ref = np.zeros((hmm_cell.max_num_states, hmm_cell.max_num_states))
         A_ref[0,0] = .6
         A_ref[0,1] = .4*.6
         A_ref[0,2] = .4*(.1 + .1*.8)
@@ -95,18 +95,18 @@ class TestMsaHmmCell(unittest.TestCase):
         A_ref[9,9] = 0.6
         A_ref[9,10] = 0.4
         A_ref[10,10] = 1
-        for i in range(hmm_cell.num_states):
-            for j in range(hmm_cell.num_states):
-                np.testing.assert_almost_equal(A[i,j], 
+        for i in range(hmm_cell.max_num_states):
+            for j in range(hmm_cell.max_num_states):
+                np.testing.assert_almost_equal(A[0,i,j], 
                                                A_ref[i,j], 
                                                decimal=5,
                                                err_msg=str(i)+","+str(j))
         
-        imp_log_probs = hmm_cell.transitioner.make_implicit_log_probs()
+        imp_log_probs = hmm_cell.transitioner.make_implicit_log_probs()[0][0]
         for part_name in imp_log_probs.keys():
-            self.assertTrue(part_name in [part[0] for part in hmm_cell.transitioner.implicit_transition_parts], 
+            self.assertTrue(part_name in [part[0] for part in hmm_cell.transitioner.implicit_transition_parts[0]], 
                             part_name + " is in the kernel but not under the expected kernel parts. Wrong spelling?")
-        for part_name,l in hmm_cell.transitioner.implicit_transition_parts:
+        for part_name,l in hmm_cell.transitioner.implicit_transition_parts[0]:
             if part_name in imp_log_probs:
                 kernel_length = tf.size(imp_log_probs[part_name]).numpy()
                 self.assertTrue(kernel_length == l, 
@@ -163,7 +163,7 @@ class TestMSAHMM(unittest.TestCase):
                                                                     FC = 0,
                                                                     FE = 3,
                                                                     R = 0,
-                                                                    RF = 0, 
+                                                                    RF = -1, 
                                                                     T = 0)
         emitter = msa_hmm.emit.ProfileHMMEmitter(emission_init = emission_init, 
                                                  insertion_init = tf.keras.initializers.Zeros())
@@ -178,7 +178,7 @@ class TestMSAHMM(unittest.TestCase):
         sequences = tf.one_hot(sequences, len(msa_hmm.fasta.alphabet))
         self.assertEqual(sequences.shape, (2,5,len(msa_hmm.fasta.alphabet)))
         forward, loglik = hmm_cell.get_initial_state(batch_size=2)
-        self.assertEqual(loglik[0], 0)
+        self.assertEqual(loglik[0,0], 0)
         #next match state should always yield highest probability
         for i in range(length):
             _, (forward, loglik) = hmm_cell(sequences[:,i], (forward, loglik))
@@ -194,14 +194,15 @@ class TestMSAHMM(unittest.TestCase):
         sequences = get_all_seqs(fasta_file)
         sequences = tf.one_hot(sequences, len(msa_hmm.fasta.alphabet))
         self.assertEqual(sequences.shape, (2,10,len(msa_hmm.fasta.alphabet)))
-        forward, loglik = hmm_cell.get_initial_state(batch_size=1)
+        forward, loglik = hmm_cell.get_initial_state(batch_size=2)
         for i in range(length):
             _, (forward, loglik) = hmm_cell(sequences[:,i], (forward, loglik))
-            self.assertEqual(np.argmax(forward[0]), i+1)
-            self.assertEqual(np.argmax(forward[1]), i+1)
+            self.assertEqual(np.argmax(forward[0,0]), i+1)
+            self.assertEqual(np.argmax(forward[0,1]), i+1)
         _, (forward, loglik) = hmm_cell(sequences[:,length], (forward, loglik))
-        self.assertEqual(np.argmax(forward[0]), 2*length+2)
-        self.assertEqual(np.argmax(forward[1]), 2*length)
+        self.assertEqual(np.argmax(forward[0,0]), 2*length+2)
+        print(forward[0,1])
+        self.assertEqual(np.argmax(forward[0,1]), 2*length)
         for i in range(4):
             old_loglik = loglik
             _, (forward, loglik) = hmm_cell(sequences[:,length+1+i], (forward, loglik))
@@ -213,7 +214,7 @@ class TestMSAHMM(unittest.TestCase):
             #the second sequence has the motif of the first seq. repeated twice
             #check whether the model loops correctly 
             #looping must yield larger probabilities than using the right flank state
-            self.assertEqual(np.argmax(forward[1]), i+1)
+            self.assertEqual(np.argmax(forward[0,1]), i+1)
             
             
     def test_viterbi(self):

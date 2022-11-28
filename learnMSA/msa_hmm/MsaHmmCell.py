@@ -12,7 +12,7 @@ class MsaHmmCell(tf.keras.layers.Layer):
         and transition-matricies also used elsewhere e.g. during Viterbi.
         Based on https://github.com/mslehre/classify-seqs/blob/main/HMMCell.py.
     Args:
-        length: Model length / number of match states.
+        length: Model length / number of match states or a list of lengths.
         emitter: An object or a list of objects following the emitter interface (see MultinomialAminoAcidEmitter).
         transitioner: An object following the transitioner interface (see ProfileHMMTransitioner).
         dtype: The datatype of the cell.
@@ -25,15 +25,17 @@ class MsaHmmCell(tf.keras.layers.Layer):
                  **kwargs
                 ):
         super(MsaHmmCell, self).__init__(name="MsaHmmCell", dtype=dtype, **kwargs)
-        self.length = length 
-        self.emitter = emitter
-        if not hasattr(self.emitter, '__iter__'):
-            self.emitter = [self.emitter]
+        self.length = [length] if not hasattr(length, '__iter__') else length 
+        self.num_models = len(self.length)
+        self.emitter = [emitter] if not hasattr(emitter, '__iter__') else emitter 
         self.transitioner = transitioner
-        self.num_states = 2 * length + 3  #number of emitting states, i.e. not counting flanking states and deletions
-        self.num_states_implicit = self.num_states + self.length + 2
-        self.state_size = (self.num_states, 1)
-        self.output_size = self.num_states
+        #number of emitting states, i.e. not counting flanking states and deletions
+        self.num_states = [2 * length + 3 for length in self.length]  
+        self.num_states_implicit = [num_states + length + 2 
+                                    for num_states, length in zip(self.num_states, self.length)]
+        self.max_num_states = max(self.num_states)
+        self.state_size = (tf.TensorShape([None, self.max_num_states]), tf.TensorShape([None]))
+        self.output_size = tf.TensorShape([None, self.max_num_states])
         for em in self.emitter:
             em.cell_init(self)
         self.transitioner.cell_init(self)
@@ -87,12 +89,14 @@ class MsaHmmCell(tf.keras.layers.Layer):
 
     def get_initial_state(self, inputs=None, batch_size=None, _dtype=None):
         init_dist = tf.repeat(self.make_initial_distribution(), repeats=batch_size, axis=0)
-        loglik = tf.zeros((batch_size, 1), dtype=self.dtype)
+        init_dist = tf.transpose(init_dist, (1,0,2))
+        loglik = tf.zeros((self.num_models, batch_size, 1), dtype=self.dtype)
         S = [init_dist, loglik]
         return S
 
-    def get_prior_log_density(self, add_metrics=False):    
-        em_priors = [tf.reduce_sum(em.get_prior_log_density()) for em in self.emitter]
+    def get_prior_log_density(self, add_metrics=False):  
+        em_mean_per_match = [tf.reduce_mean(em.get_prior_log_density(), axis=0) for em in self.emitter]
+        em_priors = [tf.reduce_sum(p) for p in em_mean_per_match]
         trans_priors = self.transitioner.get_prior_log_densities()
         prior = sum(em_priors) + sum(trans_priors.values())
         if add_metrics:

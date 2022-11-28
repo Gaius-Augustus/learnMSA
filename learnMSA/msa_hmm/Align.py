@@ -16,7 +16,7 @@ def viterbi_transitions(hmm_cell, gamma_prev, sequences_i, log_A_val, indices_0,
     gamma_subset = tf.gather(gamma_prev, indices_0, axis=1)
     a = tf.math.unsorted_segment_max(log_A_val + gamma_subset, indices_1, n*m) 
     a = tf.reshape(a, (n, m))
-    b = hmm_cell.emission_probs(tf.cast(sequences_i, hmm_cell.dtype))
+    b = hmm_cell.emission_probs(tf.cast(sequences_i, hmm_cell.dtype))[0]
     b = tf.cast(b, dtype=sequences_i.dtype) 
     b += epsilon                         
     b = tf.math.log(b)
@@ -28,17 +28,19 @@ def viterbi_transitions(hmm_cell, gamma_prev, sequences_i, log_A_val, indices_0,
 # utilizes sparse matrix format for a speedup
 def viterbi_dyn_prog(sequences, hmm_cell, epsilon=np.finfo(np.float32).tiny):
     epsilon = tf.cast(epsilon, hmm_cell.dtype)
-    init = hmm_cell.make_initial_distribution()
+    init = hmm_cell.make_initial_distribution()[0]
     n = sequences.shape[0]
-    m = hmm_cell.num_states
+    m = hmm_cell.max_num_states
     len_seq = sequences.shape[1]
     log_A_sparse = hmm_cell.transitioner.make_log_A_sparse()
+    log_A = tf.sparse.to_dense(log_A_sparse)[0]
+    log_A_sparse = tf.sparse.from_dense(log_A)
     log_A_val = log_A_sparse.values
     indices_0 = log_A_sparse.indices[:,0]
     grid = tf.meshgrid(tf.range(n, dtype=tf.int64) * m,
                        log_A_sparse.indices[:,1], indexing='ij')
     indices_1 = tf.add_n(grid)
-    b0 = hmm_cell.emission_probs(tf.cast(sequences[:,0], hmm_cell.dtype))
+    b0 = hmm_cell.emission_probs(tf.cast(sequences[:,0], hmm_cell.dtype))[0]
     gamma0 = tf.math.log(init+epsilon) + tf.math.log(b0+epsilon)
     gamma0 = tf.cast(gamma0, dtype=sequences.dtype) 
     gamma = [gamma0]  
@@ -61,7 +63,7 @@ def viterbi_backtracking_step(q, gamma_state, log_A_dense):
 def viterbi_backtracking(hmm_cell, gamma, epsilon=np.finfo(np.float32).tiny):
     n = gamma.shape[0]
     l = gamma.shape[1]
-    log_A_dense = hmm_cell.transitioner.make_log_A()
+    log_A_dense = hmm_cell.transitioner.make_log_A()[0]
     state_seqs_max_lik = []
     q = tf.math.argmax(gamma[:,-1], axis=-1)
     for i in range(l):
@@ -77,7 +79,7 @@ def viterbi_backtracking(hmm_cell, gamma, epsilon=np.finfo(np.float32).tiny):
 def viterbi(sequences, hmm_cell, batch_size=64):
     hmm_cell.recurrent_init()
     k = 0
-    gamma = np.zeros((sequences.shape[0], sequences.shape[1], hmm_cell.num_states), dtype=hmm_cell.dtype)
+    gamma = np.zeros((sequences.shape[0], sequences.shape[1], hmm_cell.max_num_states), dtype=hmm_cell.dtype)
     while k < sequences.shape[0]:
         if len(sequences.shape) == 2:
             gamma[k:k+batch_size] = viterbi_dyn_prog(tf.one_hot(sequences[k:k+batch_size], fasta.s, dtype=hmm_cell.dtype), hmm_cell)
@@ -104,7 +106,7 @@ def get_state_seqs_max_lik(fasta_file,
     seq_len = np.amax(fasta_file.seq_lens[indices])+1
     #initialize with terminal states
     state_seqs_max_lik = np.zeros((indices.size, seq_len), 
-                                  dtype=np.uint16) + (2*msa_hmm_cell.length+2)
+                                  dtype=np.uint16) + (2*msa_hmm_cell.length[0]+2)
     i = 0                              
     for inputs, _ in ds:
         if encoder is None:
