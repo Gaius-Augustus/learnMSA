@@ -101,33 +101,50 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
             A probability distribution per model. Shape: (k, q)
         """
         #state order: LEFT_FLANK, MATCH x length, INSERT x length-1, UNANNOTATED_SEGMENT, RIGHT_FLANK, TERMINAL
-        init_flank_prob = self.make_flank_init_prob()
-        log_init_flank_prob = tf.math.log(init_flank_prob)
-        log_complement_init_flank_prob = tf.math.log(1-init_flank_prob)
-        pad = _pad_and_stack(self.log_probs)
-        pad_implicit = _pad_and_stack(self.implicit_log_probs)
-        log_init_match = (pad_implicit["left_flank_to_match"] 
-                      + log_complement_init_flank_prob
-                      - pad["left_flank_exit"])
-        log_init_right_flank = (pad_implicit["left_flank_to_right_flank"] 
-                            + log_complement_init_flank_prob 
-                            - pad["left_flank_exit"])
-        log_init_unannotated_segment = (pad_implicit["left_flank_to_unannotated_segment"] 
-                                    + log_complement_init_flank_prob 
-                                    - pad["left_flank_exit"])
-        log_init_terminal = (pad_implicit["left_flank_to_terminal"] 
-                         + log_complement_init_flank_prob 
-                         - pad["left_flank_exit"] )
-        log_init_insert = tf.zeros((self.num_models, max(self.length)-1), dtype=self.dtype) + self.approx_log_zero
-        log_init_dist = tf.concat([log_init_flank_prob, 
-                                    log_init_match, 
-                                    log_init_insert, 
-                                    log_init_unannotated_segment, 
-                                    log_init_right_flank, 
-                                    log_init_terminal], axis=1)
-        log_init_dist = tf.expand_dims(log_init_dist, 0)
-        init_dist = tf.math.exp(log_init_dist)
-        return init_dist
+        init_flank_probs = self.make_flank_init_prob()
+        log_init_flank_probs = tf.math.log(init_flank_probs)
+        log_complement_init_flank_probs = tf.math.log(1-init_flank_probs)
+        log_init_dists = []
+        for (init_flank_prob, 
+             log_init_flank_prob,
+             log_complement_init_flank_prob,
+             log_p, 
+             implicit_log_p, 
+             length, 
+             num_states) in zip(init_flank_probs,
+                            log_init_flank_probs,
+                            log_complement_init_flank_probs, 
+                            self.log_probs,
+                            self.implicit_log_probs,
+                            self.length,
+                            self.num_states):
+            log_init_match = (implicit_log_p["left_flank_to_match"] 
+                          + log_complement_init_flank_prob
+                          - log_p["left_flank_exit"])
+            log_init_right_flank = (implicit_log_p["left_flank_to_right_flank"] 
+                                + log_complement_init_flank_prob 
+                                - log_p["left_flank_exit"])
+            log_init_unannotated_segment = (implicit_log_p["left_flank_to_unannotated_segment"] 
+                                        + log_complement_init_flank_prob 
+                                        - log_p["left_flank_exit"])
+            log_init_terminal = (implicit_log_p["left_flank_to_terminal"] 
+                             + log_complement_init_flank_prob 
+                             - log_p["left_flank_exit"] )
+            log_init_insert = tf.zeros((length-1), dtype=self.dtype) + self.approx_log_zero
+            log_init_dist = tf.concat([log_init_flank_prob, 
+                                        log_init_match, 
+                                        log_init_insert, 
+                                        log_init_unannotated_segment, 
+                                        log_init_right_flank, 
+                                        log_init_terminal], axis=0)
+            log_init_dist = tf.pad(log_init_dist, 
+                                   [[0, self.max_num_states - num_states]], 
+                                   constant_values = self.approx_log_zero)
+            log_init_dists.append(log_init_dist)
+        log_init_dists = tf.stack(log_init_dists, axis=0)
+        log_init_dists = tf.expand_dims(log_init_dists, 0)
+        init_dists = tf.math.exp(log_init_dists)
+        return init_dists
     
     def make_transition_kernel(self):
         """Concatenates the kernels of all transition types (e.g. match-to-match) in a consistent order.
@@ -328,8 +345,8 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
             (part_name : str, length : int, init : tf.initializer, frozen : bool, shared_with : list or None)
         """
         #assume that shared_kernels contains each name at most once
-        shared_kernels = [ ["unannotated_segment_loop", "right_flank_loop", "left_flank_loop"], 
-                           ["unannotated_segment_exit", "right_flank_exit", "left_flank_exit"] ]
+        shared_kernels = [ ["right_flank_loop", "left_flank_loop"], 
+                           ["right_flank_exit", "left_flank_exit"] ]
         #map each name to the list it is contained in
         shared_kernel_dict = {} 
         for shared in shared_kernels: 
@@ -344,6 +361,22 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
                                      shared_kernel_dict.get(part_name, None)) 
                                         for part_name, length in parts] )
         return kernel_part_list
+        
+    def _pad_and_stack(self, dicts):
+        # takes a list of dictionaries with the same keys that map to arrays of different lengths
+        # returns a dictionary where each key is mapped to a stacked array with zero padding
+        if len(dicts) == 1:
+            return dicts[0]
+        transposed = {}
+        for d in dicts:
+            for k,a in d.items():
+                transposed.setdefault(k, []).append(a)
+        padded_and_stacked = {k : tf.keras.preprocessing.sequence.pad_sequences(arrays, 
+                                                                                dtype=arrays[0].dtype.name, 
+                                                                                padding="post",
+                                                                                value=self.approx_log_zero) 
+                              for k,arrays in transposed.items()}
+        return padded_and_stacked
     
     def __repr__(self):
         return f"ProfileHMMTransitioner(transition_init={self.transition_init}, flank_init={self.flank_init}, prior={self.prior}, frozen_kernels={self.frozen_kernels})"
@@ -475,19 +508,6 @@ def _assert_transition_init_kernel(kernel_init, parts):
         assert part_name in kernel_init, "No initializer found for kernel " + part_name + "."
     for part_name in kernel_init.keys():
         assert part_name in [part[0] for part in parts], part_name + " is in the kernel init dict but there is no kernel part matching it. Wrong spelling?"
-        
-def _pad_and_stack(dicts):
-    # takes a list of dictionaries with the same keys that map to arrays of different lengths
-    # returns a dictionary where each key is mapped to a stacked array with zero padding
-    if len(dicts) == 1:
-        return dicts[0]
-    transposed = {}
-    for d in dicts:
-        for k,a in d.items():
-            transposed.setdefault(k, []).append(a)
-    padded_and_stacked = {k : tf.keras.preprocessing.sequence.pad_sequences(arrays, dtype=arrays[0].dtype.name) 
-                          for k,arrays in transposed.items()}
-    return padded_and_stacked
         
 def _logsumexp(x, y):
     return tf.math.log(tf.math.exp(x) +  tf.math.exp(y))
