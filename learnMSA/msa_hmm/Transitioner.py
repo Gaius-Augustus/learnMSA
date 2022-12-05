@@ -98,7 +98,7 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
     def make_initial_distribution(self):
         """Constructs the initial state distribution per model which depends on the transition probabilities.
         Returns:
-            A probability distribution per model. Shape: (k, q)
+            A probability distribution per model. Shape: (1, k, q)
         """
         #state order: LEFT_FLANK, MATCH x length, INSERT x length-1, UNANNOTATED_SEGMENT, RIGHT_FLANK, TERMINAL
         init_flank_probs = self.make_flank_init_prob()

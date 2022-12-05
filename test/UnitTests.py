@@ -347,7 +347,6 @@ class TestMSAHMM(unittest.TestCase):
             self.assertEqual(np.argmax(forward[0,1]), i+1)
         _, (forward, loglik) = hmm_cell(sequences[:,length], (forward, loglik))
         self.assertEqual(np.argmax(forward[0,0]), 2*length+2)
-        print(forward[0,1])
         self.assertEqual(np.argmax(forward[0,1]), 2*length)
         for i in range(4):
             old_loglik = loglik
