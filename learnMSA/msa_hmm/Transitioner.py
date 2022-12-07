@@ -105,40 +105,28 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
         log_init_flank_probs = tf.math.log(init_flank_probs)
         log_complement_init_flank_probs = tf.math.log(1-init_flank_probs)
         log_init_dists = []
-        for (init_flank_prob, 
-             log_init_flank_prob,
-             log_complement_init_flank_prob,
-             log_p, 
-             implicit_log_p, 
-             length, 
-             num_states) in zip(init_flank_probs,
-                            log_init_flank_probs,
-                            log_complement_init_flank_probs, 
-                            self.log_probs,
-                            self.implicit_log_probs,
-                            self.length,
-                            self.num_states):
-            log_init_match = (implicit_log_p["left_flank_to_match"] 
-                          + log_complement_init_flank_prob
-                          - log_p["left_flank_exit"])
-            log_init_right_flank = (implicit_log_p["left_flank_to_right_flank"] 
-                                + log_complement_init_flank_prob 
-                                - log_p["left_flank_exit"])
-            log_init_unannotated_segment = (implicit_log_p["left_flank_to_unannotated_segment"] 
-                                        + log_complement_init_flank_prob 
-                                        - log_p["left_flank_exit"])
-            log_init_terminal = (implicit_log_p["left_flank_to_terminal"] 
-                             + log_complement_init_flank_prob 
-                             - log_p["left_flank_exit"] )
-            log_init_insert = tf.zeros((length-1), dtype=self.dtype) + self.approx_log_zero
-            log_init_dist = tf.concat([log_init_flank_prob, 
+        for i in range(self.num_models):
+            log_init_match = (self.implicit_log_probs[i]["left_flank_to_match"] 
+                          + log_complement_init_flank_probs[i]
+                          - self.log_probs[i]["left_flank_exit"])
+            log_init_right_flank = (self.implicit_log_probs[i]["left_flank_to_right_flank"] 
+                                + log_complement_init_flank_probs[i] 
+                                - self.log_probs[i]["left_flank_exit"])
+            log_init_unannotated_segment = (self.implicit_log_probs[i]["left_flank_to_unannotated_segment"] 
+                                        + log_complement_init_flank_probs[i] 
+                                        - self.log_probs[i]["left_flank_exit"])
+            log_init_terminal = (self.implicit_log_probs[i]["left_flank_to_terminal"] 
+                             + log_complement_init_flank_probs[i] 
+                             - self.log_probs[i]["left_flank_exit"] )
+            log_init_insert = tf.zeros((self.length[i]-1), dtype=self.dtype) + self.approx_log_zero
+            log_init_dist = tf.concat([log_init_flank_probs[i], 
                                         log_init_match, 
                                         log_init_insert, 
                                         log_init_unannotated_segment, 
                                         log_init_right_flank, 
                                         log_init_terminal], axis=0)
             log_init_dist = tf.pad(log_init_dist, 
-                                   [[0, self.max_num_states - num_states]], 
+                                   [[0, self.max_num_states - self.num_states[i]]], 
                                    constant_values = self.approx_log_zero)
             log_init_dists.append(log_init_dist)
         log_init_dists = tf.stack(log_init_dists, axis=0)

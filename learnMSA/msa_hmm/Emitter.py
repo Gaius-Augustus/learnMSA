@@ -76,7 +76,7 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
     def call(self, inputs):
         """ 
         Args: 
-                inputs: Shape (b, s)
+                inputs: Shape (k, b, s) (Shape (b, s) works as well if all models should get the same input.)
         Returns:
                 Shape (k, b, q)
         """

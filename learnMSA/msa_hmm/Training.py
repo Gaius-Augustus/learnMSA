@@ -6,17 +6,19 @@ from learnMSA.msa_hmm.MsaHmmLayer import MsaHmmLayer
 from learnMSA.msa_hmm.AncProbsLayer import AncProbsLayer
 from learnMSA.msa_hmm.Configuration import assert_config
 
-# boilerplate code for model generation 
-# in the following we test different models that only vary in the anc_probs_layer
+
 def generic_model_generator(encoder_layers,
                             msa_hmm_layer):
-    """A generic model generator function that can be used to construct an actual callback for the pipeline.
+    """A generic model generator function. The model inputs are sequences of shape (num_model, b, L) 
+        and sequence indices of shape (num_model, b).
     Args:
-        encoder_layers: A list of layers with compatible inputs and outputs and the last output is compatible with msa_hmm_layer.
-        msa_hmm_layer
+        encoder_layers: A list of layers with compatible inputs and outputs and the last output 
+                        is compatible with msa_hmm_layer. 
+        msa_hmm_layer: An instance of MsaHmmLayer.
     """
-    sequences = tf.keras.Input(shape=(None,), name="sequences", dtype=tf.uint8)
-    indices = tf.keras.Input(shape=(), name="indices", dtype=tf.int32)
+    num_models = msa_hmm_layer.cell.num_models
+    sequences = tf.keras.Input(shape=(None,None,), name="sequences", dtype=tf.uint8)
+    indices = tf.keras.Input(shape=(None,), name="indices", dtype=tf.int32)
     forward_seq = sequences
     for layer in encoder_layers:
         forward_seq = layer(forward_seq, indices)
@@ -26,13 +28,13 @@ def generic_model_generator(encoder_layers,
     return model
 
 def make_msa_hmm_layer(effective_num_seq,
-                        model_length, 
+                        model_lengths, 
                         config,
                         alphabet_size=25):
     """Constructs a cell and a MSA HMM layer given a config.
     """
     assert_config(config)
-    msa_hmm_cell = MsaHmmCell(model_length, config["emitter"], config["transitioner"])
+    msa_hmm_cell = MsaHmmCell(model_lengths, config["emitter"], config["transitioner"])
     msa_hmm_layer = MsaHmmLayer(msa_hmm_cell, 
                                 effective_num_seq,
                                 use_prior=config["use_prior"],
@@ -41,7 +43,8 @@ def make_msa_hmm_layer(effective_num_seq,
 
 def make_anc_probs_layer(num_seq, config):
     assert_config(config)
-    anc_probs_layer = AncProbsLayer(num_seq,
+    anc_probs_layer = AncProbsLayer(config["num_models"],
+                                    num_seq,
                                     config["num_rate_matrices"],
                                     equilibrium_init=config["encoder_initializer"][2],
                                     rate_init=config["encoder_initializer"][0],
@@ -57,60 +60,67 @@ def make_anc_probs_layer(num_seq, config):
 
 def default_model_generator(num_seq,
                             effective_num_seq,
-                            model_length, 
+                            model_lengths, 
                             config,
                             alphabet_size=25):
     """A callback that constructs the default learnMSA model.
     Args:
         num_seq: The total number of sequences to align.
         effective_num_seq: The actual number of sequences currently used for training (model surgery might use only a subset).
-        model_length: Length of the pHMM.
+        model_lengths: List of pHMM lengths.
         config: Dictionary storing the configuration.
         alphabet_size: Number of symbols without the terminal symbol (i.e. 25 for amino acids).
     """
-    msa_hmm_layer = make_msa_hmm_layer(effective_num_seq, model_length, config, alphabet_size)
+    num_models = config["num_models"]
+    assert len(model_lengths) == num_models, \
+        (f"The list of given model lengths ({len(model_lengths)}) should"
+         + f" match the number of models specified in the configuration({num_models}).")
+    msa_hmm_layer = make_msa_hmm_layer(effective_num_seq, model_lengths, config, alphabet_size)
     anc_probs_layer = make_anc_probs_layer(num_seq, config)
     model = generic_model_generator([anc_probs_layer], msa_hmm_layer)
     return model
 
-                            
-    
+
 class DefaultBatchGenerator():
-    def __init__(self, fasta_file, alphabet_size=25):
+    def __init__(self, fasta_file, num_models, return_only_sequences=False, shuffle=True, alphabet_size=25):
         self.fasta_file = fasta_file
+        #generate a unique permutation of the sequence indices for each model to train
+        self.num_models = num_models
+        self.permutations = [np.arange(fasta_file.num_seq) for _ in range(num_models)]
+        for p in self.permutations:
+            np.random.shuffle(p)
+        self.return_only_sequences = return_only_sequences
         self.alphabet_size = alphabet_size
+        self.shuffle = shuffle
         
     def __call__(self, indices):
-        max_len = np.max(self.fasta_file.seq_lens[indices])
-        batch = np.zeros((indices.shape[0], max_len+1), dtype=np.uint8) + self.alphabet_size
-        for i,j in enumerate(indices):
-            batch[i, :self.fasta_file.seq_lens[j]] = self.fasta_file.get_raw_seq(j)
-        return batch, indices
+        #use a different permutation of the sequences per trained model
+        if self.shuffle:
+            permutated_indices = np.stack([perm[indices] for perm in self.permutations], axis=0)
+        else:
+            permutated_indices = np.stack([indices]*self.num_models, axis=0)
+        max_len = np.max(self.fasta_file.seq_lens[permutated_indices])
+        batch = np.zeros((self.num_models, indices.shape[0], max_len+1), dtype=np.uint8) 
+        batch += self.alphabet_size #initialize with terminal symbols
+        for k,perm_ind in enumerate(permutated_indices):
+            for i,j in enumerate(perm_ind):
+                batch[k, i, :self.fasta_file.seq_lens[j]] = self.fasta_file.get_raw_seq(j)
+        if self.return_only_sequences:
+            return batch
+        else:
+            return batch, permutated_indices
     
     def get_out_types(self):
-        return (tf.uint8, tf.int64)  
+        if self.return_only_sequences:
+            return (tf.uint8)
+        else:
+            return (tf.uint8, tf.int64)  
     
-    
-class OnlySequencesBatchGenerator():
-    def __init__(self, fasta_file, alphabet_size=25):
-        self.fasta_file = fasta_file
-        self.alphabet_size = alphabet_size
-        
-    def __call__(self, indices):
-        max_len = np.max(self.fasta_file.seq_lens[indices])
-        batch = np.zeros((indices.shape[0], max_len+1)) + self.alphabet_size
-        for i,j in enumerate(indices):
-            batch[i, :self.fasta_file.seq_lens[j]] = self.fasta_file.get_raw_seq(j)
-        batch = tf.one_hot(batch, self.alphabet_size+1)
-        return batch
-    
-    def get_out_types(self):
-        return (tf.float32)  
-        
           
 # batch_generator is a callable object that maps a vector of sequence indices to
 # inputs compatible with the model
 def make_dataset(indices, batch_generator, batch_size=512, shuffle=True):   
+    batch_generator.shuffle = shuffle
     ds = tf.data.Dataset.from_tensor_slices(indices)
     if shuffle:
         ds = ds.shuffle(indices.size, reshuffle_each_iteration=True)

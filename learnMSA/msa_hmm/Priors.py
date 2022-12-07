@@ -32,7 +32,7 @@ class AminoAcidPrior():
         s = tf.shape(B)[2]
         B = B[:,1:model_length+1,:20]
         B /= tf.reduce_sum(B, axis=-1, keepdims=True)
-        B = tf.reshape(B, (-1, s))
+        B = tf.reshape(B, (-1, 20))
         prior = self.emission_dirichlet_mix.log_pdf(B)
         prior = tf.reshape(prior, (k, model_length))
         return prior 
@@ -101,16 +101,16 @@ class ProfileHMMTransitionPrior():
         delete_model = dm.load_mixture_model(delete_model_path, self.delete_comp, 2, trainable=False, dtype=dtype)
         self.delete_dirichlet = delete_model.layers[-1]
         
-    def __call__(self, probs_list, flank_init_prob_list):
+    def __call__(self, probs_list, flank_init_prob):
         """Computes log pdf values for each transition prior.
         Args:
         probs_list: A list of dictionaries that map transition type to probabilities per model.
-        flank_init_prob_list: A list of flank init probabilities per model.
+        flank_init_prob: Flank init probabilities per model.
         Returns:
             A dictionary that maps prior names to prior values.
         """
         match_dirichlet = insert_dirichlet = delete_dirichlet = flank_prior = hit_prior = enex_prior = 0
-        for probs, flank_init_prob in zip(probs_list, flank_init_prob_list):
+        for i,probs in enumerate(probs_list):
             log_probs = {part_name : tf.math.log(p) for part_name, p in probs.items()}
             #match state transitions
             p_match = tf.stack([probs["match_to_match"],
@@ -131,7 +131,7 @@ class ProfileHMMTransitionPrior():
             flank_prior += self.alpha_flank * log_probs["right_flank_loop"]
             flank_prior += self.alpha_flank * log_probs["left_flank_loop"]
             flank_prior += self.alpha_flank * tf.math.log(probs["end_to_right_flank"])
-            flank_prior += self.alpha_flank * tf.math.log(flank_init_prob)
+            flank_prior += self.alpha_flank * tf.math.log(flank_init_prob[i])
             #uni-hit
             hit_prior += self.alpha_single * tf.math.log(probs["end_to_right_flank"] + probs["end_to_terminal"])
             #uniform entry/exit prior
@@ -149,6 +149,7 @@ class ProfileHMMTransitionPrior():
             "enex_prior" : enex_prior}
         num_models = tf.constant(len(probs_list), dtype=probs_list[0]["match_to_match"].dtype)
         prior_val = { name : val/num_models for name,val in prior_val.items() }
+        return prior_val
     
     def __repr__(self):
         return f"ProfileHMMTransitionPrior(match_comp={self.match_comp}, insert_comp={self.insert_comp}, delete_comp={self.delete_comp}, alpha_flank={self.alpha_flank}, alpha_single={self.alpha_single}, alpha_frag={self.alpha_frag})"

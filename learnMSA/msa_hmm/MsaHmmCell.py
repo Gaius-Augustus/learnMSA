@@ -41,6 +41,7 @@ class MsaHmmCell(tf.keras.layers.Layer):
         self.transitioner.cell_init(self)
             
     def build(self, input_shape):
+        self.dim = input_shape[-1]
         for em in self.emitter:
             em.build(input_shape)
         self.transitioner.build(input_shape)
@@ -74,6 +75,7 @@ class MsaHmmCell(tf.keras.layers.Layer):
         """ Computes one recurrent step of the Forward DP.
         """
         old_forward, old_loglik = states
+        inputs = tf.reshape(inputs, (self.num_models, -1, self.dim))
         E = self.emission_probs(inputs)
         if self.init:
             forward = tf.multiply(E, old_forward, name="forward")

@@ -52,61 +52,69 @@ def make_rate_matrix(exchangeabilities, equilibrium, epsilon=1e-16):
 def make_anc_probs(sequences, exchangeabilities, equilibrium, tau, equilibrium_sample=False, transposed=False):
     """Computes ancestral probabilities simultaneously for all sites and rate matrices.
     Args:
-        sequences: Sequences either as integers (faster embedding lookup) or in vector format. Shape: (b, L) or (b, L, s)
-        exchangeabilities: A stack of symmetric exchangeability matrices. Shape: (k, s, s)
-        equilibrium: A stack of equilibrium distributions. Shape: (k, s)
-        tau: Evolutionary times for all sequences (1 time unit = 1 expected mutation per site). Shape: (b) or (b,k)
+        sequences: Sequences either as integers (faster embedding lookup) or in vector format. Shape: (num_model, b, L) or (num_model, b, L, s)
+        exchangeabilities: A stack of symmetric exchangeability matrices. Shape: (num_model, k, s, s)
+        equilibrium: A stack of equilibrium distributions. Shape: (num_model, k, s)
+        tau: Evolutionary times for all sequences (1 time unit = 1 expected mutation per site). Shape: (num_model, b) or (num_model,b,k)
         equi_init: If true, a 2-staged process is assumed where an amino acid is first sampled from the equilibirium distribution
                     and the ancestral probabilities are computed afterwards.
     Returns:
-        A tensor with the expected amino acids frequencies after time tau. Output shape: (b, L, k, s)
+        A tensor with the expected amino acids frequencies after time tau. Output shape: (num_model, b, L, k, s)
     """
-    while len(tau.shape) < 4:
+    while len(tau.shape) < 5:
         tau = tf.expand_dims(tau, -1)
+    shape = tf.shape(exchangeabilities)
+    exchangeabilities = tf.reshape(exchangeabilities, (-1, 20, 20))
+    equilibrium = tf.reshape(equilibrium, (-1, 20))
     Q = make_rate_matrix(exchangeabilities, equilibrium)
-    tauQ = tau * tf.expand_dims(Q, 0)
-    P = tf.linalg.expm(tauQ) # P[b,k,i,j] = P(X(tau_b) = j | X(0) = i; Q_k))
-    b,k,s,s = tf.unstack(tf.shape(P), 4)
+    Q = tf.reshape(Q, shape)
+    tauQ = tau * tf.expand_dims(Q, 1)
+    P = tf.linalg.expm(tauQ) # P[m,b,k,i,j] = P(X(tau_b) = j | X(0) = i; Q_k, model m))
+    num_model,b,k,s,s = tf.unstack(tf.shape(P), 5)
     if equilibrium_sample:
-        equilibrium = tf.reshape(equilibrium, (1,k,s,1))
+        equilibrium = tf.reshape(equilibrium, (num_model,1,k,s,1))
         P *= equilibrium
-    if len(sequences.shape) == 2: #assume index format
+    if len(sequences.shape) == 3: #assume index format
         if transposed:
-            P = tf.transpose(P, [0,3,1,2])
+            P = tf.transpose(P, [0,1,4,2,3])
         else:
-            P = tf.transpose(P, [0,2,1,3])
+            P = tf.transpose(P, [0,1,3,2,4])
         P = tf.reshape(P, (-1, k, s))
         sequences = tf.cast(sequences, tf.int32)
-        sequences += tf.expand_dims( tf.range(b) * s, -1)
+        sequences += tf.expand_dims( tf.range(num_model*b) * s, -1)
         ancprobs = tf.nn.embedding_lookup(P, sequences)
     else: #assume vector format
         if transposed:
-            ancprobs = tf.einsum("bLz,bksz->bLks", sequences, P)
+            ancprobs = tf.einsum("mbLz,mbksz->mbLks", sequences, P)
         else:
-            ancprobs = tf.einsum("bLz,bkzs->bLks", sequences, P)
+            ancprobs = tf.einsum("mbLz,mbkzs->mbLks", sequences, P)
     return ancprobs
     
 class AncProbsLayer(tf.keras.layers.Layer): 
     """A learnable layer for ancestral probabilities.
 
     Args:
+        num_models: The number of independently trained models.
         num_rates: The number of different evolutionary times.
         num_matrices: The number of rate matrices.
         equilibrium_init: Initializer for the equilibrium distribution of the rate matrices
-        exchangeability_init: Initializer for the exchangeability matrices. Usually inverse_softplus should be used on the initial matrix by the user.
+        exchangeability_init: Initializer for the exchangeability matrices. Usually inverse_softplus 
+                                should be used on the initial matrix by the user.
         rate_init: Initializer for the rates.
         trainable_exchangeabilities: Flag that can prevent learning the exchangeabilities.
         per_matrix_rate: Learns an additional evolutionary time per rate matrix.
         matrix_rate_init: Initializer for the replacement rate per matrix.
         matrix_rate_l2: L2 regularizer strength that penalizes deviation of the parameters from the initial value.
-        shared_matrix: Make all weight matrices internally use the same weights. Only useful in combination with num_matrices > 1 and per_matrix_rate = True. 
-        equilibrium_sample: If true, a 2-staged process is assumed where an amino acid is first sampled from the equilibirium distribution
-                    and the ancestral probabilities are computed afterwards.
+        shared_matrix: Make all weight matrices internally use the same weights. Only useful in combination with 
+                        num_matrices > 1 and per_matrix_rate = True. 
+        equilibrium_sample: If true, a 2-staged process is assumed where an amino acid is first sampled from 
+                        the equilibirium distribution and the ancestral probabilities are computed afterwards.
         transposed: Transposes the probability matrix P = e^tQ. 
         name: Layer name.
     """
 
     def __init__(self, 
+                 num_models,
                  num_rates, 
                  num_matrices,
                  equilibrium_init,
@@ -122,6 +130,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
                  name="AncProbsLayer",
                  **kwargs):
         super(AncProbsLayer, self).__init__(name=name, **kwargs)
+        self.num_models = num_models
         self.num_rates = num_rates
         self.num_matrices = num_matrices
         self.rate_init = rate_init
@@ -136,39 +145,39 @@ class AncProbsLayer(tf.keras.layers.Layer):
         self.transposed = transposed
     
     def build(self, input_shape=None):
-        self.tau_kernel = self.add_weight(shape=[self.num_rates], 
+        self.tau_kernel = self.add_weight(shape=[self.num_models, self.num_rates], 
                                    name="tau_kernel", 
                                    initializer=self.rate_init)
         if self.shared_matrix:
-            self.exchangeability_kernel = self.add_weight(shape=[1,20, 20],
+            self.exchangeability_kernel = self.add_weight(shape=[self.num_models, 1, 20, 20],
                                                           name="exchangeability_kernel",
                                                            initializer=self.exchangeability_init,
                                                            trainable=self.trainable_rate_matrices)
             
-            self.equilibrium_kernel = self.add_weight(shape=[1, 20], 
+            self.equilibrium_kernel = self.add_weight(shape=[self.num_models, 1, 20], 
                                                       name="equilibrium_kernel",
                                                       initializer=self.equilibrium_init,
                                                       trainable=self.trainable_rate_matrices)
         else:
-            self.exchangeability_kernel = self.add_weight(shape=[self.num_matrices, 20, 20], 
+            self.exchangeability_kernel = self.add_weight(shape=[self.num_models, self.num_matrices, 20, 20], 
                                                            name="exchangeability_kernel", 
                                                            initializer=self.exchangeability_init,
                                                            trainable=self.trainable_rate_matrices)
             
-            self.equilibrium_kernel = self.add_weight(shape=[self.num_matrices, 20], 
+            self.equilibrium_kernel = self.add_weight(shape=[self.num_models, self.num_matrices, 20], 
                                                       name="equilibrium_kernel",
                                                       initializer=self.equilibrium_init,
                                                       trainable=self.trainable_rate_matrices)
             
         if self.per_matrix_rate:
-            self.per_matrix_rates_kernel = self.add_weight(shape=[self.num_matrices], 
+            self.per_matrix_rates_kernel = self.add_weight(shape=[self.num_models, self.num_matrices], 
                                                       name="per_matrix_rates_kernel",
                                                       initializer=self.matrix_rate_init)
        
     def make_R(self, kernel=None):
         if kernel is None:
             kernel = self.exchangeability_kernel
-        R = 0.5 * (kernel + tf.transpose(kernel, [0,2,1])) #make symmetric
+        R = 0.5 * (kernel + tf.transpose(kernel, [0,1,3,2])) #make symmetric
         R = tf.math.softplus(R)
         R -= tf.linalg.diag(tf.linalg.diag_part(R)) #zero diagonal
         return R
@@ -177,12 +186,17 @@ class AncProbsLayer(tf.keras.layers.Layer):
         return tf.nn.softmax(self.equilibrium_kernel)
     
     def make_Q(self):
-        return make_rate_matrix(self.make_R(), self.make_p())
+        R, p = self.make_R(), self.make_p()
+        R = tf.reshape(R, (-1, 20, 20))
+        p = tf.reshape(p, (-1, 20))
+        Q = make_rate_matrix(R, p)
+        Q = tf.reshape(Q, (self.num_models, self.num_matrices, 20, 20))
+        return Q
         
     def make_tau(self, subset=None):
         tau = self.tau_kernel
         if subset is not None:
-            tau = tf.gather(tau, subset)
+            tau = tf.gather_nd(tau, subset, batch_dims=1)
         return tf.math.softplus(tau)
     
     def make_per_matrix_rate(self):
@@ -191,10 +205,12 @@ class AncProbsLayer(tf.keras.layers.Layer):
     def call(self, inputs, rate_indices):
         """ Computes anchestral probabilities of the inputs.
         Args:
-            inputs: Input sequences. Shape: (b, L) or (b, L, s)
-            rate_indices: Indices that map each input sequences to an evolutionary times.
+            inputs: Input sequences. Shape: (num_model, b, L) or (num_models, b, L, s)
+            rate_indices: Indices that map each input sequences to an evolutionary times. Shape: (num_model, b)
+        Returns:
+            Ancestral probabilities. Shape: (num_model, b, L, num_matrices, s)
         """
-        input_indices = len(inputs.shape) == 2 
+        input_indices = len(inputs.shape) == 3 
         if input_indices:
             mask = inputs < 20
             only_std_aa_inputs = inputs * tf.cast(mask, inputs.dtype)
@@ -203,11 +219,12 @@ class AncProbsLayer(tf.keras.layers.Layer):
             mask = tf.expand_dims(mask, -1)
         else:
             only_std_aa_inputs = inputs
+        rate_indices = tf.expand_dims(rate_indices, -1)
         tau_subset = self.make_tau(rate_indices)
         if self.per_matrix_rate:
             per_matrix_rates = self.make_per_matrix_rate()
-            per_matrix_rates = tf.expand_dims(per_matrix_rates, 0)
-            tau_subset = tf.expand_dims(tau_subset, 1)
+            per_matrix_rates = tf.expand_dims(per_matrix_rates, 1)
+            tau_subset = tf.expand_dims(tau_subset, 2)
             mut_rates = tau_subset * per_matrix_rates
             reg = tf.reduce_mean(tf.square(self.per_matrix_rates_kernel - inverse_softplus(1.)))
             self.add_loss(self.matrix_rate_l2 * reg)
@@ -223,12 +240,14 @@ class AncProbsLayer(tf.keras.layers.Layer):
                                    self.transposed)
         if input_indices:
             anc_probs *= mask
-            anc_probs = tf.pad(anc_probs, [[0,0], [0,0], [0,0], [0,6]])
+            anc_probs = tf.pad(anc_probs, [[0,0], [0,0], [0,0], [0,0], [0,6]])
             rest = tf.expand_dims(tf.one_hot(inputs, 26), -2) * (1-mask)
             anc_probs += rest
-            anc_probs = tf.reshape(anc_probs, (tf.shape(inputs)[0], tf.shape(inputs)[1], 26 * self.num_matrices) )
+            num_model, b, L = tf.unstack(tf.shape(inputs))
+            anc_probs = tf.reshape(anc_probs, (num_model, b, L, self.num_matrices, 26) )
         else:
-            anc_probs = tf.reshape(anc_probs, (tf.shape(inputs)[0], tf.shape(inputs)[1], 20 * self.num_matrices) )
+            num_model, b, L, _ = tf.unstack(tf.shape(inputs))
+            anc_probs = tf.reshape(anc_probs, (num_model, b, L, self.num_matrices, 20) )
         return anc_probs
 
 # the default rate matrix ("LG")

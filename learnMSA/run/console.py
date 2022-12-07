@@ -50,13 +50,13 @@ def run_main():
     config = dict(msa_hmm.config.default)
     
     config["batch_size"] = args.batch_size if args.batch_size > 0 else "adaptive"
+    config["num_models"] = args.num_runs
     
-    best_alignment = msa_hmm.align.run_learnMSA(num_runs = args.num_runs,
-                                                train_filename = args.input_file,
-                                                out_filename = args.output_file,
-                                                config = config, 
-                                                ref_filename = args.ref_file,
-                                                verbose = not args.silent)
+    _ = msa_hmm.align.run_learnMSA(train_filename = args.input_file,
+                                    out_filename = args.output_file,
+                                    config = config, 
+                                    ref_filename = args.ref_file,
+                                    verbose = not args.silent)
             
             
 if __name__ == '__main__':

@@ -15,7 +15,7 @@ def viterbi_step(hmm_cell, gamma_prev, sequences_i, log_A_dense, epsilon):
     Args:
         hmm_cell: HMM cell with the models under which decoding should happen.
         gamma_prev: Viterbi values of the previous recursion. Shape (num_models, b, q)
-        sequences_i: i-th vertical sequence slice. Shape (b, s)
+        sequences_i: i-th vertical sequence slice. Shape (num_models, b, s)
         log_A_dense: Logarithmic transition matricies. Shape (num_model,q, q)
         epsilon: A small constant for numeric stability. 
     """
@@ -30,7 +30,7 @@ def viterbi_step(hmm_cell, gamma_prev, sequences_i, log_A_dense, epsilon):
 def viterbi_dyn_prog(sequences, hmm_cell, epsilon=np.finfo(np.float32).tiny):
     """ Logarithmic (underflow safe) viterbi capable of decoding many sequences in parallel on the GPU.
     Args:
-        sequences: Tensor. Shape (b, L, s).
+        sequences: Tensor. Shape (num_models, b, L, s).
         hmm_cell: HMM cell with the models under which decoding should happen.
         epsilon: A small constant for numeric stability. 
     Returns:
@@ -40,14 +40,14 @@ def viterbi_dyn_prog(sequences, hmm_cell, epsilon=np.finfo(np.float32).tiny):
     init = hmm_cell.make_initial_distribution()
     init = tf.transpose(init, (1,0,2)) #(num_models, 1, q)
     log_A_dense = hmm_cell.transitioner.make_log_A()
-    b0 = hmm_cell.emission_probs(sequences[:,0])
+    b0 = hmm_cell.emission_probs(sequences[:,:,0])
     gamma0 = tf.math.log(init+epsilon) + tf.math.log(b0+epsilon)
     gamma0 = tf.cast(gamma0, dtype=sequences.dtype) 
     gamma = [gamma0]  
-    for i in range(1,tf.shape(sequences)[1]):
+    for i in range(1,tf.shape(sequences)[-2]):
         gamma_next = viterbi_step(hmm_cell, 
                                     gamma[-1], 
-                                    sequences[:,i], 
+                                    sequences[:,:,i], 
                                     log_A_dense,
                                     epsilon)
         gamma.append(gamma_next) 
@@ -92,14 +92,16 @@ def viterbi_backtracking(hmm_cell, gamma):
 
 def viterbi(sequences, hmm_cell):
     """ Computes the most likely sequence of hidden states given unaligned sequences and a number of models.
+        The implementation is logarithmic (underflow safe) and capable of decoding many sequences in parallel 
+        on the GPU.
     Args:
-        sequences: Input sequences. Shape (b, L, s) or (b, L)
+        sequences: Input sequences. Shape (num_models, b, L, s) or (num_models, b, L)
         hmm_cell: A HMM cell representing k models used for decoding.
     Returns:
         State sequences. Shape (num_models, b, L)
     """
     hmm_cell.recurrent_init()
-    if len(sequences.shape) == 2:
+    if len(sequences.shape) == 3:
         sequences = tf.one_hot(sequences, fasta.s, dtype=hmm_cell.dtype)
     else:
         sequences = tf.cast(sequences, hmm_cell.dtype)
@@ -147,14 +149,24 @@ def get_state_seqs_max_lik(fasta_file,
     return state_seqs_max_lik
 
 
-#given sequences, state sequences, model length and the current positions,
-#returns decoded consensus columns as a matrix as well as insertions, lengths and starting positions
-#in the sequences
+
 def decode_core(model_length,
                 state_seqs_max_lik,
                 indices):
+    """ Decodes consensus columns as a matrix as well as insertion lengths and starting positions
+        as auxiliary vectors.
+    Args: 
+        model_length: Number of match states (length of the consensus sequence).
+        state_seqs_max_lik: A tensor with the most likeli state sequences. Shape: (num_seq, L)
+        indices: Indices in the sequences where decoding should start. Shape: (num_seq)
+    Returns:
+        consensus_columns: Decoded consensus columns. Shape: (num_seq, model_length)
+        insertion_lens: Number of amino acids emitted per insertion state. Shape: (num_seq, model_length-1)
+        insertion_start: Starting position of each insertion in the sequences. Shape: (num_seq, model_length-1)
+        finished: Boolean vector indicating sequences that are fully decoded. Shape: (num_seq) 
+    """
     n = state_seqs_max_lik.shape[0]
-    c = model_length #alias for code readability
+    c = model_length 
     #initialize the consensus with gaps
     consensus_columns = -np.ones((n, c), dtype=np.int16) 
     #insertion lengths and starting positions per sequence
@@ -164,7 +176,7 @@ def decode_core(model_length,
     last_insert = np.zeros(n, dtype=bool)
     A = np.arange(n)
     while True:
-        q = state_seqs_max_lik[A, indices]
+        q = state_seqs_max_lik[A, indices] 
         is_match = ((q > 0) & (q < c+1))
         is_insert = ((q >= c+1) & (q < 2*c))
         is_insert_start = is_insert & ~last_insert
@@ -185,11 +197,19 @@ def decode_core(model_length,
     return consensus_columns, insertion_lens, insertion_start, finished
 
 
-# an insertion state, active as long as at least one sequence remains in a flank/unannotated state 
-# returns insertion length and starting position in each sequence
 def decode_flank(state_seqs_max_lik, 
                  flank_state_id, 
                  indices):
+    """ Decodes flanking insertion states. The deconding is active as long as at least one sequence remains 
+        in a flank/unannotated state.
+    Args: 
+        state_seqs_max_lik: A tensor with the most likeli state sequences. Shape: (num_seq, L)
+        flank_state_id: Index of the flanking state.
+        indices: Indices in the sequences where decoding should start. Shape: (num_seq)
+    Returns:
+        insertion_lens: Number of amino acids emitted per insertion state. Shape: (num_seq, model_length-1)
+        insertion_start: Starting position of each insertion in the sequences. Shape: (num_seq, model_length-1)
+    """
     n = state_seqs_max_lik.shape[0]
     insertion_start = np.copy(indices)
     while True:
@@ -202,11 +222,19 @@ def decode_flank(state_seqs_max_lik,
     return insertion_lens, insertion_start
 
 
-# decodes an implicit alignment from most likely state sequences
-# implicit here means that insertions are stored as pairs (starting index, length)
-# returns a representation of the consensus, insertion start positions and lengths, as well
-# as an indicator for finished sequences
+
 def decode(model_length, state_seqs_max_lik):
+    """ Decodes an implicit alignment (insertion start/length are represented as 2 integers) 
+        from most likely state sequences.
+    Args: 
+        model_length: Number of match states (length of the consensus sequence).
+        state_seqs_max_lik: A tensor with the most likeli state sequences. Shape: (num_seq, L)
+    Returns:
+        core_blocks: Representation of the consensus. 
+        left_flank:
+        right_flank:
+        unannotated_segments:
+    """
     n = state_seqs_max_lik.shape[0]
     c = model_length #alias for code readability
     indices = np.zeros(n, np.int16) # active positions in the sequence
@@ -228,6 +256,10 @@ def get_insertion_block(sequences,
                         maxlen,
                         starts,
                         align_to_right=False):
+    """ Constructs one insertion block from an implicitly represented alignment.
+    Args: 
+    Returns:
+    """
     A = np.arange(sequences.shape[0])
     block = np.zeros((sequences.shape[0], maxlen), dtype=np.uint8) + (fasta.s-1)
     lens = np.copy(lens)
@@ -253,6 +285,10 @@ def get_alignment_block(sequences,
                         ins_len, 
                         ins_len_total,
                         ins_start):
+    """ Constructs one core model hit block from an implicitly represented alignment.
+    Args: 
+    Returns:
+    """
     A = np.arange(sequences.shape[0])
     length = consensus.shape[1] + np.sum(ins_len_total)
     block = np.zeros((sequences.shape[0], length), dtype=np.uint8) + (fasta.s-1)
@@ -279,13 +315,26 @@ def get_alignment_block(sequences,
 
 
 
-#constructs an (implicit) alignment given a fasta file of unaligned sequences and a trained model
+
 class Alignment():
+    """ Decodes alignments from a number of models, stores them in a memory friendly representation and
+        generates table-form (memory unfriendly) alignments on demand (batch-wise mode possible).
+    Args:
+        fasta_file: A fasta file with the sequences to decode.
+        batch_generator: Batch generator.
+        indices: (A subset of) The sequence indices from the fasta to align (1D).
+        batch_size: Controls memory consumption of viterbi.
+        model: A learnMSA model which internally might represent multiple pHMM models.
+        gap_symbol: Character used to denote missing match positions.
+        gap_symbol_insertions: Character used to denote insertions in other sequences.
+        build: If "eager", the alignment is decoded when its constructed. If "lazy", the decoding will
+                only happen, if the alignment should be printed or written to file.
+    """
     def __init__(self, 
                  fasta_file, 
                  batch_generator,
-                 indices, #(subset of) the sequences from the fasta to align
-                 batch_size, #controls memory consumption of viterbi
+                 indices, 
+                 batch_size, 
                  model,
                  gap_symbol="-",
                  gap_symbol_insertions=".",
@@ -297,7 +346,7 @@ class Alignment():
         self.model = model
         #encoder model is the same as model but with the MsaHmmLayer removed
         #the output of the encoder model will be the input to viterbi
-        #Per default, this is the anc.probs. output
+        #in the default learnMSA, the encoder model is only the Ancestral Probability layer.
         self.encoder_model = None
         for i, layer in enumerate(model.layers[1:]):
             if layer.name.startswith("MsaHmmLayer"):
@@ -876,9 +925,7 @@ def fit_and_align(fasta_file,
     return best_alignment, best_loglik, best_prior
 
 
-
-def fit_and_align_n(num_runs, 
-                    fasta_file, 
+def fit_and_align_n(fasta_file, 
                     config,
                     model_generator=None,
                     batch_generator=None,
@@ -889,26 +936,22 @@ def fit_and_align_n(num_runs,
     if batch_generator is None:
         batch_generator = train.DefaultBatchGenerator(fasta_file)
     if verbose:
-        print("Training of", num_runs, "independent models on file", os.path.basename(fasta_file.filename))
+        print("Training of", config["num_models"], " models on file", os.path.basename(fasta_file.filename))
         print("Configuration:")
         print(as_str(config))
-    results = []
-    for i in range(num_runs):
-        t_s = time.time()
-        alignment, loglik, prior = fit_and_align(fasta_file, 
-                                                  dict(config), #copy the dict, fit_and_align may change its contents
-                                                  model_generator,
-                                                  batch_generator,
-                                                  subset, 
-                                                  verbose)
-        if verbose:
-            print("Time for alignment:", "%.4f" % (time.time()-t_s))
-        results.append((loglik + prior, alignment))
-    return results
+    t_s = time.time()
+    alignment, loglik, prior = fit_and_align(fasta_file, 
+                                              dict(config), #copy the dict, fit_and_align may change its contents
+                                              model_generator,
+                                              batch_generator,
+                                              subset, 
+                                              verbose)
+    if verbose:
+        print("Time for alignment:", "%.4f" % (time.time()-t_s))
+    return alignment, loglik, prior
 
 
-def run_learnMSA(num_runs, 
-                 train_filename,
+def run_learnMSA(train_filename,
                  out_filename,
                  config, 
                  model_generator=None,
@@ -924,26 +967,25 @@ def run_learnMSA(num_runs,
     else:
         subset = None
     try:
-        results = fit_and_align_n(num_runs,
-                                    fasta_file, 
-                                    config=config,
-                                    model_generator=model_generator,
-                                    subset=subset, 
-                                    verbose=verbose)
+        alignment, loglik, prior = fit_and_align_n(fasta_file, 
+                                  config=config,
+                                  model_generator=model_generator,
+                                  subset=subset, 
+                                  verbose=verbose)
     except tf.errors.ResourceExhaustedError as e:
         print("Out of memory. A resource was exhausted.")
         print("Try reducing the batch size (-b). The current batch size was: "+str(config["batch_size"])+".")
         sys.exit(e.error_code)
         
-    best = np.argmax([ll for ll,_ in results])
-    best_ll, best_alignment = results[best]
+    best_model = np.argmax(loglik + prior)
     if verbose:
-        print("Computed alignments with likelihoods:", ["%.4f" % ll for ll,_ in results])
-        print("Best model has likelihood:", "%.4f" % best_ll, " (prior=", "%.4f" % best_alignment.prior ,")")
+        print("Computed alignments with likelihoods (priors): ", ["%.4f" % ll + " (%.4f)" % p 
+                                                                 for ll,p in zip(loglik, prior)])
+        print("Best model: ", best_model)
         
-    t = time.time()
     Path(os.path.dirname(out_filename)).mkdir(parents=True, exist_ok=True)
-    best_alignment.to_file(out_filename)
+    t = time.time()
+    alignment.to_file(best_model, out_filename)
     
     if verbose:
         print("time for generating output:", "%.4f" % (time.time()-t))
@@ -955,7 +997,7 @@ def run_learnMSA(num_runs,
         #tc = out_file.tc_score(ref_fasta)
         if verbose:
             print("SP score =", sp)
-        return best_alignment, sp
+        return alignment, sp
     else:
-        return best_alignment
+        return alignment
     

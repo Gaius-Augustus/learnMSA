@@ -17,6 +17,13 @@ class EmissionInitializer(tf.keras.initializers.Initializer):
 R, p = anc_probs.parse_paml(anc_probs.LG_paml, fasta.alphabet[:-1])
 p_padded = np.pad(np.squeeze(p), (0,5))
 exchangeability_init = anc_probs.inverse_softplus(R + 1e-32)
+
+def make_default_anc_probs_init(num_models):
+    exchangeability_stack = np.stack([exchangeability_init]*num_models, axis=0)
+    log_p_stack = np.stack([np.log(p)]*num_models, axis=0)
+    return [tf.constant_initializer(-3), 
+            tf.constant_initializer(exchangeability_stack), 
+            tf.constant_initializer(log_p_stack)]
     
 def make_default_emission_init():
     return EmissionInitializer(np.log(p_padded+1e-16))
