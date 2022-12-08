@@ -10,10 +10,12 @@ def as_str(config, items_per_line=3):
 
 #simple adpative batch size depending on sequence length
 #longer models and sequences require much more memory
-def get_adaptive_batch_size(model_length, max_len):
-    if max_len * model_length < 200 * 200:
+#we limit the batch size based on the longest model to train
+def get_adaptive_batch_size(model_lengths, max_seq_len):
+    model_length = max(model_lengths)
+    if max_seq_len * model_length < 200 * 200:
         return 512
-    if max_len * model_length < 500 * 500:
+    if max_seq_len * model_length < 500 * 500:
         return 256
     else:
         return 128

@@ -6,6 +6,7 @@ from learnMSA.msa_hmm.MsaHmmLayer import MsaHmmLayer
 from learnMSA.msa_hmm.AncProbsLayer import AncProbsLayer
 from learnMSA.msa_hmm.Configuration import assert_config
 
+        
 
 def generic_model_generator(encoder_layers,
                             msa_hmm_layer):
@@ -140,7 +141,7 @@ def fit_model(model_generator,
               batch_generator,
               fasta_file,
               indices,
-              model_length, 
+              model_lengths, 
               config,
               batch_size, 
               epochs,
@@ -150,12 +151,12 @@ def fit_model(model_generator,
     tf.get_logger().setLevel('ERROR')
     optimizer = tf.optimizers.Adam(config["learning_rate"])
     if verbose:
-        print("Fitting a model of length", model_length, "on", indices.shape[0], "sequences.")
+        print("Fitting models of lengths", model_lengths, "on", indices.shape[0], "sequences.")
         print("Batch size=", batch_size, "Learning rate=", config["learning_rate"])
     def make_and_compile():
         model = model_generator(num_seq=fasta_file.num_seq,
                                 effective_num_seq=indices.shape[0],
-                                model_length=model_length,
+                                model_lengths=model_lengths,
                                 config=config)
         model.compile(optimizer=optimizer)
         return model

@@ -91,14 +91,12 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
         return ProfileHMMEmitter(
                  emission_init = self.emission_init,
                  insertion_init = self.insertion_init,
-                 emission_func = self.emission_func, 
-                 emission_matrix_generator = self.emission_matrix_generator,
                  prior = self.prior,
                  frozen_insertions = self.frozen_insertions,
                  dtype = self.dtype) 
     
     def __repr__(self):
-        return f"ProfileHMMEmitter(emission_init={self.emission_init}, insertion_init={self.insertion_init}, emission_func={self.emission_func}, emission_matrix_generator={self.emission_matrix_generator}, prior={self.prior}, frozen_insertions={self.frozen_insertions}, )"
+        return f"ProfileHMMEmitter(emission_init={self.emission_init}, insertion_init={self.insertion_init}, prior={self.prior}, frozen_insertions={self.frozen_insertions}, )"
     
     
     

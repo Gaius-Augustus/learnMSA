@@ -81,8 +81,10 @@ def make_anc_probs(sequences, exchangeabilities, equilibrium, tau, equilibrium_s
             P = tf.transpose(P, [0,1,3,2,4])
         P = tf.reshape(P, (-1, k, s))
         sequences = tf.cast(sequences, tf.int32)
+        sequences = tf.reshape(sequences, (-1, tf.shape(sequences)[-1]))
         sequences += tf.expand_dims( tf.range(num_model*b) * s, -1)
         ancprobs = tf.nn.embedding_lookup(P, sequences)
+        ancprobs = tf.reshape(ancprobs, (num_model, b, -1, k, s))
     else: #assume vector format
         if transposed:
             ancprobs = tf.einsum("mbLz,mbksz->mbLks", sequences, P)
@@ -244,10 +246,10 @@ class AncProbsLayer(tf.keras.layers.Layer):
             rest = tf.expand_dims(tf.one_hot(inputs, 26), -2) * (1-mask)
             anc_probs += rest
             num_model, b, L = tf.unstack(tf.shape(inputs))
-            anc_probs = tf.reshape(anc_probs, (num_model, b, L, self.num_matrices, 26) )
+            anc_probs = tf.reshape(anc_probs, (num_model, b, L, self.num_matrices * 26) )
         else:
             num_model, b, L, _ = tf.unstack(tf.shape(inputs))
-            anc_probs = tf.reshape(anc_probs, (num_model, b, L, self.num_matrices, 20) )
+            anc_probs = tf.reshape(anc_probs, (num_model, b, L, self.num_matrices * 20) )
         return anc_probs
 
 # the default rate matrix ("LG")

@@ -97,14 +97,15 @@ class MsaHmmCell(tf.keras.layers.Layer):
         return S
 
     def get_prior_log_density(self, add_metrics=False):  
-        em_mean_per_match = [tf.reduce_mean(em.get_prior_log_density(), axis=0) for em in self.emitter]
-        em_priors = [tf.reduce_sum(p) for p in em_mean_per_match]
+        em_priors = [tf.reduce_sum(em.get_prior_log_density(), 1) for em in self.emitter]
         trans_priors = self.transitioner.get_prior_log_densities()
         prior = sum(em_priors) + sum(trans_priors.values())
         if add_metrics:
             for i,d in enumerate(em_priors):
-                self.add_metric(d, "em_prior_"+str(i))
-            for name, prior in trans_priors.items():
-                self.add_metric(prior, name)
+                d = tf.reduce_mean(d)
+                self.add_metric(d, "mean_model_em_prior_"+str(i))
+            for name, d in trans_priors.items():
+                d = tf.reduce_mean(d)
+                self.add_metric(d, "mean_model_"+name)
         return prior
 

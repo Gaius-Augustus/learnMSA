@@ -1,3 +1,4 @@
+import learnMSA.msa_hmm.Viterbi as viterbi
 import learnMSA.msa_hmm.Align as align
 from learnMSA.msa_hmm.Align import Alignment
 import learnMSA.msa_hmm.Fasta as fasta

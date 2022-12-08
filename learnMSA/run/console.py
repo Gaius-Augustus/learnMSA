@@ -47,7 +47,7 @@ def run_main():
 
         print("Found tensorflow version", tf.__version__)
     
-    config = dict(msa_hmm.config.default)
+    config = msa_hmm.config.make_default(args.num_runs)
     
     config["batch_size"] = args.batch_size if args.batch_size > 0 else "adaptive"
     config["num_models"] = args.num_runs

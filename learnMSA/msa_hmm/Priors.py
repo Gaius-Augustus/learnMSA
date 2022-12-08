@@ -107,9 +107,14 @@ class ProfileHMMTransitionPrior():
         probs_list: A list of dictionaries that map transition type to probabilities per model.
         flank_init_prob: Flank init probabilities per model.
         Returns:
-            A dictionary that maps prior names to prior values.
+            A dictionary that maps prior names to lists of prior values per model.
         """
-        match_dirichlet = insert_dirichlet = delete_dirichlet = flank_prior = hit_prior = enex_prior = 0
+        match_dirichlet = []
+        insert_dirichlet = []
+        delete_dirichlet = []
+        flank_prior = []
+        hit_prior = []
+        enex_prior = []
         for i,probs in enumerate(probs_list):
             log_probs = {part_name : tf.math.log(p) for part_name, p in probs.items()}
             #match state transitions
@@ -117,29 +122,30 @@ class ProfileHMMTransitionPrior():
                                 probs["match_to_insert"],
                                 probs["match_to_delete"][1:]], axis=-1)
             p_match_sum = tf.reduce_sum(p_match, axis=-1, keepdims=True)
-            match_dirichlet += tf.reduce_sum(self.match_dirichlet.log_pdf(p_match / p_match_sum))
+            match_dirichlet.append( tf.reduce_sum(self.match_dirichlet.log_pdf(p_match / p_match_sum)) )
             #insert state transitions
             p_insert = tf.stack([probs["insert_to_match"],
                                probs["insert_to_insert"]], axis=-1)
-            insert_dirichlet += tf.reduce_sum(self.insert_dirichlet.log_pdf(p_insert))
+            insert_dirichlet.append( tf.reduce_sum(self.insert_dirichlet.log_pdf(p_insert)) )
             #delete state transitions
             p_delete = tf.stack([probs["delete_to_match"][:-1],
                                probs["delete_to_delete"]], axis=-1)
-            delete_dirichlet += tf.reduce_sum(self.delete_dirichlet.log_pdf(p_delete))
+            delete_dirichlet.append( tf.reduce_sum(self.delete_dirichlet.log_pdf(p_delete)) )
             #other transitions
-            flank_prior += self.alpha_flank * log_probs["unannotated_segment_loop"] #todo: handle as extra case?
-            flank_prior += self.alpha_flank * log_probs["right_flank_loop"]
-            flank_prior += self.alpha_flank * log_probs["left_flank_loop"]
-            flank_prior += self.alpha_flank * tf.math.log(probs["end_to_right_flank"])
-            flank_prior += self.alpha_flank * tf.math.log(flank_init_prob[i])
+            flank = self.alpha_flank * log_probs["unannotated_segment_loop"] #todo: handle as extra case?
+            flank += self.alpha_flank * log_probs["right_flank_loop"]
+            flank += self.alpha_flank * log_probs["left_flank_loop"]
+            flank += self.alpha_flank * tf.math.log(probs["end_to_right_flank"])
+            flank += self.alpha_flank * tf.math.log(flank_init_prob[i])
+            flank_prior.append(flank)
             #uni-hit
-            hit_prior += self.alpha_single * tf.math.log(probs["end_to_right_flank"] + probs["end_to_terminal"])
+            hit_prior.append( self.alpha_single * tf.math.log(probs["end_to_right_flank"] + probs["end_to_terminal"]) )
             #uniform entry/exit prior
             btm = probs["begin_to_match"] / (1- probs["match_to_delete"][0])
             enex = tf.expand_dims(btm, 1) * tf.expand_dims(probs["match_to_end"], 0)
             enex = tf.linalg.band_part(enex, 0, -1)
             enex = tf.math.log(1 - enex) 
-            enex_prior += self.alpha_frag * (tf.reduce_sum(enex) - enex[0, -1])
+            enex_prior.append( self.alpha_frag * (tf.reduce_sum(enex) - enex[0, -1]) )
         prior_val = {
             "match_prior" : match_dirichlet,
             "insert_prior" : insert_dirichlet,
@@ -147,8 +153,7 @@ class ProfileHMMTransitionPrior():
             "flank_prior" : flank_prior,
             "hit_prior" : hit_prior,
             "enex_prior" : enex_prior}
-        num_models = tf.constant(len(probs_list), dtype=probs_list[0]["match_to_match"].dtype)
-        prior_val = { name : val/num_models for name,val in prior_val.items() }
+        prior_val = {k : tf.stack(v) for k,v in prior_val.items()}
         return prior_val
     
     def __repr__(self):
