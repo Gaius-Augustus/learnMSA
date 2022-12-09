@@ -217,6 +217,8 @@ class TestMsaHmmCell(unittest.TestCase):
         hmm_cell.build(seq.shape)
         hmm_cell.recurrent_init()
         forward, loglik = hmm_cell.get_initial_state(batch_size=1)
+        forward = np.reshape(forward, (2, -1, hmm_cell.max_num_states))
+        loglik = np.reshape(loglik, (2, -1, 1))
         ref_forward_scores = np.array([[[0.5, 0.3, 0.09, 
                                          0.055, 0.054, 0, 
                                          0, 0, 0.0002, 
@@ -254,6 +256,8 @@ class TestMsaHmmCell(unittest.TestCase):
         for i in range(1,3):
             _, (forward, loglik) = hmm_cell(np.repeat(seq[np.newaxis,:,i-1], len(length), axis=0), 
                                             (forward, loglik))
+            forward = np.reshape(forward, (2, -1, hmm_cell.max_num_states))
+            loglik = np.reshape(loglik, (2, -1, 1))
             for j in range(2):
                 ref = ref_forward_scores[j:(j+1), i:(i+1)]
                 np.testing.assert_almost_equal(forward[j:(j+1)], ref / np.sum(ref), decimal=4)
@@ -325,15 +329,15 @@ class TestMSAHMM(unittest.TestCase):
         sequences = tf.one_hot(sequences, len(msa_hmm.fasta.alphabet))
         self.assertEqual(sequences.shape, (1,2,5,len(msa_hmm.fasta.alphabet)))
         forward, loglik = hmm_cell.get_initial_state(batch_size=2)
-        self.assertEqual(loglik[0,0], 0)
+        self.assertEqual(loglik[0], 0)
         #next match state should always yield highest probability
         for i in range(length):
             _, (forward, loglik) = hmm_cell(sequences[:,:,i], (forward, loglik))
-            self.assertEqual(np.argmax(forward[0,0]), i+1)
+            self.assertEqual(np.argmax(forward[0]), i+1)
         last_loglik = loglik
         #check correct end in match state
         _, (forward, loglik) = hmm_cell(sequences[:,:,4], (forward, loglik))
-        self.assertEqual(np.argmax(forward[0,0]), 2*length+2)
+        self.assertEqual(np.argmax(forward[0]), 2*length+2)
         
         hmm_cell.recurrent_init()
         filename = os.path.dirname(__file__)+"/data/length_diff.fa"
@@ -344,11 +348,11 @@ class TestMSAHMM(unittest.TestCase):
         forward, loglik = hmm_cell.get_initial_state(batch_size=2)
         for i in range(length):
             _, (forward, loglik) = hmm_cell(sequences[:,:,i], (forward, loglik))
-            self.assertEqual(np.argmax(forward[0,0]), i+1)
-            self.assertEqual(np.argmax(forward[0,1]), i+1)
+            self.assertEqual(np.argmax(forward[0]), i+1)
+            self.assertEqual(np.argmax(forward[1]), i+1)
         _, (forward, loglik) = hmm_cell(sequences[:,:,length], (forward, loglik))
-        self.assertEqual(np.argmax(forward[0,0]), 2*length+2)
-        self.assertEqual(np.argmax(forward[0,1]), 2*length)
+        self.assertEqual(np.argmax(forward[0]), 2*length+2)
+        self.assertEqual(np.argmax(forward[1]), 2*length)
         for i in range(4):
             old_loglik = loglik
             _, (forward, loglik) = hmm_cell(sequences[:,:,length+1+i], (forward, loglik))
@@ -356,11 +360,11 @@ class TestMSAHMM(unittest.TestCase):
             #the first end symbol in each sequence affects the likelihood, but this is the
             #same constant for all sequences in the batch
             #further padding does not affect the likelihood
-            self.assertEqual(old_loglik[0,0], loglik[0,0])
+            self.assertEqual(old_loglik[0], loglik[0])
             #the second sequence has the motif of the first seq. repeated twice
             #check whether the model loops correctly 
             #looping must yield larger probabilities than using the right flank state
-            self.assertEqual(np.argmax(forward[0,1]), i+1)
+            self.assertEqual(np.argmax(forward[1]), i+1)
             
             
     def test_viterbi(self):
@@ -836,6 +840,8 @@ class TestAncProbs(unittest.TestCase):
             anc_probs_layer = msa_hmm.train.make_anc_probs_layer(n, case["config"])
             self.assert_anc_probs_layer(anc_probs_layer, case["config"])
             anc_prob_seqs = anc_probs_layer(sequences, np.arange(n)[np.newaxis, :]).numpy()
+            shape = (case["config"]["num_models"], n, sequences.shape[2], case["config"]["num_rate_matrices"], 26)
+            anc_prob_seqs = np.reshape(anc_prob_seqs, shape)
             if "expected_anc_probs" in case:
                 self.assert_anc_probs(anc_prob_seqs, case["expected_freq"], case["expected_anc_probs"])
             else:
@@ -867,7 +873,9 @@ class TestAncProbs(unittest.TestCase):
                                     build="lazy")
             self.assert_anc_probs_layer(msa.encoder_model.layers[-1], case["config"])
             for x,_ in ds:
-                 anc_prob_seqs = msa.encoder_model(x).numpy()[:,:,:-1]
+                anc_prob_seqs = msa.encoder_model(x).numpy()[:,:,:-1]
+                shape = (case["config"]["num_models"], n, sequences.shape[2], case["config"]["num_rate_matrices"], 26)
+                anc_prob_seqs = np.reshape(anc_prob_seqs, shape)
             if "expected_anc_probs" in case:
                 self.assert_anc_probs(anc_prob_seqs,  case["expected_freq"], case["expected_anc_probs"])
             else:
@@ -884,6 +892,8 @@ class TestAncProbs(unittest.TestCase):
         config["transposed"] = True
         anc_probs_layer_transposed = msa_hmm.train.make_anc_probs_layer(n, config)
         anc_prob_seqs = anc_probs_layer_transposed(sequences, np.arange(n)[np.newaxis, :]).numpy()
+        shape = (config["num_models"], n, sequences.shape[2], config["num_rate_matrices"], 26)
+        anc_prob_seqs = np.reshape(anc_prob_seqs, shape)
         anc_prob_seqs = tf.cast(anc_prob_seqs, B.dtype)
         anc_prob_B = anc_probs_layer(B[tf.newaxis,tf.newaxis,:,:20], [[0]])
         anc_prob_B = tf.squeeze(anc_prob_B)
@@ -1227,11 +1237,11 @@ class TestAlignment(unittest.TestCase):
         alignment = msa_hmm.align.fit_and_align(fasta_file, 
                                                 config=config,
                                                 subset=ref_subset, 
-                                                verbose=False)[0]
+                                                verbose=False)
         #some friendly thresholds to check if the alignments does make sense at all
         self.assertTrue(alignment.loglik > -70)
-        self.assertTrue(alignment.msa_hmm_layer.cell.length > 25)
-        alignment.to_file(os.path.dirname(__file__)+"/data/egf.out.fasta")
+        self.assertTrue(alignment.msa_hmm_layer.cell.length[0] > 25)
+        alignment.to_file(os.path.dirname(__file__)+"/data/egf.out.fasta", 0)
         pred_fasta_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/egf.out.fasta")
         p,r = pred_fasta_file.precision_recall(ref_file)
         tc = pred_fasta_file.tc_score(ref_file)

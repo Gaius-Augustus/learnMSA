@@ -137,9 +137,10 @@ class ProfileHMMTransitionPrior():
             flank += self.alpha_flank * log_probs["left_flank_loop"]
             flank += self.alpha_flank * tf.math.log(probs["end_to_right_flank"])
             flank += self.alpha_flank * tf.math.log(flank_init_prob[i])
-            flank_prior.append(flank)
+            flank_prior.append(tf.squeeze(flank))
             #uni-hit
-            hit_prior.append( self.alpha_single * tf.math.log(probs["end_to_right_flank"] + probs["end_to_terminal"]) )
+            hit = self.alpha_single * tf.math.log(probs["end_to_right_flank"] + probs["end_to_terminal"]) 
+            hit_prior.append(tf.squeeze(hit))
             #uniform entry/exit prior
             btm = probs["begin_to_match"] / (1- probs["match_to_delete"][0])
             enex = tf.expand_dims(btm, 1) * tf.expand_dims(probs["match_to_end"], 0)

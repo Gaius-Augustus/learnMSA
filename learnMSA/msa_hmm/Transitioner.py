@@ -321,8 +321,8 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
     
     def duplicate(self):
         return ProfileHMMTransitioner(
-                transition_init = self.transition_init,
-                flank_init = self.flank_init,
+                transition_init = self.transition_init.copy(),
+                flank_init = self.flank_init.copy(),
                 prior = self.prior,
                 frozen_kernels = self.frozen_kernels,
                 dtype = self.dtype) 

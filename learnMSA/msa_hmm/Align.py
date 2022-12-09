@@ -66,6 +66,8 @@ def fit_and_align(fasta_file,
                                model=model,
                                build="lazy" if last_iteration else "eager")
         loglik, prior = compute_loglik(alignment)
+        alignment.loglik = loglik 
+        alignment.prior = prior
         if verbose:
             print("Fitted models with MAP estimates = ", 
                   ",".join("%.4f" % (l + p) for l,p in zip(loglik, prior)))
@@ -74,6 +76,9 @@ def fit_and_align(fasta_file,
         if i == 0: # remember the initializers used in the first iteration
             emission_init_0, transition_init_0, flank_init_0 = _get_initializers(alignment)
         surgery_converged = True
+        #duplicate the previous emitters and transitioner and replace their initializers later
+        config["emitter"] = [em.duplicate() for em in alignment.msa_hmm_layer.cell.emitter]
+        config["transitioner"] = alignment.msa_hmm_layer.cell.transitioner.duplicate()
         for i in range(config["num_models"]):
             pos_expand, expansion_lens, pos_discard = get_discard_or_expand_positions(alignment, 
                                                                                       i,
@@ -94,19 +99,12 @@ def fit_and_align(fasta_file,
                                                                         [e[i] for e in emission_init_0], 
                                                                         transition_init_0[i], 
                                                                         flank_init_0[i])
-            config["emitter"] = []
-            for em, e_init in zip(alignment.msa_hmm_layer.cell.emitter, emission_init):
-                em_dup = em.duplicate()
-                em_dup.emission_init = tf.constant_initializer(e_init) 
-                em_dup.insertion_init = tf.constant_initializer(em.insertion_kernel.numpy())
-                config["emitter"].append(em_dup)
-
-            trans_dup = alignment.msa_hmm_layer.cell.transitioner.duplicate()
-            trans_dup.transition_init = {key : tf.constant_initializer(t) 
+            for em, old_em, e_init in zip(config["emitter"], alignment.msa_hmm_layer.cell.emitter, emission_init):
+                em.emission_init[i] = tf.constant_initializer(e_init) 
+                em.insertion_init[i] = tf.constant_initializer(old_em.insertion_kernel[i].numpy())
+            config["transitioner"].transition_init[i] = {key : tf.constant_initializer(t) 
                                          for key,t in transition_init.items()}
-            trans_dup.flank_init = tf.constant_initializer(flank_init)
-            config["transitioner"] = trans_dup
-
+            config["transitioner"].flank_init[i] = tf.constant_initializer(flank_init)
             model_lengths[i] = emission_init[0].shape[0]
             if model_lengths[i] < 3: 
                 raise SystemExit("A problem occured during model surgery: A pHMM is too short (length <= 2).") 
@@ -166,15 +164,15 @@ def run_learnMSA(train_filename,
         print("Try reducing the batch size (-b). The current batch size was: "+str(config["batch_size"])+".")
         sys.exit(e.error_code)
         
-    best_model = np.argmax(alignment.loglik + alignment.prior)
+    alignment.best_model = np.argmax(alignment.loglik + alignment.prior)
     if verbose:
         likelihoods = ["%.4f" % ll + " (%.4f)" % p for ll,p in zip(alignment.loglik, alignment.prior)]
         print("Computed alignments with likelihoods (priors): ", likelihoods)
-        print("Best model: ", best_model)
+        print("Best model: ", alignment.best_model)
         
     Path(os.path.dirname(out_filename)).mkdir(parents=True, exist_ok=True)
     t = time.time()
-    alignment.to_file(best_model, out_filename)
+    alignment.to_file(out_filename, alignment.best_model)
     
     if verbose:
         print("time for generating output:", "%.4f" % (time.time()-t))
@@ -823,6 +821,7 @@ def compute_loglik(alignment, max_ll_estimate = 200000):
                             shuffle=False)
     loglik = np.zeros((alignment.msa_hmm_layer.cell.num_models))
     for x, _ in ds:
+        ll = alignment.model(x)
         loglik += np.sum(alignment.model(x), axis=1)
     loglik /= ll_subset.size
     prior = alignment.msa_hmm_layer.cell.get_prior_log_density().numpy()/alignment.fasta_file.num_seq

@@ -10,16 +10,16 @@ import itertools
 import seaborn as sns
 
 
-def make_logo(alignment, ax):
+def make_logo(alignment, model_index, ax):
     hmm_cell = alignment.msa_hmm_layer.cell
+    length = hmm_cell.length[model_index]
     
     logomaker_alphabet = ["A", "C", "D", "E", "F", "G", "H", "I", "K", "L", "M", "N", "P", "Q", "R", "S", "T", "V", "W", "Y"]
     logomaker_perm = np.array([msa_hmm.fasta.alphabet.index(aa) for aa in logomaker_alphabet], dtype=int)
 
     #reduce to std AA alphabet 
-    emissions = hmm_cell.emitter[0].make_B().numpy()[1:hmm_cell.length+1,:20][:,logomaker_perm]
-    length = alignment.msa_hmm_layer.cell.length
-    background = alignment.msa_hmm_layer.cell.emitter[0].emission_init((length,25), dtype=alignment.msa_hmm_layer.dtype)[0, :20]
+    emissions = hmm_cell.emitter[0].make_B().numpy()[model_index, 1:length+1,:20][:,logomaker_perm]
+    background = hmm_cell.emitter[0].emission_init[model_index]((length,25), dtype=alignment.msa_hmm_layer.dtype)[0, :20]
     information_content = tf.keras.losses.KLDivergence(reduction=tf.keras.losses.Reduction.NONE)(
                                                          emissions,
                                                          np.expand_dims(background, 0))
@@ -28,7 +28,7 @@ def make_logo(alignment, ax):
     information_content_df = pd.DataFrame(information_content * emissions, 
                                           columns=logomaker_alphabet)
 
-    ax.figure.set_size_inches(hmm_cell.length/2, 6)
+    ax.figure.set_size_inches(length/2, 6)
 
     # create Logo object
     logo = logomaker.Logo(information_content_df,
@@ -45,6 +45,7 @@ def make_logo(alignment, ax):
 
     
 def plot_hmm(alignment, 
+             model_index,
              ax,
                edge_show_threshold=1e-2, #grey out edges below this threshold (label_probs=False requires adjustment)
                num_aa=3, #print this many of the aminoacids with highest emission probability per match state
@@ -56,10 +57,11 @@ def plot_hmm(alignment,
                inactive_transition_color="#E0E0E0"
                 ):
     hmm_cell = alignment.msa_hmm_layer.cell
+    length = hmm_cell.length[model_index]
     
     G = nx.DiGraph()
-    indices_dict = hmm_cell.transitioner.sparse_transition_indices_explicit
-    probs = hmm_cell.transitioner.make_probs()
+    indices_dict = hmm_cell.transitioner.sparse_transition_indices_explicit[model_index]
+    probs = hmm_cell.transitioner.make_probs()[model_index]
     for transition_type, indices in indices_dict.items():
         if transition_type == "begin_to_match" or transition_type == "match_to_end":
             continue
@@ -69,23 +71,23 @@ def plot_hmm(alignment,
             G.add_edge(u, v, color=c, label=transition_type)
     pos = {}
     pos[0] = (-spacing*2, spacing) # left flanking state
-    for i in range(1, hmm_cell.length+1): #match-states
+    for i in range(1, length+1): #match-states
         pos[i] = (spacing*i, spacing/2)
-    for i in range(hmm_cell.length-1): #insertions
-        pos[hmm_cell.length+1+i] = (1.75*spacing + spacing*i, -spacing/2)
-    pos[2*hmm_cell.length] = (spacing*(hmm_cell.length+2) / 2, 1.5*spacing) #unannotated-state
-    pos[2*hmm_cell.length+1] = (spacing*(hmm_cell.length+6), spacing) #right flank state
-    pos[2*hmm_cell.length+2] = (spacing*(hmm_cell.length+7), spacing) #terminal state
-    pos[2*hmm_cell.length+3] = (-spacing*1.5, spacing*1.5) #begin state
-    pos[2*hmm_cell.length+4] = (spacing*(hmm_cell.length+5), spacing*1.5) #end state
-    for i in range(hmm_cell.length): #deletions
-        pos[2*hmm_cell.length+5+i] = (spacing*(i+0.9), -1.5*spacing)
+    for i in range(length-1): #insertions
+        pos[length+1+i] = (1.75*spacing + spacing*i, -spacing/2)
+    pos[2*length] = (spacing*(length+2) / 2, 1.5*spacing) #unannotated-state
+    pos[2*length+1] = (spacing*(length+6), spacing) #right flank state
+    pos[2*length+2] = (spacing*(length+7), spacing) #terminal state
+    pos[2*length+3] = (-spacing*1.5, spacing*1.5) #begin state
+    pos[2*length+4] = (spacing*(length+5), spacing*1.5) #end state
+    for i in range(length): #deletions
+        pos[2*length+5+i] = (spacing*(i+0.9), -1.5*spacing)
 
     edge_labels = {}
     if label_probs:
         values = probs
     else:
-        values = {part_name : kernel.numpy() for part_name, kernel in hmm_cell.transitioner.transition_kernel.items()}
+        values = {part_name : kernel.numpy() for part_name, kernel in hmm_cell.transitioner.transition_kernel[model_index].items()}
     for transition_type, indices in indices_dict.items():
         if transition_type == "begin_to_match" or transition_type == "match_to_end":
             continue
@@ -93,9 +95,9 @@ def plot_hmm(alignment,
                                 for edge,p,v in zip(indices, probs[transition_type], values[transition_type]) 
                                     if p > edge_show_threshold})
 
-    B = hmm_cell.emitter[0].make_B().numpy()
+    B = hmm_cell.emitter[0].make_B().numpy()[model_index]
     node_labels = {}
-    for i in range(hmm_cell.length):
+    for i in range(length):
         sort = np.argsort(-B[i+1, :25])
         label = str(i+1)+"\n"
         for j in range(num_aa):
@@ -104,9 +106,9 @@ def plot_hmm(alignment,
         label += "ex="+"%.2f" % probs["match_to_end"][i]+"\n"
         node_labels[i+1] = label
 
-    ax.figure.set_size_inches(hmm_cell.length, 7)
+    ax.figure.set_size_inches(length, 7)
     
-    p = tf.math.sigmoid(hmm_cell.transitioner.flank_init_kernel)
+    p = tf.math.sigmoid(hmm_cell.transitioner.flank_init_kernel[model_index])
     #ax.text(-4*spacing, 0, "Init: \n (%.2f, %.2f)" % (p, 1-p), fontsize=12)
     ax.text(-2.5*spacing, -spacing/2, "Insertions", fontsize=20)
     ax.text(-2.5*spacing, -1.5*spacing, "Deletions", fontsize=20)
@@ -127,47 +129,47 @@ def plot_hmm(alignment,
     nx.draw_networkx_labels(G, label_pos, labels=node_labels, font_size=8)
     
     for k, (seq_i, path_color) in enumerate(zip(seq_indices, path_colors)):
-        batch_gen = msa_hmm.train.DefaultBatchGenerator(alignment.fasta_file)
+        batch_gen = msa_hmm.train.DefaultBatchGenerator(alignment.fasta_file, alignment.msa_hmm_layer.cell.num_models)
         ds = msa_hmm.train.make_dataset(np.array([seq_i]), batch_gen, batch_size=1, shuffle=False)
         for x, _ in ds:
             sequence = alignment.encoder_model(x)  
-        hidden_seq = msa_hmm.align.viterbi(sequence, hmm_cell)
+        hidden_seq = msa_hmm.viterbi.viterbi(sequence, hmm_cell)[model_index]
         hidden_seq = list(hidden_seq[0])
         for i in range(len(hidden_seq)):
             #find silent path parts along delete states
             #match to match
             if (i < len(hidden_seq)-1 and
                 hidden_seq[i] > 0 and 
-                hidden_seq[i] < hmm_cell.length+1 and
+                hidden_seq[i] < length+1 and
                 hidden_seq[i+1] > 0 and 
-                hidden_seq[i+1] < hmm_cell.length+1):
+                hidden_seq[i+1] < length+1):
                 for j in range(hidden_seq[i+1]-1-hidden_seq[i]):
-                    hidden_seq.insert(i+1+j, 2*hmm_cell.length+5+hidden_seq[i]+j)
+                    hidden_seq.insert(i+1+j, 2*length+5+hidden_seq[i]+j)
             #find unannotated segment to match transitions
             if (i < len(hidden_seq)-1 and
                hidden_seq[i+1] > 0 and 
-               hidden_seq[i+1] < hmm_cell.length+1 and
-               hidden_seq[i] == 2*hmm_cell.length):
-                hidden_seq.insert(i+1, 2*hmm_cell.length+3)
+               hidden_seq[i+1] < length+1 and
+               hidden_seq[i] == 2*length):
+                hidden_seq.insert(i+1, 2*length+3)
             #find match to unannotated segment transitions
             if (i < len(hidden_seq)-1 and
                hidden_seq[i] > 0 and 
-               hidden_seq[i] < hmm_cell.length+1 and
-               hidden_seq[i+1] == 2*hmm_cell.length):
-                hidden_seq.insert(i+1, 2*hmm_cell.length+4)
+               hidden_seq[i] < length+1 and
+               hidden_seq[i+1] == 2*length):
+                hidden_seq.insert(i+1, 2*length+4)
                 
         i = 0
         while hidden_seq[i]==0:
             i+=1
-        hidden_seq.insert(i, 2*hmm_cell.length+3)
+        hidden_seq.insert(i, 2*length+3)
         i = 1
-        while hidden_seq[-i]>=2*hmm_cell.length+1:
+        while hidden_seq[-i]>=2*length+1:
             i+=1
-        hidden_seq.insert(-i+1, 2*hmm_cell.length+4)
+        hidden_seq.insert(-i+1, 2*length+4)
 
         edgelist = list(zip(hidden_seq[:-1], hidden_seq[1:]))
         edge_labels_path = {e : l for e,l in edge_labels.items() if e in edgelist}
-        edge_pos = {n : (x+k*spacing*0.05,y+k*spacing*0.1) if n > hmm_cell.length and n < 2*hmm_cell.length else (x+k*spacing*0.05,y+k*spacing*0.05) for n,(x,y) in pos.items()}
+        edge_pos = {n : (x+k*spacing*0.05,y+k*spacing*0.1) if n > length and n < 2*length else (x+k*spacing*0.05,y+k*spacing*0.05) for n,(x,y) in pos.items()}
         nx.draw_networkx_edges(G, edge_pos, 
                                 edgelist=edgelist, 
                                 edge_color = path_color, 
@@ -188,6 +190,7 @@ def plot_hmm(alignment,
     
     
 def plot_anc_probs(alignment, 
+                   model_index,
                    seqs=[0,1,2], 
                    pos=list(range(6)), 
                    rescale=True, 
@@ -198,10 +201,12 @@ def plot_anc_probs(alignment,
                                     batch_size=n, 
                                     shuffle=False)
     for x,_ in ds:
-        ancs = alignment.encoder_model(x).numpy()
+        ancs = alignment.encoder_model(x).numpy()[model_index]
     i = [l.name for l in alignment.encoder_model.layers].index("AncProbsLayer")
     anc_probs_layer = alignment.encoder_model.layers[i]
-    tau = anc_probs_layer.make_tau(alignment.indices)
+    indices = np.stack([alignment.indices]*alignment.msa_hmm_layer.cell.num_models)
+    indices = np.expand_dims(indices, -1)
+    tau = anc_probs_layer.make_tau(indices)[model_index]
     if rescale:
         ancs /= np.sum(ancs, -1, keepdims=True)
     f, axes = plt.subplots(n, m, sharey=True)
@@ -215,10 +220,11 @@ def plot_anc_probs(alignment,
     
     
 def plot_rate_matrices(alignment,
+                       model_index,
                     title="normalized rate matrix (1 time unit = 1 expected mutation per site)"):
     i = [l.name for l in alignment.encoder_model.layers].index("AncProbsLayer")
     anc_probs_layer = alignment.encoder_model.layers[i]
-    Q = anc_probs_layer.make_Q()
+    Q = anc_probs_layer.make_Q()[model_index]
     k = Q.shape[0]
     f, axes = plt.subplots(1, k, sharey=True)
     f.set_size_inches(10*k, 10.5)

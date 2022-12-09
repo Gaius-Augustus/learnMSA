@@ -210,7 +210,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
             inputs: Input sequences. Shape: (num_model, b, L) or (num_models, b, L, s)
             rate_indices: Indices that map each input sequences to an evolutionary times. Shape: (num_model, b)
         Returns:
-            Ancestral probabilities. Shape: (num_model, b, L, num_matrices, s)
+            Ancestral probabilities. Shape: (num_model, b, L, num_matrices*s)
         """
         input_indices = len(inputs.shape) == 3 
         if input_indices:

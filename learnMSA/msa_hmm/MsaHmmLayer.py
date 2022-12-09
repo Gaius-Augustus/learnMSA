@@ -26,10 +26,9 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         initial_state = self.cell.get_initial_state(batch_size=tf.shape(inputs)[1])
         inputs = tf.cast(inputs, self.dtype)
         inputs = tf.reshape(inputs, (-1, tf.shape(inputs)[-2], tf.shape(inputs)[-1]))
-        _, _, loglik = self.rnn(inputs, 
-                                initial_state=initial_state, 
-                                training=training)
-        loglik_mean = tf.reduce_mean(loglik) 
+        _, _, loglik = self.rnn(inputs, initial_state=initial_state, training=training)
+        loglik = tf.reshape(loglik, (self.cell.num_models, -1))
+        loglik_mean = tf.reduce_mean(loglik) #mean over both models and batches
         if self.use_prior:
             prior = self.cell.get_prior_log_density(add_metrics=False)
             prior = tf.reduce_mean(prior)

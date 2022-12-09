@@ -34,8 +34,8 @@ class MsaHmmCell(tf.keras.layers.Layer):
         self.num_states_implicit = [num_states + length + 2 
                                     for num_states, length in zip(self.num_states, self.length)]
         self.max_num_states = max(self.num_states)
-        self.state_size = (tf.TensorShape([None, self.max_num_states]), tf.TensorShape([None]))
-        self.output_size = tf.TensorShape([None, self.max_num_states])
+        self.state_size = (tf.TensorShape([self.max_num_states]), tf.TensorShape([1]))
+        self.output_size = tf.TensorShape([self.max_num_states])
         for em in self.emitter:
             em.cell_init(self)
         self.transitioner.cell_init(self)
@@ -75,6 +75,8 @@ class MsaHmmCell(tf.keras.layers.Layer):
         """ Computes one recurrent step of the Forward DP.
         """
         old_forward, old_loglik = states
+        old_forward = tf.reshape(old_forward, (self.num_models, -1, self.max_num_states))
+        old_loglik = tf.reshape(old_loglik, (self.num_models, -1, 1))
         inputs = tf.reshape(inputs, (self.num_models, -1, self.dim))
         E = self.emission_probs(inputs)
         if self.init:
@@ -86,13 +88,16 @@ class MsaHmmCell(tf.keras.layers.Layer):
         S = tf.reduce_sum(forward, axis=-1, keepdims=True, name="loglik")
         loglik = old_loglik + tf.math.log(S) 
         forward = forward / S 
+        loglik = tf.reshape(loglik, (-1, 1))
+        forward = tf.reshape(forward, (-1, self.max_num_states))
         new_state = [forward, loglik]
         return forward, new_state
 
     def get_initial_state(self, inputs=None, batch_size=None, _dtype=None):
         init_dist = tf.repeat(self.make_initial_distribution(), repeats=batch_size, axis=0)
         init_dist = tf.transpose(init_dist, (1,0,2))
-        loglik = tf.zeros((self.num_models, batch_size, 1), dtype=self.dtype)
+        init_dist = tf.reshape(init_dist, (-1, self.max_num_states))
+        loglik = tf.zeros((self.num_models*batch_size, 1), dtype=self.dtype)
         S = [init_dist, loglik]
         return S
 

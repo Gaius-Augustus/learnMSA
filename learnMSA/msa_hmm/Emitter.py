@@ -89,8 +89,8 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
     
     def duplicate(self):
         return ProfileHMMEmitter(
-                 emission_init = self.emission_init,
-                 insertion_init = self.insertion_init,
+                 emission_init = self.emission_init.copy(),
+                 insertion_init = self.insertion_init.copy(),
                  prior = self.prior,
                  frozen_insertions = self.frozen_insertions,
                  dtype = self.dtype) 
