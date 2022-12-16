@@ -15,7 +15,7 @@ def get_adaptive_batch_size(model_lengths, max_seq_len):
     model_length = max(model_lengths)
     if max_seq_len * model_length < 200 * 200:
         return 512
-    if max_seq_len * model_length < 500 * 500:
+    if max_seq_len * model_length < 350 * 350:
         return 256
     else:
         return 128
@@ -39,7 +39,7 @@ def make_default(default_num_models = 5):
         "surgery_quantile" : 0.5,
         "min_surgery_seqs" : 1e4,
         "len_mul" : 0.8,
-        "batch_size" : get_adaptive_batch_size,
+        "batch_size" : "adaptive",
         "learning_rate" : 0.1,
         "epochs" : [10, 2, 10],
         "use_prior" : True,

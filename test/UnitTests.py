@@ -78,7 +78,7 @@ class TestMsaHmmCell(unittest.TestCase):
                                                 insertion_init = insertion_kernel_initializer)
         transitioner = msa_hmm.trans.ProfileHMMTransitioner(transition_init = transition_kernel_initializers)
         hmm_cell = msa_hmm.MsaHmmCell(length, emitter, transitioner)
-        hmm_cell.build((None,3))
+        hmm_cell.build((None,None,3))
         A = hmm_cell.transitioner.make_A()
         # [LEFT_FLANK, MATCH x length, INSERT x length-1, UNANNOTATED_SEGMENT, RIGHT_FLANK, TERMINAL]
         A_ref = np.zeros((hmm_cell.max_num_states, hmm_cell.max_num_states))
@@ -146,7 +146,7 @@ class TestMsaHmmCell(unittest.TestCase):
                                                 insertion_init = insertion_kernel_initializer)
         transitioner = msa_hmm.trans.ProfileHMMTransitioner(transition_init = transition_kernel_initializers)
         hmm_cell = msa_hmm.MsaHmmCell(length, emitter, transitioner)
-        hmm_cell.build((None,3))
+        hmm_cell.build((None,None,3))
         A = hmm_cell.transitioner.make_A()
         # [LEFT_FLANK, MATCH x length, INSERT x length-1, UNANNOTATED_SEGMENT, RIGHT_FLANK, TERMINAL]
         A_ref = np.zeros((hmm_cell.max_num_states, hmm_cell.max_num_states))
@@ -290,7 +290,7 @@ class TestMSAHMM(unittest.TestCase):
     def test_matrices(self):
         length=32
         hmm_cell = msa_hmm.MsaHmmCell(length=length)
-        hmm_cell.build((None,26))
+        hmm_cell.build((None,None,26))
         A = hmm_cell.transitioner.make_A()
         A_sum = np.sum(A, -1)
         for a in A_sum:
@@ -321,7 +321,7 @@ class TestMSAHMM(unittest.TestCase):
         transitioner = msa_hmm.trans.ProfileHMMTransitioner(transition_init = transition_init, 
                                                             flank_init = tf.keras.initializers.Zeros())
         hmm_cell = msa_hmm.MsaHmmCell(length, emitter, transitioner)
-        hmm_cell.build((None, 26))
+        hmm_cell.build((None,None, 26))
         hmm_cell.recurrent_init()
         filename = os.path.dirname(__file__)+"/data/simple.fa"
         fasta_file = msa_hmm.fasta.Fasta(filename)
@@ -388,7 +388,8 @@ class TestMSAHMM(unittest.TestCase):
         transitioner = msa_hmm.trans.ProfileHMMTransitioner(transition_init = transition_init, 
                                                             flank_init = [tf.keras.initializers.Zeros()]*2)
         hmm_cell = msa_hmm.MsaHmmCell(length, emitter, transitioner)
-        hmm_cell.build((None, 26))
+        hmm_cell.build((None, None, 26))
+        hmm_cell.recurrent_init()
         fasta_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/felix.fa")
         ref_seqs = np.array([#model 1
                              [[1,2,3,4,5,12,12,12,12,12,12,12,12,12,12],
@@ -409,7 +410,7 @@ class TestMSAHMM(unittest.TestCase):
                              [0,1,2,6,6,1,6,1,2,3,7,8,8,8,8],
                              [0,0,0,1,2,3,6,6,1,2,3,8,8,8,8]]])
         sequences = get_all_seqs(fasta_file, 2)
-        state_seqs_max_lik = msa_hmm.viterbi.viterbi(sequences, hmm_cell)
+        state_seqs_max_lik = msa_hmm.viterbi.viterbi(sequences, hmm_cell).numpy()
         # states : [LEFT_FLANK, MATCH x length, INSERT x length-1, UNANNOTATED_SEGMENT, RIGHT_FLANK, END]
         self.assert_vec(state_seqs_max_lik, ref_seqs)
         #this produces a result identical to above, but runs viterbi batch wise 
@@ -419,14 +420,14 @@ class TestMSAHMM(unittest.TestCase):
                                                                    batch_generator,
                                                                    np.arange(fasta_file.num_seq),
                                                                    batch_size=2,
-                                                                   msa_hmm_cell=hmm_cell)
+                                                                   hmm_cell=hmm_cell)
         self.assert_vec(state_seqs_max_lik2, ref_seqs)
         indices = np.array([0,4,5])
         state_seqs_max_lik3 = msa_hmm.viterbi.get_state_seqs_max_lik(fasta_file,
                                                                    batch_generator,
                                                                    indices, #try a subset
                                                                    batch_size=2,
-                                                                   msa_hmm_cell=hmm_cell)
+                                                                   hmm_cell=hmm_cell)
         max_len = np.amax(fasta_file.seq_lens[indices])+1
         for i,j in enumerate(indices):
             self.assert_vec(state_seqs_max_lik3[:,i], ref_seqs[:,j, :max_len])
@@ -1211,12 +1212,12 @@ class TestAlignment(unittest.TestCase):
                                                       effective_num_seq=8,
                                                       model_lengths=[length], 
                                                       config=config)
-    
         #subalignment
         filename = os.path.dirname(__file__)+"/data/felix.fa"
         fasta_file = msa_hmm.fasta.Fasta(filename)
         subset = np.array([0,2,5])
         batch_gen = msa_hmm.train.DefaultBatchGenerator(fasta_file, 1)
+        #create alignment after building model
         subalignment = msa_hmm.Alignment(fasta_file, batch_gen, subset, 32, model)
         subalignment_strings = subalignment.to_string(0, add_block_sep=False)
         ref_subalignment = ["FE...LIX...", "FE...LIXbac", "FEabcLIX..."]

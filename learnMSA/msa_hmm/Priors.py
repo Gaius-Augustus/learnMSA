@@ -9,8 +9,9 @@ class AminoAcidPrior():
     Args:
         comp_count: The number of components in the mixture.
     """
-    def __init__(self, comp_count=1):
+    def __init__(self, comp_count=1, epsilon=1e-32):
         self.comp_count = comp_count
+        self.epsilon = epsilon
         
     def load(self, dtype):
         prior_path = os.path.dirname(__file__)+"/trained_prior/"
@@ -30,8 +31,9 @@ class AminoAcidPrior():
         k = tf.shape(B)[0]
         model_length = int((tf.shape(B)[1]-2)/2)
         s = tf.shape(B)[2]
-        B = B[:,1:model_length+1,:20]
-        B /= tf.reduce_sum(B, axis=-1, keepdims=True)
+        #add a small constant to avoid underflow and division by 0 in the next line after
+        B = B[:,1:model_length+1,:20] + self.epsilon 
+        B /= tf.reduce_sum(B, axis=-1, keepdims=True) 
         B = tf.reshape(B, (-1, 20))
         prior = self.emission_dirichlet_mix.log_pdf(B)
         prior = tf.reshape(prior, (k, model_length))
@@ -120,7 +122,7 @@ class ProfileHMMTransitionPrior():
             #match state transitions
             p_match = tf.stack([probs["match_to_match"],
                                 probs["match_to_insert"],
-                                probs["match_to_delete"][1:]], axis=-1)
+                                probs["match_to_delete"][1:]], axis=-1) + 1e-32
             p_match_sum = tf.reduce_sum(p_match, axis=-1, keepdims=True)
             match_dirichlet.append( tf.reduce_sum(self.match_dirichlet.log_pdf(p_match / p_match_sum)) )
             #insert state transitions
@@ -135,14 +137,14 @@ class ProfileHMMTransitionPrior():
             flank = self.alpha_flank * log_probs["unannotated_segment_loop"] #todo: handle as extra case?
             flank += self.alpha_flank * log_probs["right_flank_loop"]
             flank += self.alpha_flank * log_probs["left_flank_loop"]
-            flank += self.alpha_flank * tf.math.log(probs["end_to_right_flank"])
+            flank += self.alpha_flank * log_probs["end_to_right_flank"]
             flank += self.alpha_flank * tf.math.log(flank_init_prob[i])
             flank_prior.append(tf.squeeze(flank))
             #uni-hit
             hit = self.alpha_single * tf.math.log(probs["end_to_right_flank"] + probs["end_to_terminal"]) 
             hit_prior.append(tf.squeeze(hit))
             #uniform entry/exit prior
-            btm = probs["begin_to_match"] / (1- probs["match_to_delete"][0])
+            btm = probs["begin_to_match"] / (1- probs["match_to_delete"][0]) #rescale begin_to_match to sum to 1
             enex = tf.expand_dims(btm, 1) * tf.expand_dims(probs["match_to_end"], 0)
             enex = tf.linalg.band_part(enex, 0, -1)
             enex = tf.math.log(1 - enex) 

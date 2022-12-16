@@ -6,12 +6,14 @@ import learnMSA.msa_hmm.Fasta as fasta
 import learnMSA.msa_hmm.Training as train
 import learnMSA.msa_hmm.MsaHmmLayer as msa_hmm
 import learnMSA.msa_hmm.Viterbi as viterbi
-from learnMSA.msa_hmm.Configuration import as_str, assert_config
+from learnMSA.msa_hmm.Configuration import as_str, assert_config, get_adaptive_batch_size
 from pathlib import Path
 
 
  
-""" Aligns the sequences in a fasta file. 
+""" Trains k independent models on the sequences in a fasta file and returns k "lazy" alignments, where "lazy" means 
+    that decoding will only be carried out when the user wants to print the alignment or write it to a file. 
+    Decoding is usually expensive and typically it should only be done after a model selection step.
 Args: 
     fasta_file: A Fasta object.
     config: Configuration that can be used to control training and decoding (see msa_hmm.config.make_default).
@@ -35,14 +37,19 @@ def fit_and_align(fasta_file,
         _fasta_file_messages(fasta_file)
     n = fasta_file.num_seq
     if subset is None:
-        subset = np.arange(n)
+        subset = np.arange(fasta_file.num_seq)
     full_length_estimate = get_full_length_estimate(fasta_file, config) 
     model_lengths = get_initial_model_lengths(fasta_file, config)
     #model surgery
     last_iteration=config["max_surgery_runs"]==1
     for i in range(config["max_surgery_runs"]):
-        batch_size = config["batch_size"](model_lengths, fasta_file.max_len)
-        batch_size = min(batch_size, n)
+        if config["batch_size"] == "adaptive":
+            batch_size = get_adaptive_batch_size(model_lengths, fasta_file.max_len)
+        else:
+            batch_size = config["batch_size"]
+        #set the batch size to something smaller than the dataset size even though
+        #for low sequence numbers it would be feasible to train on all data at once
+        batch_size = min(batch_size, int(np.ceil(n*0.5)))
         if last_iteration:    
             train_indices = np.arange(n)
             decode_indices = subset
@@ -62,7 +69,7 @@ def fit_and_align(fasta_file,
         alignment = Alignment(fasta_file,
                                batch_generator,
                                decode_indices,
-                               batch_size=2*batch_size, 
+                               batch_size=batch_size, 
                                model=model,
                                build="lazy" if last_iteration else "eager")
         loglik, prior = compute_loglik(alignment)
@@ -79,9 +86,9 @@ def fit_and_align(fasta_file,
         #duplicate the previous emitters and transitioner and replace their initializers later
         config["emitter"] = [em.duplicate() for em in alignment.msa_hmm_layer.cell.emitter]
         config["transitioner"] = alignment.msa_hmm_layer.cell.transitioner.duplicate()
-        for i in range(config["num_models"]):
+        for k in range(config["num_models"]):
             pos_expand, expansion_lens, pos_discard = get_discard_or_expand_positions(alignment, 
-                                                                                      i,
+                                                                                      k,
                                                                                         del_t=config["surgery_del"], 
                                                                                         ins_t=config["surgery_ins"],
                                                                                         ins_long=100000, 
@@ -89,24 +96,24 @@ def fit_and_align(fasta_file,
                                                                                         match_prior_threshold=1)
             surgery_converged &= pos_expand.size == 0 and pos_discard.size == 0
             if verbose:
-                print(f"expansions {i}:", list(zip(pos_expand, expansion_lens)))
-                print(f"discards {i}:", pos_discard)
+                print(f"expansions model {k}:", list(zip(pos_expand, expansion_lens)))
+                print(f"discards model {k}:", pos_discard)
             transition_init, emission_init, flank_init = update_kernels(alignment, 
-                                                                        i,
+                                                                        k,
                                                                         pos_expand,
                                                                         expansion_lens, 
                                                                         pos_discard,
-                                                                        [e[i] for e in emission_init_0], 
-                                                                        transition_init_0[i], 
-                                                                        flank_init_0[i])
+                                                                        [e[k] for e in emission_init_0], 
+                                                                        transition_init_0[k], 
+                                                                        flank_init_0[k])
             for em, old_em, e_init in zip(config["emitter"], alignment.msa_hmm_layer.cell.emitter, emission_init):
-                em.emission_init[i] = tf.constant_initializer(e_init) 
-                em.insertion_init[i] = tf.constant_initializer(old_em.insertion_kernel[i].numpy())
-            config["transitioner"].transition_init[i] = {key : tf.constant_initializer(t) 
+                em.emission_init[k] = tf.constant_initializer(e_init) 
+                em.insertion_init[k] = tf.constant_initializer(old_em.insertion_kernel[k].numpy())
+            config["transitioner"].transition_init[k] = {key : tf.constant_initializer(t) 
                                          for key,t in transition_init.items()}
-            config["transitioner"].flank_init[i] = tf.constant_initializer(flank_init)
-            model_lengths[i] = emission_init[0].shape[0]
-            if model_lengths[i] < 3: 
+            config["transitioner"].flank_init[k] = tf.constant_initializer(flank_init)
+            model_lengths[k] = emission_init[0].shape[0]
+            if model_lengths[k] < 3: 
                 raise SystemExit("A problem occured during model surgery: A pHMM is too short (length <= 2).") 
         if "encoder_weight_extractor" in config:
             if verbose:
@@ -124,7 +131,8 @@ def run_learnMSA(train_filename,
                  model_generator=None,
                  batch_generator=None,
                  ref_filename="", 
-                 verbose=True):
+                 verbose=True, 
+                 select_best_for_comparison=True):
     """ Wraps fit_and_align and adds file parsing, verbosity, model selection, reference file comparison and an outfile file.
     Args: 
         train_filename: Path of a fasta file with the sequences. 
@@ -135,6 +143,7 @@ def run_learnMSA(train_filename,
         ref_filename: Optional filepath to a reference alignment. If given, the computed alignment is scored and 
                         the score is returned along with the alignment.
         verbose: If False, all output messages will be disabled.
+        select_best_for_comparison: If False, all trained models, not just the one with highest score, will be scored.
     Returns:
         An Alignment object.
     """
@@ -179,11 +188,20 @@ def run_learnMSA(train_filename,
         print("Wrote file", out_filename)
 
     if ref_filename != "":
-        out_file = fasta.Fasta(out_filename, aligned=True) 
-        _,sp = out_file.precision_recall(ref_fasta)
-        #tc = out_file.tc_score(ref_fasta)
-        if verbose:
-            print("SP score =", sp)
+        if select_best_for_comparison:
+            out_file = fasta.Fasta(out_filename, aligned=True) 
+            _,sp = out_file.precision_recall(ref_fasta)
+            #tc = out_file.tc_score(ref_fasta)
+            if verbose:
+                print("SP score =", sp)
+        else:
+            for i in range(alignment.msa_hmm_layer.cell.num_models):
+                tmp_file = "tmp.fasta"
+                alignment.to_file(tmp_file, i)
+                tmp_fasta = fasta.Fasta(tmp_file, aligned=True) 
+                _,sp = tmp_fasta.precision_recall(ref_fasta)
+                print(f"Model {i} SP score =", sp)
+                os.remove(tmp_file)
         return alignment, sp
     else:
         return alignment
@@ -400,12 +418,14 @@ class Alignment():
         self.metadata = {}
         if build=="eager":
             self._build_alignment(range(self.msa_hmm_layer.cell.num_models))
+        self.num_models = self.msa_hmm_layer.cell.num_models
             
             
     #computes an implicit alignment (without storing gaps)
     #eventually, an alignment with explicit gaps can be written 
     #in a memory friendly manner to file
     def _build_alignment(self, models):
+        self.msa_hmm_layer.cell.recurrent_init()
         state_seqs_max_lik = viterbi.get_state_seqs_max_lik(self.fasta_file,
                                                                     self.batch_generator,
                                                                     self.indices,
@@ -810,18 +830,22 @@ def update_kernels(alignment,
     
 
 def compute_loglik(alignment, max_ll_estimate = 200000):
-    #estimate the ll only on a subset, otherwise for millions of 
-    # sequences this step takes rather long for bvery little benefit
-    ll_subset = np.arange(alignment.fasta_file.num_seq)
-    np.random.shuffle(ll_subset)
-    ll_subset = ll_subset[:max_ll_estimate]
+    if alignment.fasta_file.num_seq > max_ll_estimate:
+        #estimate the ll only on a subset, otherwise for millions of 
+        # sequences this step takes rather long for little benefit
+        ll_subset = np.arange(alignment.fasta_file.num_seq)
+        np.random.shuffle(ll_subset)
+        ll_subset = ll_subset[:max_ll_estimate]
+        ll_subset = np.sort(ll_subset)
+    else:
+        #use the sorted indices for optimal length distributions in batches
+        ll_subset = alignment.fasta_file.sorted_indices
     ds = train.make_dataset(ll_subset, 
                             alignment.batch_generator,
                             alignment.batch_size, 
                             shuffle=False)
     loglik = np.zeros((alignment.msa_hmm_layer.cell.num_models))
     for x, _ in ds:
-        ll = alignment.model(x)
         loglik += np.sum(alignment.model(x), axis=1)
     loglik /= ll_subset.size
     prior = alignment.msa_hmm_layer.cell.get_prior_log_density().numpy()/alignment.fasta_file.num_seq
@@ -834,8 +858,8 @@ def get_full_length_estimate(fasta_file, config):
     k = int(min(n*config["surgery_quantile"], 
                 max(0, n-config["min_surgery_seqs"])))
     #a rough estimate of a set of only full-length sequences
-    full_length_estimate = [i for l,i in sorted(zip(fasta_file.seq_lens, list(range(n))))[k:]]   
-    return np.array(full_length_estimate) 
+    full_length_estimate = fasta_file.sorted_indices[k:]
+    return full_length_estimate
 
 
 def get_initial_model_lengths(fasta_file, config):

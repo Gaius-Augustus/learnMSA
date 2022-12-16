@@ -3,7 +3,6 @@ import numpy as np
 import learnMSA.msa_hmm.Initializers as initializers
 import learnMSA.msa_hmm.Priors as priors
 
-
 class ProfileHMMTransitioner(tf.keras.layers.Layer):
     """ A transitioner defines which transitions between HMM states are allowed, how they are initialized
         and how the transition matrix is represented (dense, sparse, other).
@@ -84,6 +83,7 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
                                          name="init_logit_"+str(i),
                                          dtype=self.dtype)
                                       for i,init in enumerate(self.flank_init)]
+        self.built = True
         
     def recurrent_init(self):
         """ Automatically called before each recurrent run. Should be used for setups that
@@ -367,7 +367,7 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
         return padded_and_stacked
     
     def __repr__(self):
-        return f"ProfileHMMTransitioner(transition_init={self.transition_init}, flank_init={self.flank_init}, prior={self.prior}, frozen_kernels={self.frozen_kernels})"
+        return f"ProfileHMMTransitioner(transition_init={self.transition_init[0]}, flank_init={self.flank_init[0]}, prior={self.prior}, frozen_kernels={self.frozen_kernels})"
     
 
 def _make_explicit_transition_kernel_parts(length): 

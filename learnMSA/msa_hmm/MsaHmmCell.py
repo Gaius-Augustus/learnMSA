@@ -45,18 +45,22 @@ class MsaHmmCell(tf.keras.layers.Layer):
         for em in self.emitter:
             em.build(input_shape)
         self.transitioner.build(input_shape)
+        self.built = True
 
     def recurrent_init(self):
         self.transitioner.recurrent_init()
         for em in self.emitter:
             em.recurrent_init()
+        self.log_A_dense = self.transitioner.make_log_A()
+        self.log_A_dense_t = tf.transpose(self.log_A_dense, [0,2,1])
+        self.init_dist = self.make_initial_distribution()
         self.init = True
     
     def make_initial_distribution(self):
         """Constructs the initial state distribution which depends on the transition probabilities.
             See ProfileHMMTransitioner.
         Returns:
-            A probability distribution of shape: (q)
+            A probability distribution of shape: (1, num_model, q)
         """
         return self.transitioner.make_initial_distribution()
     

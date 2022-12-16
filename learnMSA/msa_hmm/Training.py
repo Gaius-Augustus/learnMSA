@@ -19,7 +19,7 @@ def generic_model_generator(encoder_layers,
     """
     num_models = msa_hmm_layer.cell.num_models
     sequences = tf.keras.Input(shape=(None,None,), name="sequences", dtype=tf.uint8)
-    indices = tf.keras.Input(shape=(None,), name="indices", dtype=tf.int32)
+    indices = tf.keras.Input(shape=(None,), name="indices", dtype=tf.int64)
     forward_seq = sequences
     for layer in encoder_layers:
         forward_seq = layer(forward_seq, indices)

@@ -1,65 +1,64 @@
 import tensorflow as tf
 import numpy as np
 import learnMSA.msa_hmm.Training as train
+import time
 
 
-@tf.function
-def viterbi_step(hmm_cell, gamma_prev, sequences_i, log_A_dense, epsilon):
+def viterbi_step(gamma_prev, sequences_i, hmm_cell):
     """ Computes one Viterbi dynamic programming step.
     Args:
-        hmm_cell: HMM cell with the models under which decoding should happen.
         gamma_prev: Viterbi values of the previous recursion. Shape (num_models, b, q)
         sequences_i: i-th vertical sequence slice. Shape (num_models, b, s)
-        log_A_dense: Logarithmic transition matricies. Shape (num_model,q, q)
-        epsilon: A small constant for numeric stability. 
+        hmm_cell: HMM cell with the models under which decoding should happen.
     """
-    a = tf.reduce_max(tf.expand_dims(log_A_dense, 1) + tf.expand_dims(gamma_prev, -1), axis=-2)
+    epsilon = tf.constant(np.finfo(np.float32).tiny)
+    
+    #very very inefficient!?
+    a = tf.expand_dims(hmm_cell.log_A_dense, 1) + tf.expand_dims(gamma_prev, -1)
+    #a = tf.linalg.matmul()
+    a = tf.reduce_max(a, axis=-2)
+    
     b = hmm_cell.emission_probs(sequences_i)
-    b += epsilon                         
+    b += epsilon
     b = tf.math.log(b)
     gamma_next = a + b
     return gamma_next
 
 
-def viterbi_dyn_prog(sequences, hmm_cell, epsilon=np.finfo(np.float32).tiny):
+def viterbi_dyn_prog(sequences, hmm_cell):
     """ Logarithmic (underflow safe) viterbi capable of decoding many sequences in parallel on the GPU.
     Args:
         sequences: Tensor. Shape (num_models, b, L, s).
         hmm_cell: HMM cell with the models under which decoding should happen.
-        epsilon: A small constant for numeric stability. 
     Returns:
         Viterbi values (gamma) per model. Shape (num_model, b, L, q)
     """
-    epsilon = tf.cast(epsilon, hmm_cell.dtype)
-    init = hmm_cell.make_initial_distribution()
-    init = tf.transpose(init, (1,0,2)) #(num_models, 1, q)
-    log_A_dense = hmm_cell.transitioner.make_log_A()
+    epsilon = tf.constant(np.finfo(np.float32).tiny)
+    init = tf.transpose(hmm_cell.init_dist, (1,0,2)) #(num_models, 1, q)
     b0 = hmm_cell.emission_probs(sequences[:,:,0])
-    gamma0 = tf.math.log(init+epsilon) + tf.math.log(b0+epsilon)
-    gamma0 = tf.cast(gamma0, dtype=sequences.dtype) 
-    gamma = [gamma0]  
-    for i in range(1,tf.shape(sequences)[-2]):
-        gamma_next = viterbi_step(hmm_cell, 
-                                    gamma[-1], 
-                                    sequences[:,:,i], 
-                                    log_A_dense,
-                                    epsilon)
-        gamma.append(gamma_next) 
-    gamma = tf.stack(gamma, axis=2)
+    gamma_val = tf.math.log(init+epsilon) + tf.math.log(b0+epsilon)
+    gamma_val = tf.cast(gamma_val, dtype=hmm_cell.dtype) 
+    L = tf.shape(sequences)[-2]
+    #tf.function-compatible accumulation of results in a dynamically unrolled loop using TensorArray
+    gamma = tf.TensorArray(hmm_cell.dtype, size=L)
+    gamma = gamma.write(0, gamma_val)
+    for i in tf.range(1, L):
+        gamma_val = viterbi_step(gamma_val, sequences[:,:,i], hmm_cell)
+        gamma = gamma.write(i, gamma_val) 
+    gamma = tf.transpose(gamma.stack(), [1,2,0,3])
     return gamma
 
 
-@tf.function
-def viterbi_backtracking_step(q, gamma_state, log_A_dense_t):
+def viterbi_backtracking_step(q, gamma_state, hmm_cell):
     """ Computes a Viterbi backtracking step in parallel for all models and batch elements.
     Args:
         q: Previously decoded states. Shape: (num_model, b, 1)
         gamma_state: Viterbi values of the previously decoded states. Shape: (num_model, b, q)
-        log_A_dense_t: Transposed, logarithmic transition matrices per model in dense format. Shape: (num_model, q, q)
+        hmm_cell: HMM cell with the models under which decoding should happen.
     """
     #since A is transposed, we gather columns (i.e. all starting states q' when transitioning to q)
-    A_q = tf.gather_nd(log_A_dense_t, q, batch_dims=1)
-    q = tf.compat.v1.argmax(A_q + gamma_state, axis=-1)
+    A_q = tf.gather_nd(hmm_cell.log_A_dense_t, q, batch_dims=1)
+    q = tf.math.argmax(A_q + gamma_state, axis=-1)
     q = tf.expand_dims(q, -1)
     return q
 
@@ -70,17 +69,17 @@ def viterbi_backtracking(hmm_cell, gamma):
         hmm_cell: HMM cell with the models under which decoding should happen.
         gamma: A Viterbi score table per model and batch element. Shape (num_model, b, L, q)
     """
-    log_A_dense = hmm_cell.transitioner.make_log_A()
-    log_A_dense_t = tf.transpose(log_A_dense, [0,2,1])
-    state_seqs_max_lik = []
-    q = tf.compat.v1.argmax(gamma[:,:,-1], axis=-1)
+    q = tf.math.argmax(gamma[:,:,-1], axis=-1)
     q = tf.expand_dims(q, -1)
     L = tf.shape(gamma)[2]
-    for i in range(L):
-        q = viterbi_backtracking_step(q, gamma[:,:,L-i-1], log_A_dense_t)
-        state_seqs_max_lik.insert(0, q)
-    state_seqs_max_lik = tf.stack(state_seqs_max_lik, axis=2)
-    state_seqs_max_lik = tf.cast(state_seqs_max_lik, tf.int16)[:,:,:,0]
+    #tf.function-compatible accumulation of results in a dynamically unrolled loop using TensorArray
+    state_seqs_max_lik = tf.TensorArray(q.dtype, size=L)
+    for i in tf.range(L-1, -1, -1):
+        q = viterbi_backtracking_step(q, gamma[:,:,i], hmm_cell)
+        state_seqs_max_lik = state_seqs_max_lik.write(i, q)
+    state_seqs_max_lik = tf.transpose(state_seqs_max_lik.stack(), [1,2,0,3])
+    state_seqs_max_lik = tf.cast(state_seqs_max_lik, dtype=tf.int16)
+    state_seqs_max_lik = state_seqs_max_lik[:,:,:,0]
     return state_seqs_max_lik
 
 
@@ -94,20 +93,19 @@ def viterbi(sequences, hmm_cell):
     Returns:
         State sequences. Shape (num_models, b, L)
     """
-    hmm_cell.recurrent_init()
     if len(sequences.shape) == 3:
         sequences = tf.one_hot(sequences, hmm_cell.dim, dtype=hmm_cell.dtype)
     else:
         sequences = tf.cast(sequences, hmm_cell.dtype)
     gamma = viterbi_dyn_prog(sequences, hmm_cell)
-    return viterbi_backtracking(hmm_cell, gamma).numpy()
+    return viterbi_backtracking(hmm_cell, gamma)
 
 
 def get_state_seqs_max_lik(fasta_file,
                            batch_generator,
                            indices,
                            batch_size,
-                           msa_hmm_cell, 
+                           hmm_cell, 
                            encoder=None):
     """ Runs batch-wise viterbi on all sequences in fasta_file as specified by indices.
     Args:
@@ -115,23 +113,32 @@ def get_state_seqs_max_lik(fasta_file,
         batch_generator: Batch generator.
         indices: Indices that specify which sequences in fasta_file should be decoded. 
         batch_size: Specifies how many sequences will be decoded in parallel. 
-        msa_hmm_cell: MsaHmmCell object. 
+        hmm_cell: MsaHmmCell object. 
         encoder: Optional encoder model that is applied to the sequences before Viterbi.
     Returns:
         A dense integer representation of the most likely state sequences. Shape: (num_model, num_seq, L)
     """
-    ds = train.make_dataset(indices, 
+    #compute an optimized order for decoding that sorts sequences of equal length into the same batch
+    sorted_indices = np.array([[i,j] for l,i,j in sorted(zip(fasta_file.seq_lens[indices], indices, range(indices.size)))])
+    hmm_cell.recurrent_init()
+    ds = train.make_dataset(sorted_indices[:,0], 
                             batch_generator, 
                             batch_size,
                             shuffle=False)
-    seq_len = np.amax(fasta_file.seq_lens[indices])+1
+    seq_len = fasta_file.seq_lens[sorted_indices[-1,0]]+1
     #initialize with terminal states
-    state_seqs_max_lik = np.zeros((msa_hmm_cell.num_models, indices.size, seq_len), 
+    state_seqs_max_lik = np.zeros((hmm_cell.num_models, indices.size, seq_len), 
                                   dtype=np.uint16) 
-    for i,q in enumerate(msa_hmm_cell.num_states):
-        state_seqs_max_lik[i] = q-1 #terminal state
-    i = 0                              
-    for inputs, _ in ds:
+    
+    @tf.function(input_signature=(tf.TensorSpec(shape=[hmm_cell.num_models, None, None], dtype=tf.uint8),
+                                  tf.TensorSpec(shape=[hmm_cell.num_models, None], dtype=tf.int64)))
+    def call_viterbi(inputs, indices):
+        encoded_seq = encoder([inputs, indices]) 
+        viterbi_seq = viterbi(encoded_seq, hmm_cell)
+        return viterbi_seq
+    
+    @tf.function(input_signature=(tf.TensorSpec(shape=[hmm_cell.num_models, None, None], dtype=tf.uint8),))
+    def call_viterbi_single(inputs):
         if encoder is None:
             if batch_generator.return_only_sequences:
                 seq = inputs
@@ -139,8 +146,19 @@ def get_state_seqs_max_lik(fasta_file,
                 seq = inputs[0]
         else:
             seq = encoder(inputs) 
-        state_seqs_max_lik_batch = viterbi(seq, msa_hmm_cell) 
+        return viterbi(seq, hmm_cell)
+    
+    for i,q in enumerate(hmm_cell.num_states):
+        state_seqs_max_lik[i] = q-1 #terminal state
+    i = 0     
+    for inputs, _ in ds:
+        if batch_generator.return_only_sequences:
+            state_seqs_max_lik_batch = call_viterbi_single(inputs).numpy()
+        else:
+            state_seqs_max_lik_batch = call_viterbi(inputs[0], inputs[1]).numpy()
         _,b,l = state_seqs_max_lik_batch.shape
         state_seqs_max_lik[:, i:i+b, :l] = state_seqs_max_lik_batch
-        i += b
+        i += b 
+    #reorder back to the original order 
+    state_seqs_max_lik = state_seqs_max_lik[:,np.argsort(sorted_indices[:,1])]
     return state_seqs_max_lik

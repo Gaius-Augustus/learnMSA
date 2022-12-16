@@ -19,6 +19,7 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         
     def build(self, input_shape):
         self.rnn.build((None, input_shape[-2], input_shape[-1])) #also builds the cell
+        self.built = True
         
         
     def call(self, inputs, training=False):

@@ -12,6 +12,7 @@ import seaborn as sns
 
 def make_logo(alignment, model_index, ax):
     hmm_cell = alignment.msa_hmm_layer.cell
+    hmm_cell.recurrent_init()
     length = hmm_cell.length[model_index]
     
     logomaker_alphabet = ["A", "C", "D", "E", "F", "G", "H", "I", "K", "L", "M", "N", "P", "Q", "R", "S", "T", "V", "W", "Y"]
@@ -57,6 +58,7 @@ def plot_hmm(alignment,
                inactive_transition_color="#E0E0E0"
                 ):
     hmm_cell = alignment.msa_hmm_layer.cell
+    hmm_cell.recurrent_init()
     length = hmm_cell.length[model_index]
     
     G = nx.DiGraph()
@@ -133,7 +135,7 @@ def plot_hmm(alignment,
         ds = msa_hmm.train.make_dataset(np.array([seq_i]), batch_gen, batch_size=1, shuffle=False)
         for x, _ in ds:
             sequence = alignment.encoder_model(x)  
-        hidden_seq = msa_hmm.viterbi.viterbi(sequence, hmm_cell)[model_index]
+        hidden_seq = msa_hmm.viterbi.viterbi(sequence, hmm_cell).numpy()[model_index]
         hidden_seq = list(hidden_seq[0])
         for i in range(len(hidden_seq)):
             #find silent path parts along delete states
@@ -221,7 +223,7 @@ def plot_anc_probs(alignment,
     
 def plot_rate_matrices(alignment,
                        model_index,
-                    title="normalized rate matrix (1 time unit = 1 expected mutation per site)"):
+                       title="normalized rate matrix (1 time unit = 1 expected mutation per site)"):
     i = [l.name for l in alignment.encoder_model.layers].index("AncProbsLayer")
     anc_probs_layer = alignment.encoder_model.layers[i]
     Q = anc_probs_layer.make_Q()[model_index]
@@ -236,3 +238,47 @@ def plot_rate_matrices(alignment,
         a = msa_hmm.fasta.alphabet[:20]
         sns.heatmap(Q[i], linewidth=0.5, ax=ax, xticklabels=a, yticklabels=a)
     f.suptitle(title, fontsize=16)
+    
+    
+def print_and_plot(alignment, 
+                   model_index = None,
+                   max_seq = 20, 
+                   seqs_to_plot = [0,1,2], 
+                   seq_ids = False, 
+                   plot_model=True, 
+                   plot_anc_probs=True,
+                   plot_logo=True):
+    if model_index is None:
+        model_index = alignment.best_model
+    # print the alignment
+    msa = alignment.to_string(model_index)
+    i = [l.name for l in alignment.encoder_model.layers].index("AncProbsLayer")
+    anc_probs_layer = alignment.encoder_model.layers[i]
+    ds = msa_hmm.train.make_dataset(alignment.indices, 
+                            alignment.batch_generator,
+                            alignment.batch_size, 
+                            shuffle=False)
+    ll = alignment.model.predict(ds)[model_index] + alignment.prior[model_index]
+    for i,s in enumerate(msa[:max_seq]):
+        indices = np.array([[alignment.indices[i]]]*alignment.msa_hmm_layer.cell.num_models)
+        tau = anc_probs_layer.make_tau(indices)[model_index]
+        param_string = "l=%.2f" % (ll[i]) + "_t=%.2f" % tau
+        if seq_ids:
+            print(f">{alignment.fasta_file.seq_ids[i]} "+param_string)
+        else:
+            print(">"+param_string)
+        print(s)
+    if len(msa) > max_seq:
+        print(len(msa) - max_seq, "sequences omitted.")
+    if plot_model:
+        #plot the model
+        fig = plt.figure(frameon=False)
+        ax = fig.add_axes([0, 0, 1, 1])
+        plot_hmm(alignment, model_index, ax, 
+                 seq_indices=alignment.indices[seqs_to_plot],
+                 path_colors=["#CC6600", "#0000cc", "#00cccc"])   
+    if plot_anc_probs:
+        plot_anc_probs(alignment, model_index, seqs=seqs_to_plot)
+    if plot_logo:
+        fig, ax = plt.subplots()
+        make_logo(alignment, model_index, ax)

@@ -55,6 +55,7 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
                                 name="insertion_kernel_"+str(i),
                                 trainable=not self.frozen_insertions) 
                                     for i,init in enumerate(self.insertion_init)]
+        self.built = True
         
     def recurrent_init(self):
         """ Automatically called before each recurrent run. Should be used for setups that
@@ -96,7 +97,7 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
                  dtype = self.dtype) 
     
     def __repr__(self):
-        return f"ProfileHMMEmitter(emission_init={self.emission_init}, insertion_init={self.insertion_init}, prior={self.prior}, frozen_insertions={self.frozen_insertions}, )"
+        return f"ProfileHMMEmitter(emission_init={self.emission_init[0]}, insertion_init={self.insertion_init[0]}, prior={self.prior}, frozen_insertions={self.frozen_insertions}, )"
     
     
     

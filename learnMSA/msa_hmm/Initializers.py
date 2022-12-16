@@ -2,6 +2,8 @@ import tensorflow as tf
 import numpy as np
 import learnMSA.msa_hmm.Fasta as fasta
 import learnMSA.msa_hmm.AncProbsLayer as anc_probs
+import learnMSA.msa_hmm.DirichletMixture as dm
+import os
 
 class EmissionInitializer(tf.keras.initializers.Initializer):
 
@@ -15,8 +17,20 @@ class EmissionInitializer(tf.keras.initializers.Initializer):
         return tf.reshape(tf.tile(dist, shape[:1]), shape)
     
 R, p = anc_probs.parse_paml(anc_probs.LG_paml, fasta.alphabet[:-1])
-p_padded = np.pad(np.squeeze(p), (0,5))
 exchangeability_init = anc_probs.inverse_softplus(R + 1e-32)
+
+
+
+prior_path = os.path.dirname(__file__)+"/trained_prior/"
+model_path = prior_path+"_".join([str(1), "True", "float32", "_dirichlet/ckpt"])
+model = dm.load_mixture_model(model_path, 1, 20, trainable=False, dtype=tf.float32)
+dirichlet = model.layers[-1]
+background_distribution = dirichlet.expectation()
+#the prior was trained on example distributions over the 20 amino acid alphabet
+#the additional frequencies for 'B', 'Z',  'X', 'U', 'O' were derived from Pfam
+extra = [2.03808244e-05, 1.02731819e-05, 7.92076933e-04, 5.84256792e-08, 1e-32]
+background_distribution = np.concatenate([background_distribution, extra], axis=0)
+background_distribution /= np.sum(background_distribution)
 
 def make_default_anc_probs_init(num_models):
     exchangeability_stack = np.stack([exchangeability_init]*num_models, axis=0)
@@ -26,11 +40,11 @@ def make_default_anc_probs_init(num_models):
             tf.constant_initializer(log_p_stack)]
     
 def make_default_emission_init():
-    return EmissionInitializer(np.log(p_padded+1e-16))
+    return EmissionInitializer(np.log(background_distribution))
 
 
 def make_default_insertion_init():
-    return tf.constant_initializer(np.log(p_padded+1e-16))
+    return tf.constant_initializer(np.log(background_distribution))
 
 
 class EntryInitializer(tf.keras.initializers.Initializer):
@@ -48,14 +62,18 @@ class ExitInitializer(tf.keras.initializers.Initializer):
     
 
 class MatchTransitionInitializer(tf.keras.initializers.Initializer):
-    def __init__(self, val, i):
+    def __init__(self, val, i, scale):
         self.val = val
         self.i = i
+        self.scale = scale
     
     def __call__(self, shape, dtype=None, **kwargs):
+        val = tf.constant(self.val, dtype=dtype)[tf.newaxis,:]
+        z = tf.random.normal(shape, stddev=self.scale, dtype=dtype)[:,tf.newaxis]
+        val_z = val + z
         p_exit_desired = 0.5 / (shape[0]-1)
-        prob = (tf.nn.softmax(np.array(self.val, dtype=float)) * (1-p_exit_desired))[self.i]
-        return tf.zeros(shape, dtype=dtype) + np.log(prob)
+        prob = (tf.nn.softmax(val_z) * (1-p_exit_desired))[:,self.i]
+        return tf.math.log(prob)
     
     
 def make_default_flank_init():
@@ -73,24 +91,25 @@ def make_default_transition_init(MM=1,
                                  FE=-1,
                                  R=-9, 
                                  RF=0, 
-                                 T=0):
+                                 T=0,
+                                 scale=0.1):
     transition_init_kernel = {
         "begin_to_match" : EntryInitializer(),
         "match_to_end" : ExitInitializer(),
-        "match_to_match" : MatchTransitionInitializer([MM, MI, MD], 0),
-        "match_to_insert" : MatchTransitionInitializer([MM, MI, MD], 1),
-        "insert_to_match" : tf.constant_initializer(IM),
-        "insert_to_insert" : tf.constant_initializer(II),
-        "match_to_delete" : MatchTransitionInitializer([MM, MI, MD], 2),
-        "delete_to_match" : tf.constant_initializer(DM),
-        "delete_to_delete" : tf.constant_initializer(DD),
-        "left_flank_loop" : tf.constant_initializer(FC),
-        "left_flank_exit" : tf.constant_initializer(FE),
-        "right_flank_loop" : tf.constant_initializer(FC),
-        "right_flank_exit" : tf.constant_initializer(FE),
-        "unannotated_segment_loop" : tf.constant_initializer(FC),
-        "unannotated_segment_exit" : tf.constant_initializer(FE),
-        "end_to_unannotated_segment" : tf.constant_initializer(R),
-        "end_to_right_flank" : tf.constant_initializer(RF),
-        "end_to_terminal" : tf.constant_initializer(T) }
+        "match_to_match" : MatchTransitionInitializer([MM, MI, MD], 0, scale),
+        "match_to_insert" : MatchTransitionInitializer([MM, MI, MD], 1, scale),
+        "insert_to_match" : tf.random_normal_initializer(IM, scale),
+        "insert_to_insert" : tf.random_normal_initializer(II, scale),
+        "match_to_delete" : MatchTransitionInitializer([MM, MI, MD], 2, scale),
+        "delete_to_match" : tf.random_normal_initializer(DM, scale),
+        "delete_to_delete" : tf.random_normal_initializer(DD, scale),
+        "left_flank_loop" : tf.random_normal_initializer(FC, scale),
+        "left_flank_exit" : tf.random_normal_initializer(FE, scale),
+        "right_flank_loop" : tf.random_normal_initializer(FC, scale),
+        "right_flank_exit" : tf.random_normal_initializer(FE, scale),
+        "unannotated_segment_loop" : tf.random_normal_initializer(FC, scale),
+        "unannotated_segment_exit" : tf.random_normal_initializer(FE, scale),
+        "end_to_unannotated_segment" : tf.random_normal_initializer(R, scale),
+        "end_to_right_flank" : tf.random_normal_initializer(RF, scale),
+        "end_to_terminal" : tf.random_normal_initializer(T, scale) }
     return transition_init_kernel
