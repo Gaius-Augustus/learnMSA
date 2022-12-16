@@ -63,6 +63,7 @@ class MsaHmmCell(tf.keras.layers.Layer):
             A probability distribution of shape: (1, num_model, q)
         """
         return self.transitioner.make_initial_distribution()
+        
     
     def emission_probs(self, inputs):
         """ Computes the probabilities of emission per state for the given observation. Multiple emitters
@@ -105,6 +106,12 @@ class MsaHmmCell(tf.keras.layers.Layer):
         S = [init_dist, loglik]
         return S
 
+    def get_initial_backward_state(self, inputs=None, batch_size=None, _dtype=None):
+        init_dist = tf.ones((self.num_models*batch_size, self.max_num_states), dtype=self.dtype)
+        loglik = tf.zeros((self.num_models*batch_size, 1), dtype=self.dtype)
+        S = [init_dist, loglik]
+        return S
+
     def get_prior_log_density(self, add_metrics=False):  
         em_priors = [tf.reduce_sum(em.get_prior_log_density(), 1) for em in self.emitter]
         trans_priors = self.transitioner.get_prior_log_densities()
@@ -117,4 +124,8 @@ class MsaHmmCell(tf.keras.layers.Layer):
                 d = tf.reduce_mean(d)
                 self.add_metric(d, "mean_model_"+name)
         return prior
+    
+    #configures the cell for the backward recursion
+    def transpose(self):
+        self.transitioner.transpose()
 

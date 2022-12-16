@@ -72,13 +72,13 @@ def fit_and_align(fasta_file,
                                batch_size=batch_size, 
                                model=model,
                                build="lazy" if last_iteration else "eager")
-        loglik, prior = compute_loglik(alignment)
-        alignment.loglik = loglik 
-        alignment.prior = prior
-        if verbose:
-            print("Fitted models with MAP estimates = ", 
-                  ",".join("%.4f" % (l + p) for l,p in zip(loglik, prior)))
         if last_iteration:
+            loglik, prior = compute_loglik(alignment)
+            alignment.loglik = loglik 
+            alignment.prior = prior
+            if verbose:
+                print("Fitted models with MAP estimates = ", 
+                      ",".join("%.4f" % (l + p) for l,p in zip(loglik, prior)))
             break
         if i == 0: # remember the initializers used in the first iteration
             emission_init_0, transition_init_0, flank_init_0 = _get_initializers(alignment)

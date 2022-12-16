@@ -315,7 +315,8 @@ class TestMSAHMM(unittest.TestCase):
                                                                     FE = 3,
                                                                     R = 0,
                                                                     RF = -1, 
-                                                                    T = 0)
+                                                                    T = 0, 
+                                                                    scale = 0)
         emitter = msa_hmm.emit.ProfileHMMEmitter(emission_init = emission_init, 
                                                  insertion_init = tf.keras.initializers.Zeros())
         transitioner = msa_hmm.trans.ProfileHMMTransitioner(transition_init = transition_init, 
@@ -381,8 +382,9 @@ class TestMSAHMM(unittest.TestCase):
                                                                     FC = 0,
                                                                     FE = 0,
                                                                     R = 0,
-                                                                    RF = 0, 
-                                                                    T = 0)]*2
+                                                                    RF = -1, 
+                                                                    T = 0, 
+                                                                    scale = 0)]*2
         emitter = msa_hmm.emit.ProfileHMMEmitter(emission_init = emission_init, 
                                                  insertion_init = [tf.keras.initializers.Zeros()]*2)
         transitioner = msa_hmm.trans.ProfileHMMTransitioner(transition_init = transition_init, 
@@ -953,7 +955,8 @@ class TestModelSurgery(unittest.TestCase):
                                                                             FE = 0,
                                                                             R = 0,
                                                                             RF = 0, 
-                                                                            T = 0)
+                                                                            T = 0, 
+                                                                           scale = 0)
         transition_init["match_to_match"] = tf.constant_initializer(0)
         transition_init["match_to_insert"] = tf.constant_initializer(0)
         transition_init["match_to_delete"] = tf.constant_initializer(-1)
@@ -1207,7 +1210,8 @@ class TestAlignment(unittest.TestCase):
                                                                             FE = 0,
                                                                             R = 0,
                                                                             RF = 0, 
-                                                                            T = 0)))
+                                                                            T = 0,
+                                                                            scale = 0)))
         model = msa_hmm.train.default_model_generator(num_seq=8, 
                                                       effective_num_seq=8,
                                                       model_lengths=[length], 

@@ -327,6 +327,11 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
                 frozen_kernels = self.frozen_kernels,
                 dtype = self.dtype) 
     
+    #configure the Transitioner for the backward recursion
+    def transpose(self):
+        self.A = tf.transpose(self.A, (0,2,1))
+        
+    
     def _get_kernel_parts_init_list(self):
         """ Returns a list of lists that specifies initialization data to the cell for all transition kernels.
             The outer list contains one list per model. The inner list contains 5-tuples: 

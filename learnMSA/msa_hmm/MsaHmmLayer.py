@@ -13,7 +13,13 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         super(MsaHmmLayer, self).__init__(name=name, dtype=dtype, **kwargs)
         self.num_seq = num_seq
         self.cell = cell
-        self.rnn = tf.keras.layers.RNN(self.cell, return_sequences=True, return_state=True)
+        self.rnn = tf.keras.layers.RNN(self.cell, 
+                                       return_sequences=True, 
+                                       return_state=True)
+        self.rnn_backward = tf.keras.layers.RNN(self.cell, 
+                                                return_sequences=True, 
+                                                return_state=True,
+                                                go_backwards=True)
         self.use_prior = use_prior 
         
         
@@ -22,12 +28,27 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         self.built = True
         
         
-    def call(self, inputs, training=False):
+    def foward_recursion(self, inputs, training=False):
         self.cell.recurrent_init()
         initial_state = self.cell.get_initial_state(batch_size=tf.shape(inputs)[1])
-        inputs = tf.cast(inputs, self.dtype)
         inputs = tf.reshape(inputs, (-1, tf.shape(inputs)[-2], tf.shape(inputs)[-1]))
-        _, _, loglik = self.rnn(inputs, initial_state=initial_state, training=training)
+        forward, _, loglik = self.rnn(inputs, initial_state=initial_state, training=training)
+        return forward, loglik
+    
+    
+    def backward_recursion(self, inputs):
+        self.cell.recurrent_init()
+        initial_state = self.cell.get_initial_backward_state(batch_size=tf.shape(inputs)[1])
+        inputs = tf.reshape(inputs, (-1, tf.shape(inputs)[-2], tf.shape(inputs)[-1]))
+        self.cell.transpose()
+        backward, _, loglik = self.rnn_backward(inputs, initial_state=initial_state)
+        self.cell.transpose()
+        return backward, loglik
+        
+        
+    def call(self, inputs, training=False):
+        inputs = tf.cast(inputs, self.dtype)
+        _, loglik = self.foward_recursion(inputs, training=training)
         loglik = tf.reshape(loglik, (self.cell.num_models, -1))
         loglik_mean = tf.reduce_mean(loglik) #mean over both models and batches
         if self.use_prior:
