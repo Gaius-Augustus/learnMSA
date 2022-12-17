@@ -23,10 +23,8 @@ class TestFasta(unittest.TestCase):
         self.assertEqual(fasta2.aminoacid_seq_str(7), "SSPCQNGGMCFMSGDDTDYTCACPTGFSG")
         self.assertEqual(fasta2.aminoacid_seq_str(-1), "CSSSPCNAEGTVRCEDKKGDFLCHCFTGWAGAR")
         
-
-class TestMsaHmmCell(unittest.TestCase):
-    
-    def make_test_transition_init(self):
+        
+def make_test_transition_init():
         inits = [{"begin_to_match" : [0.6, 0.1, 0.1, 0.1],
                   "match_to_end" : [0.01, 0.05, 0.05, 1],
                   "match_to_match" : [0.97, 0.5, 0.6], 
@@ -68,10 +66,14 @@ class TestMsaHmmCell(unittest.TestCase):
         inits = [{part_name : tf.constant_initializer(np.log(p))
                                   for part_name,p in d.items()} for d in inits]
         return inits
+    
+
+class TestMsaHmmCell(unittest.TestCase):
    
+ 
     def test_A(self):
         length = 4
-        transition_kernel_initializers = self.make_test_transition_init()[0]
+        transition_kernel_initializers = make_test_transition_init()[0]
         emission_kernel_initializer = tf.constant_initializer(np.zeros((length, 2)))
         insertion_kernel_initializer = tf.constant_initializer(np.zeros((2)))
         emitter = msa_hmm.emit.ProfileHMMEmitter(emission_init = emission_kernel_initializer,
@@ -139,7 +141,7 @@ class TestMsaHmmCell(unittest.TestCase):
                 
     def test_B(self):
         length = 3
-        transition_kernel_initializers = self.make_test_transition_init()[1]
+        transition_kernel_initializers = make_test_transition_init()[1]
         emission_kernel_initializer = tf.constant_initializer(np.zeros((length, 2)))
         insertion_kernel_initializer = tf.constant_initializer(np.zeros((2)))
         emitter = msa_hmm.emit.ProfileHMMEmitter(emission_init = emission_kernel_initializer,
@@ -200,7 +202,7 @@ class TestMsaHmmCell(unittest.TestCase):
                 
     def test_multi_model_forward(self):
         length = [4,3]
-        transition_kernel_initializers = self.make_test_transition_init()
+        transition_kernel_initializers = make_test_transition_init()
         #alphabet: {A,B}
         emission_kernel_initializer1 = np.log([[0.5, 0.5], [0.1, 0.9], [0.7, 0.3], [0.9, 0.1]])
         emission_kernel_initializer2 = np.log([[0.5, 0.5], [0.1, 0.9], [0.7, 0.3]])
@@ -261,6 +263,7 @@ class TestMsaHmmCell(unittest.TestCase):
             for j in range(2):
                 ref = ref_forward_scores[j:(j+1), i:(i+1)]
                 np.testing.assert_almost_equal(forward[j:(j+1)], ref / np.sum(ref), decimal=4)
+        
         
                 
                 
@@ -691,6 +694,34 @@ class TestMSAHMM(unittest.TestCase):
                 alignment_block = msa_hmm.align.get_alignment_block(sequences[i], 
                                                                     C,IL,np.amax(IL, axis=0),IS)
                 self.assert_vec(alignment_block, ref)
+                
+               
+    def test_backward(self):
+        length = [4]
+        transition_kernel_initializers = make_test_transition_init()[0]
+        #alphabet: {A,B}
+        emission_kernel_initializer = np.log([[0.5, 0.5], [0.1, 0.9], [0.7, 0.3], [0.9, 0.1]])
+        emission_kernel_initializer = tf.constant_initializer(emission_kernel_initializer)
+        insertion_kernel_initializer = np.log([0.5, 0.5])
+        insertion_kernel_initializer = tf.constant_initializer(insertion_kernel_initializer)
+        emitter = msa_hmm.emit.ProfileHMMEmitter(emission_init = emission_kernel_initializer, 
+                                                 insertion_init = insertion_kernel_initializer)
+        transitioner = msa_hmm.trans.ProfileHMMTransitioner(transition_init = transition_kernel_initializers)
+        hmm_cell = msa_hmm.MsaHmmCell(length, emitter, transitioner)
+        seq = tf.one_hot([[[0,1,0]]], 3)
+        hmm_layer = msa_hmm.MsaHmmLayer(hmm_cell, 1)
+        hmm_layer.build(seq.shape)
+        backward_seqs,_ = hmm_layer.backward_recursion(seq)
+        backward_ref = np.array([[0.09615385, 0.09615385, 0.01923077, 
+                                 0.13461538, 0.17307692, 0.09615385, 
+                                 0.09615385, 0.09615385, 0.09615385, 
+                                 0.09615385, 0.        ], 
+                               [0.10272918, 0.02356259, 0.26830981, 
+                                0.09111005, 0.01859389, 0.06197963, 
+                                0.12395926, 0.14461914, 0.10315683, 
+                                0.06197963, 0.        ]])
+        for i in range(2):
+            np.testing.assert_almost_equal(backward_seqs[0,i], backward_ref[i], decimal=7)
             
                 
                 
