@@ -39,6 +39,7 @@ class MsaHmmCell(tf.keras.layers.Layer):
         for em in self.emitter:
             em.cell_init(self)
         self.transitioner.cell_init(self)
+        self.epsilon = tf.constant(1e-32, dtype)
             
     def build(self, input_shape):
         self.dim = input_shape[-1]
@@ -79,24 +80,25 @@ class MsaHmmCell(tf.keras.layers.Layer):
     def call(self, inputs, states, training=None):
         """ Computes one recurrent step of the Forward DP.
         """
-        old_forward, old_loglik = states
-        old_forward = tf.reshape(old_forward, (self.num_models, -1, self.max_num_states))
+        old_scaled_forward, old_loglik = states
+        old_scaled_forward = tf.reshape(old_scaled_forward, (self.num_models, -1, self.max_num_states))
         old_loglik = tf.reshape(old_loglik, (self.num_models, -1, 1))
         inputs = tf.reshape(inputs, (self.num_models, -1, self.dim))
         E = self.emission_probs(inputs)
         if self.init:
-            forward = tf.multiply(E, old_forward, name="forward")
+            scaled_forward = tf.multiply(E, old_scaled_forward, name="forward")
             self.init = False
         else:
-            R = self.transitioner(old_forward)
-            forward = tf.multiply(E, R, name="forward")
-        S = tf.reduce_sum(forward, axis=-1, keepdims=True, name="loglik")
+            R = self.transitioner(old_scaled_forward)
+            scaled_forward = tf.multiply(E, R, name="forward")
+        S = tf.reduce_sum(scaled_forward, axis=-1, keepdims=True, name="loglik")
         loglik = old_loglik + tf.math.log(S) 
-        forward = forward / S 
+        scaled_forward /= S 
         loglik = tf.reshape(loglik, (-1, 1))
-        forward = tf.reshape(forward, (-1, self.max_num_states))
-        new_state = [forward, loglik]
-        return forward, new_state
+        scaled_forward = tf.reshape(scaled_forward, (-1, self.max_num_states))
+        new_state = [scaled_forward, loglik]
+        log_unscaled_forward = tf.math.log(scaled_forward + self.epsilon) + loglik
+        return log_unscaled_forward, new_state
 
     def get_initial_state(self, inputs=None, batch_size=None, _dtype=None):
         init_dist = tf.repeat(self.make_initial_distribution(), repeats=batch_size, axis=0)

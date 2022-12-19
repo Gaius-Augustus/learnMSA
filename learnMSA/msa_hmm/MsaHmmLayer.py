@@ -41,9 +41,9 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         initial_state = self.cell.get_initial_backward_state(batch_size=tf.shape(inputs)[1])
         inputs = tf.reshape(inputs, (-1, tf.shape(inputs)[-2], tf.shape(inputs)[-1]))
         self.cell.transpose()
-        backward, _, loglik = self.rnn_backward(inputs, initial_state=initial_state)
+        backward, _, _ = self.rnn_backward(inputs, initial_state=initial_state)
         self.cell.transpose()
-        return backward, loglik
+        return backward
         
         
     def call(self, inputs, training=False):

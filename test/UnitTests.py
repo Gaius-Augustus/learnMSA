@@ -297,11 +297,11 @@ class TestMSAHMM(unittest.TestCase):
         A = hmm_cell.transitioner.make_A()
         A_sum = np.sum(A, -1)
         for a in A_sum:
-            np.testing.assert_almost_equal(a, 1.0)
+            np.testing.assert_almost_equal(a, 1.0, decimal=5)
         B = hmm_cell.emitter[0].make_B()
         B_sum = np.sum(B, -1)
         for b in B_sum:
-            np.testing.assert_almost_equal(b, 1.0)
+            np.testing.assert_almost_equal(b, 1.0, decimal=5)
             
             
     def test_cell(self):
@@ -711,17 +711,16 @@ class TestMSAHMM(unittest.TestCase):
         seq = tf.one_hot([[[0,1,0]]], 3)
         hmm_layer = msa_hmm.MsaHmmLayer(hmm_cell, 1)
         hmm_layer.build(seq.shape)
-        backward_seqs,_ = hmm_layer.backward_recursion(seq)
-        backward_ref = np.array([[0.09615385, 0.09615385, 0.01923077, 
-                                 0.13461538, 0.17307692, 0.09615385, 
-                                 0.09615385, 0.09615385, 0.09615385, 
-                                 0.09615385, 0.        ], 
-                               [0.10272918, 0.02356259, 0.26830981, 
-                                0.09111005, 0.01859389, 0.06197963, 
-                                0.12395926, 0.14461914, 0.10315683, 
-                                0.06197963, 0.        ]])
+        backward_seqs = hmm_layer.backward_recursion(seq)
+        backward_ref = np.array([[0.5, 0.5, 0.1, 0.7, 0.9, 0.5, 0.5, 0.5, 0.5, 0.5, 0. ], 
+                               [0.24862003, 0.05702499, 0.64934999, 
+                                0.22049999, 0.045     , 0.15      , 
+                                0.3       , 0.35      , 0.249655  , 
+                                0.15000001, 0.        ]])
         for i in range(2):
-            np.testing.assert_almost_equal(backward_seqs[0,i], backward_ref[i], decimal=7)
+            actual = np.exp(backward_seqs[0,i])
+            ref = backward_ref[i] + hmm_cell.epsilon
+            np.testing.assert_almost_equal(actual, ref, decimal=7)
             
                 
                 
