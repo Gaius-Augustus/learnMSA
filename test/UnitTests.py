@@ -263,6 +263,52 @@ class TestMsaHmmCell(unittest.TestCase):
             for j in range(2):
                 ref = ref_forward_scores[j:(j+1), i:(i+1)]
                 np.testing.assert_almost_equal(forward[j:(j+1)], ref / np.sum(ref), decimal=4)
+                
+    def test_duplication(self):
+        length = [4,3]
+        transition_kernel_initializers = make_test_transition_init()
+        #alphabet: {A,B}
+        emission_kernel_initializer1 = np.log([[0.5, 0.5], [0.1, 0.9], [0.7, 0.3], [0.9, 0.1]])
+        emission_kernel_initializer2 = np.log([[0.1, 0.9], [0.4, 0.6], [0.5, 0.5]])
+        emission_kernel_initializer = [tf.constant_initializer(emission_kernel_initializer1), 
+                                       tf.constant_initializer(emission_kernel_initializer2)]
+        insertion_kernel_initializer = [tf.constant_initializer(np.log([0.5, 0.5])), 
+                                        tf.constant_initializer(np.log([0.3, 0.7]))]
+        emitter = msa_hmm.emit.ProfileHMMEmitter(emission_init = emission_kernel_initializer, 
+                                                 insertion_init = insertion_kernel_initializer)
+        transitioner = msa_hmm.trans.ProfileHMMTransitioner(transition_init = transition_kernel_initializers,
+                                                            flank_init = [msa_hmm.initializers.make_default_flank_init()]*2)
+        hmm_cell = msa_hmm.MsaHmmCell(length, emitter, transitioner)
+        test_shape = [None, None, 3]
+        hmm_cell.build(test_shape)
+        
+        def test_copied_cell(hmm_cell_copy, model_indices):
+            hmm_cell_copy.build(test_shape)
+            emitter_copy = hmm_cell_copy.emitter
+            transitioner_copy = hmm_cell_copy.transitioner
+            for i,j in enumerate(model_indices):
+                #match emissions
+                ref_kernel = emitter.emission_kernel[j].numpy()
+                kernel_copy = emitter_copy[0].emission_init[i](ref_kernel.shape)
+                np.testing.assert_almost_equal(kernel_copy, ref_kernel)
+                #insertions
+                ref_ins_kernel = emitter.insertion_kernel[j].numpy()
+                ins_kernel_copy = emitter_copy[0].insertion_init[i](ref_ins_kernel.shape)
+                np.testing.assert_almost_equal(ins_kernel_copy, ref_ins_kernel)
+                #transitioners
+                for key, ref_kernel in transitioner.transition_kernel[j].items():
+                    ref_kernel = ref_kernel.numpy()
+                    kernel_copy = transitioner_copy.transition_init[i][key](ref_kernel.shape)
+                    np.testing.assert_almost_equal(kernel_copy, ref_kernel)
+                    
+        #clone both models
+        test_copied_cell(hmm_cell.duplicate(), [0,1])
+        
+        #clone single model
+        for i in range(2):
+            test_copied_cell(hmm_cell.duplicate([i]), [i])
+            
+            
         
         
                 

@@ -319,10 +319,19 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
     def get_prior_log_densities(self):
         return self.prior(self.probs, self.make_flank_init_prob())
     
-    def duplicate(self):
+    def duplicate(self, model_indices=None):
+        if model_indices is None:
+            model_indices = range(len(self.transition_init))
+        sub_transition_init = []
+        sub_flank_init = []
+        for i in model_indices:
+            transition_init_dict = {key : tf.constant_initializer(kernel.numpy())
+                                       for key, kernel in self.transition_kernel[i].items()}
+            sub_transition_init.append(transition_init_dict)
+            sub_flank_init.append(tf.constant_initializer(self.flank_init_kernel[i].numpy()))
         return ProfileHMMTransitioner(
-                transition_init = self.transition_init.copy(),
-                flank_init = self.flank_init.copy(),
+                transition_init = sub_transition_init,
+                flank_init = sub_flank_init,
                 prior = self.prior,
                 frozen_kernels = self.frozen_kernels,
                 dtype = self.dtype) 

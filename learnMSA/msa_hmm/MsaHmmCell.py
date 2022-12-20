@@ -140,6 +140,18 @@ class MsaHmmCell(tf.keras.layers.Layer):
         return prior
     
     
+    def duplicate(self, model_indices=None):
+        """ Returns a new cell by copying the models specified in model_indices from this cell. 
+        """
+        if model_indices is None:
+            model_indices = range(self.num_models)
+        sub_lengths = [self.length[i] for i in model_indices]
+        sub_emitter = [e.duplicate(model_indices) for e in self.emitter]
+        sub_transitioner = self.transitioner.duplicate(model_indices)
+        subset_cell = MsaHmmCell(sub_lengths, sub_emitter, sub_transitioner)
+        return subset_cell
+    
+    
     #configures the cell for the backward recursion
     def reverse_direction(self):
         self.transitioner.transpose()

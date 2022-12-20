@@ -88,10 +88,14 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
     def get_prior_log_density(self):
         return self.prior(self.B)
     
-    def duplicate(self):
+    def duplicate(self, model_indices=None):
+        if model_indices is None:
+            model_indices = range(len(self.emission_init))
+        sub_emission_init = [tf.constant_initializer(self.emission_kernel[i].numpy()) for i in model_indices]
+        sub_insertion_init = [tf.constant_initializer(self.insertion_kernel[i].numpy()) for i in model_indices]
         return ProfileHMMEmitter(
-                 emission_init = self.emission_init.copy(),
-                 insertion_init = self.insertion_init.copy(),
+                 emission_init = sub_emission_init,
+                 insertion_init = sub_insertion_init,
                  prior = self.prior,
                  frozen_insertions = self.frozen_insertions,
                  dtype = self.dtype) 
