@@ -712,15 +712,31 @@ class TestMSAHMM(unittest.TestCase):
         hmm_layer = msa_hmm.MsaHmmLayer(hmm_cell, 1)
         hmm_layer.build(seq.shape)
         backward_seqs = hmm_layer.backward_recursion(seq)
-        backward_ref = np.array([[0.5, 0.5, 0.1, 0.7, 0.9, 0.5, 0.5, 0.5, 0.5, 0.5, 0. ], 
-                               [0.24862003, 0.05702499, 0.64934999, 
-                                0.22049999, 0.045     , 0.15      , 
-                                0.3       , 0.35      , 0.249655  , 
-                                0.15000001, 0.        ]])
+        backward_ref = np.array([[1.]*11, 
+                               [0.49724005, 0.11404998, 0.72149999, 
+                                0.73499997, 0.44999999, 0.3       , 
+                                0.6       , 0.7       , 0.49931   , 
+                                0.30000002, 0.         ]])
         for i in range(2):
-            actual = np.exp(backward_seqs[0,i])
+            actual = np.exp(backward_seqs[0,0,-(i+1)])
             ref = backward_ref[i] + hmm_cell.epsilon
-            np.testing.assert_almost_equal(actual, ref, decimal=7)
+            np.testing.assert_almost_equal(actual, ref, decimal=5)
+            
+            
+    def test_posterior_state_probabilities(self):
+        train_filename = os.path.dirname(__file__)+"/data/egf.fasta"
+        fasta_file = msa_hmm.fasta.Fasta(train_filename)
+        hmm_cell = msa_hmm.MsaHmmCell(32)
+        hmm_layer = msa_hmm.MsaHmmLayer(hmm_cell, 1)
+        hmm_layer.build((1, None, None, 26))
+        batch_gen = msa_hmm.train.DefaultBatchGenerator(fasta_file, 1)
+        indices = tf.range(fasta_file.num_seq, dtype=tf.int64)
+        ds = msa_hmm.train.make_dataset(indices, batch_gen, batch_size=fasta_file.num_seq, shuffle=False)
+        for x,_ in ds:
+            seq = tf.one_hot(x[0], 26)
+            p = hmm_layer.state_posterior_log_probs(seq)
+        p = np.exp(p)
+        np.testing.assert_almost_equal(np.sum(p, -1), 1., decimal=4)
             
                 
                 

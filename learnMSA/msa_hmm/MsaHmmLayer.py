@@ -28,28 +28,52 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         self.built = True
         
         
-    def foward_recursion(self, inputs, training=False):
+    def forward_recursion(self, inputs, training=False):
         self.cell.recurrent_init()
-        initial_state = self.cell.get_initial_state(batch_size=tf.shape(inputs)[1])
-        inputs = tf.reshape(inputs, (-1, tf.shape(inputs)[-2], tf.shape(inputs)[-1]))
+        num_model, b, seq_len, s = tf.unstack(tf.shape(inputs))
+        initial_state = self.cell.get_initial_state(batch_size=b)
+        inputs = tf.reshape(inputs, (num_model*b, seq_len, s))
         forward, _, loglik = self.rnn(inputs, initial_state=initial_state, training=training)
+        forward = tf.reshape(forward, (num_model, b, seq_len, -1))
+        loglik = tf.reshape(loglik, (num_model, b))
         return forward, loglik
     
     
     def backward_recursion(self, inputs):
         self.cell.recurrent_init()
-        initial_state = self.cell.get_initial_backward_state(batch_size=tf.shape(inputs)[1])
-        inputs = tf.reshape(inputs, (-1, tf.shape(inputs)[-2], tf.shape(inputs)[-1]))
-        self.cell.transpose()
+        num_model, b, seq_len, s = tf.unstack(tf.shape(inputs))
+        initial_state = self.cell.get_initial_backward_state(batch_size=b)
+        inputs = tf.reshape(inputs, (num_model*b, seq_len, s))
+        self.cell.reverse_direction()
         backward, _, _ = self.rnn_backward(inputs, initial_state=initial_state)
-        self.cell.transpose()
+        self.cell.reverse_direction()
+        backward = tf.reshape(backward, (num_model, b, seq_len, -1))
+        backward = tf.reverse(backward, [-2])
         return backward
+    
+    
+    def state_posterior_log_probs(self, inputs):
+        """ Computes the log-probability of state q at position i given inputs.
+        Args:
+            inputs: Sequences. Shape: (num_model, b, seq_len, s)
+        Returns:
+            state posterior probbabilities: Shape: (num_model, b, seq_len, q)
+        """
+        forward, loglik = self.forward_recursion(inputs)
+        backward = self.backward_recursion(inputs)
+        loglik = loglik[:,:,tf.newaxis,tf.newaxis]
+        return forward + backward - loglik
         
         
     def call(self, inputs, training=False):
+        """ Computes log-likelihoods per model and sequence.
+        Args:
+            inputs: Sequences. Shape: (num_model, b, seq_len, s)
+        Returns:
+            log-likelihoods: Sequences. Shape: (num_model, b)
+        """
         inputs = tf.cast(inputs, self.dtype)
-        _, loglik = self.foward_recursion(inputs, training=training)
-        loglik = tf.reshape(loglik, (self.cell.num_models, -1))
+        _, loglik = self.forward_recursion(inputs, training=training)
         loglik_mean = tf.reduce_mean(loglik) #mean over both models and batches
         if self.use_prior:
             prior = self.cell.get_prior_log_density(add_metrics=False)

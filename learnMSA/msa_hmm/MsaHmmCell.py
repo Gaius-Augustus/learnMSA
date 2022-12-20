@@ -40,6 +40,8 @@ class MsaHmmCell(tf.keras.layers.Layer):
             em.cell_init(self)
         self.transitioner.cell_init(self)
         self.epsilon = tf.constant(1e-32, dtype)
+        self.reverse = False
+            
             
     def build(self, input_shape):
         self.dim = input_shape[-1]
@@ -48,6 +50,7 @@ class MsaHmmCell(tf.keras.layers.Layer):
         self.transitioner.build(input_shape)
         self.built = True
 
+        
     def recurrent_init(self):
         self.transitioner.recurrent_init()
         for em in self.emitter:
@@ -56,6 +59,7 @@ class MsaHmmCell(tf.keras.layers.Layer):
         self.log_A_dense_t = tf.transpose(self.log_A_dense, [0,2,1])
         self.init_dist = self.make_initial_distribution()
         self.init = True
+    
     
     def make_initial_distribution(self):
         """Constructs the initial state distribution which depends on the transition probabilities.
@@ -77,6 +81,7 @@ class MsaHmmCell(tf.keras.layers.Layer):
             em_probs *= em(inputs)
         return em_probs
 
+    
     def call(self, inputs, states, training=None):
         """ Computes one recurrent step of the Forward DP.
         """
@@ -86,20 +91,25 @@ class MsaHmmCell(tf.keras.layers.Layer):
         inputs = tf.reshape(inputs, (self.num_models, -1, self.dim))
         E = self.emission_probs(inputs)
         if self.init:
-            scaled_forward = tf.multiply(E, old_scaled_forward, name="forward")
+            R = old_scaled_forward
             self.init = False
         else:
             R = self.transitioner(old_scaled_forward)
-            scaled_forward = tf.multiply(E, R, name="forward")
+        scaled_forward = tf.multiply(E, R, name="forward")
         S = tf.reduce_sum(scaled_forward, axis=-1, keepdims=True, name="loglik")
         loglik = old_loglik + tf.math.log(S) 
         scaled_forward /= S 
         loglik = tf.reshape(loglik, (-1, 1))
         scaled_forward = tf.reshape(scaled_forward, (-1, self.max_num_states))
         new_state = [scaled_forward, loglik]
-        log_unscaled_forward = tf.math.log(scaled_forward + self.epsilon) + loglik
+        if self.reverse:
+            log_unscaled_forward = tf.math.log(R + self.epsilon) + old_loglik
+            log_unscaled_forward = tf.reshape(log_unscaled_forward, (-1, self.max_num_states))
+        else:
+            log_unscaled_forward = tf.math.log(scaled_forward + self.epsilon) + loglik
         return log_unscaled_forward, new_state
 
+    
     def get_initial_state(self, inputs=None, batch_size=None, _dtype=None):
         init_dist = tf.repeat(self.make_initial_distribution(), repeats=batch_size, axis=0)
         init_dist = tf.transpose(init_dist, (1,0,2))
@@ -108,12 +118,14 @@ class MsaHmmCell(tf.keras.layers.Layer):
         S = [init_dist, loglik]
         return S
 
+    
     def get_initial_backward_state(self, inputs=None, batch_size=None, _dtype=None):
         init_dist = tf.ones((self.num_models*batch_size, self.max_num_states), dtype=self.dtype)
         loglik = tf.zeros((self.num_models*batch_size, 1), dtype=self.dtype)
         S = [init_dist, loglik]
         return S
 
+    
     def get_prior_log_density(self, add_metrics=False):  
         em_priors = [tf.reduce_sum(em.get_prior_log_density(), 1) for em in self.emitter]
         trans_priors = self.transitioner.get_prior_log_densities()
@@ -127,7 +139,9 @@ class MsaHmmCell(tf.keras.layers.Layer):
                 self.add_metric(d, "mean_model_"+name)
         return prior
     
+    
     #configures the cell for the backward recursion
-    def transpose(self):
+    def reverse_direction(self):
         self.transitioner.transpose()
+        self.reverse = not self.reverse
 

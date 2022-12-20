@@ -10,7 +10,7 @@ import itertools
 import seaborn as sns
 
 
-def make_logo(alignment, model_index, ax):
+def plot_logo(alignment, model_index, ax):
     hmm_cell = alignment.msa_hmm_layer.cell
     hmm_cell.recurrent_init()
     length = hmm_cell.length[model_index]
@@ -245,9 +245,9 @@ def print_and_plot(alignment,
                    max_seq = 20, 
                    seqs_to_plot = [0,1,2], 
                    seq_ids = False, 
-                   plot_model=True, 
-                   plot_anc_probs=True,
-                   plot_logo=True):
+                   show_model=True, 
+                   show_anc_probs=True,
+                   show_logo=True):
     if model_index is None:
         model_index = alignment.best_model
     # print the alignment
@@ -270,15 +270,15 @@ def print_and_plot(alignment,
         print(s)
     if len(msa) > max_seq:
         print(len(msa) - max_seq, "sequences omitted.")
-    if plot_model:
+    if show_model:
         #plot the model
         fig = plt.figure(frameon=False)
         ax = fig.add_axes([0, 0, 1, 1])
         plot_hmm(alignment, model_index, ax, 
                  seq_indices=alignment.indices[seqs_to_plot],
                  path_colors=["#CC6600", "#0000cc", "#00cccc"])   
-    if plot_anc_probs:
+    if show_anc_probs:
         plot_anc_probs(alignment, model_index, seqs=seqs_to_plot)
-    if plot_logo:
+    if show_logo:
         fig, ax = plt.subplots()
-        make_logo(alignment, model_index, ax)
+        plot_logo(alignment, model_index, ax)

@@ -206,6 +206,53 @@ def run_learnMSA(train_filename,
     else:
         return alignment
     
+    
+def get_state_posterior_probs(fasta_file,
+                               batch_generator,
+                               indices,
+                               batch_size,
+                               msa_hmm_layer, 
+                               encoder):
+    """ Computes the posterior state probabilities for all sequences in fasta_file as specified by indices
+        and for all models as defined in msa_hmm_layer.
+    Args:
+        fasta_file: Fasta file object.
+        batch_generator: Batch generator.
+        indices: Indices that specify which sequences in fasta_file should be decoded. 
+        batch_size: Specifies how many sequences will be decoded in parallel. 
+        msa_hmm_layer: MsaHmmLayer object. 
+        encoder: Encoder model that is applied to the sequences before Viterbi.
+    Returns:
+        A dense integer representation of the most likely state sequences. Shape: (num_model, num_seq, L)
+    """
+    #compute an optimized order for decoding that sorts sequences of equal length into the same batch
+    indices = tf.reshape(indices, (-1))
+    num_indices = indices.shape[0]
+    sorted_indices = np.array([[i,j] for l,i,j in sorted(zip(fasta_file.seq_lens[indices], indices, range(num_indices)))])
+    msa_hmm_layer.cell.recurrent_init()
+    ds = train.make_dataset(sorted_indices[:,0], 
+                            batch_generator, 
+                            batch_size,
+                            shuffle=False)
+    
+    cell = msa_hmm_layer.cell
+    
+    @tf.function(input_signature=(tf.TensorSpec(shape=[cell.num_models, None, None], dtype=tf.uint8),
+                                  tf.TensorSpec(shape=[cell.num_models, None], dtype=tf.int64)))
+    def batch_posterior_state_probs(inputs, indices):
+        encoded_seq = encoder([inputs, indices]) 
+        posterior_probs = msa_hmm_layer.state_posterior_log_probs(encoded_seq)
+        posterior_probs = tf.math.exp(posterior_probs)
+        #compute expected number of visits per hidden state and sum over batch dim
+        posterior_probs = tf.reduce_sum(posterior_probs, -2)
+        posterior_probs = tf.reduce_sum(posterior_probs, 1) / num_indices
+        return posterior_probs
+    
+    posterior_probs = np.zeros((cell.num_models, cell.max_num_states), cell.dtype) 
+    for inputs, _ in ds:
+        posterior_probs += batch_posterior_state_probs(inputs[0], inputs[1]).numpy()
+    return posterior_probs
+    
 
 def decode_core(model_length,
                 state_seqs_max_lik,
