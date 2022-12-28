@@ -283,7 +283,6 @@ class TestMsaHmmCell(unittest.TestCase):
         hmm_cell.build(test_shape)
         
         def test_copied_cell(hmm_cell_copy, model_indices):
-            hmm_cell_copy.build(test_shape)
             emitter_copy = hmm_cell_copy.emitter
             transitioner_copy = hmm_cell_copy.transitioner
             for i,j in enumerate(model_indices):
@@ -471,6 +470,7 @@ class TestMSAHMM(unittest.TestCase):
                                                                    batch_generator,
                                                                    np.arange(fasta_file.num_seq),
                                                                    batch_size=2,
+                                                                   model_ids=[0,1],
                                                                    hmm_cell=hmm_cell)
         self.assert_vec(state_seqs_max_lik2, ref_seqs)
         indices = np.array([0,4,5])
@@ -478,6 +478,7 @@ class TestMSAHMM(unittest.TestCase):
                                                                    batch_generator,
                                                                    indices, #try a subset
                                                                    batch_size=2,
+                                                                   model_ids=[0,1],
                                                                    hmm_cell=hmm_cell)
         max_len = np.amax(fasta_file.seq_lens[indices])+1
         for i,j in enumerate(indices):
@@ -964,8 +965,7 @@ class TestAncProbs(unittest.TestCase):
                                     batch_gen, 
                                     ind, 
                                     batch_size=n, 
-                                    model=model,
-                                    build="lazy")
+                                    model=model)
             self.assert_anc_probs_layer(msa.encoder_model.layers[-1], case["config"])
             for x,_ in ds:
                 anc_prob_seqs = msa.encoder_model(x).numpy()[:,:,:-1]
@@ -1032,7 +1032,7 @@ class TestModelSurgery(unittest.TestCase):
         self.assertEqual(x.shape, y.shape, str(x)+" "+str(y))
         self.assertTrue(np.all(x == y), str(x) + " not equal to " + str(y))
         
-    def test_discard_or_expand_positions(self):
+    def make_test_alignment(self):
         config = msa_hmm.config.make_default(1)
         emission_init = string_to_one_hot("FELIC").numpy()*10
         insert_init= np.squeeze(string_to_one_hot("A") + string_to_one_hot("N"))*10
@@ -1069,14 +1069,18 @@ class TestModelSurgery(unittest.TestCase):
                                       np.arange(fasta_file.num_seq),
                                       32, 
                                       model)
+        return alignment
+        
+    def test_discard_or_expand_positions(self):
+        alignment = self.make_test_alignment()
         #a simple alignment to test detection of
-        #sparse and unconserved columns and frequent or very long insertions
+        #too sparse columns and too frequent insertions
         ref_seqs = [
-            "F.-..........LnnnI-aaaFELnICnnn",             
-            "-.EnnnnnnnnnnLnn.I-aaaFE-.ICnnn",
-            "-.-..........Lnn.I-...---.--nnn",
-            "-.-..........-...ICaaaF--.I-nnn",
-            "FnE..........-...ICaaaF-LnI-nnn"
+            "..........F.-LnnnI-aaaFELnICnnn",             
+            "nnnnnnnnnn-.-Lnn.I-aaaF--.ICnnn",
+            "..........-.-Lnn.I-...---.--nnn",
+            "..........-.--...ICaaaF--.I-nnn",
+            "..........FnE-...ICaaaF-LnI-nnn"
         ]
         aligned_sequences = alignment.to_string(model_index=0, add_block_sep=False)
         for s, ref_s in zip(aligned_sequences, ref_seqs):
@@ -1084,12 +1088,12 @@ class TestModelSurgery(unittest.TestCase):
         self.assertTrue(0 in alignment.metadata)
         #shape: [number of domain hits, length]
         deletions = np.sum(alignment.metadata[0].consensus == -1, axis=1)
-        self.assert_vec(deletions, [[3,3,2,0,3], [1,3,3,1,3]]) 
+        self.assert_vec(deletions, [[3,4,2,0,3], [1,4,3,1,3]]) 
         #shape: [number of domain hits, num seq]
         self.assert_vec(alignment.metadata[0].finished, [[False,False,True,False,False], [True,True,True,True,True]]) 
         #shape: [number of domain hits, num seq, L-1 inner positions]
         self.assert_vec(alignment.metadata[0].insertion_lens, [[[0, 0, 3, 0],
-                                                  [0, 10, 2, 0],
+                                                  [0, 0, 2, 0],
                                                   [0, 0, 2, 0],
                                                   [0, 0, 0, 0],
                                                   [1, 0, 0, 0]],
@@ -1099,13 +1103,19 @@ class TestModelSurgery(unittest.TestCase):
                                                   [0, 0, 0, 0],
                                                   [0, 0, 0, 0],
                                                   [0, 0, 1, 0]]]) 
-        pos_expand, expansion_lens, pos_discard = msa_hmm.align.get_discard_or_expand_positions(alignment, 
-                                                                                                model_index=0, 
-                                                                                                ins_long=9, 
-                                                                                                k=1)
+        pos_expand, expansion_lens, pos_discard = msa_hmm.align.get_discard_or_expand_positions(alignment)
+        pos_expand = pos_expand[0]
+        expansion_lens = expansion_lens[0]
+        pos_discard = pos_discard[0]
         self.assert_vec(pos_expand, [2,3,5])
-        self.assert_vec(expansion_lens, [9,1,3])
-        self.assert_vec(pos_discard, [4])
+        self.assert_vec(expansion_lens, [2,2,3])
+        self.assert_vec(pos_discard, [1])
+        
+        
+    def test_extend_mods(self):
+        pos_expand = np.array([2,3,5])
+        expansion_lens = np.array([9,1,3])
+        pos_discard = np.array([4])
         e,l,d = msa_hmm.align.extend_mods(pos_expand, expansion_lens, pos_discard, L=5)
         self.assert_vec(d, [1,2,3])
         self.assert_vec(e, [1,2,4])
@@ -1118,6 +1128,13 @@ class TestModelSurgery(unittest.TestCase):
         self.assert_vec(d, [1,2,3,4])
         self.assert_vec(e, [1,2,3,4])
         self.assert_vec(l, [10,2,1,3])
+        
+        
+    def test_update_kernels(self):
+        alignment = self.make_test_alignment()
+        pos_expand = np.array([2,3,5])
+        expansion_lens = np.array([9,1,3])
+        pos_discard = np.array([4])
         emission_init2 = [tf.constant_initializer(string_to_one_hot("A").numpy()*10)]
         transition_init2 = {"begin_to_match" : tf.constant_initializer(77),
                             "match_to_end" : tf.constant_initializer(77),

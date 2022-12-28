@@ -8,17 +8,19 @@ import learnMSA.msa_hmm.Initializers as initializers
 def as_str(config, items_per_line=3):
     return " , ".join(key + " : " + str(val) + "\n"*((i+1)%items_per_line==0) for i,(key,val) in enumerate(config.items()))
 
-#simple adpative batch size depending on sequence length
+#simple adpative batch size depending on sequence- length and model length
 #longer models and sequences require much more memory
 #we limit the batch size based on the longest model to train
 def get_adaptive_batch_size(model_lengths, max_seq_len):
     model_length = max(model_lengths)
-    if max_seq_len * model_length < 200 * 200:
+    if max_seq_len < 200 and model_length < 200:
         return 512
-    if max_seq_len * model_length < 350 * 350:
+    elif max_seq_len < 520 and model_length < 300:
         return 256
-    else:
+    elif max_seq_len < 800 and model_length < 500:
         return 128
+    else:
+        return 64
 
 #the configuration can be changed by experienced users
 #proper command line support for these parameters will be added in the future

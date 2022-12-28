@@ -329,12 +329,16 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
                                        for key, kernel in self.transition_kernel[i].items()}
             sub_transition_init.append(transition_init_dict)
             sub_flank_init.append(tf.constant_initializer(self.flank_init_kernel[i].numpy()))
-        return ProfileHMMTransitioner(
-                transition_init = sub_transition_init,
-                flank_init = sub_flank_init,
-                prior = self.prior,
-                frozen_kernels = self.frozen_kernels,
-                dtype = self.dtype) 
+        transitioner_copy = ProfileHMMTransitioner(
+                                        transition_init = sub_transition_init,
+                                        flank_init = sub_flank_init,
+                                        prior = self.prior,
+                                        frozen_kernels = self.frozen_kernels,
+                                        dtype = self.dtype) 
+        transitioner_copy.transition_kernel = [self.transition_kernel[i] for i in model_indices]
+        transitioner_copy.flank_init_kernel = [self.flank_init_kernel[i] for i in model_indices]
+        transitioner_copy.built = True
+        return transitioner_copy
     
     #configure the Transitioner for the backward recursion
     def transpose(self):

@@ -95,8 +95,8 @@ class MsaHmmCell(tf.keras.layers.Layer):
             self.init = False
         else:
             R = self.transitioner(old_scaled_forward)
-        scaled_forward = tf.multiply(E, R, name="forward")
-        S = tf.reduce_sum(scaled_forward, axis=-1, keepdims=True, name="loglik")
+        scaled_forward = tf.multiply(E, R, name="scaled_forward")
+        S = tf.reduce_sum(scaled_forward, axis=-1, keepdims=True)
         loglik = old_loglik + tf.math.log(S) 
         scaled_forward /= S 
         loglik = tf.reshape(loglik, (-1, 1))
@@ -143,12 +143,15 @@ class MsaHmmCell(tf.keras.layers.Layer):
     def duplicate(self, model_indices=None):
         """ Returns a new cell by copying the models specified in model_indices from this cell. 
         """
+        assert self.built, "Can only duplicate a cell that was built before (i.e. it has kernels)."
         if model_indices is None:
             model_indices = range(self.num_models)
         sub_lengths = [self.length[i] for i in model_indices]
         sub_emitter = [e.duplicate(model_indices) for e in self.emitter]
         sub_transitioner = self.transitioner.duplicate(model_indices)
         subset_cell = MsaHmmCell(sub_lengths, sub_emitter, sub_transitioner)
+        subset_cell.dim = self.dim
+        subset_cell.built = True
         return subset_cell
     
     

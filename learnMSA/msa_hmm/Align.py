@@ -70,8 +70,7 @@ def fit_and_align(fasta_file,
                                batch_generator,
                                decode_indices,
                                batch_size=batch_size, 
-                               model=model,
-                               build="lazy" if last_iteration else "eager")
+                               model=model)
         if last_iteration:
             loglik, prior = compute_loglik(alignment)
             alignment.loglik = loglik 
@@ -86,23 +85,19 @@ def fit_and_align(fasta_file,
         #duplicate the previous emitters and transitioner and replace their initializers later
         config["emitter"] = [em.duplicate() for em in alignment.msa_hmm_layer.cell.emitter]
         config["transitioner"] = alignment.msa_hmm_layer.cell.transitioner.duplicate()
+        pos_expand, expansion_lens, pos_discard = get_discard_or_expand_positions(alignment, 
+                                                                                    del_t=config["surgery_del"], 
+                                                                                    ins_t=config["surgery_ins"])
         for k in range(config["num_models"]):
-            pos_expand, expansion_lens, pos_discard = get_discard_or_expand_positions(alignment, 
-                                                                                      k,
-                                                                                        del_t=config["surgery_del"], 
-                                                                                        ins_t=config["surgery_ins"],
-                                                                                        ins_long=100000, 
-                                                                                        k=32, 
-                                                                                        match_prior_threshold=1)
-            surgery_converged &= pos_expand.size == 0 and pos_discard.size == 0
+            surgery_converged &= pos_expand[k].size == 0 and pos_discard[k].size == 0
             if verbose:
-                print(f"expansions model {k}:", list(zip(pos_expand, expansion_lens)))
-                print(f"discards model {k}:", pos_discard)
+                print(f"expansions model {k}:", list(zip(pos_expand[k], expansion_lens[k])))
+                print(f"discards model {k}:", pos_discard[k])
             transition_init, emission_init, flank_init = update_kernels(alignment, 
                                                                         k,
-                                                                        pos_expand,
-                                                                        expansion_lens, 
-                                                                        pos_discard,
+                                                                        pos_expand[k],
+                                                                        expansion_lens[k], 
+                                                                        pos_discard[k],
                                                                         [e[k] for e in emission_init_0], 
                                                                         transition_init_0[k], 
                                                                         flank_init_0[k])
@@ -177,7 +172,7 @@ def run_learnMSA(train_filename,
     if verbose:
         likelihoods = ["%.4f" % ll + " (%.4f)" % p for ll,p in zip(alignment.loglik, alignment.prior)]
         print("Computed alignments with likelihoods (priors): ", likelihoods)
-        print("Best model: ", alignment.best_model)
+        print("Best model: ", alignment.best_model, "(0-based)")
         
     Path(os.path.dirname(out_filename)).mkdir(parents=True, exist_ok=True)
     t = time.time()
@@ -207,14 +202,13 @@ def run_learnMSA(train_filename,
         return alignment
     
     
-def get_state_posterior_probs(fasta_file,
-                               batch_generator,
-                               indices,
-                               batch_size,
-                               msa_hmm_layer, 
-                               encoder):
-    """ Computes the posterior state probabilities for all sequences in fasta_file as specified by indices
-        and for all models as defined in msa_hmm_layer.
+def get_state_expectations(fasta_file,
+                           batch_generator,
+                           indices,
+                           batch_size,
+                           msa_hmm_layer, 
+                           encoder):
+    """ Computes the expected number of occurences per model and state.
     Args:
         fasta_file: Fasta file object.
         batch_generator: Batch generator.
@@ -223,10 +217,10 @@ def get_state_posterior_probs(fasta_file,
         msa_hmm_layer: MsaHmmLayer object. 
         encoder: Encoder model that is applied to the sequences before Viterbi.
     Returns:
-        A dense integer representation of the most likely state sequences. Shape: (num_model, num_seq, L)
+        The expected number of occurences per model state. Shape (num_model, max_num_states)
     """
     #compute an optimized order for decoding that sorts sequences of equal length into the same batch
-    indices = tf.reshape(indices, (-1))
+    indices = np.reshape(indices, (-1))
     num_indices = indices.shape[0]
     sorted_indices = np.array([[i,j] for l,i,j in sorted(zip(fasta_file.seq_lens[indices], indices, range(num_indices)))])
     msa_hmm_layer.cell.recurrent_init()
@@ -431,8 +425,6 @@ class Alignment():
         model: A learnMSA model which internally might represent multiple pHMM models.
         gap_symbol: Character used to denote missing match positions.
         gap_symbol_insertions: Character used to denote insertions in other sequences.
-        build: If "eager", the alignment is decoded when its constructed. If "lazy", the decoding will
-                only happen, if the alignment should be printed or written to file.
     """
     def __init__(self, 
                  fasta_file, 
@@ -441,8 +433,7 @@ class Alignment():
                  batch_size, 
                  model,
                  gap_symbol="-",
-                 gap_symbol_insertions=".",
-                 build="eager"):
+                 gap_symbol_insertions="."):
         self.fasta_file = fasta_file
         self.batch_generator = batch_generator
         self.indices = indices
@@ -463,8 +454,6 @@ class Alignment():
                                         [aa.lower() for aa in fasta.alphabet[:-1]] + 
                                         [gap_symbol_insertions, "$"]))
         self.metadata = {}
-        if build=="eager":
-            self._build_alignment(range(self.msa_hmm_layer.cell.num_models))
         self.num_models = self.msa_hmm_layer.cell.num_models
             
             
@@ -472,17 +461,18 @@ class Alignment():
     #eventually, an alignment with explicit gaps can be written 
     #in a memory friendly manner to file
     def _build_alignment(self, models):
-        self.msa_hmm_layer.cell.recurrent_init()
+        cell_copy = self.msa_hmm_layer.cell.duplicate(models)
         state_seqs_max_lik = viterbi.get_state_seqs_max_lik(self.fasta_file,
-                                                                    self.batch_generator,
-                                                                    self.indices,
-                                                                    self.batch_size,
-                                                                    self.msa_hmm_layer.cell,
-                                                                    self.encoder_model)
-        lengths = self.msa_hmm_layer.cell.length
-        for i in models:
-            decoded_data = decode(lengths[i], state_seqs_max_lik[i])
+                                                            self.batch_generator,
+                                                            self.indices,
+                                                            self.batch_size,
+                                                            cell_copy,
+                                                            models,
+                                                            self.encoder_model)
+        for i,l,max_lik_seqs in zip(models, cell_copy.length, state_seqs_max_lik):
+            decoded_data = decode(l,max_lik_seqs)
             self.metadata[i] = AlignmentMetaData(*decoded_data)
+
                               
     
     #use only for low sequence numbers
@@ -608,88 +598,46 @@ class AlignmentMetaData():
                               self.right_flank_len_total)
   
         
-# Given an alignment, computes positions for match expansions and discards depending
-# on the following criteria:
-# A position is expanded, if an insertion occurs in at least ins_t % of cases or 
-# at least k sequences have an insertion of length > ins_long 
-# (i.e. filter for very frequent or long insertions)
-# In the first case the position is expanded by the average insertion length (counting zeros).
-# In the second case the position is expanded by ins_long.
-#
-# A position is discarded, if it is deleted in at least del_t % of the sequences of all domain blocks and 
-# if it has a prior density value in the lower match_prior_threshold % of the range of prior density values.
-# (note that as a consequence we keep very conserved positions even if they are deleted frequently in the sequences)
 def get_discard_or_expand_positions(alignment, 
-                                    model_index, 
-                                    #fraction of gaps beyond which a column can be discarded
                                     del_t=0.5, 
-                                    #fraction of insertion openings beyond which additional matches are added
-                                    ins_t=0.5, 
-                                    #percentage of the mid of range prior value below which a match state can be discarded
-                                    match_prior_threshold=0.5, 
-                                    #insertion length threshold to detect suspiciously long insertions
-                                    ins_long=32,
-                                    k=2,
-                                    verbose=False):
-    n = alignment.indices.size
-    r = alignment.metadata[model_index].num_repeats
-    finished_early = np.sum(alignment.metadata[model_index].finished[:-1], axis=1, keepdims=True)
-    num_repeats = r*n-np.sum(finished_early)
-    
-    #insertions
-    #find the fraction of insertion openings in all domain blocks handling repeats as multiple independent hits
-    block_ins = np.sum(alignment.metadata[model_index].insertion_lens > 0, axis=(0,1))
-    block_ins_frac = block_ins / num_repeats
-    left_ins_frac = np.mean(alignment.metadata[model_index].left_flank_len > 0)
-    right_ins_frac = np.mean(alignment.metadata[model_index].right_flank_len  > 0)
-    ins_frac = np.concatenate([[left_ins_frac], block_ins_frac, [right_ins_frac]], axis=0)
-    #compute the average insertion lengths over all sequences/domain blocks 
-    #include zeros but do not count "empty" domain hits of finished sequences
-    block_ins_lens = np.sum(alignment.metadata[model_index].insertion_lens, axis=(0,1))
-    block_ins_avg_lens = block_ins_lens/num_repeats
-    left_ins_lens = np.mean(alignment.metadata[model_index].left_flank_len)
-    right_ins_lens = np.mean(alignment.metadata[model_index].right_flank_len)
-    ins_lens = np.concatenate([[left_ins_lens], block_ins_avg_lens, [right_ins_lens]], axis=0)
-    ins_lens = np.ceil(ins_lens).astype(np.int32)
-    expand1 = ins_frac > ins_t
-    pos_expand1 = np.arange(ins_frac.size, dtype=np.int32)[expand1]
-    expansion_lens1 = ins_lens[expand1]
-    block_very_long = alignment.metadata[model_index].insertion_lens > ins_long
-    block_very_long = np.minimum(np.sum(block_very_long, axis=0), 1) #clip multi domain cases in the same sequence
-    block_very_long = np.sum(block_very_long, axis=0)
-    left_very_long = np.sum(alignment.metadata[model_index].left_flank_len > ins_long)
-    right_very_long = np.sum(alignment.metadata[model_index].right_flank_len  > ins_long)
-    very_long = np.concatenate([[left_very_long], block_very_long, [right_very_long]], axis=0)
-    expand2 = very_long >= k
-    pos_expand2 = np.arange(very_long.size, dtype=np.int32)[expand2]
-    expansion_lens2 = np.array([ins_long]*pos_expand2.size, dtype=np.int32)
-    #resolve the potential overlap between the two position vectors
-    pos_expand, unique_indices = np.unique(np.concatenate([pos_expand2, pos_expand1]), return_index=True) 
-    #unique_indices points to the first occurence, therefore we take the entry in pos_expand2
-    #over the one in pos_expand1 in case of a dublication
-    expansion_lens = np.concatenate([expansion_lens2, expansion_lens1], axis=0)[unique_indices]
-    
-    #deletions
-    #find fraction of gaps in all domain blocks handling repeats as multiple independent hits
-    #and without counting "empty" hits of finished sequences
-    del_no_finish = np.sum(alignment.metadata[model_index].consensus == -1, axis=1)
-    del_no_finish[1:] -= finished_early
-    del_frac = np.sum(del_no_finish, axis=0) / num_repeats
-    pos_discard1 = np.arange(del_frac.size, dtype=np.int32)[del_frac > del_t]
-    #find match states with low prior
-    #emissions
-    p = []
-    for em in alignment.msa_hmm_layer.cell.emitter:
-        p_val = em.get_prior_log_density()[model_index]
-        if p_val.shape[0] > alignment.msa_hmm_layer.cell.length[model_index]:
-            p_val = p_val[1:alignment.msa_hmm_layer.cell.length[model_index]+1]
-        p.append(p_val)
-    prior_val = np.sum(np.stack(p), axis=0)
-    min_prior, max_prior = np.min(prior_val), np.max(prior_val)
-    prior_threshold = min_prior + match_prior_threshold * (max_prior - min_prior)
-    pos_discard2 = np.arange(prior_val.size, dtype=np.int32)[prior_val <= prior_threshold]
-    pos_discard = np.intersect1d(pos_discard1, pos_discard2) 
-    
+                                    ins_t=0.5):
+    """ Given an alignment, computes positions for match expansions and discards based on the posterior state probabilities.
+    Args: 
+        alignment: An Alignment object.
+        del_t: Discards match positions that are expected less often than this number.
+        ins_t: Expands insertions that are expected more often than this number. 
+                Adds new match states according to the expected insertion length. 
+    Returns:
+        pos_expand: A list of arrays with match positions to expand per model.
+        expansion_lens: A list of arrays with the expansion lengths.
+        pos_discard: A list of arrays with match positions to discard.
+    """
+    e_state = get_state_expectations(alignment.fasta_file,
+                                    alignment.batch_generator,
+                                    alignment.indices,
+                                    alignment.batch_size,
+                                    alignment.msa_hmm_layer,
+                                    alignment.encoder_model)
+    pos_expand = []
+    expansion_lens = []
+    pos_discard = []
+    for i in range(alignment.num_models):
+        model_length = alignment.msa_hmm_layer.cell.length[i]
+        #discards
+        match_states = e_state[i, 1:model_length+1]
+        discard = np.arange(model_length, dtype=np.int32)[match_states < del_t]
+        pos_discard.append(discard)
+        #expansions
+        insert_states = e_state[i, model_length+1:2*model_length]
+        left_flank_state = e_state[i, 0]
+        right_flank_state = e_state[i, 2*model_length+1]
+        all_inserts = np.concatenate([[left_flank_state], insert_states, [right_flank_state]], axis=0)
+        which_to_expand = all_inserts > ins_t
+        expand = np.arange(model_length+1, dtype=np.int32)[which_to_expand]
+        pos_expand.append(expand)
+        #expansion lengths
+        expand_len = np.ceil(all_inserts).astype(np.int32)[which_to_expand]
+        expansion_lens.append(expand_len)
     return pos_expand, expansion_lens, pos_discard
 
 

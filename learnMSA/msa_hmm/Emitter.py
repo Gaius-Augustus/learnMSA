@@ -93,12 +93,16 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
             model_indices = range(len(self.emission_init))
         sub_emission_init = [tf.constant_initializer(self.emission_kernel[i].numpy()) for i in model_indices]
         sub_insertion_init = [tf.constant_initializer(self.insertion_kernel[i].numpy()) for i in model_indices]
-        return ProfileHMMEmitter(
-                 emission_init = sub_emission_init,
-                 insertion_init = sub_insertion_init,
-                 prior = self.prior,
-                 frozen_insertions = self.frozen_insertions,
-                 dtype = self.dtype) 
+        emitter_copy = ProfileHMMEmitter(
+                             emission_init = sub_emission_init,
+                             insertion_init = sub_insertion_init,
+                             prior = self.prior,
+                             frozen_insertions = self.frozen_insertions,
+                             dtype = self.dtype) 
+        emitter_copy.emission_kernel = [self.emission_kernel[i] for i in model_indices]
+        emitter_copy.insertion_kernel = [self.insertion_kernel[i] for i in model_indices]
+        emitter_copy.built = True 
+        return emitter_copy
     
     def __repr__(self):
         return f"ProfileHMMEmitter(emission_init={self.emission_init[0]}, insertion_init={self.insertion_init[0]}, prior={self.prior}, frozen_insertions={self.frozen_insertions}, )"

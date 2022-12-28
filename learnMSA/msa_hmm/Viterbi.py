@@ -106,6 +106,7 @@ def get_state_seqs_max_lik(fasta_file,
                            indices,
                            batch_size,
                            hmm_cell, 
+                           model_ids,
                            encoder=None):
     """ Runs batch-wise viterbi on all sequences in fasta_file as specified by indices.
     Args:
@@ -114,7 +115,7 @@ def get_state_seqs_max_lik(fasta_file,
         indices: Indices that specify which sequences in fasta_file should be decoded. 
         batch_size: Specifies how many sequences will be decoded in parallel. 
         hmm_cell: MsaHmmCell object. 
-        encoder: Optional encoder model that is applied to the sequences before Viterbi.
+        encoder: Optional eget_state_seqs_max_likncoder model that is applied to the sequences before Viterbi.
     Returns:
         A dense integer representation of the most likely state sequences. Shape: (num_model, num_seq, L)
     """
@@ -130,14 +131,16 @@ def get_state_seqs_max_lik(fasta_file,
     state_seqs_max_lik = np.zeros((hmm_cell.num_models, indices.size, seq_len), 
                                   dtype=np.uint16) 
     
-    @tf.function(input_signature=(tf.TensorSpec(shape=[hmm_cell.num_models, None, None], dtype=tf.uint8),
-                                  tf.TensorSpec(shape=[hmm_cell.num_models, None], dtype=tf.int64)))
+    @tf.function(input_signature=(tf.TensorSpec(shape=[batch_generator.num_models, None, None], dtype=tf.uint8),
+                                  tf.TensorSpec(shape=[batch_generator.num_models, None], dtype=tf.int64)))
     def call_viterbi(inputs, indices):
-        encoded_seq = encoder([inputs, indices]) 
+        encoded_seq = encoder([inputs, indices])
+        #todo: this can be improved by encoding only for required models, not all
+        encoded_seq = tf.gather(encoded_seq, model_ids, axis=0)
         viterbi_seq = viterbi(encoded_seq, hmm_cell)
         return viterbi_seq
     
-    @tf.function(input_signature=(tf.TensorSpec(shape=[hmm_cell.num_models, None, None], dtype=tf.uint8),))
+    @tf.function(input_signature=(tf.TensorSpec(shape=[batch_generator.num_models, None, None], dtype=tf.uint8),))
     def call_viterbi_single(inputs):
         if encoder is None:
             if batch_generator.return_only_sequences:
@@ -146,6 +149,8 @@ def get_state_seqs_max_lik(fasta_file,
                 seq = inputs[0]
         else:
             seq = encoder(inputs) 
+        #todo: this can be improved by encoding only for required models, not all
+        seq = tf.boolean_mask(seq, model_ids, axis=0)
         return viterbi(seq, hmm_cell)
     
     for i,q in enumerate(hmm_cell.num_states):

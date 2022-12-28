@@ -122,7 +122,7 @@ class ProfileHMMTransitionPrior():
             #match state transitions
             p_match = tf.stack([probs["match_to_match"],
                                 probs["match_to_insert"],
-                                probs["match_to_delete"][1:]], axis=-1) + 1e-32
+                                probs["match_to_delete"][1:]], axis=-1) + 1e-16
             p_match_sum = tf.reduce_sum(p_match, axis=-1, keepdims=True)
             match_dirichlet.append( tf.reduce_sum(self.match_dirichlet.log_pdf(p_match / p_match_sum)) )
             #insert state transitions
