@@ -190,13 +190,15 @@ def run_learnMSA(train_filename,
             if verbose:
                 print("SP score =", sp)
         else:
+            sp = []
             for i in range(alignment.msa_hmm_layer.cell.num_models):
                 tmp_file = "tmp.fasta"
                 alignment.to_file(tmp_file, i)
                 tmp_fasta = fasta.Fasta(tmp_file, aligned=True) 
-                _,sp = tmp_fasta.precision_recall(ref_fasta)
-                print(f"Model {i} SP score =", sp)
+                _,sp_i = tmp_fasta.precision_recall(ref_fasta)
+                print(f"Model {i} SP score =", sp_i)
                 os.remove(tmp_file)
+                sp.append(sp_i)
         return alignment, sp
     else:
         return alignment
@@ -857,12 +859,18 @@ def get_full_length_estimate(fasta_file, config):
     return full_length_estimate
 
 
-def get_initial_model_lengths(fasta_file, config):
+def get_initial_model_lengths(fasta_file, config, random=True):
     #initial model length
     model_length = np.quantile(fasta_file.seq_lens, q=config["length_init_quantile"])
     model_length *= config["len_mul"]
     model_length = max(3, int(np.floor(model_length)))
-    return [model_length] * config["num_models"]
+    if random:
+        scale = 3 + int(np.floor(model_length/30))
+        lens = np.random.normal(loc=model_length, scale=scale, size=config["num_models"]).astype(np.int32)
+        lens = np.maximum(lens, 3)
+        return lens
+    else:
+        return [model_length] * config["num_models"]
     
     
 def _make_defaults_if_none(fasta_file, config, model_generator, batch_generator):
