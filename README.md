@@ -76,6 +76,17 @@ Requirements:
 
 Run the notebook <code>MsaHmm.ipynb</code> with juypter.
 
+# Version 1.1.0 improvements
+
+*This version is currently only available under the branch "general_cell".*
+
+- Parallel training of multiple models and reduced memory footprint (train more models in less time)
+- Customize learnMSA via code (e.g. by changing emission type, prior or the number of rate matricies used to compute ancestral probabilities)
+
+![alt text](https://github.com/Ung0d/MSA-HMM-Analysis/blob/main/fig/boxplots_sp_homfam.png?raw=true)
+![alt text](https://github.com/Ung0d/MSA-HMM-Analysis/blob/main/fig/learnMSA_fast_comparison.png?raw=true)
+![alt text](https://github.com/Ung0d/MSA-HMM-Analysis/blob/main/fig/learnMSA_fast_comparison_large.png?raw=true)
+
 # Publications
 
 Becker F, Stanke M. **learnMSA: learning and aligning large protein families**. *GigaScience*. 2022
