@@ -5,8 +5,8 @@ import learnMSA.msa_hmm.Transitioner as trans
 import learnMSA.msa_hmm.Initializers as initializers
 
 
-def as_str(config, items_per_line=3):
-    return " , ".join(key + " : " + str(val) + "\n"*((i+1)%items_per_line==0) for i,(key,val) in enumerate(config.items()))
+def as_str(config, items_per_line=1, prefix="", sep=""):
+    return "\n"+prefix+"{" + sep.join(("\n"+prefix)*(i%items_per_line==0) + key + " : " + str(val) for i,(key,val) in enumerate(config.items())) + "\n"+prefix+"}"
 
 #simple adpative batch size depending on sequence- length and model length
 #longer models and sequences require much more memory
@@ -48,7 +48,6 @@ def make_default(default_num_models = 5):
         "dirichlet_mix_comp_count" : 1,
         "use_anc_probs" : True,
         "trainable_rate_matrices" : False,
-        "encoder_initializer" : initializers.make_default_anc_probs_init(default_num_models),
         "surgery_del" : 0.5,
         "surgery_ins" : 0.5,
         "num_rate_matrices" : 1,
@@ -56,7 +55,8 @@ def make_default(default_num_models = 5):
         "matrix_rate_l2" : 0.0,
         "shared_rate_matrix" : False,
         "equilibrium_sample" : False,
-        "transposed" : False
+        "transposed" : False,
+        "encoder_initializer" : initializers.make_default_anc_probs_init(default_num_models)
     }
     return default
 

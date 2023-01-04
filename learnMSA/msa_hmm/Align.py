@@ -143,9 +143,8 @@ def run_learnMSA(train_filename,
         An Alignment object.
     """
     if verbose:
-        print("Training of", config["num_models"], " models on file", os.path.basename(train_filename))
-        print("Configuration:")
-        print(as_str(config))
+        print("Training of", config["num_models"], "models on file", os.path.basename(train_filename))
+        print("Configuration:", as_str(config))
     # load the file
     fasta_file = fasta.Fasta(train_filename)  
     # optionally load the reference and find the corresponding sequences in the train file
@@ -859,14 +858,17 @@ def get_full_length_estimate(fasta_file, config):
     return full_length_estimate
 
 
-def get_initial_model_lengths(fasta_file, config, random=True):
+def get_initial_model_lengths(fasta_file, config, random=True, len_offset_threshold_seqs=100000, scale_threshold_seqs=7000):
     #initial model length
     model_length = np.quantile(fasta_file.seq_lens, q=config["length_init_quantile"])
-    model_length *= config["len_mul"]
-    model_length = max(3, int(np.floor(model_length)))
+    # randomize less for many sequences
+    factor_len_offset = min(len_offset_threshold_seqs/fasta_file.num_seq, 1.) 
+    factor_scale = min(scale_threshold_seqs/fasta_file.num_seq, 1.) 
+    model_length -= (1-config["len_mul"]) * model_length * factor_len_offset
+    model_length = max(3., model_length)
     if random:
-        scale = 3 + int(np.floor(model_length/30))
-        lens = np.random.normal(loc=model_length, scale=scale, size=config["num_models"]).astype(np.int32)
+        scale = (2 + model_length/50) * factor_scale
+        lens = np.round(np.random.normal(loc=model_length, scale=scale, size=config["num_models"])).astype(np.int32)
         lens = np.maximum(lens, 3)
         return lens
     else:

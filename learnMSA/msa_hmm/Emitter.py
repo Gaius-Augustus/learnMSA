@@ -105,7 +105,7 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
         return emitter_copy
     
     def __repr__(self):
-        return f"ProfileHMMEmitter(emission_init={self.emission_init[0]}, insertion_init={self.insertion_init[0]}, prior={self.prior}, frozen_insertions={self.frozen_insertions}, )"
+        return f"ProfileHMMEmitter(\n emission_init={self.emission_init[0]},\n insertion_init={self.insertion_init[0]},\n prior={self.prior},\n frozen_insertions={self.frozen_insertions}, )"
     
     
     

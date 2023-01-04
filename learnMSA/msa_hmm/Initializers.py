@@ -16,6 +16,16 @@ class EmissionInitializer(tf.keras.initializers.Initializer):
         dist = tf.cast(self.dist, dtype)
         return tf.reshape(tf.tile(dist, shape[:1]), shape)
     
+    def __repr__(self):
+        return f"DefaultEmission()"
+    
+class ConstantInitializer(tf.keras.initializers.Constant):
+    def __repr__(self):
+        if np.isscalar(self.value):
+            return f"Const({self.value})"
+        else:
+            return f"Const(shape={self.value.shape})"
+    
 R, p = anc_probs.parse_paml(anc_probs.LG_paml, fasta.alphabet[:-1])
 exchangeability_init = anc_probs.inverse_softplus(R + 1e-32)
 
@@ -35,16 +45,16 @@ background_distribution /= np.sum(background_distribution)
 def make_default_anc_probs_init(num_models):
     exchangeability_stack = np.stack([exchangeability_init]*num_models, axis=0)
     log_p_stack = np.stack([np.log(p)]*num_models, axis=0)
-    return [tf.constant_initializer(-3), 
-            tf.constant_initializer(exchangeability_stack), 
-            tf.constant_initializer(log_p_stack)]
+    return [ConstantInitializer(-3), 
+            ConstantInitializer(exchangeability_stack), 
+            ConstantInitializer(log_p_stack)]
     
 def make_default_emission_init():
     return EmissionInitializer(np.log(background_distribution))
 
 
 def make_default_insertion_init():
-    return tf.constant_initializer(np.log(background_distribution))
+    return ConstantInitializer(np.log(background_distribution))
 
 
 class EntryInitializer(tf.keras.initializers.Initializer):
@@ -54,11 +64,17 @@ class EntryInitializer(tf.keras.initializers.Initializer):
         p = tf.cast(tf.repeat(tf.math.log(1/(shape[0]-1)), shape[0]-1), dtype=dtype)
         return tf.concat([p0, p], axis=0)
     
+    def __repr__(self):
+        return f"DefaultEntry()"
+    
     
 class ExitInitializer(tf.keras.initializers.Initializer):
     def __call__(self, shape, dtype=None, **kwargs):
         #choose such that all exit probs equal the probs entry[i] for i > 0 
         return tf.zeros(shape, dtype=dtype) + tf.cast(tf.math.log(0.5/(shape[0]-1)), dtype=dtype)
+    
+    def __repr__(self):
+        return f"DefaultExit()"
     
 
 class MatchTransitionInitializer(tf.keras.initializers.Initializer):
@@ -75,9 +91,15 @@ class MatchTransitionInitializer(tf.keras.initializers.Initializer):
         prob = (tf.nn.softmax(val_z) * (1-p_exit_desired))[:,self.i]
         return tf.math.log(prob)
     
+    def __repr__(self):
+        return f"DefaultMatchTransition({self.val[self.i]})"
+    
+class RandomNormalInitializer(tf.keras.initializers.RandomNormal):
+    def __repr__(self):
+        return f"Norm({self.mean}, {self.stddev})"
     
 def make_default_flank_init():
-    return tf.keras.initializers.Zeros()
+    return ConstantInitializer(0.)
 
     
 def make_default_transition_init(MM=1, 
@@ -98,18 +120,18 @@ def make_default_transition_init(MM=1,
         "match_to_end" : ExitInitializer(),
         "match_to_match" : MatchTransitionInitializer([MM, MI, MD], 0, scale),
         "match_to_insert" : MatchTransitionInitializer([MM, MI, MD], 1, scale),
-        "insert_to_match" : tf.random_normal_initializer(IM, scale),
-        "insert_to_insert" : tf.random_normal_initializer(II, scale),
+        "insert_to_match" : RandomNormalInitializer(IM, scale),
+        "insert_to_insert" : RandomNormalInitializer(II, scale),
         "match_to_delete" : MatchTransitionInitializer([MM, MI, MD], 2, scale),
-        "delete_to_match" : tf.random_normal_initializer(DM, scale),
-        "delete_to_delete" : tf.random_normal_initializer(DD, scale),
-        "left_flank_loop" : tf.random_normal_initializer(FC, scale),
-        "left_flank_exit" : tf.random_normal_initializer(FE, scale),
-        "right_flank_loop" : tf.random_normal_initializer(FC, scale),
-        "right_flank_exit" : tf.random_normal_initializer(FE, scale),
-        "unannotated_segment_loop" : tf.random_normal_initializer(FC, scale),
-        "unannotated_segment_exit" : tf.random_normal_initializer(FE, scale),
-        "end_to_unannotated_segment" : tf.random_normal_initializer(R, scale),
-        "end_to_right_flank" : tf.random_normal_initializer(RF, scale),
-        "end_to_terminal" : tf.random_normal_initializer(T, scale) }
+        "delete_to_match" : RandomNormalInitializer(DM, scale),
+        "delete_to_delete" : RandomNormalInitializer(DD, scale),
+        "left_flank_loop" : RandomNormalInitializer(FC, scale),
+        "left_flank_exit" : RandomNormalInitializer(FE, scale),
+        "right_flank_loop" : RandomNormalInitializer(FC, scale),
+        "right_flank_exit" : RandomNormalInitializer(FE, scale),
+        "unannotated_segment_loop" : RandomNormalInitializer(FC, scale),
+        "unannotated_segment_exit" : RandomNormalInitializer(FE, scale),
+        "end_to_unannotated_segment" : RandomNormalInitializer(R, scale),
+        "end_to_right_flank" : RandomNormalInitializer(RF, scale),
+        "end_to_terminal" : RandomNormalInitializer(T, scale) }
     return transition_init_kernel

@@ -2,6 +2,7 @@ import tensorflow as tf
 import numpy as np
 import learnMSA.msa_hmm.Initializers as initializers
 import learnMSA.msa_hmm.Priors as priors
+import learnMSA.msa_hmm.Configuration as config
 
 class ProfileHMMTransitioner(tf.keras.layers.Layer):
     """ A transitioner defines which transitions between HMM states are allowed, how they are initialized
@@ -385,7 +386,7 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
         return padded_and_stacked
     
     def __repr__(self):
-        return f"ProfileHMMTransitioner(transition_init={self.transition_init[0]}, flank_init={self.flank_init[0]}, prior={self.prior}, frozen_kernels={self.frozen_kernels})"
+        return f"ProfileHMMTransitioner(\n transition_init={config.as_str(self.transition_init[0], 2, '    ', ' , ')},\n flank_init={self.flank_init[0]},\n prior={self.prior},\n frozen_kernels={self.frozen_kernels})"
     
 
 def _make_explicit_transition_kernel_parts(length): 
