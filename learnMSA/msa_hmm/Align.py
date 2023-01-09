@@ -75,6 +75,13 @@ def fit_and_align(fasta_file,
             loglik, prior = compute_loglik(alignment)
             alignment.loglik = loglik 
             alignment.prior = prior
+            expected_state = get_state_expectations(fasta_file,
+                                    batch_generator,
+                                    np.arange(alignment.fasta_file.num_seq),
+                                    batch_size,
+                                    alignment.msa_hmm_layer,
+                                    alignment.encoder_model)
+            alignment.expected_state = expected_state
             if verbose:
                 print("Fitted models with MAP estimates = ", 
                       ",".join("%.4f" % (l + p) for l,p in zip(loglik, prior)))
@@ -166,11 +173,19 @@ def run_learnMSA(train_filename,
         print("Out of memory. A resource was exhausted.")
         print("Try reducing the batch size (-b). The current batch size was: "+str(config["batch_size"])+".")
         sys.exit(e.error_code)
-        
-    alignment.best_model = np.argmax(alignment.loglik + alignment.prior)
+    if config["model_criterion"] == "loglik":
+        alignment.best_model = np.argmax(alignment.loglik + alignment.prior)
+    elif config["model_criterion"] == "posterior":
+        posterior_sums = [np.sum(alignment.expected_state[i, 1:alignment.length[i]+1]) for i in range(alignment.num_models)]
+        alignment.best_model = np.argmax(posterior_sums)
+        if verbose:
+            print("Per model total expected match states:", posterior_sums)
+    else:
+        raise SystemExit("Invalid model selection criterion. Valid criteria are loglik and posterior.") 
     if verbose:
         likelihoods = ["%.4f" % ll + " (%.4f)" % p for ll,p in zip(alignment.loglik, alignment.prior)]
-        print("Computed alignments with likelihoods (priors): ", likelihoods)
+        print("Per model likelihoods (priors): ", likelihoods)
+        print("Selection criterion:", config["model_criterion"])
         print("Best model: ", alignment.best_model, "(0-based)")
         
     Path(os.path.dirname(out_filename)).mkdir(parents=True, exist_ok=True)
@@ -190,6 +205,9 @@ def run_learnMSA(train_filename,
                 print("SP score =", sp)
         else:
             sp = []
+            #without setting the logger level the following code can produce tf retracing warnings 
+            #these warnings are expected in this special case and should be disabled to keep the output clear
+            tf.get_logger().setLevel('ERROR')
             for i in range(alignment.msa_hmm_layer.cell.num_models):
                 tmp_file = "tmp.fasta"
                 alignment.to_file(tmp_file, i)
@@ -198,6 +216,7 @@ def run_learnMSA(train_filename,
                 print(f"Model {i} SP score =", sp_i)
                 os.remove(tmp_file)
                 sp.append(sp_i)
+            tf.get_logger().setLevel('WARNING')
         return alignment, sp
     else:
         return alignment
@@ -232,8 +251,8 @@ def get_state_expectations(fasta_file,
     
     cell = msa_hmm_layer.cell
     
-    @tf.function(input_signature=(tf.TensorSpec(shape=[cell.num_models, None, None], dtype=tf.uint8),
-                                  tf.TensorSpec(shape=[cell.num_models, None], dtype=tf.int64)))
+    @tf.function(input_signature=(tf.TensorSpec(shape=[None, cell.num_models, None], dtype=tf.uint8),
+                                  tf.TensorSpec(shape=[None, cell.num_models], dtype=tf.int64)))
     def batch_posterior_state_probs(inputs, indices):
         encoded_seq = encoder([inputs, indices]) 
         posterior_probs = msa_hmm_layer.state_posterior_log_probs(encoded_seq)
@@ -243,10 +262,10 @@ def get_state_expectations(fasta_file,
         posterior_probs = tf.reduce_sum(posterior_probs, 1) / num_indices
         return posterior_probs
     
-    posterior_probs = np.zeros((cell.num_models, cell.max_num_states), cell.dtype) 
+    posterior_probs = tf.zeros((cell.num_models, cell.max_num_states), cell.dtype) 
     for inputs, _ in ds:
-        posterior_probs += batch_posterior_state_probs(inputs[0], inputs[1]).numpy()
-    return posterior_probs
+        posterior_probs += batch_posterior_state_probs(inputs[0], inputs[1])
+    return posterior_probs.numpy()
     
 
 def decode_core(model_length,
@@ -456,13 +475,21 @@ class Alignment():
                                         [gap_symbol_insertions, "$"]))
         self.metadata = {}
         self.num_models = self.msa_hmm_layer.cell.num_models
+        self.length = self.msa_hmm_layer.cell.length
             
             
     #computes an implicit alignment (without storing gaps)
     #eventually, an alignment with explicit gaps can be written 
     #in a memory friendly manner to file
     def _build_alignment(self, models):
-        cell_copy = self.msa_hmm_layer.cell.duplicate(models)
+        
+        if tf.distribute.has_strategy():
+            with tf.distribute.get_strategy().scope():
+                cell_copy = self.msa_hmm_layer.cell.duplicate(models)
+        else:
+            cell_copy = self.msa_hmm_layer.cell.duplicate(models)
+            
+        cell_copy.build((self.num_models, None, None, self.batch_generator.alphabet_size+1))
         state_seqs_max_lik = viterbi.get_state_seqs_max_lik(self.fasta_file,
                                                             self.batch_generator,
                                                             self.indices,
@@ -613,7 +640,7 @@ def get_discard_or_expand_positions(alignment,
         expansion_lens: A list of arrays with the expansion lengths.
         pos_discard: A list of arrays with match positions to discard.
     """
-    e_state = get_state_expectations(alignment.fasta_file,
+    expected_state = get_state_expectations(alignment.fasta_file,
                                     alignment.batch_generator,
                                     alignment.indices,
                                     alignment.batch_size,
@@ -625,13 +652,13 @@ def get_discard_or_expand_positions(alignment,
     for i in range(alignment.num_models):
         model_length = alignment.msa_hmm_layer.cell.length[i]
         #discards
-        match_states = e_state[i, 1:model_length+1]
+        match_states = expected_state[i, 1:model_length+1]
         discard = np.arange(model_length, dtype=np.int32)[match_states < del_t]
         pos_discard.append(discard)
         #expansions
-        insert_states = e_state[i, model_length+1:2*model_length]
-        left_flank_state = e_state[i, 0]
-        right_flank_state = e_state[i, 2*model_length+1]
+        insert_states = expected_state[i, model_length+1:2*model_length]
+        left_flank_state = expected_state[i, 0]
+        right_flank_state = expected_state[i, 2*model_length+1]
         all_inserts = np.concatenate([[left_flank_state], insert_states, [right_flank_state]], axis=0)
         which_to_expand = all_inserts > ins_t
         expand = np.arange(model_length+1, dtype=np.int32)[which_to_expand]
@@ -842,7 +869,7 @@ def compute_loglik(alignment, max_ll_estimate = 200000):
                             shuffle=False)
     loglik = np.zeros((alignment.msa_hmm_layer.cell.num_models))
     for x, _ in ds:
-        loglik += np.sum(alignment.model(x), axis=1)
+        loglik += np.sum(alignment.model(x), axis=0)
     loglik /= ll_subset.size
     prior = alignment.msa_hmm_layer.cell.get_prior_log_density().numpy()/alignment.fasta_file.num_seq
     return loglik, prior
@@ -858,16 +885,13 @@ def get_full_length_estimate(fasta_file, config):
     return full_length_estimate
 
 
-def get_initial_model_lengths(fasta_file, config, random=True, len_offset_threshold_seqs=100000, scale_threshold_seqs=7000):
+def get_initial_model_lengths(fasta_file, config, random=True):
     #initial model length
     model_length = np.quantile(fasta_file.seq_lens, q=config["length_init_quantile"])
-    # randomize less for many sequences
-    factor_len_offset = min(len_offset_threshold_seqs/fasta_file.num_seq, 1.) 
-    factor_scale = min(scale_threshold_seqs/fasta_file.num_seq, 1.) 
-    model_length -= (1-config["len_mul"]) * model_length * factor_len_offset
+    model_length *= config["len_mul"]
     model_length = max(3., model_length)
     if random:
-        scale = (2 + model_length/50) * factor_scale
+        scale = (3 + model_length/30)
         lens = np.round(np.random.normal(loc=model_length, scale=scale, size=config["num_models"])).astype(np.int32)
         lens = np.maximum(lens, 3)
         return lens

@@ -1,5 +1,4 @@
 import tensorflow as tf
-from tensorflow.python.client import device_lib
 import numpy as np
 from learnMSA.msa_hmm.MsaHmmCell import MsaHmmCell
 from learnMSA.msa_hmm.MsaHmmLayer import MsaHmmLayer
@@ -10,8 +9,8 @@ from learnMSA.msa_hmm.Configuration import assert_config
 
 def generic_model_generator(encoder_layers,
                             msa_hmm_layer):
-    """A generic model generator function. The model inputs are sequences of shape (num_model, b, L) 
-        and sequence indices of shape (num_model, b).
+    """A generic model generator function. The model inputs are sequences of shape (b, num_model, L) 
+        and sequence indices of shape (b, num_model).
     Args:
         encoder_layers: A list of layers with compatible inputs and outputs and the last output 
                         is compatible with msa_hmm_layer. 
@@ -20,10 +19,16 @@ def generic_model_generator(encoder_layers,
     num_models = msa_hmm_layer.cell.num_models
     sequences = tf.keras.Input(shape=(None,None,), name="sequences", dtype=tf.uint8)
     indices = tf.keras.Input(shape=(None,), name="indices", dtype=tf.int64)
-    forward_seq = sequences
+    #in the input pipeline, we need the batch dimension to come first to make multi GPU work 
+    #we transpose here, because all learnMSA layers require the model dimension to come first
+    transposed_sequences = tf.transpose(sequences, [1,0,2])
+    transposed_indices = tf.transpose(indices)
+    forward_seq = transposed_sequences
     for layer in encoder_layers:
-        forward_seq = layer(forward_seq, indices)
+        forward_seq = layer(forward_seq, transposed_indices)
     loglik = msa_hmm_layer(forward_seq)
+    #transpose back to make model.predict work correct 
+    loglik = tf.transpose(loglik)
     model = tf.keras.Model(inputs=[sequences, indices], 
                         outputs=[tf.keras.layers.Lambda(lambda x: x, name="loglik")(loglik)])
     return model
@@ -97,15 +102,15 @@ class DefaultBatchGenerator():
     def __call__(self, indices):
         #use a different permutation of the sequences per trained model
         if self.shuffle:
-            permutated_indices = np.stack([perm[indices] for perm in self.permutations], axis=0)
+            permutated_indices = np.stack([perm[indices] for perm in self.permutations], axis=1)
         else:
-            permutated_indices = np.stack([indices]*self.num_models, axis=0)
+            permutated_indices = np.stack([indices]*self.num_models, axis=1)
         max_len = np.max(self.fasta_file.seq_lens[permutated_indices])
-        batch = np.zeros((self.num_models, indices.shape[0], max_len+1), dtype=np.uint8) 
+        batch = np.zeros((indices.shape[0], self.num_models, max_len+1), dtype=np.uint8) 
         batch += self.alphabet_size #initialize with terminal symbols
-        for k,perm_ind in enumerate(permutated_indices):
-            for i,j in enumerate(perm_ind):
-                batch[k, i, :self.fasta_file.seq_lens[j]] = self.fasta_file.get_raw_seq(j)
+        for i,perm_ind in enumerate(permutated_indices):
+            for k,j in enumerate(perm_ind):
+                batch[i, k, :self.fasta_file.seq_lens[j]] = self.fasta_file.get_raw_seq(j)
         if self.return_only_sequences:
             return batch
         else:
@@ -160,7 +165,7 @@ def fit_model(model_generator,
                                 config=config)
         model.compile(optimizer=optimizer)
         return model
-    num_gpu = len([x.name for x in device_lib.list_local_devices() if x.device_type == 'GPU']) 
+    num_gpu = len([x.name for x in tf.config.list_logical_devices() if x.device_type == 'GPU']) 
     if verbose:
         print("Using", num_gpu, "GPUs.")
     if num_gpu > 1:       

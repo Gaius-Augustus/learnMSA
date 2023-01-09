@@ -99,9 +99,6 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
                              prior = self.prior,
                              frozen_insertions = self.frozen_insertions,
                              dtype = self.dtype) 
-        emitter_copy.emission_kernel = [self.emission_kernel[i] for i in model_indices]
-        emitter_copy.insertion_kernel = [self.insertion_kernel[i] for i in model_indices]
-        emitter_copy.built = True 
         return emitter_copy
     
     def __repr__(self):

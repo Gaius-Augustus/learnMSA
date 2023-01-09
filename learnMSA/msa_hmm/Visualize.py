@@ -258,7 +258,7 @@ def print_and_plot(alignment,
                             alignment.batch_generator,
                             alignment.batch_size, 
                             shuffle=False)
-    ll = alignment.model.predict(ds)[model_index] + alignment.prior[model_index]
+    ll = alignment.model.predict(ds)[:,model_index] + alignment.prior[model_index]
     for i,s in enumerate(msa[:max_seq]):
         indices = np.array([[alignment.indices[i]]]*alignment.msa_hmm_layer.cell.num_models)
         tau = anc_probs_layer.make_tau(indices)[model_index]

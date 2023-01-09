@@ -151,7 +151,6 @@ class MsaHmmCell(tf.keras.layers.Layer):
         sub_transitioner = self.transitioner.duplicate(model_indices)
         subset_cell = MsaHmmCell(sub_lengths, sub_emitter, sub_transitioner)
         subset_cell.dim = self.dim
-        subset_cell.built = True
         return subset_cell
     
     

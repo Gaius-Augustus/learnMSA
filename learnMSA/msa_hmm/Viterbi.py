@@ -131,8 +131,8 @@ def get_state_seqs_max_lik(fasta_file,
     state_seqs_max_lik = np.zeros((hmm_cell.num_models, indices.size, seq_len), 
                                   dtype=np.uint16) 
     
-    @tf.function(input_signature=(tf.TensorSpec(shape=[batch_generator.num_models, None, None], dtype=tf.uint8),
-                                  tf.TensorSpec(shape=[batch_generator.num_models, None], dtype=tf.int64)))
+    @tf.function(input_signature=(tf.TensorSpec(shape=[None, batch_generator.num_models, None], dtype=tf.uint8),
+                                  tf.TensorSpec(shape=[None, batch_generator.num_models], dtype=tf.int64)))
     def call_viterbi(inputs, indices):
         encoded_seq = encoder([inputs, indices])
         #todo: this can be improved by encoding only for required models, not all
@@ -140,13 +140,10 @@ def get_state_seqs_max_lik(fasta_file,
         viterbi_seq = viterbi(encoded_seq, hmm_cell)
         return viterbi_seq
     
-    @tf.function(input_signature=(tf.TensorSpec(shape=[batch_generator.num_models, None, None], dtype=tf.uint8),))
+    @tf.function(input_signature=(tf.TensorSpec(shape=[None, batch_generator.num_models, None], dtype=tf.uint8),))
     def call_viterbi_single(inputs):
         if encoder is None:
-            if batch_generator.return_only_sequences:
-                seq = inputs
-            else:
-                seq = inputs[0]
+            seq = tf.transpose(inputs, [1,0,2])
         else:
             seq = encoder(inputs) 
         #todo: this can be improved by encoding only for required models, not all

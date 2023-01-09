@@ -336,9 +336,6 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
                                         prior = self.prior,
                                         frozen_kernels = self.frozen_kernels,
                                         dtype = self.dtype) 
-        transitioner_copy.transition_kernel = [self.transition_kernel[i] for i in model_indices]
-        transitioner_copy.flank_init_kernel = [self.flank_init_kernel[i] for i in model_indices]
-        transitioner_copy.built = True
         return transitioner_copy
     
     #configure the Transitioner for the backward recursion

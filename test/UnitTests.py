@@ -376,7 +376,7 @@ class TestMSAHMM(unittest.TestCase):
         fasta_file = msa_hmm.fasta.Fasta(filename)
         sequences = get_all_seqs(fasta_file, 1)
         sequences = tf.one_hot(sequences, len(msa_hmm.fasta.alphabet))
-        self.assertEqual(sequences.shape, (1,2,5,len(msa_hmm.fasta.alphabet)))
+        self.assertEqual(sequences.shape, (2,1,5,len(msa_hmm.fasta.alphabet)))
         forward, loglik = hmm_cell.get_initial_state(batch_size=2)
         self.assertEqual(loglik[0], 0)
         #next match state should always yield highest probability
@@ -393,7 +393,7 @@ class TestMSAHMM(unittest.TestCase):
         fasta_file = msa_hmm.fasta.Fasta(filename)
         sequences = get_all_seqs(fasta_file,1)
         sequences = tf.one_hot(sequences, len(msa_hmm.fasta.alphabet))
-        self.assertEqual(sequences.shape, (1,2,10,len(msa_hmm.fasta.alphabet)))
+        self.assertEqual(sequences.shape, (2,1,10,len(msa_hmm.fasta.alphabet)))
         forward, loglik = hmm_cell.get_initial_state(batch_size=2)
         for i in range(length):
             _, (forward, loglik) = hmm_cell(sequences[:,:,i], (forward, loglik))
@@ -460,6 +460,7 @@ class TestMSAHMM(unittest.TestCase):
                              [0,1,2,6,6,1,6,1,2,3,7,8,8,8,8],
                              [0,0,0,1,2,3,6,6,1,2,3,8,8,8,8]]])
         sequences = get_all_seqs(fasta_file, 2)
+        sequences = np.transpose(sequences, [1,0,2])
         state_seqs_max_lik = msa_hmm.viterbi.viterbi(sequences, hmm_cell).numpy()
         # states : [LEFT_FLANK, MATCH x length, INSERT x length-1, UNANNOTATED_SEGMENT, RIGHT_FLANK, END]
         self.assert_vec(state_seqs_max_lik, ref_seqs)
@@ -781,6 +782,7 @@ class TestMSAHMM(unittest.TestCase):
         ds = msa_hmm.train.make_dataset(indices, batch_gen, batch_size=fasta_file.num_seq, shuffle=False)
         for x,_ in ds:
             seq = tf.one_hot(x[0], 26)
+            seq = tf.transpose(seq, [1,0,2,3])
             p = hmm_layer.state_posterior_log_probs(seq)
         p = np.exp(p)
         np.testing.assert_almost_equal(np.sum(p, -1), 1., decimal=4)
@@ -927,6 +929,7 @@ class TestAncProbs(unittest.TestCase):
         filename = os.path.dirname(__file__)+"/data/simple.fa"
         fasta_file = msa_hmm.fasta.Fasta(filename)
         sequences = get_all_seqs(fasta_file, 1)[:,:,:-1]
+        sequences = np.transpose(sequences, [1,0,2])
         return sequences, fasta_file
             
     def test_anc_probs(self):                 
@@ -1016,9 +1019,9 @@ class TestData(unittest.TestCase):
             ind = np.array(ind)
             ref = [fasta_file.aminoacid_seq_str(i) for i in ind]
             s,i = batch_gen(ind) 
-            self.assert_vec(i[0], ind)
+            self.assert_vec(i[:,0], ind)
             for i,(r,j) in enumerate(zip(ref, ind)):
-                self.assertEqual("".join(alphabet[s[0,i,:fasta_file.seq_lens[j]]]), r)
+                self.assertEqual("".join(alphabet[s[i,0,:fasta_file.seq_lens[j]]]), r)
         
         
 class TestModelSurgery(unittest.TestCase):
