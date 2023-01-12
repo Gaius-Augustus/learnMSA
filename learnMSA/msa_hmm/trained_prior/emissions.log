@@ -1,0 +1,252 @@
+Fitted a model for k = 1 with loglik = 42.00126647949219 
+Fitted a model for k = 1 with loglik = 42.00244140625 
+Fitted a model for k = 1 with loglik = 42.00242233276367 
+Fitted a model for k = 1 with loglik = 42.000919342041016 
+Fitted a model for k = 1 with loglik = 42.00069046020508 
+Saving best model for k = 1 with loglik = 42.00244140625 to file 
+Fitted a model for k = 1 with loglik = 42.00175094604492 
+Fitted a model for k = 1 with loglik = 42.001976013183594 
+Fitted a model for k = 1 with loglik = 42.00244140625 
+Fitted a model for k = 1 with loglik = 42.002418518066406 
+Fitted a model for k = 1 with loglik = 42.00254440307617 
+Saving best model for k = 1 with loglik = 42.00254440307617 to file 
+Fitted a model for k = 1 with loglik = 42.00272750854492 
+Fitted a model for k = 1 with loglik = 42.00236129760742 
+Fitted a model for k = 1 with loglik = 42.00046920776367 
+Fitted a model for k = 1 with loglik = 42.0019645690918 
+Fitted a model for k = 1 with loglik = 42.00226974487305 
+Saving best model for k = 1 with loglik = 42.00272750854492 to file 
+Fitted a model for k = 1 with loglik = 42.00209045410156 
+Fitted a model for k = 1 with loglik = 42.001564025878906 
+Fitted a model for k = 1 with loglik = 42.002498626708984 
+Fitted a model for k = 1 with loglik = 42.0025520324707 
+Fitted a model for k = 1 with loglik = 42.00251770019531 
+Saving best model for k = 1 with loglik = 42.0025520324707 to file 
+Fitted a model for k = 3 with loglik = 47.051673889160156 
+Fitted a model for k = 3 with loglik = 47.05329132080078 
+Fitted a model for k = 3 with loglik = 47.05296325683594 
+Fitted a model for k = 3 with loglik = 47.053829193115234 
+Fitted a model for k = 3 with loglik = 47.05356216430664 
+Saving best model for k = 3 with loglik = 47.053829193115234 to file 
+Fitted a model for k = 3 with loglik = 47.0525016784668 
+Fitted a model for k = 3 with loglik = 47.05248260498047 
+Fitted a model for k = 3 with loglik = 47.052642822265625 
+Fitted a model for k = 3 with loglik = 47.053401947021484 
+Fitted a model for k = 3 with loglik = 47.05381393432617 
+Saving best model for k = 3 with loglik = 47.05381393432617 to file 
+Fitted a model for k = 3 with loglik = 47.05300521850586 
+Fitted a model for k = 3 with loglik = 47.053531646728516 
+Fitted a model for k = 3 with loglik = 47.053016662597656 
+Fitted a model for k = 3 with loglik = 47.053466796875 
+Fitted a model for k = 3 with loglik = 47.05339813232422 
+Saving best model for k = 3 with loglik = 47.053531646728516 to file 
+Fitted a model for k = 3 with loglik = 47.052947998046875 
+Fitted a model for k = 3 with loglik = 47.05307388305664 
+Fitted a model for k = 3 with loglik = 47.05278778076172 
+Fitted a model for k = 3 with loglik = 47.053401947021484 
+Fitted a model for k = 3 with loglik = 47.053558349609375 
+Saving best model for k = 3 with loglik = 47.053558349609375 to file 
+Fitted a model for k = 9 with loglik = 49.6980094909668 
+Fitted a model for k = 9 with loglik = 49.69863510131836 
+Fitted a model for k = 9 with loglik = 49.6976203918457 
+Fitted a model for k = 9 with loglik = 49.43285369873047 
+Fitted a model for k = 9 with loglik = 49.598934173583984 
+Saving best model for k = 9 with loglik = 49.69863510131836 to file 
+Fitted a model for k = 9 with loglik = 49.59838104248047 
+Fitted a model for k = 9 with loglik = 49.698036193847656 
+Fitted a model for k = 9 with loglik = 49.69837951660156 
+Fitted a model for k = 9 with loglik = 49.289127349853516 
+Fitted a model for k = 9 with loglik = 49.69792175292969 
+Saving best model for k = 9 with loglik = 49.69837951660156 to file 
+Fitted a model for k = 9 with loglik = 49.698753356933594 
+Fitted a model for k = 9 with loglik = 49.69819259643555 
+Fitted a model for k = 9 with loglik = 49.59912109375 
+Fitted a model for k = 9 with loglik = 49.69822692871094 
+Fitted a model for k = 9 with loglik = 49.698604583740234 
+Saving best model for k = 9 with loglik = 49.698753356933594 to file 
+Fitted a model for k = 9 with loglik = 49.69826889038086 
+Fitted a model for k = 9 with loglik = 49.76664352416992 
+Fitted a model for k = 9 with loglik = 49.43231201171875 
+Fitted a model for k = 9 with loglik = 49.43276596069336 
+Fitted a model for k = 9 with loglik = 49.69810104370117 
+Saving best model for k = 9 with loglik = 49.76664352416992 to file 
+Fitted a model for k = 32 with loglik = 53.696754455566406 
+Fitted a model for k = 32 with loglik = 53.71711730957031 
+Fitted a model for k = 32 with loglik = 53.65986251831055 
+Fitted a model for k = 32 with loglik = 53.7574577331543 
+Fitted a model for k = 32 with loglik = 53.73834228515625 
+Saving best model for k = 32 with loglik = 53.7574577331543 to file 
+Fitted a model for k = 32 with loglik = 53.567481994628906 
+Fitted a model for k = 32 with loglik = 53.81455993652344 
+Fitted a model for k = 32 with loglik = 53.481136322021484 
+Fitted a model for k = 32 with loglik = 53.55754852294922 
+Fitted a model for k = 32 with loglik = 53.573036193847656 
+Saving best model for k = 32 with loglik = 53.81455993652344 to file 
+Fitted a model for k = 32 with loglik = 53.65143966674805 
+Fitted a model for k = 32 with loglik = 53.624813079833984 
+Fitted a model for k = 32 with loglik = 53.71892166137695 
+Fitted a model for k = 32 with loglik = 53.47440719604492 
+Fitted a model for k = 32 with loglik = 53.66893768310547 
+Saving best model for k = 32 with loglik = 53.71892166137695 to file 
+Fitted a model for k = 32 with loglik = 53.80055236816406 
+Fitted a model for k = 32 with loglik = 53.68950653076172 
+Fitted a model for k = 32 with loglik = 53.80440902709961 
+Fitted a model for k = 32 with loglik = 53.590702056884766 
+Fitted a model for k = 32 with loglik = 53.73948287963867 
+Saving best model for k = 32 with loglik = 53.80440902709961 to file 
+Fitted a model for k = 64 with loglik = 55.99378967285156 
+Fitted a model for k = 64 with loglik = 56.18206787109375 
+Fitted a model for k = 64 with loglik = 56.05045700073242 
+Fitted a model for k = 64 with loglik = 56.1068115234375 
+Fitted a model for k = 64 with loglik = 56.11301040649414 
+Saving best model for k = 64 with loglik = 56.18206787109375 to file 
+Fitted a model for k = 64 with loglik = 56.00815200805664 
+Fitted a model for k = 64 with loglik = 56.07857894897461 
+Fitted a model for k = 64 with loglik = 56.06782150268555 
+Fitted a model for k = 64 with loglik = 56.10801315307617 
+Fitted a model for k = 64 with loglik = 56.12164306640625 
+Saving best model for k = 64 with loglik = 56.12164306640625 to file 
+Fitted a model for k = 64 with loglik = 56.077064514160156 
+Fitted a model for k = 64 with loglik = 56.093994140625 
+Fitted a model for k = 64 with loglik = 56.10332489013672 
+Fitted a model for k = 64 with loglik = 56.05426025390625 
+Fitted a model for k = 64 with loglik = 56.06843566894531 
+Saving best model for k = 64 with loglik = 56.10332489013672 to file 
+Fitted a model for k = 64 with loglik = 56.040916442871094 
+Fitted a model for k = 64 with loglik = 56.113494873046875 
+Fitted a model for k = 64 with loglik = 55.99369430541992 
+Fitted a model for k = 64 with loglik = 56.116241455078125 
+Fitted a model for k = 64 with loglik = 56.08808135986328 
+Saving best model for k = 64 with loglik = 56.116241455078125 to file 
+Fitted a model for k = 128 with loglik = 58.48045349121094 
+Fitted a model for k = 128 with loglik = 56.96702194213867 
+Fitted a model for k = 128 with loglik = 58.495506286621094 
+Fitted a model for k = 128 with loglik = 58.59636688232422 
+Fitted a model for k = 128 with loglik = 58.42014694213867 
+Saving best model for k = 128 with loglik = 58.59636688232422 to file 
+Fitted a model for k = 128 with loglik = 58.505714416503906 
+Fitted a model for k = 128 with loglik = 58.693443298339844 
+Fitted a model for k = 128 with loglik = 58.47578048706055 
+Fitted a model for k = 128 with loglik = 58.58568572998047 
+Fitted a model for k = 128 with loglik = 58.533164978027344 
+Saving best model for k = 128 with loglik = 58.693443298339844 to file 
+Fitted a model for k = 128 with loglik = 58.529685974121094 
+Fitted a model for k = 128 with loglik = 58.34967803955078 
+Fitted a model for k = 128 with loglik = 58.60017013549805 
+Fitted a model for k = 128 with loglik = 58.44602966308594 
+Fitted a model for k = 128 with loglik = 58.42807388305664 
+Saving best model for k = 128 with loglik = 58.60017013549805 to file 
+Fitted a model for k = 128 with loglik = 58.47721862792969 
+Fitted a model for k = 128 with loglik = 58.48077392578125 
+Fitted a model for k = 128 with loglik = 58.61024856567383 
+Fitted a model for k = 128 with loglik = 58.47332000732422 
+Fitted a model for k = 128 with loglik = 58.642906188964844 
+Saving best model for k = 128 with loglik = 58.642906188964844 to file 
+Fitted a model for k = 256 with loglik = 56.4880256652832 
+Fitted a model for k = 256 with loglik = 56.48016357421875 
+Fitted a model for k = 256 with loglik = 56.55394744873047 
+Fitted a model for k = 256 with loglik = 56.49092102050781 
+Fitted a model for k = 256 with loglik = 56.46010971069336 
+Saving best model for k = 256 with loglik = 56.55394744873047 to file 
+Fitted a model for k = 256 with loglik = 56.41874694824219 
+Fitted a model for k = 256 with loglik = 56.39042282104492 
+Fitted a model for k = 256 with loglik = 56.51553726196289 
+Fitted a model for k = 256 with loglik = 56.47418975830078 
+Fitted a model for k = 256 with loglik = 56.504432678222656 
+Saving best model for k = 256 with loglik = 56.51553726196289 to file 
+Fitted a model for k = 256 with loglik = 60.636383056640625 
+Fitted a model for k = 256 with loglik = 60.58256530761719 
+Fitted a model for k = 256 with loglik = 60.557647705078125 
+Fitted a model for k = 256 with loglik = 60.57451248168945 
+Fitted a model for k = 256 with loglik = 60.53578567504883 
+Saving best model for k = 256 with loglik = 60.636383056640625 to file 
+Fitted a model for k = 256 with loglik = 60.649169921875 
+Fitted a model for k = 256 with loglik = 60.61707305908203 
+Fitted a model for k = 256 with loglik = 60.59387969970703 
+Fitted a model for k = 256 with loglik = 60.593467712402344 
+Fitted a model for k = 256 with loglik = 60.50224685668945 
+Saving best model for k = 256 with loglik = 60.649169921875 to file 
+Fitted a model for k = 1 with loglik = 42.001546235801 
+Fitted a model for k = 1 with loglik = 42.00111760749907 
+Fitted a model for k = 1 with loglik = 42.00046449812928 
+Fitted a model for k = 1 with loglik = 42.00112939520037 
+Fitted a model for k = 1 with loglik = 42.001826586033 
+Saving best model for k = 1 with loglik = 42.001826586033 to file 
+Fitted a model for k = 1 with loglik = 41.996837096134 
+Fitted a model for k = 1 with loglik = 42.001531807295926 
+Fitted a model for k = 1 with loglik = 41.99846217140777 
+Fitted a model for k = 1 with loglik = 42.00023938028632 
+Fitted a model for k = 1 with loglik = 42.001494865654706 
+Saving best model for k = 1 with loglik = 42.001531807295926 to file 
+Fitted a model for k = 3 with loglik = 47.048343000538914 
+Fitted a model for k = 3 with loglik = 47.04952096774443 
+Fitted a model for k = 3 with loglik = 47.04838552990545 
+Fitted a model for k = 3 with loglik = 47.05060765651582 
+Fitted a model for k = 3 with loglik = 47.049771228893874 
+Saving best model for k = 3 with loglik = 47.05060765651582 to file 
+Fitted a model for k = 3 with loglik = 47.050483046507225 
+Fitted a model for k = 3 with loglik = 47.04922849625299 
+Fitted a model for k = 3 with loglik = 47.05043074504181 
+Fitted a model for k = 3 with loglik = 47.04943785498053 
+Fitted a model for k = 3 with loglik = 47.04968171469991 
+Saving best model for k = 3 with loglik = 47.050483046507225 to file 
+Fitted a model for k = 9 with loglik = 49.43223797587462 
+Fitted a model for k = 9 with loglik = 49.38673241299564 
+Fitted a model for k = 9 with loglik = 49.70043065645307 
+Fitted a model for k = 9 with loglik = 49.70143985705557 
+Fitted a model for k = 9 with loglik = 49.70119956415756 
+Saving best model for k = 9 with loglik = 49.70143985705557 to file 
+Fitted a model for k = 9 with loglik = 49.70033079466975 
+Fitted a model for k = 9 with loglik = 49.70040147133449 
+Fitted a model for k = 9 with loglik = 49.43123888461803 
+Fitted a model for k = 9 with loglik = 49.70023611575626 
+Fitted a model for k = 9 with loglik = 49.767955321433206 
+Saving best model for k = 9 with loglik = 49.767955321433206 to file 
+Fitted a model for k = 32 with loglik = 53.82218292974163 
+Fitted a model for k = 32 with loglik = 53.63943495458429 
+Fitted a model for k = 32 with loglik = 53.67312167142685 
+Fitted a model for k = 32 with loglik = 53.62460961712068 
+Fitted a model for k = 32 with loglik = 53.67408604684419 
+Saving best model for k = 32 with loglik = 53.82218292974163 to file 
+Fitted a model for k = 32 with loglik = 53.76615787086714 
+Fitted a model for k = 32 with loglik = 53.73079042027183 
+Fitted a model for k = 32 with loglik = 53.60308401814431 
+Fitted a model for k = 32 with loglik = 53.48782723958466 
+Fitted a model for k = 32 with loglik = 53.71635453510279 
+Saving best model for k = 32 with loglik = 53.76615787086714 to file 
+Fitted a model for k = 64 with loglik = 56.09761620685681 
+Fitted a model for k = 64 with loglik = 55.99630706635542 
+Fitted a model for k = 64 with loglik = 56.14019367790225 
+Fitted a model for k = 64 with loglik = 56.14497541988745 
+Fitted a model for k = 64 with loglik = 56.23694136230027 
+Saving best model for k = 64 with loglik = 56.23694136230027 to file 
+Fitted a model for k = 64 with loglik = 56.089868397831886 
+Fitted a model for k = 64 with loglik = 56.209940738661246 
+Fitted a model for k = 64 with loglik = 56.291586506780675 
+Fitted a model for k = 64 with loglik = 56.01131677695405 
+Fitted a model for k = 64 with loglik = 56.11384935104417 
+Saving best model for k = 64 with loglik = 56.291586506780675 to file 
+Fitted a model for k = 128 with loglik = 58.37538743605623 
+Fitted a model for k = 128 with loglik = 58.64852132362216 
+Fitted a model for k = 128 with loglik = 58.533423759978525 
+Fitted a model for k = 128 with loglik = 58.44928190575314 
+Fitted a model for k = 128 with loglik = 58.508800224366766 
+Saving best model for k = 128 with loglik = 58.64852132362216 to file 
+Fitted a model for k = 128 with loglik = 58.373490454839704 
+Fitted a model for k = 128 with loglik = 58.54709587574577 
+Fitted a model for k = 128 with loglik = 58.51686347489552 
+Fitted a model for k = 128 with loglik = 58.48862463083717 
+Fitted a model for k = 128 with loglik = 58.52239228958262 
+Saving best model for k = 128 with loglik = 58.54709587574577 to file 
+Fitted a model for k = 256 with loglik = 58.16385189732656 
+Fitted a model for k = 256 with loglik = 57.89007977373672 
+Fitted a model for k = 256 with loglik = 58.02714384885611 
+Fitted a model for k = 256 with loglik = 57.98474612855215 
+Fitted a model for k = 256 with loglik = 57.99690154094441 
+Saving best model for k = 256 with loglik = 58.16385189732656 to file 
+Fitted a model for k = 256 with loglik = 60.57925088262235 
+Fitted a model for k = 256 with loglik = 60.47817130370576 
+Fitted a model for k = 256 with loglik = 60.460365968208485 
+Fitted a model for k = 256 with loglik = 60.51491372559356 
+Fitted a model for k = 256 with loglik = 60.54498025417471 
+Saving best model for k = 256 with loglik = 60.57925088262235 to file 

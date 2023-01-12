@@ -75,6 +75,8 @@ class Fasta:
         self.total_len = np.sum(self.seq_lens)
         self.max_len = np.amax(self.seq_lens)
         self.num_seq = len(self.seq_lens)
+        #also store the permutation of sequence indices that sorts by length
+        self.sorted_indices = np.array([i for l,i in sorted(zip(self.seq_lens, range(self.num_seq)))]) 
         
         
     def validate(self):
