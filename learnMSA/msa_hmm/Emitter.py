@@ -86,7 +86,7 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
         return tf.matmul(inputs, self.B_transposed)
     
     def get_prior_log_density(self):
-        return self.prior(self.B)
+        return self.prior(self.B, self.length)
     
     def duplicate(self, model_indices=None):
         if model_indices is None:

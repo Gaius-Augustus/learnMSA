@@ -1453,5 +1453,25 @@ class DirichletTest(unittest.TestCase):
                                                         mix_init=mix_init2)(probs)
         np.testing.assert_almost_equal(mean_log_pdf2, np.mean(expected2), decimal=3)
         
+        
+        
+class TestPriors(unittest.TestCase):
+        
+    def test_amino_acid_match_prior(self):
+        prior = msa_hmm.priors.AminoAcidPrior()
+        prior.load(tf.float64)
+        model_lengths = [2,5,3]
+        num_models = len(model_lengths)
+        max_len = max(model_lengths)
+        max_num_states = 2*max_len+3
+        B = np.random.rand(3, max_num_states, 26)
+        B /= np.sum(B, -1, keepdims=True)
+        pdf = prior(B, model_lengths)
+        self.assertEqual(pdf.shape, (num_models, max_len))
+        for i,l in enumerate(model_lengths):
+            np.testing.assert_equal(pdf[i,l:].numpy(), 0.)
+    
+    
+        
 if __name__ == '__main__':
     unittest.main()

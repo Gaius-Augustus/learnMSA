@@ -20,23 +20,25 @@ class AminoAcidPrior():
         model = dm.load_mixture_model(model_path, self.comp_count, 20, trainable=False, dtype=dtype)
         self.emission_dirichlet_mix = model.layers[-1]
         
-    def __call__(self, B):
+    def __call__(self, B, lengths):
         """Computes log pdf values for each match state.
         Args:
         B: A stack of k emission matrices. Assumes that the 20 std amino acids are the first 20 positions of the last dimension
             and that the states are ordered the standard way as seen in MsaHmmCell. Shape: (k, q, s)
         Returns:
-        A tensor with the log pdf values of this Dirichlet mixture. Shape: (k, model_length)
+            A tensor with the log pdf values of this Dirichlet mixture. The models can vary in length. 
+            Shorter models will have a zero padding in the output. Shape: (k, max_model_length)
         """
         k = tf.shape(B)[0]
-        model_length = int((tf.shape(B)[1]-2)/2)
+        max_model_length = tf.reduce_max(lengths)
         s = tf.shape(B)[2]
         #add a small constant to avoid underflow and division by 0 in the next line after
-        B = B[:,1:model_length+1,:20] + self.epsilon 
+        B = B[:,1:max_model_length+1,:20] + self.epsilon 
         B /= tf.reduce_sum(B, axis=-1, keepdims=True) 
         B = tf.reshape(B, (-1, 20))
         prior = self.emission_dirichlet_mix.log_pdf(B)
-        prior = tf.reshape(prior, (k, model_length))
+        prior = tf.reshape(prior, (k, max_model_length))
+        prior *= tf.cast(tf.sequence_mask(lengths), B.dtype)
         return prior 
     
     def __repr__(self):
@@ -161,3 +163,5 @@ class ProfileHMMTransitionPrior():
     
     def __repr__(self):
         return f"ProfileHMMTransitionPrior(match_comp={self.match_comp}, insert_comp={self.insert_comp}, delete_comp={self.delete_comp}, alpha_flank={self.alpha_flank}, alpha_single={self.alpha_single}, alpha_frag={self.alpha_frag})"
+
+    
