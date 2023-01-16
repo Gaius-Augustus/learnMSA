@@ -78,8 +78,6 @@ Run the notebook <code>MsaHmm.ipynb</code> with juypter.
 
 # Version 1.1.0 improvements
 
-*This version is currently only available under the branch "general_cell".*
-
 - Parallel training of multiple models and reduced memory footprint (train more models in less time)
 - Customize learnMSA via code (e.g. by changing emission type, prior or the number of rate matricies used to compute ancestral probabilities)
 
