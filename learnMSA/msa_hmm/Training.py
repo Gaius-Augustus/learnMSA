@@ -68,6 +68,7 @@ def default_model_generator(num_seq,
                             effective_num_seq,
                             model_lengths, 
                             config,
+                            fasta_file,
                             alphabet_size=25):
     """A callback that constructs the default learnMSA model.
     Args:
@@ -75,6 +76,7 @@ def default_model_generator(num_seq,
         effective_num_seq: The actual number of sequences currently used for training (model surgery might use only a subset).
         model_lengths: List of pHMM lengths.
         config: Dictionary storing the configuration.
+        fasta_file: A fasta_file. This is part of the model generator callback because the generated model might depends on data like maximum sequence length.
         alphabet_size: Number of symbols without the terminal symbol (i.e. 25 for amino acids).
     """
     num_models = config["num_models"]
@@ -88,18 +90,24 @@ def default_model_generator(num_seq,
 
 
 class DefaultBatchGenerator():
-    def __init__(self, fasta_file, num_models, return_only_sequences=False, shuffle=True, alphabet_size=25):
-        self.fasta_file = fasta_file
+    def __init__(self, return_only_sequences=False, shuffle=True, alphabet_size=25):
         #generate a unique permutation of the sequence indices for each model to train
-        self.num_models = num_models
-        self.permutations = [np.arange(fasta_file.num_seq) for _ in range(num_models)]
-        for p in self.permutations:
-            np.random.shuffle(p)
         self.return_only_sequences = return_only_sequences
         self.alphabet_size = alphabet_size
         self.shuffle = shuffle
+        self.configured = False
+        
+    def configure(self, fasta_file, config):
+        self.fasta_file = fasta_file
+        self.num_models = config["num_models"]
+        self.permutations = [np.arange(fasta_file.num_seq) for _ in range(self.num_models)]
+        for p in self.permutations:
+            np.random.shuffle(p)
+        self.configured = True
         
     def __call__(self, indices):
+        if not self.configured:
+            raise ValueError("A batch generator must be configured with the configure(fasta_file, config) method.") 
         #use a different permutation of the sequences per trained model
         if self.shuffle:
             permutated_indices = np.stack([perm[indices] for perm in self.permutations], axis=1)
@@ -162,7 +170,8 @@ def fit_model(model_generator,
         model = model_generator(num_seq=fasta_file.num_seq,
                                 effective_num_seq=indices.shape[0],
                                 model_lengths=model_lengths,
-                                config=config)
+                                config=config,
+                                fasta_file=fasta_file)
         model.compile(optimizer=optimizer)
         return model
     num_gpu = len([x.name for x in tf.config.list_logical_devices() if x.device_type == 'GPU']) 
@@ -180,6 +189,7 @@ def fit_model(model_generator,
     else:
          model = make_and_compile()
     steps = max(10, int(100*np.sqrt(indices.shape[0])/batch_size))
+    batch_generator.configure(fasta_file, config)
     dataset = make_dataset(indices, 
                            batch_generator, 
                            batch_size,

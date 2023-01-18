@@ -131,8 +131,7 @@ def plot_hmm(alignment,
     nx.draw_networkx_labels(G, label_pos, labels=node_labels, font_size=8)
     
     for k, (seq_i, path_color) in enumerate(zip(seq_indices, path_colors)):
-        batch_gen = msa_hmm.train.DefaultBatchGenerator(alignment.fasta_file, alignment.msa_hmm_layer.cell.num_models)
-        ds = msa_hmm.train.make_dataset(np.array([seq_i]), batch_gen, batch_size=1, shuffle=False)
+        ds = msa_hmm.train.make_dataset(np.array([seq_i]), alignment.batch_generator, batch_size=1, shuffle=False)
         for x, _ in ds:
             sequence = alignment.encoder_model(x)  
         hidden_seq = msa_hmm.viterbi.viterbi(sequence, hmm_cell).numpy()[model_index]

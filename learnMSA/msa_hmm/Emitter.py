@@ -64,10 +64,30 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
         self.B = self.make_B()
         self.B_transposed = tf.transpose(self.B, [0,2,1])
         
+    def make_emission_matrix(self, em, ins, length):
+        """Constructs an emission matrix from kernels with a shared insertion distribution.
+        Args:
+           s: Alphabet size.
+           em: Emission distribution logits (kernel).
+           ins: Shared insertion distribution (kernel).
+           length: Model length.
+        Returns:
+            The emission matrix.
+        """
+        s = em.shape[-1]
+        emissions = tf.concat([tf.expand_dims(ins, 0), 
+                               em, 
+                               tf.stack([ins]*(length+1))] , axis=0)
+        emissions = tf.nn.softmax(emissions)
+        emissions = tf.concat([emissions, tf.zeros_like(emissions[:,:1])], axis=-1) 
+        end_state_emission = tf.one_hot([s], s+1, dtype=em.dtype) 
+        emissions = tf.concat([emissions, end_state_emission], axis=0)
+        return emissions
+        
     def make_B(self):
         emission_matrices = []
         for em, ins, length in zip(self.emission_kernel, self.insertion_kernel, self.length):
-            em_mat = make_default_emission_matrix(em, ins, length) 
+            em_mat = self.make_emission_matrix(em, ins, length) 
             padding = self.max_num_states - em_mat.shape[0]
             em_mat_pad = tf.pad(em_mat, [[0, padding], [0,0]])
             emission_matrices.append(em_mat_pad)
@@ -103,25 +123,3 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
     
     def __repr__(self):
         return f"ProfileHMMEmitter(\n emission_init={self.emission_init[0]},\n insertion_init={self.insertion_init[0]},\n prior={self.prior},\n frozen_insertions={self.frozen_insertions}, )"
-    
-    
-    
-def make_default_emission_matrix(em, ins, length):
-    """Constructs an emission matrix from kernels with a shared insertion distribution.
-    Args:
-       s: Alphabet size.
-       em: Emission distribution logits (kernel).
-       ins: Shared insertion distribution (kernel).
-       length: Model length.
-    Returns:
-        The emission matrix.
-    """
-    s = em.shape[-1]
-    emissions = tf.concat([tf.expand_dims(ins, 0), 
-                           em, 
-                           tf.stack([ins]*(length+1))] , axis=0)
-    emissions = tf.nn.softmax(emissions)
-    emissions = tf.concat([emissions, tf.zeros_like(emissions[:,:1])], axis=-1) 
-    end_state_emission = tf.one_hot([s], s+1, dtype=em.dtype) 
-    emissions = tf.concat([emissions, end_state_emission], axis=0)
-    return emissions

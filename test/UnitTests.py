@@ -320,7 +320,9 @@ def string_to_one_hot(s):
 
 def get_all_seqs(fasta_file, num_models):
     indices = np.arange(fasta_file.num_seq)
-    batch_generator = msa_hmm.train.DefaultBatchGenerator(fasta_file, num_models)
+    batch_generator = msa_hmm.train.DefaultBatchGenerator()
+    config = msa_hmm.config.make_default(num_models)
+    batch_generator.configure(fasta_file, config)
     ds = msa_hmm.train.make_dataset(indices, 
                                     batch_generator, 
                                     batch_size=fasta_file.num_seq,
@@ -466,7 +468,8 @@ class TestMSAHMM(unittest.TestCase):
         self.assert_vec(state_seqs_max_lik, ref_seqs)
         #this produces a result identical to above, but runs viterbi batch wise 
         #to avoid memory overflow  
-        batch_generator = msa_hmm.train.DefaultBatchGenerator(fasta_file, 2, return_only_sequences=True)
+        batch_generator = msa_hmm.train.DefaultBatchGenerator(return_only_sequences=True)
+        batch_generator.configure(fasta_file, msa_hmm.config.make_default(2))
         state_seqs_max_lik2 = msa_hmm.viterbi.get_state_seqs_max_lik(fasta_file,
                                                                    batch_generator,
                                                                    np.arange(fasta_file.num_seq),
@@ -777,7 +780,8 @@ class TestMSAHMM(unittest.TestCase):
         hmm_cell = msa_hmm.MsaHmmCell(32)
         hmm_layer = msa_hmm.MsaHmmLayer(hmm_cell, 1)
         hmm_layer.build((1, None, None, 26))
-        batch_gen = msa_hmm.train.DefaultBatchGenerator(fasta_file, 1)
+        batch_gen = msa_hmm.train.DefaultBatchGenerator()
+        batch_gen.configure(fasta_file, msa_hmm.config.make_default(1))
         indices = tf.range(fasta_file.num_seq, dtype=tf.int64)
         ds = msa_hmm.train.make_dataset(indices, batch_gen, batch_size=fasta_file.num_seq, shuffle=False)
         for x,_ in ds:
@@ -953,7 +957,8 @@ class TestAncProbs(unittest.TestCase):
         n = sequences.shape[1]
         ind = np.arange(n)
         model_length = 10
-        batch_gen = msa_hmm.train.DefaultBatchGenerator(fasta_file, 1)
+        batch_gen = msa_hmm.train.DefaultBatchGenerator()
+        batch_gen.configure(fasta_file, msa_hmm.config.make_default(1))
         ds = msa_hmm.train.make_dataset(ind, batch_gen, batch_size=n, shuffle=False)
         for case in self.get_test_configs(sequences):
             # the default emitter initializers expect 25 as last dimension which is not compatible with num_matrix=3
@@ -963,7 +968,8 @@ class TestAncProbs(unittest.TestCase):
             model = msa_hmm.train.default_model_generator(num_seq=n, 
                                                           effective_num_seq=n, 
                                                           model_lengths=[model_length], 
-                                                          config=config)
+                                                          config=config,
+                                                          fasta_file=fasta_file)
             msa = msa_hmm.Alignment(fasta_file, 
                                     batch_gen, 
                                     ind, 
@@ -1012,7 +1018,8 @@ class TestData(unittest.TestCase):
     def test_default_batch_gen(self):
         filename = os.path.dirname(__file__)+"/data/felix_insert_delete.fa"
         fasta_file = msa_hmm.fasta.Fasta(filename)
-        batch_gen = msa_hmm.train.DefaultBatchGenerator(fasta_file, 1, shuffle=False)
+        batch_gen = msa_hmm.train.DefaultBatchGenerator(shuffle=False)
+        batch_gen.configure(fasta_file, msa_hmm.config.make_default(1))
         test_batches = [[0], [1], [4], [0,2], [0,1,2,3,4], [2,3,4]]
         alphabet = np.array(msa_hmm.fasta.alphabet)
         for ind in test_batches:
@@ -1036,6 +1043,8 @@ class TestModelSurgery(unittest.TestCase):
         self.assertTrue(np.all(x == y), str(x) + " not equal to " + str(y))
         
     def make_test_alignment(self):
+        filename = os.path.dirname(__file__)+"/data/felix_insert_delete.fa"
+        fasta_file = msa_hmm.fasta.Fasta(filename)
         config = msa_hmm.config.make_default(1)
         emission_init = string_to_one_hot("FELIC").numpy()*10
         insert_init= np.squeeze(string_to_one_hot("A") + string_to_one_hot("N"))*10
@@ -1063,10 +1072,10 @@ class TestModelSurgery(unittest.TestCase):
         model = msa_hmm.train.default_model_generator(num_seq=10, 
                                                       effective_num_seq=10, 
                                                       model_lengths=[5],
-                                                      config=config)
-        filename = os.path.dirname(__file__)+"/data/felix_insert_delete.fa"
-        fasta_file = msa_hmm.fasta.Fasta(filename)
-        batch_gen = msa_hmm.train.DefaultBatchGenerator(fasta_file, 1)
+                                                      config=config,
+                                                      fasta_file=fasta_file)
+        batch_gen = msa_hmm.train.DefaultBatchGenerator()
+        batch_gen.configure(fasta_file, config)
         alignment = msa_hmm.Alignment(fasta_file, 
                                       batch_gen,
                                       np.arange(fasta_file.num_seq),
@@ -1304,6 +1313,8 @@ class TestModelSurgery(unittest.TestCase):
 class TestAlignment(unittest.TestCase):
     
     def test_subalignment(self):
+        filename = os.path.dirname(__file__)+"/data/felix.fa"
+        fasta_file = msa_hmm.fasta.Fasta(filename)
         length=5
         config = msa_hmm.config.make_default(1)
         emission_init = string_to_one_hot("FELIX").numpy()*20
@@ -1327,12 +1338,12 @@ class TestAlignment(unittest.TestCase):
         model = msa_hmm.train.default_model_generator(num_seq=8, 
                                                       effective_num_seq=8,
                                                       model_lengths=[length], 
-                                                      config=config)
+                                                      config=config,
+                                                      fasta_file=fasta_file)
         #subalignment
-        filename = os.path.dirname(__file__)+"/data/felix.fa"
-        fasta_file = msa_hmm.fasta.Fasta(filename)
         subset = np.array([0,2,5])
-        batch_gen = msa_hmm.train.DefaultBatchGenerator(fasta_file, 1)
+        batch_gen = msa_hmm.train.DefaultBatchGenerator()
+        batch_gen.configure(fasta_file, msa_hmm.config.make_default(1))
         #create alignment after building model
         subalignment = msa_hmm.Alignment(fasta_file, batch_gen, subset, 32, model)
         subalignment_strings = subalignment.to_string(0, add_block_sep=False)

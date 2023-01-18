@@ -130,17 +130,16 @@ def get_state_seqs_max_lik(fasta_file,
     #initialize with terminal states
     state_seqs_max_lik = np.zeros((hmm_cell.num_models, indices.size, seq_len), 
                                   dtype=np.uint16) 
+    if encoder:
+        @tf.function(input_signature=[tf.TensorSpec(x.shape, dtype=x.dtype) for x in encoder.inputs])
+        def call_viterbi(inputs, indices):
+            encoded_seq = encoder([inputs, indices])
+            #todo: this can be improved by encoding only for required models, not all
+            encoded_seq = tf.gather(encoded_seq, model_ids, axis=0)
+            viterbi_seq = viterbi(encoded_seq, hmm_cell)
+            return viterbi_seq
     
-    @tf.function(input_signature=(tf.TensorSpec(shape=[None, batch_generator.num_models, None], dtype=tf.uint8),
-                                  tf.TensorSpec(shape=[None, batch_generator.num_models], dtype=tf.int64)))
-    def call_viterbi(inputs, indices):
-        encoded_seq = encoder([inputs, indices])
-        #todo: this can be improved by encoding only for required models, not all
-        encoded_seq = tf.gather(encoded_seq, model_ids, axis=0)
-        viterbi_seq = viterbi(encoded_seq, hmm_cell)
-        return viterbi_seq
-    
-    @tf.function(input_signature=(tf.TensorSpec(shape=[None, batch_generator.num_models, None], dtype=tf.uint8),))
+    @tf.function(input_signature=(tf.TensorSpec(shape=[None, hmm_cell.num_models, None], dtype=tf.uint8),))
     def call_viterbi_single(inputs):
         if encoder is None:
             seq = tf.transpose(inputs, [1,0,2])
@@ -154,7 +153,7 @@ def get_state_seqs_max_lik(fasta_file,
         state_seqs_max_lik[i] = q-1 #terminal state
     i = 0     
     for inputs, _ in ds:
-        if batch_generator.return_only_sequences:
+        if hasattr(batch_generator, "return_only_sequences") and batch_generator.return_only_sequences:
             state_seqs_max_lik_batch = call_viterbi_single(inputs).numpy()
         else:
             state_seqs_max_lik_batch = call_viterbi(inputs[0], inputs[1]).numpy()

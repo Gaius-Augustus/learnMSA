@@ -32,7 +32,7 @@ def fit_and_align(fasta_file,
                   subset=None,
                   verbose=True):
     assert_config(config)
-    model_generator, batch_generator = _make_defaults_if_none(fasta_file, config, model_generator, batch_generator)
+    model_generator, batch_generator = _make_defaults_if_none(model_generator, batch_generator)
     if verbose:
         _fasta_file_messages(fasta_file)
     n = fasta_file.num_seq
@@ -165,6 +165,7 @@ def run_learnMSA(train_filename,
         alignment = fit_and_align(fasta_file, 
                                   config=config,
                                   model_generator=model_generator,
+                                  batch_generator=batch_generator,
                                   subset=subset, 
                                   verbose=verbose)
         if verbose:
@@ -251,8 +252,7 @@ def get_state_expectations(fasta_file,
     
     cell = msa_hmm_layer.cell
     
-    @tf.function(input_signature=(tf.TensorSpec(shape=[None, cell.num_models, None], dtype=tf.uint8),
-                                  tf.TensorSpec(shape=[None, cell.num_models], dtype=tf.int64)))
+    @tf.function(input_signature=[tf.TensorSpec(x.shape, dtype=x.dtype) for x in encoder.inputs])
     def batch_posterior_state_probs(inputs, indices):
         encoded_seq = encoder([inputs, indices]) 
         posterior_probs = msa_hmm_layer.state_posterior_log_probs(encoded_seq)
@@ -439,7 +439,7 @@ class Alignment():
         generates table-form (memory unfriendly) alignments on demand (batch-wise mode possible).
     Args:
         fasta_file: A fasta file with the sequences to decode.
-        batch_generator: Batch generator.
+        batch_generator: An already configured batch generator.
         indices: (A subset of) The sequence indices from the fasta to align (1D).
         batch_size: Controls memory consumption of viterbi.
         model: A learnMSA model which internally might represent multiple pHMM models.
@@ -476,7 +476,7 @@ class Alignment():
         self.metadata = {}
         self.num_models = self.msa_hmm_layer.cell.num_models
         self.length = self.msa_hmm_layer.cell.length
-            
+        
             
     #computes an implicit alignment (without storing gaps)
     #eventually, an alignment with explicit gaps can be written 
@@ -489,7 +489,7 @@ class Alignment():
         else:
             cell_copy = self.msa_hmm_layer.cell.duplicate(models)
             
-        cell_copy.build((self.num_models, None, None, self.batch_generator.alphabet_size+1))
+        cell_copy.build((self.num_models, None, None, self.msa_hmm_layer.cell.dim))
         state_seqs_max_lik = viterbi.get_state_seqs_max_lik(self.fasta_file,
                                                             self.batch_generator,
                                                             self.indices,
@@ -899,11 +899,11 @@ def get_initial_model_lengths(fasta_file, config, random=True):
         return [model_length] * config["num_models"]
     
     
-def _make_defaults_if_none(fasta_file, config, model_generator, batch_generator):
+def _make_defaults_if_none(model_generator, batch_generator):
     if model_generator is None:
         model_generator = train.default_model_generator
     if batch_generator is None:
-        batch_generator = train.DefaultBatchGenerator(fasta_file, config["num_models"])
+        batch_generator = train.DefaultBatchGenerator()
     return model_generator, batch_generator
 
 

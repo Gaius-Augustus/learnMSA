@@ -60,7 +60,8 @@ def make_default(default_num_models = 5):
         "equilibrium_sample" : False,
         "transposed" : False,
         "encoder_initializer" : initializers.make_default_anc_probs_init(default_num_models),
-        "model_criterion" : "loglik"
+        "model_criterion" : "loglik",
+        "allow_user_keys_in_config" : False
     }
     return default
 
@@ -69,5 +70,6 @@ def assert_config(config):
     default = make_default(config["num_models"])
     for key in default:
         assert key in config, f"User configuration is missing key {key}."
-    for key in config:
-        assert key in default, f"Unrecognized key {key} in user configuration."
+    if not config["allow_user_keys_in_config"]:
+        for key in config:
+            assert key in default, f"Unrecognized key {key} in user configuration."
