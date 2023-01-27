@@ -119,6 +119,10 @@ def get_state_seqs_max_lik(fasta_file,
     Returns:
         A dense integer representation of the most likely state sequences. Shape: (num_model, num_seq, L)
     """
+    #does currently not support multi-GPU, scale the batch size to account for that and prevent overflow
+    num_gpu = len([x.name for x in tf.config.list_logical_devices() if x.device_type == 'GPU']) 
+    num_devices = num_gpu + int(num_gpu==0) #account for the CPU-only case 
+    batch_size = int(batch_size / num_devices)
     #compute an optimized order for decoding that sorts sequences of equal length into the same batch
     sorted_indices = np.array([[i,j] for l,i,j in sorted(zip(fasta_file.seq_lens[indices], indices, range(indices.size)))])
     hmm_cell.recurrent_init()

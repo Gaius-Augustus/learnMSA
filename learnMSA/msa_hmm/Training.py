@@ -27,7 +27,7 @@ def generic_model_generator(encoder_layers,
     for layer in encoder_layers:
         forward_seq = layer(forward_seq, transposed_indices)
     loglik = msa_hmm_layer(forward_seq)
-    #transpose back to make model.predict work correct 
+    #transpose back to make model.predict work correctly
     loglik = tf.transpose(loglik)
     model = tf.keras.Model(inputs=[sequences, indices], 
                         outputs=[tf.keras.layers.Lambda(lambda x: x, name="loglik")(loglik)])

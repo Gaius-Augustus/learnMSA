@@ -20,7 +20,8 @@ def plot_logo(alignment, model_index, ax):
 
     #reduce to std AA alphabet 
     emissions = hmm_cell.emitter[0].make_B().numpy()[model_index, 1:length+1,:20][:,logomaker_perm]
-    background = hmm_cell.emitter[0].emission_init[model_index]((length,25), dtype=alignment.msa_hmm_layer.dtype)[0, :20]
+    background = hmm_cell.emitter[0].make_B().numpy()[model_index, 0, :20][logomaker_perm]
+    #background = hmm_cell.emitter[0].emission_init[model_index]((length,25), dtype=alignment.msa_hmm_layer.dtype)[0, :20]
     information_content = tf.keras.losses.KLDivergence(reduction=tf.keras.losses.Reduction.NONE)(
                                                          emissions,
                                                          np.expand_dims(background, 0))
@@ -246,7 +247,10 @@ def print_and_plot(alignment,
                    seq_ids = False, 
                    show_model=True, 
                    show_anc_probs=True,
-                   show_logo=True):
+                   show_logo=True,
+                   model_filename="", 
+                   anc_probs_filename="",
+                   logo_filename=""):
     if model_index is None:
         model_index = alignment.best_model
     # print the alignment
@@ -276,8 +280,30 @@ def print_and_plot(alignment,
         plot_hmm(alignment, model_index, ax, 
                  seq_indices=alignment.indices[seqs_to_plot],
                  path_colors=["#CC6600", "#0000cc", "#00cccc"])   
+        if model_filename != "":
+            plt.savefig(model_filename, bbox_inches='tight')
     if show_anc_probs:
         plot_anc_probs(alignment, model_index, seqs=seqs_to_plot)
+        if anc_probs_filename != "":
+            plt.savefig(anc_probs_filename, bbox_inches='tight')
     if show_logo:
         fig, ax = plt.subplots()
         plot_logo(alignment, model_index, ax)
+        if logo_filename != "":
+            plt.savefig(logo_filename, bbox_inches='tight')
+        
+        
+def plot_sequence_length_distribution(fasta_filename, 
+                                     bins=100,
+                                     q=0.75):
+    fasta_file = msa_hmm.fasta.Fasta(fasta_filename)
+    x = fasta_file.seq_lens
+    sns.histplot(x, bins=bins)
+    #plt.hist(x, density=False, bins=bins);  
+    plt.xlabel("Seq. length")
+    plt.ylabel("Number of seq.")
+    median, q25, q75= np.percentile(x, 50), np.percentile(x, 25), np.percentile(x, 75)
+    plt.axvline(x = q25, c='k', ls='--', label = "q25")
+    plt.axvline(x = median, c='orange', ls='-', label = "median")
+    plt.axvline(x = q75, c='g', ls='--', label = "q75")
+    plt.legend(loc='upper right')

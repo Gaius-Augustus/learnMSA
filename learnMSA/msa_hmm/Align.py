@@ -2,6 +2,7 @@ import tensorflow as tf
 import numpy as np
 import time
 import os
+import sys
 import learnMSA.msa_hmm.Fasta as fasta
 import learnMSA.msa_hmm.Training as train
 import learnMSA.msa_hmm.MsaHmmLayer as msa_hmm
@@ -49,7 +50,7 @@ def fit_and_align(fasta_file,
             batch_size = config["batch_size"]
         #set the batch size to something smaller than the dataset size even though
         #for low sequence numbers it would be feasible to train on all data at once
-        batch_size = min(batch_size, int(np.ceil(n*0.5)))
+        batch_size = min(batch_size, get_low_seq_num_batch_size(n))
         if last_iteration:    
             train_indices = np.arange(n)
             decode_indices = subset
@@ -117,7 +118,7 @@ def fit_and_align(fasta_file,
             model_lengths[k] = emission_init[0].shape[0]
             if model_lengths[k] < 3: 
                 raise SystemExit("A problem occured during model surgery: A pHMM is too short (length <= 2).") 
-        if "encoder_weight_extractor" in config:
+        if config["encoder_weight_extractor"] is not None:
             if verbose:
                 print("Used the encoder_weight_extractor callback to pass the encoder parameters to the next iteration.")
             config["encoder_initializer"] = config["encoder_weight_extractor"](alignment.encoder_model)
@@ -228,7 +229,8 @@ def get_state_expectations(fasta_file,
                            indices,
                            batch_size,
                            msa_hmm_layer, 
-                           encoder):
+                           encoder,
+                           reduce=True):
     """ Computes the expected number of occurences per model and state.
     Args:
         fasta_file: Fasta file object.
@@ -237,9 +239,15 @@ def get_state_expectations(fasta_file,
         batch_size: Specifies how many sequences will be decoded in parallel. 
         msa_hmm_layer: MsaHmmLayer object. 
         encoder: Encoder model that is applied to the sequences before Viterbi.
+        reduce: If true (default), the posterior state probs are summed up over the dataset size. 
+            Otherwise the posteriors for each sequence are returned.
     Returns:
         The expected number of occurences per model state. Shape (num_model, max_num_states)
     """
+    #does currently not support multi-GPU, scale the batch size to account for that and prevent overflow
+    num_gpu = len([x.name for x in tf.config.list_logical_devices() if x.device_type == 'GPU']) 
+    num_devices = num_gpu + int(num_gpu==0) #account for the CPU-only case 
+    batch_size = int(batch_size / num_devices)
     #compute an optimized order for decoding that sorts sequences of equal length into the same batch
     indices = np.reshape(indices, (-1))
     num_indices = indices.shape[0]
@@ -259,13 +267,20 @@ def get_state_expectations(fasta_file,
         posterior_probs = tf.math.exp(posterior_probs)
         #compute expected number of visits per hidden state and sum over batch dim
         posterior_probs = tf.reduce_sum(posterior_probs, -2)
-        posterior_probs = tf.reduce_sum(posterior_probs, 1) / num_indices
+        if reduce:
+            posterior_probs = tf.reduce_sum(posterior_probs, 1) / num_indices
         return posterior_probs
     
-    posterior_probs = tf.zeros((cell.num_models, cell.max_num_states), cell.dtype) 
-    for inputs, _ in ds:
-        posterior_probs += batch_posterior_state_probs(inputs[0], inputs[1])
-    return posterior_probs.numpy()
+    if reduce:
+        posterior_probs = tf.zeros((cell.num_models, cell.max_num_states), cell.dtype) 
+        for inputs, _ in ds:
+            posterior_probs += batch_posterior_state_probs(inputs[0], inputs[1])
+        return posterior_probs.numpy()
+    else:
+        posterior_probs = np.zeros((cell.num_models, num_indices, cell.max_num_states), cell.dtype) 
+        for i, (inputs, _) in enumerate(ds):
+            posterior_probs[:,i*batch_size : (i+1)*batch_size] = batch_posterior_state_probs(inputs[0], inputs[1])
+        return posterior_probs
     
 
 def decode_core(model_length,
@@ -897,6 +912,14 @@ def get_initial_model_lengths(fasta_file, config, random=True):
         return lens
     else:
         return [model_length] * config["num_models"]
+    
+    
+def get_low_seq_num_batch_size(n):
+    num_gpu = len([x.name for x in tf.config.list_logical_devices() if x.device_type == 'GPU']) 
+    num_devices = num_gpu + int(num_gpu==0) #account for the CPU-only case 
+    batch_size = int(np.ceil(n*0.5))
+    batch_size -= batch_size % num_devices
+    return max(batch_size, num_devices)
     
     
 def _make_defaults_if_none(model_generator, batch_generator):
