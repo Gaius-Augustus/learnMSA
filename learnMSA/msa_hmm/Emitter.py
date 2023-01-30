@@ -94,6 +94,11 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
         B = tf.stack(emission_matrices, axis=0)
         return B
         
+    def make_B_amino(self):
+        """ A variant of used for plotting the HMM. Can be overridden for more complex emissions. Per default this is equivalent to make_B
+        """
+        return self.make_B()
+        
     def call(self, inputs):
         """ 
         Args: 

@@ -19,8 +19,8 @@ def plot_logo(alignment, model_index, ax):
     logomaker_perm = np.array([msa_hmm.fasta.alphabet.index(aa) for aa in logomaker_alphabet], dtype=int)
 
     #reduce to std AA alphabet 
-    emissions = hmm_cell.emitter[0].make_B().numpy()[model_index, 1:length+1,:20][:,logomaker_perm]
-    background = hmm_cell.emitter[0].make_B().numpy()[model_index, 0, :20][logomaker_perm]
+    emissions = hmm_cell.emitter[0].make_B_amino().numpy()[model_index, 1:length+1,:20][:,logomaker_perm]
+    background = hmm_cell.emitter[0].make_B_amino().numpy()[model_index, 0, :20][logomaker_perm]
     #background = hmm_cell.emitter[0].emission_init[model_index]((length,25), dtype=alignment.msa_hmm_layer.dtype)[0, :20]
     information_content = tf.keras.losses.KLDivergence(reduction=tf.keras.losses.Reduction.NONE)(
                                                          emissions,
@@ -98,7 +98,7 @@ def plot_hmm(alignment,
                                 for edge,p,v in zip(indices, probs[transition_type], values[transition_type]) 
                                     if p > edge_show_threshold})
 
-    B = hmm_cell.emitter[0].make_B().numpy()[model_index]
+    B = hmm_cell.emitter[0].make_B_amino().numpy()[model_index]
     node_labels = {}
     for i in range(length):
         sort = np.argsort(-B[i+1, :25])
