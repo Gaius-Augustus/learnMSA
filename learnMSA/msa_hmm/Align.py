@@ -7,7 +7,7 @@ import learnMSA.msa_hmm.Fasta as fasta
 import learnMSA.msa_hmm.Training as train
 import learnMSA.msa_hmm.MsaHmmLayer as msa_hmm
 import learnMSA.msa_hmm.Viterbi as viterbi
-from learnMSA.msa_hmm.Configuration import as_str, assert_config, get_adaptive_batch_size
+from learnMSA.msa_hmm.Configuration import as_str, assert_config
 from pathlib import Path
 
 
@@ -44,8 +44,8 @@ def fit_and_align(fasta_file,
     #model surgery
     last_iteration=config["max_surgery_runs"]==1
     for i in range(config["max_surgery_runs"]):
-        if config["batch_size"] == "adaptive":
-            batch_size = get_adaptive_batch_size(model_lengths, fasta_file.max_len)
+        if callable(config["batch_size"]):
+            batch_size = config["batch_size"](model_lengths, fasta_file.max_len)
         else:
             batch_size = config["batch_size"]
         #set the batch size to something smaller than the dataset size even though
