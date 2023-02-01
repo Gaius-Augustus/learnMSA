@@ -12,14 +12,20 @@ def run_main():
             sys.stderr.write('error: %s\n' % message)
             self.print_help()
             sys.exit(2)
+            
+    #get the version without importing learnMSA as a module
+    base_dir = str(os.path.abspath(os.path.join(os.path.dirname( __file__ ), '..')))
+    version_file_path = base_dir + "/_version.py"
+    with open(version_file_path, "rt") as version_file:
+        version = version_file.readlines()[0].split("=")[1].strip(' "')
 
-    parser = MsaHmmArgumentParser(description="learnMSA - multiple alignment of protein sequences")
+    parser = MsaHmmArgumentParser(description=f"learnMSA (version {version}) - multiple alignment of protein sequences")
     parser.add_argument("-i", "--in_file", dest="input_file", type=str, required=True,
                         help="Input sequence file in fasta format.")
     parser.add_argument("-o", "--out_file", dest="output_file", type=str, required=True,
                         help="Filepath for the output alignment.")
-    parser.add_argument("-n", "--num_runs", dest="num_runs", type=int, default=1,
-                        help="Number of trained models (default 1).")
+    parser.add_argument("-n", "--num_model", dest="num_model", type=int, default=1,
+                        help="Number of models trained in parallel (default 1).")
     parser.add_argument("-s", "--silent", dest="silent", action='store_true', help="Prevents output to stdout.")
     parser.add_argument("-r", "--ref_file", dest="ref_file", type=str, default="", help=argparse.SUPPRESS) #useful for debudding, do not expose to users
     parser.add_argument("-b", "--batch", dest="batch_size", type=int, default=-1,
@@ -27,6 +33,9 @@ def run_main():
     parser.add_argument("-d", "--cuda_visible_devices", dest="cuda_visible_devices", type=str, default="default",
                         help="Controls the GPU devices visible to learnMSA as a comma-separated list of device IDs. The value -1 forces learnMSA to run on CPU. Per default, learnMSA attempts to use all available GPUs.")
     args = parser.parse_args()
+    
+    if not args.silent:
+        print(f"learnMSA (version {version}) - multiple alignment of protein sequences")
     
     #import after argparsing to avoid long delay with -h option
     if not args.cuda_visible_devices == "default":
@@ -47,10 +56,10 @@ def run_main():
 
         print("Found tensorflow version", tf.__version__)
     
-    config = msa_hmm.config.make_default(args.num_runs)
+    config = msa_hmm.config.make_default(args.num_model)
     
-    config["batch_size"] = args.batch_size if args.batch_size > 0 else "adaptive"
-    config["num_models"] = args.num_runs
+    config["batch_size"] = args.batch_size if args.batch_size > 0 else msa_hmm.config.get_adaptive_batch_size
+    config["num_models"] = args.num_model
     
     _ = msa_hmm.align.run_learnMSA(train_filename = args.input_file,
                                     out_filename = args.output_file,
