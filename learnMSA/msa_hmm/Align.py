@@ -182,8 +182,12 @@ def run_learnMSA(train_filename,
         alignment.best_model = np.argmax(posterior_sums)
         if verbose:
             print("Per model total expected match states:", posterior_sums)
+    elif config["model_criterion"] == "AIC":
+        num_param = 34 * np.array(alignment.length) + 25
+        aic = -2 * alignment.loglik * fasta_file.num_seq + 2*num_param
+        alignment.best_model = np.argmax(aic)
     else:
-        raise SystemExit("Invalid model selection criterion. Valid criteria are loglik and posterior.") 
+        raise SystemExit("Invalid model selection criterion. Valid criteria are loglik, AIC and posterior.") 
     if verbose:
         likelihoods = ["%.4f" % ll + " (%.4f)" % p for ll,p in zip(alignment.loglik, alignment.prior)]
         print("Per model likelihoods (priors): ", likelihoods)

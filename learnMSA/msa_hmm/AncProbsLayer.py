@@ -7,7 +7,9 @@ some amount of evolutionary time has passed under a substitution model. This can
 """
               
 def inverse_softplus(features):
-    return np.log(np.expm1(features))
+    #cast to float 64 to prevent overflow of large entries
+    features64 = features.astype(np.float64)
+    return np.log(np.expm1(features64)).astype(features.dtype)
 
 def parse_paml(lines, desired_alphabet):
     """Parses the content of a paml file.
