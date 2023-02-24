@@ -8,8 +8,9 @@ class AminoAcidPrior():
 
     Args:
         comp_count: The number of components in the mixture.
+        epsilon: A small constant for numerical stability.
     """
-    def __init__(self, comp_count=1, epsilon=1e-32):
+    def __init__(self, comp_count=1, epsilon=1e-16):
         self.comp_count = comp_count
         self.epsilon = epsilon
         
@@ -70,6 +71,7 @@ class ProfileHMMTransitionPrior():
         alpha_flank: Favors high probability of staying one of the 3 flanking states.
         alpha_single: Favors high probability for a single main model hit (avoid looping paths).
         alpha_frag: Favors models with high prob. to enter at the first match and exit after the last match.
+        epsilon: A small constant for numerical stability.
     """
     def __init__(self, 
                  match_comp=1, 
@@ -77,7 +79,8 @@ class ProfileHMMTransitionPrior():
                  delete_comp=1,
                  alpha_flank = 7000,
                  alpha_single = 1e9,
-                 alpha_frag = 1e4):
+                 alpha_frag = 1e4,
+                 epsilon=1e-16):
         self.match_comp = match_comp
         self.insert_comp = insert_comp
         self.delete_comp = delete_comp
@@ -87,6 +90,7 @@ class ProfileHMMTransitionPrior():
         self.alpha_flank = alpha_flank
         self.alpha_single = alpha_single
         self.alpha_frag = alpha_frag
+        self.epsilon = epsilon
         
     def load(self, dtype):
         self.alpha_flank = tf.constant(self.alpha_flank, dtype=dtype) 
@@ -146,10 +150,12 @@ class ProfileHMMTransitionPrior():
             hit = self.alpha_single * tf.math.log(probs["end_to_right_flank"] + probs["end_to_terminal"]) 
             hit_prior.append(tf.squeeze(hit))
             #uniform entry/exit prior
-            btm = probs["begin_to_match"] / (1- probs["match_to_delete"][0]) #rescale begin_to_match to sum to 1
+            #rescale begin_to_match to sum to 1
+            div = tf.math.maximum(self.epsilon, 1- probs["match_to_delete"][0]) 
+            btm = probs["begin_to_match"] / div
             enex = tf.expand_dims(btm, 1) * tf.expand_dims(probs["match_to_end"], 0)
             enex = tf.linalg.band_part(enex, 0, -1)
-            enex = tf.math.log(1 - enex) 
+            enex = tf.math.log(tf.math.maximum(self.epsilon, 1 - enex))
             enex_prior.append( self.alpha_frag * (tf.reduce_sum(enex) - enex[0, -1]) )
         prior_val = {
             "match_prior" : match_dirichlet,

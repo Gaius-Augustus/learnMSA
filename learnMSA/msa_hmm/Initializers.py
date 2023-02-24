@@ -11,10 +11,9 @@ class EmissionInitializer(tf.keras.initializers.Initializer):
         self.dist = dist
 
     def __call__(self, shape, dtype=None, **kwargs):
-        assert len(shape) == 2, "EmissionInitializer only supports 2D shapes."
         assert shape[-1] == self.dist.size, f"Last dimension of shape must match the size of the initial distribution. Shape={shape} dist.size={self.dist.size}"
         dist = tf.cast(self.dist, dtype)
-        return tf.reshape(tf.tile(dist, shape[:1]), shape)
+        return tf.reshape(tf.tile(dist, tf.math.reduce_prod(shape[:-1], keepdims=True)), shape)
     
     def __repr__(self):
         return f"DefaultEmission()"

@@ -267,7 +267,7 @@ def print_and_plot(alignment,
         tau = anc_probs_layer.make_tau(indices)[model_index]
         param_string = "l=%.2f" % (ll[i]) + "_t=%.2f" % tau
         if seq_ids:
-            print(f">{alignment.fasta_file.seq_ids[i]} "+param_string)
+            print(f">{alignment.fasta_file.seq_ids[alignment.indices[i]]} "+param_string)
         else:
             print(">"+param_string)
         print(s)
