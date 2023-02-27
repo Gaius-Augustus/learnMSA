@@ -225,7 +225,8 @@ def run_learnMSA(train_filename,
                 alignment.to_file(tmp_file, i)
                 tmp_fasta = fasta.Fasta(tmp_file, aligned=True) 
                 _,sp_i = tmp_fasta.precision_recall(ref_fasta)
-                print(f"Model {i} SP score =", sp_i)
+                if verbose:
+                    print(f"Model {i} SP score =", sp_i)
                 os.remove(tmp_file)
                 sp.append(sp_i)
             tf.get_logger().setLevel('WARNING')

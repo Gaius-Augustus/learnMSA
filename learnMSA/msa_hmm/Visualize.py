@@ -204,7 +204,7 @@ def plot_anc_probs(alignment,
                                     shuffle=False)
     for x,_ in ds:
         ancs = alignment.encoder_model(x).numpy()[model_index]
-    i = [l.name for l in alignment.encoder_model.layers].index("AncProbsLayer")
+    i = [l.name for l in alignment.encoder_model.layers].index("anc_probs_layer")
     anc_probs_layer = alignment.encoder_model.layers[i]
     indices = np.stack([alignment.indices]*alignment.msa_hmm_layer.cell.num_models)
     indices = np.expand_dims(indices, -1)
@@ -224,7 +224,7 @@ def plot_anc_probs(alignment,
 def plot_rate_matrices(alignment,
                        model_index,
                        title="normalized rate matrix (1 time unit = 1 expected mutation per site)"):
-    i = [l.name for l in alignment.encoder_model.layers].index("AncProbsLayer")
+    i = [l.name for l in alignment.encoder_model.layers].index("anc_probs_layer")
     anc_probs_layer = alignment.encoder_model.layers[i]
     Q = anc_probs_layer.make_Q()[model_index]
     k = Q.shape[0]
@@ -255,7 +255,7 @@ def print_and_plot(alignment,
         model_index = alignment.best_model
     # print the alignment
     msa = alignment.to_string(model_index)
-    i = [l.name for l in alignment.encoder_model.layers].index("AncProbsLayer")
+    i = [l.name for l in alignment.encoder_model.layers].index("anc_probs_layer")
     anc_probs_layer = alignment.encoder_model.layers[i]
     ds = msa_hmm.train.make_dataset(alignment.indices, 
                             alignment.batch_generator,

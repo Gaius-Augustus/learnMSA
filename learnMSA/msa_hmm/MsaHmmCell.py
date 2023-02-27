@@ -18,11 +18,15 @@ class MsaHmmCell(tf.keras.layers.Layer):
     """
     def __init__(self,
                  length, 
-                 emitter = emit.ProfileHMMEmitter(),
-                 transitioner = trans.ProfileHMMTransitioner(),
+                 emitter = None,
+                 transitioner = None,
                  **kwargs
                 ):
         super(MsaHmmCell, self).__init__(**kwargs)
+        if emitter is None:
+            emitter = emit.ProfileHMMEmitter()
+        if transitioner is None:
+            transitioner = trans.ProfileHMMTransitioner()
         self.length = [length] if not hasattr(length, '__iter__') else length 
         self.num_models = len(self.length)
         self.emitter = [emitter] if not hasattr(emitter, '__iter__') else emitter 
