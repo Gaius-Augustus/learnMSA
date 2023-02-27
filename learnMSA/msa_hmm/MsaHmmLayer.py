@@ -6,11 +6,9 @@ class MsaHmmLayer(tf.keras.layers.Layer):
                  cell, 
                  num_seq,
                  use_prior=True,
-                 name="MsaHmmLayer",
-                 dtype=tf.float32,
                  **kwargs
                 ):
-        super(MsaHmmLayer, self).__init__(name=name, dtype=dtype, **kwargs)
+        super(MsaHmmLayer, self).__init__(**kwargs)
         self.num_seq = num_seq
         self.cell = cell
         self.rnn = tf.keras.layers.RNN(self.cell, 
@@ -88,3 +86,12 @@ class MsaHmmLayer(tf.keras.layers.Layer):
             if self.use_prior:
                 self.add_metric(prior, "logprior")
         return loglik
+        
+    def get_config(self):
+        config = super(MsaHmmLayer, self).get_config()
+        config.update({ 
+             "cell" : self.cell,
+             "num_seq" : self.num_seq, 
+             "use_prior" : self.use_prior
+        })
+        return config

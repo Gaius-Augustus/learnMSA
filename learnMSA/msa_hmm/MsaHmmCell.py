@@ -4,7 +4,6 @@ import numpy as np
 import learnMSA.msa_hmm.Emitter as emit
 import learnMSA.msa_hmm.Transitioner as trans
 
-
 class MsaHmmCell(tf.keras.layers.Layer):
     """ A general cell for (p)HMM training. It is meant to be used with the generic RNN-layer.
         It computes the likelihood of a batch of sequences, computes a prior value and provides 
@@ -21,10 +20,9 @@ class MsaHmmCell(tf.keras.layers.Layer):
                  length, 
                  emitter = emit.ProfileHMMEmitter(),
                  transitioner = trans.ProfileHMMTransitioner(),
-                 dtype=tf.float32,
                  **kwargs
                 ):
-        super(MsaHmmCell, self).__init__(name="MsaHmmCell", dtype=dtype, **kwargs)
+        super(MsaHmmCell, self).__init__(**kwargs)
         self.length = [length] if not hasattr(length, '__iter__') else length 
         self.num_models = len(self.length)
         self.emitter = [emitter] if not hasattr(emitter, '__iter__') else emitter 
@@ -39,7 +37,7 @@ class MsaHmmCell(tf.keras.layers.Layer):
         for em in self.emitter:
             em.cell_init(self)
         self.transitioner.cell_init(self)
-        self.epsilon = tf.constant(1e-32, dtype)
+        self.epsilon = tf.constant(1e-32, self.dtype)
         self.reverse = False
             
             
@@ -158,4 +156,25 @@ class MsaHmmCell(tf.keras.layers.Layer):
     def reverse_direction(self):
         self.transitioner.transpose()
         self.reverse = not self.reverse
+        
+    def get_config(self):
+        config = super(MsaHmmCell, self).get_config()
+        config.update({
+             "length" : self.length, 
+             "num_emitters" : len(self.emitter),
+             "transitioner" : self.transitioner
+        })
+        for i, em in enumerate(self.emitter):
+             config[f"emitter_{i}"] = em
+        return config
+    
+    @classmethod
+    def from_config(cls, config):
+        emitter = []
+        for i in range(config["num_emitters"]):
+            emitter.append(config[f"emitter_{i}"])
+            config.pop(f"emitter_{i}")
+        config.pop("num_emitters")
+        config["emitter"] = emitter
+        return cls(**config)
 

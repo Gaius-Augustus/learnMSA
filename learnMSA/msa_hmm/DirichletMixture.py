@@ -48,9 +48,8 @@ class DirichletMixtureLayer(tf.keras.layers.Layer):
                  mix_init = "random_normal",
                  background_init = None,
                  trainable=True,
-                 name="DirichletMixtureLayer",
-                 dtype = tf.float32):
-        super(DirichletMixtureLayer, self).__init__(name=name, dtype=dtype)
+                 **kwargs):
+        super(DirichletMixtureLayer, self).__init__(**kwargs)
         self.num_components = num_components
         self.alphabet_size = alphabet_size
         self.use_dirichlet_process = use_dirichlet_process

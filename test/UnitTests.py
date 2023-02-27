@@ -7,6 +7,7 @@ import numpy as np
 import tensorflow as tf
 from learnMSA import msa_hmm 
 import itertools
+import shutil
 
 class TestFasta(unittest.TestCase):
 
@@ -1469,7 +1470,7 @@ class DirichletTest(unittest.TestCase):
 class TestPriors(unittest.TestCase):
         
     def test_amino_acid_match_prior(self):
-        prior = msa_hmm.priors.AminoAcidPrior()
+        prior = msa_hmm.priors.AminoAcidPrior(dtype=tf.float64)
         prior.load(tf.float64)
         model_lengths = [2,5,3]
         num_models = len(model_lengths)
@@ -1481,8 +1482,101 @@ class TestPriors(unittest.TestCase):
         self.assertEqual(pdf.shape, (num_models, max_len))
         for i,l in enumerate(model_lengths):
             np.testing.assert_equal(pdf[i,l:].numpy(), 0.)
-    
-    
+        
+        
+        
+class TestModelToFile(unittest.TestCase):
+        
+    def test_model_to_file(self):
+        test_filepath = "test/data/test_model"
+        
+        #remove saved models from previous tests
+        shutil.rmtree(test_filepath, ignore_errors=True)
+        shutil.rmtree(test_filepath+".zip", ignore_errors=True)
+        
+        #make a model with some custom parameters to save
+        model_len = 10
+        custom_transition_init = msa_hmm.initializers.make_default_transition_init(MM=7, 
+                                                                                     MI=-5, 
+                                                                                     MD=2, 
+                                                                                     II=5, 
+                                                                                     IM=12, 
+                                                                                     DM=3, 
+                                                                                     DD=22,
+                                                                                     FC=6, 
+                                                                                     FE=7,
+                                                                                     R=8, 
+                                                                                     RF=-2, 
+                                                                                     T=-10)
+        custom_flank_init = msa_hmm.initializers.ConstantInitializer(77)
+        custom_emission_init = msa_hmm.initializers.ConstantInitializer(np.random.rand(1, model_len, 25))
+        custom_insertion_init = msa_hmm.initializers.ConstantInitializer(np.random.rand(1, 25))
+        encoder_initializer = msa_hmm.initializers.make_default_anc_probs_init(1)
+        encoder_initializer[0] = msa_hmm.initializers.ConstantInitializer(np.random.rand(1, 2))
+        config = msa_hmm.config.make_default(1)
+        config["transitioner"] = msa_hmm.trans.ProfileHMMTransitioner(custom_transition_init, custom_flank_init)
+        config["emitter"] = msa_hmm.emit.ProfileHMMEmitter(custom_emission_init, custom_insertion_init)
+        config["encoder_initializer"] = encoder_initializer
+        anc_probs_layer = msa_hmm.train.make_anc_probs_layer(2, config)
+        msa_hmm_layer = msa_hmm.train.make_msa_hmm_layer(2, [model_len], config)
+        model = msa_hmm.train.generic_model_generator([anc_probs_layer], msa_hmm_layer)
+        
+        #copy current parameter state
+        emission_kernel = model.layers[-3].cell.emitter[0].emission_kernel[0].numpy()
+        insertion_kernel = model.layers[-3].cell.emitter[0].insertion_kernel[0].numpy()
+        transition_kernel = {key : kernel.numpy() 
+                                for key, kernel in model.layers[-3].cell.transitioner.transition_kernel[0].items()}
+        flank_init_kernel = model.layers[-3].cell.transitioner.flank_init_kernel[0].numpy()
+        tau_kernel = model.layers[-4].tau_kernel.numpy()
+        seq = np.random.randint(25, size=(1,1,17))
+        seq[:,:,-1] = 25
+        loglik = model([seq, np.array([[0]])]).numpy()
+        
+        #make alignment and save
+        fasta_file = msa_hmm.fasta.Fasta("test/data/simple.fa")
+        batch_gen = msa_hmm.train.DefaultBatchGenerator()
+        batch_gen.configure(fasta_file, config)
+        ind = np.array([0,1])
+        batch_size = 2
+        alignment = msa_hmm.align.Alignment(fasta_file, batch_gen, ind, batch_size, model)
+        msa_hmm.align.write_models_to_file(test_filepath, alignment)
+        
+        #remember how the decoded MSA looks and delete the alignment object
+        #todo: the MSA is currently nonsense, but it should be enough to test in Viterbi runs are consistent
+        msa_str = alignment.to_string(model_index = 0)
+        del alignment
+        
+        #load again
+        deserialized_alignment = msa_hmm.align.load_models_from_file(test_filepath, custom_batch_gen=batch_gen)
+        
+        #test if parameters are the same
+        deserialized_emission_kernel = deserialized_alignment.msa_hmm_layer.cell.emitter[0].emission_kernel[0].numpy()
+        np.testing.assert_equal(emission_kernel, deserialized_emission_kernel)
+        
+        deserialized_insertion_kernel = deserialized_alignment.msa_hmm_layer.cell.emitter[0].insertion_kernel[0].numpy()
+        np.testing.assert_equal(insertion_kernel, deserialized_insertion_kernel)
+        
+        for key, k in transition_kernel.items():
+            deserialized_k = model.layers[-3].cell.transitioner.transition_kernel[0][key].numpy()
+            np.testing.assert_equal(k, deserialized_k)
+            
+        deserialized_flank_init_kernel = deserialized_alignment.msa_hmm_layer.cell.transitioner.flank_init_kernel[0].numpy()
+        np.testing.assert_equal(flank_init_kernel, deserialized_flank_init_kernel)
+        
+        deserialized_tau_kernel = deserialized_alignment.model.layers[-4].tau_kernel.numpy()
+        np.testing.assert_equal(tau_kernel, deserialized_tau_kernel)
+        
+        #test if likelihood is the same as before
+        loglik_in_deserialized_model = deserialized_alignment.model([seq, np.array([[0]])]).numpy()
+        np.testing.assert_equal(loglik, loglik_in_deserialized_model)
+        
+        #test MSA as string
+        msa_str_from_deserialized_model = deserialized_alignment.to_string(model_index = 0)
+        self.assertEqual(msa_str, msa_str_from_deserialized_model)
+        
+        
+        
+            
         
 if __name__ == '__main__':
     unittest.main()

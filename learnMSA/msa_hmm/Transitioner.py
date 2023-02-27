@@ -21,14 +21,13 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
                 flank_init = initializers.make_default_flank_init(),
                 prior = priors.ProfileHMMTransitionPrior(),
                 frozen_kernels={},
-                dtype=tf.float32,
                 **kwargs):
-        super(ProfileHMMTransitioner, self).__init__(name="ProfileHMMTransitioner", dtype=dtype, **kwargs)
+        super(ProfileHMMTransitioner, self).__init__(**kwargs)
         self.transition_init = [transition_init] if isinstance(transition_init, dict) else transition_init 
         self.flank_init = [flank_init] if not hasattr(flank_init, '__iter__') else flank_init 
         self.prior = prior
         self.frozen_kernels = frozen_kernels
-        self.epsilon = tf.constant(1e-32, dtype)
+        self.epsilon = tf.constant(1e-32, self.dtype)
         self.approx_log_zero = tf.math.log(self.epsilon)
         
     def cell_init(self, cell):
@@ -381,6 +380,25 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
                                                                                 value=self.approx_log_zero) 
                               for k,arrays in transposed.items()}
         return padded_and_stacked
+    
+    def get_config(self):
+        config = super(ProfileHMMTransitioner, self).get_config()
+        config.update({
+            "transition_init" : [{key : k.numpy() for key, k in d.items()} for d in self.transition_kernel],
+            "flank_init" : [k.numpy() for k in self.flank_init_kernel],
+            "prior" : self.prior,
+            "frozen_kernels" : self.frozen_kernels
+        })
+        return config
+    
+    @classmethod
+    def from_config(cls, config):
+        transition_init = []
+        for d in config["transition_init"]:
+            transition_init.append( {key: initializers.ConstantInitializer(k) for key,k in d.items()} )
+        config["transition_init"] = transition_init
+        config["flank_init"] = [initializers.ConstantInitializer(k) for k in config["flank_init"]]
+        return cls(**config)
     
     def __repr__(self):
         return f"ProfileHMMTransitioner(\n transition_init={config.as_str(self.transition_init[0], 2, '    ', ' , ')},\n flank_init={self.flank_init[0]},\n prior={self.prior},\n frozen_kernels={self.frozen_kernels})"

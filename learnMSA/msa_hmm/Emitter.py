@@ -21,10 +21,9 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
                  insertion_init = initializers.make_default_insertion_init(),
                  prior = priors.AminoAcidPrior(),
                  frozen_insertions = True,
-                 dtype = tf.float32,
                  **kwargs
                  ):
-        super(ProfileHMMEmitter, self).__init__(name="ProfileHMMEmitter", dtype=dtype, **kwargs)
+        super(ProfileHMMEmitter, self).__init__(**kwargs)
         self.emission_init = [emission_init] if not hasattr(emission_init, '__iter__') else emission_init 
         self.insertion_init = [insertion_init] if not hasattr(insertion_init, '__iter__') else insertion_init 
         self.prior = prior
@@ -95,7 +94,7 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
         return B
         
     def make_B_amino(self):
-        """ A variant of used for plotting the HMM. Can be overridden for more complex emissions. Per default this is equivalent to make_B
+        """ A variant of make_B used for plotting the HMM. Can be overridden for more complex emissions. Per default this is equivalent to make_B
         """
         return self.make_B()
         
@@ -125,6 +124,22 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
                              frozen_insertions = self.frozen_insertions,
                              dtype = self.dtype) 
         return emitter_copy
+    
+    def get_config(self):
+        config = super(ProfileHMMEmitter, self).get_config()
+        config.update({
+             "emission_init" : [k.numpy() for k in self.emission_kernel],
+             "insertion_init" : [k.numpy() for k in self.insertion_kernel],
+             "prior" : self.prior,
+             "frozen_insertions" : self.frozen_insertions
+        })
+        return config
+    
+    @classmethod
+    def from_config(cls, config):
+        config["emission_init"] = [initializers.ConstantInitializer(k) for k in config["emission_init"]]
+        config["insertion_init"] = [initializers.ConstantInitializer(k) for k in config["insertion_init"]]
+        return cls(**config)
     
     def __repr__(self):
         return f"ProfileHMMEmitter(\n emission_init={self.emission_init[0]},\n insertion_init={self.insertion_init[0]},\n prior={self.prior},\n frozen_insertions={self.frozen_insertions}, )"

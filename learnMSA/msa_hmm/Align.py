@@ -3,13 +3,19 @@ import numpy as np
 import time
 import os
 import sys
+import learnMSA.msa_hmm.AncProbsLayer as anc_probs
+import learnMSA.msa_hmm.MsaHmmLayer as msa_hmm_layer
+import learnMSA.msa_hmm.MsaHmmCell as msa_hmm_cell
 import learnMSA.msa_hmm.Fasta as fasta
 import learnMSA.msa_hmm.Training as train
-import learnMSA.msa_hmm.MsaHmmLayer as msa_hmm
 import learnMSA.msa_hmm.Viterbi as viterbi
+import learnMSA.msa_hmm.Priors as priors
+import learnMSA.msa_hmm.Transitioner as trans
+import learnMSA.msa_hmm.Emitter as emit
 from learnMSA.msa_hmm.Configuration import as_str, assert_config
 from pathlib import Path
-
+import json
+import shutil
 
  
 """ Trains k independent models on the sequences in a fasta file and returns k "lazy" alignments, where "lazy" means 
@@ -483,11 +489,13 @@ class Alignment():
         #in the default learnMSA, the encoder model is only the Ancestral Probability layer.
         self.encoder_model = None
         for i, layer in enumerate(model.layers[1:]):
-            if layer.name.startswith("MsaHmmLayer"):
+            if layer.name.startswith("msa_hmm_layer"):
                 encoder_out = model.layers[i].output
                 self.msa_hmm_layer = layer
                 self.encoder_model = tf.keras.Model(inputs=self.model.inputs, outputs=[encoder_out])
         assert self.encoder_model is not None, "Can not find a MsaHmmLayer in the specified model."
+        self.gap_symbol = gap_symbol
+        self.gap_symbol_insertions = gap_symbol_insertions
         self.output_alphabet = np.array((fasta.alphabet[:-1] + 
                                         [gap_symbol] + 
                                         [aa.lower() for aa in fasta.alphabet[:-1]] + 
@@ -869,8 +877,78 @@ def update_kernels(alignment,
     return transitions_new, emissions_new, init_flank_new
 
 
-    
+def write_models_to_file(filepath, alignment, pack=True):
+    """ Writes the underlying models of an alignment instance to file.
+    Args: 
+        alignment: An Alignment object.
+        filepath: Path of the written file.
+        pack: If true, the output will be a zip file, otherwise a directory.
+    """
+    Path(filepath).mkdir(parents=True, exist_ok=True)
+    #serialize metadata
+    d = {
+        "fasta_file" : alignment.fasta_file.filename,
+        "batch_size" : alignment.batch_size,
+        "gap_symbol" : alignment.gap_symbol,
+        "gap_symbol_insertions" : alignment.gap_symbol_insertions,
+    }
+    with open(filepath+"/meta.json", "w") as metafile:
+        metafile.write(json.dumps(d, indent=4))
+    #serialize indices
+    np.savetxt(filepath+"/indices", alignment.indices, fmt='%i')
+    #save the model
+    alignment.model.save(filepath+"/model", save_traces=False)
+    if pack:
+        shutil.make_archive(filepath, "zip", filepath)
+        try:
+            shutil.rmtree(filepath)
+        except OSError as e:
+            print("Error: %s - %s." % (e.filename, e.strerror))
 
+
+def load_models_from_file(filepath, from_packed=True, custom_batch_gen=None):
+    """ Recreates an alignment instance with underlying models from file.
+    Args:
+        filepath: Path of the file to load.
+        from_packed: Pass true or false depending on the pack argument used with write_models_to_file.
+    Returns:
+        An alignment instance with equivalent behavior as the alignment instance used while saving the model.
+    """
+    if from_packed:
+        shutil.unpack_archive(filepath+".zip", filepath)
+    #deserialize metadata    
+    with open(filepath+"/meta.json") as metafile:
+        d = json.load(metafile)
+    fasta_file = fasta.Fasta(d["fasta_file"])
+    #deserialize indices
+    indices = np.loadtxt(filepath+"/indices", dtype=int)
+    #load the model
+    model = tf.keras.models.load_model(filepath+"/model", 
+                                       custom_objects={"AncProbsLayer": anc_probs.AncProbsLayer, 
+                                                       "MsaHmmLayer": msa_hmm_layer.MsaHmmLayer,
+                                                       "MsaHmmCell": msa_hmm_cell.MsaHmmCell, 
+                                                       "ProfileHMMTransitioner": trans.ProfileHMMTransitioner, 
+                                                       "ProfileHMMEmitter": emit.ProfileHMMEmitter,
+                                                       "AminoAcidPrior": priors.AminoAcidPrior,
+                                                       "NullPrior": priors.NullPrior,
+                                                       "ProfileHMMTransitionPrior": priors.ProfileHMMTransitionPrior})
+    if from_packed:
+        #after loading remove unpacked files and keep only the archive
+        try:
+            shutil.rmtree(filepath)
+        except OSError as e:
+            print("Error: %s - %s." % (e.filepath, e.strerror))
+    batch_gen = train.DefaultBatchGenerator() if custom_batch_gen is None else custom_batch_gen
+    alignment = Alignment(fasta_file, 
+                          batch_gen, 
+                          indices,
+                          d["batch_size"], 
+                          model,
+                          d["gap_symbol"], 
+                          d["gap_symbol_insertions"])
+    return alignment
+
+    
 def compute_loglik(alignment, max_ll_estimate = 200000):
     if alignment.fasta_file.num_seq > max_ll_estimate:
         #estimate the ll only on a subset, otherwise for millions of 

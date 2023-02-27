@@ -3,14 +3,15 @@ import tensorflow as tf
 import learnMSA.msa_hmm.DirichletMixture as dm
 
 
-class AminoAcidPrior():
+class AminoAcidPrior(tf.keras.layers.Layer):
     """The default dirichlet mixture prior for amino acids.
 
     Args:
         comp_count: The number of components in the mixture.
         epsilon: A small constant for numerical stability.
     """
-    def __init__(self, comp_count=1, epsilon=1e-16):
+    def __init__(self, comp_count=1, epsilon=1e-16, **kwargs):
+        super(AminoAcidPrior, self).__init__(**kwargs)
         self.comp_count = comp_count
         self.epsilon = epsilon
         
@@ -21,7 +22,7 @@ class AminoAcidPrior():
         model = dm.load_mixture_model(model_path, self.comp_count, 20, trainable=False, dtype=dtype)
         self.emission_dirichlet_mix = model.layers[-1]
         
-    def __call__(self, B, lengths):
+    def call(self, B, lengths):
         """Computes log pdf values for each match state.
         Args:
         B: A stack of k emission matrices. Assumes that the 20 std amino acids are the first 20 positions of the last dimension
@@ -42,17 +43,26 @@ class AminoAcidPrior():
         prior *= tf.cast(tf.sequence_mask(lengths), B.dtype)
         return prior 
     
+    def get_config(self):
+        config = super(AminoAcidPrior, self).get_config()
+        cell_config = {
+             "comp_count" : self.comp_count,
+             "epsilon" : self.epsilon
+        }
+        config.update(cell_config)
+        return config
+    
     def __repr__(self):
         return f"AminoAcidPrior(comp_count={self.comp_count})"
     
     
-class NullPrior():
+class NullPrior(tf.keras.layers.Layer):
     """NullObject if no prior should be used.
     """
     def load(self, dtype):
         pass
     
-    def __call__(self, B):
+    def call(self, B):
         k = tf.shape(B)[0]
         model_length = int((tf.shape(B)[1]-2)/2)
         return tf.zeros((k, model_length), dtype=B.dtype)
@@ -61,7 +71,7 @@ class NullPrior():
         return f"NullPrior()"
     
     
-class ProfileHMMTransitionPrior():
+class ProfileHMMTransitionPrior(tf.keras.layers.Layer):
     """The default dirichlet mixture prior for profileHMM transitions.
 
     Args:
@@ -80,7 +90,9 @@ class ProfileHMMTransitionPrior():
                  alpha_flank = 7000,
                  alpha_single = 1e9,
                  alpha_frag = 1e4,
-                 epsilon=1e-16):
+                 epsilon=1e-16, 
+                 **kwargs):
+        super(ProfileHMMTransitionPrior, self).__init__(**kwargs)
         self.match_comp = match_comp
         self.insert_comp = insert_comp
         self.delete_comp = delete_comp
@@ -93,10 +105,6 @@ class ProfileHMMTransitionPrior():
         self.epsilon = epsilon
         
     def load(self, dtype):
-        self.alpha_flank = tf.constant(self.alpha_flank, dtype=dtype) 
-        self.alpha_single = tf.constant(self.alpha_single, dtype=dtype) 
-        self.alpha_frag = tf.constant(self.alpha_frag, dtype=dtype) 
-
         prior_path = os.path.dirname(__file__)+"/trained_prior/transition_priors/"
 
         match_model_path = prior_path + "_".join(["match_prior", str(self.match_comp), dtype]) + "/ckpt"
@@ -109,7 +117,7 @@ class ProfileHMMTransitionPrior():
         delete_model = dm.load_mixture_model(delete_model_path, self.delete_comp, 2, trainable=False, dtype=dtype)
         self.delete_dirichlet = delete_model.layers[-1]
         
-    def __call__(self, probs_list, flank_init_prob):
+    def call(self, probs_list, flank_init_prob):
         """Computes log pdf values for each transition prior.
         Args:
         probs_list: A list of dictionaries that map transition type to probabilities per model.
@@ -166,6 +174,20 @@ class ProfileHMMTransitionPrior():
             "enex_prior" : enex_prior}
         prior_val = {k : tf.stack(v) for k,v in prior_val.items()}
         return prior_val
+    
+    def get_config(self):
+        config = super(ProfileHMMTransitionPrior, self).get_config()
+        cell_config = {
+             "match_comp" : self.match_comp, 
+             "insert_comp" : self.insert_comp, 
+             "delete_comp" : self.delete_comp, 
+             "alpha_flank" : self.alpha_flank, 
+             "alpha_single" : self.alpha_single, 
+             "alpha_frag" : self.alpha_frag, 
+             "epsilon" : self.epsilon
+        }
+        config.update(cell_config)
+        return config
     
     def __repr__(self):
         return f"ProfileHMMTransitionPrior(match_comp={self.match_comp}, insert_comp={self.insert_comp}, delete_comp={self.delete_comp}, alpha_flank={self.alpha_flank}, alpha_single={self.alpha_single}, alpha_frag={self.alpha_frag})"

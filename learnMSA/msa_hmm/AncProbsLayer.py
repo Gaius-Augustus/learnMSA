@@ -1,5 +1,6 @@
 import tensorflow as tf
 import numpy as np
+import learnMSA.msa_hmm.Initializers as initializers
 
 """Ancestral Probability Layer
 Learn one or several rate matrices jointly with a downstream model. Amino acid sequences can be smeared towards expected amino acid distributions after
@@ -131,9 +132,8 @@ class AncProbsLayer(tf.keras.layers.Layer):
                  shared_matrix=False,
                  equilibrium_sample=False,
                  transposed=False,
-                 name="AncProbsLayer",
                  **kwargs):
-        super(AncProbsLayer, self).__init__(name=name, **kwargs)
+        super(AncProbsLayer, self).__init__(**kwargs)
         self.num_models = num_models
         self.num_rates = num_rates
         self.num_matrices = num_matrices
@@ -253,6 +253,35 @@ class AncProbsLayer(tf.keras.layers.Layer):
             num_model, b, L, _ = tf.unstack(tf.shape(inputs))
             anc_probs = tf.reshape(anc_probs, (num_model, b, L, self.num_matrices * 20) )
         return anc_probs
+        
+    def get_config(self):
+        config = super(AncProbsLayer, self).get_config()
+        config.update({
+             "num_models" : self.num_models,
+             "num_rates" : self.num_rates,
+             "num_matrices" : self.num_matrices,
+             "equilibrium_init" : self.equilibrium_kernel.numpy(),
+             "exchangeability_init" : self.exchangeability_kernel.numpy(),
+             "rate_init" : self.tau_kernel.numpy(),
+             "trainable_rate_matrices" : self.trainable_rate_matrices,
+             "per_matrix_rate" : self.per_matrix_rate,
+             "matrix_rate_init" : self.per_matrix_rates_kernel if self.per_matrix_rate else None,
+             "matrix_rate_l2" : self.matrix_rate_l2,
+             "shared_matrix" : self.shared_matrix,
+             "equilibrium_sample" : self.equilibrium_sample,
+             "transposed" : self.transposed
+        })
+        return config
+    
+    @classmethod
+    def from_config(cls, config):
+        #override numpy arrays with initializers
+        config["equilibrium_init"] = initializers.ConstantInitializer(config["equilibrium_init"])
+        config["exchangeability_init"] = initializers.ConstantInitializer(config["exchangeability_init"])
+        config["rate_init"] = initializers.ConstantInitializer(config["rate_init"])
+        config["matrix_rate_init"] = initializers.ConstantInitializer(config["matrix_rate_init"]) if config["matrix_rate_init"] is not None else None
+        return cls(**config)
+        
 
 # the default rate matrix ("LG")
 LG_paml = ['0.425093 \n', 
