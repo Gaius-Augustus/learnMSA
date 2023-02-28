@@ -209,7 +209,8 @@ class AncProbsLayer(tf.keras.layers.Layer):
     def call(self, inputs, rate_indices):
         """ Computes anchestral probabilities of the inputs.
         Args:
-            inputs: Input sequences. Shape: (num_model, b, L) or (num_models, b, L, s)
+            inputs: Input sequences. Shape: (num_model, b, L) or (num_models, b, L, s). The latter format (non index)
+                    is only supported for raw amino acid input.
             rate_indices: Indices that map each input sequences to an evolutionary times. Shape: (num_model, b)
         Returns:
             Ancestral probabilities. Shape: (num_model, b, L, num_matrices*s)

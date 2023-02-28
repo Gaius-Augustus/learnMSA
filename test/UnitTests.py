@@ -1,10 +1,15 @@
 import sys 
 import os
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+#do not print tf info/warnings on import
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 import unittest
 import numpy as np
 import tensorflow as tf
+#revert back to default and set the logger level individually per test case
+#globally omitting all warnings for the entire test suite should be avoided
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' 
+tf.get_logger().setLevel('WARNING')
 from learnMSA import msa_hmm 
 import itertools
 import shutil
@@ -1520,6 +1525,7 @@ class TestModelToFile(unittest.TestCase):
         anc_probs_layer = msa_hmm.train.make_anc_probs_layer(2, config)
         msa_hmm_layer = msa_hmm.train.make_msa_hmm_layer(2, [model_len], config)
         model = msa_hmm.train.generic_model_generator([anc_probs_layer], msa_hmm_layer)
+        model.compile() #prevents warnings
         
         #copy current parameter state
         emission_kernel = model.layers[-3].cell.emitter[0].emission_kernel[0].numpy()
@@ -1539,11 +1545,15 @@ class TestModelToFile(unittest.TestCase):
         ind = np.array([0,1])
         batch_size = 2
         alignment = msa_hmm.align.Alignment(fasta_file, batch_gen, ind, batch_size, model)
+        tf.get_logger().setLevel('ERROR') #prints some info and unrelevant warnings
         msa_hmm.align.write_models_to_file(test_filepath, alignment)
+        tf.get_logger().setLevel('WARNING')
         
         #remember how the decoded MSA looks and delete the alignment object
         #todo: the MSA is currently nonsense, but it should be enough to test in Viterbi runs are consistent
+        tf.get_logger().setLevel('ERROR') #prints expected warnings about retracing
         msa_str = alignment.to_string(model_index = 0)
+        tf.get_logger().setLevel('WARNING')
         del alignment
         
         #load again
@@ -1571,7 +1581,9 @@ class TestModelToFile(unittest.TestCase):
         np.testing.assert_equal(loglik, loglik_in_deserialized_model)
         
         #test MSA as string
+        tf.get_logger().setLevel('ERROR') #prints expected warnings about retracing
         msa_str_from_deserialized_model = deserialized_alignment.to_string(model_index = 0)
+        tf.get_logger().setLevel('WARNING')
         self.assertEqual(msa_str, msa_str_from_deserialized_model)
         
         
