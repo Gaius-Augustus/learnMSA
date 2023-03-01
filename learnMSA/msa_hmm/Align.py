@@ -3,21 +3,10 @@ import numpy as np
 import time
 import os
 import sys
-import learnMSA.msa_hmm.AncProbsLayer as anc_probs
-import learnMSA.msa_hmm.MsaHmmLayer as msa_hmm_layer
-import learnMSA.msa_hmm.MsaHmmCell as msa_hmm_cell
 import learnMSA.msa_hmm.Fasta as fasta
 import learnMSA.msa_hmm.Training as train
-import learnMSA.msa_hmm.Viterbi as viterbi
-import learnMSA.msa_hmm.Priors as priors
-import learnMSA.msa_hmm.Transitioner as trans
-import learnMSA.msa_hmm.Emitter as emit
+from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
 from learnMSA.msa_hmm.Configuration import as_str, assert_config
-from pathlib import Path
-import json
-import shutil
-
- 
 
 
 def get_initial_model_lengths(fasta_file, config, random=True):
@@ -46,7 +35,7 @@ Args:
             (if None, all sequences in the fasta file will be aligned).
     verbose: If False, all output messages will be disabled.
 Returns:
-    An Alignment object.
+    An AlignmentModel object.
 """
 def fit_and_align(fasta_file, 
                   config,
@@ -90,33 +79,33 @@ def fit_and_align(fasta_file,
                                           batch_size=batch_size, 
                                           epochs=epochs_this_iteration,
                                           verbose=verbose)
-        alignment = Alignment(fasta_file,
-                               batch_generator,
-                               decode_indices,
-                               batch_size=batch_size, 
-                               model=model)
+        am = AlignmentModel(fasta_file,
+                                   batch_generator,
+                                   decode_indices,
+                                   batch_size=batch_size, 
+                                   model=model)
         if last_iteration:
-            loglik, prior = compute_loglik(alignment)
-            alignment.loglik = loglik 
-            alignment.prior = prior
+            loglik, prior = am.compute_loglik(), am.compute_log_prior()
+            am.loglik = loglik 
+            am.prior = prior
             expected_state = get_state_expectations(fasta_file,
                                     batch_generator,
-                                    np.arange(alignment.fasta_file.num_seq),
+                                    np.arange(am.fasta_file.num_seq),
                                     batch_size,
-                                    alignment.msa_hmm_layer,
-                                    alignment.encoder_model)
-            alignment.expected_state = expected_state
+                                    am.msa_hmm_layer,
+                                    am.encoder_model)
+            am.expected_state = expected_state
             if verbose:
                 print("Fitted models with MAP estimates = ", 
                       ",".join("%.4f" % (l + p) for l,p in zip(loglik, prior)))
             break
         if i == 0: # remember the initializers used in the first iteration
-            emission_init_0, transition_init_0, flank_init_0 = _get_initializers(alignment)
+            emission_init_0, transition_init_0, flank_init_0 = _get_initializers(am)
         surgery_converged = True
         #duplicate the previous emitters and transitioner and replace their initializers later
-        config["emitter"] = [em.duplicate() for em in alignment.msa_hmm_layer.cell.emitter]
-        config["transitioner"] = alignment.msa_hmm_layer.cell.transitioner.duplicate()
-        pos_expand, expansion_lens, pos_discard = get_discard_or_expand_positions(alignment, 
+        config["emitter"] = [em.duplicate() for em in am.msa_hmm_layer.cell.emitter]
+        config["transitioner"] = am.msa_hmm_layer.cell.transitioner.duplicate()
+        pos_expand, expansion_lens, pos_discard = get_discard_or_expand_positions(am, 
                                                                                     del_t=config["surgery_del"], 
                                                                                     ins_t=config["surgery_ins"])
         for k in range(config["num_models"]):
@@ -124,7 +113,7 @@ def fit_and_align(fasta_file,
             if verbose:
                 print(f"expansions model {k}:", list(zip(pos_expand[k], expansion_lens[k])))
                 print(f"discards model {k}:", pos_discard[k])
-            transition_init, emission_init, flank_init = update_kernels(alignment, 
+            transition_init, emission_init, flank_init = update_kernels(am, 
                                                                         k,
                                                                         pos_expand[k],
                                                                         expansion_lens[k], 
@@ -132,7 +121,7 @@ def fit_and_align(fasta_file,
                                                                         [e[k] for e in emission_init_0], 
                                                                         transition_init_0[k], 
                                                                         flank_init_0[k])
-            for em, old_em, e_init in zip(config["emitter"], alignment.msa_hmm_layer.cell.emitter, emission_init):
+            for em, old_em, e_init in zip(config["emitter"], am.msa_hmm_layer.cell.emitter, emission_init):
                 em.emission_init[k] = tf.constant_initializer(e_init) 
                 em.insertion_init[k] = tf.constant_initializer(old_em.insertion_kernel[k].numpy())
             config["transitioner"].transition_init[k] = {key : tf.constant_initializer(t) 
@@ -144,11 +133,11 @@ def fit_and_align(fasta_file,
         if config["encoder_weight_extractor"] is not None:
             if verbose:
                 print("Used the encoder_weight_extractor callback to pass the encoder parameters to the next iteration.")
-            config["encoder_initializer"] = config["encoder_weight_extractor"](alignment.encoder_model)
+            config["encoder_initializer"] = config["encoder_weight_extractor"](am.encoder_model)
         elif verbose:
             print("Re-initialized the encoder parameters.")
         last_iteration = surgery_converged or (i == config["max_surgery_runs"]-2)
-    return alignment
+    return am
 
 
 def run_learnMSA(train_filename,
@@ -172,7 +161,7 @@ def run_learnMSA(train_filename,
         verbose: If False, all output messages will be disabled.
         select_best_for_comparison: If False, all trained models, not just the one with highest score, will be scored.
     Returns:
-        An Alignment object.
+        An AlignmentModel object.
     """
     if verbose:
         print("Training of", config["num_models"], "models on file", os.path.basename(train_filename))
@@ -187,7 +176,7 @@ def run_learnMSA(train_filename,
         subset = None
     try:
         t_a = time.time()
-        alignment = fit_and_align(fasta_file, 
+        am = fit_and_align(fasta_file, 
                                   config=config,
                                   model_generator=model_generator,
                                   batch_generator=batch_generator,
@@ -201,27 +190,27 @@ def run_learnMSA(train_filename,
         print("Try reducing the batch size (-b). The current batch size was: "+str(config["batch_size"])+".")
         sys.exit(e.error_code)
     if config["model_criterion"] == "loglik":
-        alignment.best_model = np.argmax(alignment.loglik + alignment.prior)
+        am.best_model = np.argmax(am.loglik + am.prior)
     elif config["model_criterion"] == "posterior":
-        posterior_sums = [np.sum(alignment.expected_state[i, 1:alignment.length[i]+1]) for i in range(alignment.num_models)]
-        alignment.best_model = np.argmax(posterior_sums)
+        posterior_sums = [np.sum(am.expected_state[i, 1:am.length[i]+1]) for i in range(am.num_models)]
+        am.best_model = np.argmax(posterior_sums)
         if verbose:
             print("Per model total expected match states:", posterior_sums)
     elif config["model_criterion"] == "AIC":
-        num_param = 34 * np.array(alignment.length) + 25
-        aic = -2 * alignment.loglik * fasta_file.num_seq + 2*num_param
-        alignment.best_model = np.argmax(aic)
+        num_param = 34 * np.array(am.length) + 25
+        aic = -2 * am.loglik * fasta_file.num_seq + 2*num_param
+        am.best_model = np.argmax(aic)
     else:
         raise SystemExit("Invalid model selection criterion. Valid criteria are loglik, AIC and posterior.") 
     if verbose:
-        likelihoods = ["%.4f" % ll + " (%.4f)" % p for ll,p in zip(alignment.loglik, alignment.prior)]
+        likelihoods = ["%.4f" % ll + " (%.4f)" % p for ll,p in zip(am.loglik, am.prior)]
         print("Per model likelihoods (priors): ", likelihoods)
         print("Selection criterion:", config["model_criterion"])
-        print("Best model: ", alignment.best_model, "(0-based)")
+        print("Best model: ", am.best_model, "(0-based)")
         
     Path(os.path.dirname(out_filename)).mkdir(parents=True, exist_ok=True)
     t = time.time()
-    alignment.to_file(out_filename, alignment.best_model)
+    am.to_file(out_filename, am.best_model)
     
     if verbose:
         print("time for generating output:", "%.4f" % (time.time()-t))
@@ -239,9 +228,9 @@ def run_learnMSA(train_filename,
             #without setting the logger level the following code can produce tf retracing warnings 
             #these warnings are expected in this special case and should be disabled to keep the output clear
             tf.get_logger().setLevel('ERROR')
-            for i in range(alignment.msa_hmm_layer.cell.num_models):
+            for i in range(am.msa_hmm_layer.cell.num_models):
                 tmp_file = "tmp.fasta"
-                alignment.to_file(tmp_file, i)
+                am.to_file(tmp_file, i)
                 tmp_fasta = fasta.Fasta(tmp_file, aligned=True) 
                 _,sp_i = tmp_fasta.precision_recall(ref_fasta)
                 if verbose:
@@ -249,9 +238,9 @@ def run_learnMSA(train_filename,
                 os.remove(tmp_file)
                 sp.append(sp_i)
             tf.get_logger().setLevel('WARNING')
-        return alignment, sp
+        return am, sp
     else:
-        return alignment
+        return am
     
     
 def get_state_expectations(fasta_file,
@@ -312,373 +301,13 @@ def get_state_expectations(fasta_file,
             posterior_probs[:,i*batch_size : (i+1)*batch_size] = batch_posterior_state_probs(inputs[0], inputs[1])
         return posterior_probs
     
-
-def decode_core(model_length,
-                state_seqs_max_lik,
-                indices):
-    """ Decodes consensus columns as a matrix as well as insertion lengths and starting positions
-        as auxiliary vectors.
-    Args: 
-        model_length: Number of match states (length of the consensus sequence).
-        state_seqs_max_lik: A tensor with the most likeli state sequences. Shape: (num_seq, L)
-        indices: Indices in the sequences where decoding should start. Shape: (num_seq)
-    Returns:
-        consensus_columns: Decoded consensus columns. Shape: (num_seq, model_length)
-        insertion_lens: Number of amino acids emitted per insertion state. Shape: (num_seq, model_length-1)
-        insertion_start: Starting position of each insertion in the sequences. Shape: (num_seq, model_length-1)
-        finished: Boolean vector indicating sequences that are fully decoded. Shape: (num_seq) 
-    """
-    n = state_seqs_max_lik.shape[0]
-    c = model_length 
-    #initialize the consensus with gaps
-    consensus_columns = -np.ones((n, c), dtype=np.int16) 
-    #insertion lengths and starting positions per sequence
-    insertion_lens = np.zeros((n, c-1), dtype=np.int16)
-    insertion_start = -np.ones((n, c-1), dtype=np.int16)
-    #is true if and only if the previous hidden state was an insertion state (not counting flanks)
-    last_insert = np.zeros(n, dtype=bool)
-    A = np.arange(n)
-    while True:
-        q = state_seqs_max_lik[A, indices] 
-        is_match = ((q > 0) & (q < c+1))
-        is_insert = ((q >= c+1) & (q < 2*c))
-        is_insert_start = is_insert & ~last_insert
-        is_unannotated = (q == 2*c)
-        is_at_end = ((q == 2*c+1) | (q == 2*c+2))
-        if np.all(is_unannotated | is_at_end):
-            finished = ~is_unannotated
-            break
-        # track matches
-        consensus_columns[A[is_match], q[is_match]-1] = indices[is_match]
-        # track insertions
-        is_insert_subset = A[is_insert]
-        is_insert_start_subset = A[is_insert_start]
-        insertion_lens[is_insert_subset, q[is_insert]-c-1] += 1
-        insertion_start[is_insert_start_subset, q[is_insert_start]-c-1] = indices[is_insert_start]
-        indices[is_match | is_insert] += 1
-        last_insert = is_insert
-    return consensus_columns, insertion_lens, insertion_start, finished
-
-
-def decode_flank(state_seqs_max_lik, 
-                 flank_state_id, 
-                 indices):
-    """ Decodes flanking insertion states. The deconding is active as long as at least one sequence remains 
-        in a flank/unannotated state.
-    Args: 
-        state_seqs_max_lik: A tensor with the most likeli state sequences. Shape: (num_seq, L)
-        flank_state_id: Index of the flanking state.
-        indices: Indices in the sequences where decoding should start. Shape: (num_seq)
-    Returns:
-        insertion_lens: Number of amino acids emitted per insertion state. Shape: (num_seq, model_length-1)
-        insertion_start: Starting position of each insertion in the sequences. Shape: (num_seq, model_length-1)
-    """
-    n = state_seqs_max_lik.shape[0]
-    insertion_start = np.copy(indices)
-    while True:
-        q = state_seqs_max_lik[np.arange(n), indices]
-        is_flank = (q == flank_state_id)
-        if ~np.any(is_flank):
-            break
-        indices[is_flank] += 1
-    insertion_lens = indices - insertion_start
-    return insertion_lens, insertion_start
-
-
-
-def decode(model_length, state_seqs_max_lik):
-    """ Decodes an implicit alignment (insertion start/length are represented as 2 integers) 
-        from most likely state sequences.
-    Args: 
-        model_length: Number of match states (length of the consensus sequence).
-        state_seqs_max_lik: A tensor with the most likeli state sequences. Shape: (num_seq, L)
-    Returns:
-        core_blocks: Representation of the consensus. 
-        left_flank:
-        right_flank:
-        unannotated_segments:
-    """
-    n = state_seqs_max_lik.shape[0]
-    c = model_length #alias for code readability
-    indices = np.zeros(n, np.int16) # active positions in the sequence
-    left_flank = decode_flank(state_seqs_max_lik, 0, indices) 
-    core_blocks = []
-    unannotated_segments = []
-    while True:    
-        C, IL, IS, finished = decode_core(model_length, state_seqs_max_lik, indices)
-        core_blocks.append((C, IL, IS, finished))
-        if np.all(finished):
-            break
-        unannotated_segments.append( decode_flank(state_seqs_max_lik, 2*c, indices) )
-    right_flank = decode_flank(state_seqs_max_lik, 2*c+1, indices) 
-    return core_blocks, left_flank, right_flank, unannotated_segments
-
-
-def get_insertion_block(sequences, 
-                        lens, 
-                        maxlen,
-                        starts,
-                        align_to_right=False):
-    """ Constructs one insertion block from an implicitly represented alignment.
-    Args: 
-    Returns:
-    """
-    A = np.arange(sequences.shape[0])
-    block = np.zeros((sequences.shape[0], maxlen), dtype=np.uint8) + (fasta.s-1)
-    lens = np.copy(lens)
-    active = lens > 0
-    i = 0
-    while np.any(active):
-        aa = sequences[A[active], starts[active] + i]
-        block[active, i] = aa
-        lens -= 1
-        active = lens > 0
-        i += 1
-    if align_to_right:
-        block_right_aligned = np.zeros_like(block) + (fasta.s-1)
-        for i in range(maxlen):
-            block_right_aligned[A, (maxlen-lens+i)%maxlen] = block[:, i]
-        block = block_right_aligned
-    block += fasta.s #lower case
-    return block
-    
-
-def get_alignment_block(sequences, 
-                        consensus, 
-                        ins_len, 
-                        ins_len_total,
-                        ins_start):
-    """ Constructs one core model hit block from an implicitly represented alignment.
-    Args: 
-    Returns:
-    """
-    A = np.arange(sequences.shape[0])
-    length = consensus.shape[1] + np.sum(ins_len_total)
-    block = np.zeros((sequences.shape[0], length), dtype=np.uint8) + (fasta.s-1)
-    i = 0
-    for c in range(consensus.shape[1]-1):
-        column = consensus[:,c]
-        ins_l = ins_len[:,c]
-        ins_l_total = ins_len_total[c]
-        ins_s = ins_start[:,c]
-        #one column
-        no_gap = column != -1
-        block[no_gap,i] = sequences[A[no_gap],column[no_gap]]
-        i += 1
-        #insertion
-        block[:,i:i+ins_l_total] = get_insertion_block(sequences,
-                                                       ins_l,
-                                                       ins_l_total, 
-                                                       ins_s)
-        i += ins_l_total
-    #final column
-    no_gap = consensus[:,-1] != -1
-    block[no_gap,i] = sequences[A[no_gap],consensus[:,-1][no_gap]]
-    return block
-
-
-
-
-class Alignment():
-    """ Decodes alignments from a number of models, stores them in a memory friendly representation and
-        generates table-form (memory unfriendly) alignments on demand (batch-wise mode possible).
-    Args:
-        fasta_file: A fasta file with the sequences to decode.
-        batch_generator: An already configured batch generator.
-        indices: (A subset of) The sequence indices from the fasta to align (1D).
-        batch_size: Controls memory consumption of viterbi.
-        model: A learnMSA model which internally might represent multiple pHMM models.
-        gap_symbol: Character used to denote missing match positions.
-        gap_symbol_insertions: Character used to denote insertions in other sequences.
-    """
-    def __init__(self, 
-                 fasta_file, 
-                 batch_generator,
-                 indices, 
-                 batch_size, 
-                 model,
-                 gap_symbol="-",
-                 gap_symbol_insertions="."):
-        self.fasta_file = fasta_file
-        self.batch_generator = batch_generator
-        self.indices = indices
-        self.batch_size = batch_size
-        self.model = model
-        #encoder model is the same as model but with the MsaHmmLayer removed
-        #the output of the encoder model will be the input to viterbi
-        #in the default learnMSA, the encoder model is only the Ancestral Probability layer.
-        self.encoder_model = None
-        for i, layer in enumerate(model.layers[1:]):
-            if layer.name.startswith("msa_hmm_layer"):
-                encoder_out = model.layers[i].output
-                self.msa_hmm_layer = layer
-                self.encoder_model = tf.keras.Model(inputs=self.model.inputs, outputs=[encoder_out])
-        assert self.encoder_model is not None, "Can not find a MsaHmmLayer in the specified model."
-        self.gap_symbol = gap_symbol
-        self.gap_symbol_insertions = gap_symbol_insertions
-        self.output_alphabet = np.array((fasta.alphabet[:-1] + 
-                                        [gap_symbol] + 
-                                        [aa.lower() for aa in fasta.alphabet[:-1]] + 
-                                        [gap_symbol_insertions, "$"]))
-        self.metadata = {}
-        self.num_models = self.msa_hmm_layer.cell.num_models
-        self.length = self.msa_hmm_layer.cell.length
         
-            
-    #computes an implicit alignment (without storing gaps)
-    #eventually, an alignment with explicit gaps can be written 
-    #in a memory friendly manner to file
-    def _build_alignment(self, models):
-        
-        if tf.distribute.has_strategy():
-            with tf.distribute.get_strategy().scope():
-                cell_copy = self.msa_hmm_layer.cell.duplicate(models)
-        else:
-            cell_copy = self.msa_hmm_layer.cell.duplicate(models)
-            
-        cell_copy.build((self.num_models, None, None, self.msa_hmm_layer.cell.dim))
-        state_seqs_max_lik = viterbi.get_state_seqs_max_lik(self.fasta_file,
-                                                            self.batch_generator,
-                                                            self.indices,
-                                                            self.batch_size,
-                                                            cell_copy,
-                                                            models,
-                                                            self.encoder_model)
-        for i,l,max_lik_seqs in zip(models, cell_copy.length, state_seqs_max_lik):
-            decoded_data = decode(l,max_lik_seqs)
-            self.metadata[i] = AlignmentMetaData(*decoded_data)
-
-                              
-    
-    #use only for low sequence numbers
-    def to_string(self, model_index, batch_size=100000, add_block_sep=True):
-        alignment_strings_all = []
-        n = self.indices.size
-        i = 0
-        while i < n:
-            batch_indices = np.arange(i, min(n, i+batch_size))
-            batch_alignment = self.get_batch_alignment(model_index, batch_indices, add_block_sep)
-            alignment_strings = self.batch_to_string(batch_alignment)
-            alignment_strings_all.extend(alignment_strings)
-            i += batch_size
-        return alignment_strings_all
-    
-    
-    def to_file(self, filepath, model_index, batch_size=100000, add_block_sep=False):
-        with open(filepath, "w") as output_file:
-            n = self.indices.size
-            i = 0
-            while i < n:
-                batch_indices = np.arange(i, min(n, i+batch_size))
-                batch_alignment = self.get_batch_alignment(model_index, batch_indices, add_block_sep)
-                alignment_strings = self.batch_to_string(batch_alignment)
-                for s, seq_ind in zip(alignment_strings, batch_indices):
-                    seq_id = self.fasta_file.seq_ids[self.indices[seq_ind]]
-                    output_file.write(">"+seq_id+"\n")
-                    output_file.write(s+"\n")
-                i += batch_size
-    
-    
-    #returns a dense matrix representing a subset of sequences
-    #as specified by batch_indices with respect to the alignment of all sequences
-    #(i.e. the sub alignment can contain gap-only columns and 
-    #stacking all batches yields a complete alignment)
-    def get_batch_alignment(self, model_index, batch_indices, add_block_sep):
-        if not model_index in self.metadata:
-            self._build_alignment([model_index])
-        b = batch_indices.size
-        sequences = np.zeros((b, self.fasta_file.max_len), dtype=np.uint16) + (fasta.s-1)
-        for i,j in enumerate(batch_indices):
-            l = self.fasta_file.seq_lens[self.indices[j]]
-            sequences[i, :l] = self.fasta_file.get_raw_seq(self.indices[j])
-        blocks = []  
-        if add_block_sep:
-            sep = np.zeros((b,1), dtype=np.uint16) + 2*fasta.s
-        left_flank_block = get_insertion_block(sequences, 
-                                               self.metadata[model_index].left_flank_len[batch_indices],
-                                               self.metadata[model_index].left_flank_len_total,
-                                               self.metadata[model_index].left_flank_start[batch_indices],
-                                               align_to_right=True)
-        blocks.append(left_flank_block)
-        if add_block_sep:
-            blocks.append(sep)
-        for i in range(self.metadata[model_index].num_repeats):
-            consensus = self.metadata[model_index].consensus[i]
-            ins_len = self.metadata[model_index].insertion_lens[i]
-            ins_start = self.metadata[model_index].insertion_start[i]
-            ins_len_total = self.metadata[model_index].insertion_lens_total[i]
-            alignment_block = get_alignment_block(sequences, 
-                                                  consensus[batch_indices], 
-                                                  ins_len[batch_indices], 
-                                                  ins_len_total,
-                                                  ins_start[batch_indices])
-            blocks.append(alignment_block)
-            if add_block_sep:
-                blocks.append(sep)
-            if i < self.metadata[model_index].num_repeats-1:
-                unannotated_segment_l = self.metadata[model_index].unannotated_segments_len[i]
-                unannotated_segment_s = self.metadata[model_index].unannotated_segments_start[i]
-                unannotated_block = get_insertion_block(sequences, 
-                                                        unannotated_segment_l[batch_indices],
-                                                        self.metadata[model_index].unannotated_segment_lens_total[i],
-                                                        unannotated_segment_s[batch_indices])
-                blocks.append(unannotated_block)
-                if add_block_sep:
-                    blocks.append(sep)
-        right_flank_block = get_insertion_block(sequences, 
-                                               self.metadata[model_index].right_flank_len[batch_indices],
-                                               self.metadata[model_index].right_flank_len_total,
-                                               self.metadata[model_index].right_flank_start[batch_indices])
-        blocks.append(right_flank_block)
-        batch_alignment = np.concatenate(blocks, axis=1)
-        return batch_alignment
-    
-    
-    def batch_to_string(self, batch_alignment):
-        alignment_arr = self.output_alphabet[batch_alignment]
-        alignment_strings = [''.join(s) for s in alignment_arr]
-        return alignment_strings
-        
-    
-# utility class used in Alignment
-class AlignmentMetaData():
-    def __init__(self, 
-                 core_blocks, 
-                 left_flank, 
-                 right_flank, 
-                 unannotated_segments):
-        self.consensus = np.stack([C for C,_,_,_ in core_blocks])
-        self.insertion_lens = np.stack([IL for _,IL,_,_ in core_blocks])
-        self.insertion_start = np.stack([IS for _,_,IS,_ in core_blocks])
-        self.finished = np.stack([f for _,_,_,f in core_blocks])
-        self.left_flank_len = np.stack(left_flank[0])
-        self.left_flank_start = np.stack(left_flank[1])
-        self.right_flank_len = np.stack(right_flank[0])
-        self.right_flank_start = np.stack(right_flank[1])
-        if len(unannotated_segments) > 0:
-            self.unannotated_segments_len = np.stack([l for l,_ in unannotated_segments])
-            self.unannotated_segments_start = np.stack([s for _,s in unannotated_segments])
-            self.unannotated_segment_lens_total = np.amax(self.unannotated_segments_len, axis=1)
-        else:
-            self.unannotated_segment_lens_total = 0
-        self.num_repeats = self.consensus.shape[0]
-        self.consensus_len = self.consensus.shape[1]
-        self.left_flank_len_total = np.amax(self.left_flank_len)
-        self.right_flank_len_total = np.amax(self.right_flank_len)
-        self.insertion_lens_total = np.amax(self.insertion_lens, axis=1)
-        self.alignment_len = (self.left_flank_len_total + 
-                              self.consensus_len*self.num_repeats + 
-                              np.sum(self.insertion_lens_total) + 
-                              np.sum(self.unannotated_segment_lens_total) +
-                              self.right_flank_len_total)
-  
-        
-def get_discard_or_expand_positions(alignment, 
+def get_discard_or_expand_positions(am, 
                                     del_t=0.5, 
                                     ins_t=0.5):
-    """ Given an alignment, computes positions for match expansions and discards based on the posterior state probabilities.
+    """ Given an AlignmentModel, computes positions for match expansions and discards based on the posterior state probabilities.
     Args: 
-        alignment: An Alignment object.
+        am: An AlignmentModel object.
         del_t: Discards match positions that are expected less often than this number.
         ins_t: Expands insertions that are expected more often than this number. 
                 Adds new match states according to the expected insertion length. 
@@ -687,17 +316,17 @@ def get_discard_or_expand_positions(alignment,
         expansion_lens: A list of arrays with the expansion lengths.
         pos_discard: A list of arrays with match positions to discard.
     """
-    expected_state = get_state_expectations(alignment.fasta_file,
-                                    alignment.batch_generator,
-                                    alignment.indices,
-                                    alignment.batch_size,
-                                    alignment.msa_hmm_layer,
-                                    alignment.encoder_model)
+    expected_state = get_state_expectations(am.fasta_file,
+                                    am.batch_generator,
+                                    am.indices,
+                                    am.batch_size,
+                                    am.msa_hmm_layer,
+                                    am.encoder_model)
     pos_expand = []
     expansion_lens = []
     pos_discard = []
-    for i in range(alignment.num_models):
-        model_length = alignment.msa_hmm_layer.cell.length[i]
+    for i in range(am.num_models):
+        model_length = am.msa_hmm_layer.cell.length[i]
         #discards
         match_states = expected_state[i, 1:model_length+1]
         discard = np.arange(model_length, dtype=np.int32)[match_states < del_t]
@@ -812,7 +441,7 @@ def extend_mods(pos_expand, expansion_lens, pos_discard, L, k=0):
 
 
 #applies expansions and discards to emission and transition kernels
-def update_kernels(alignment,
+def update_kernels(am,
                    model_index, 
                     pos_expand, 
                     expansion_lens, 
@@ -820,11 +449,11 @@ def update_kernels(alignment,
                     emission_dummy, 
                     transition_dummy,
                     init_flank_dummy):
-    L = alignment.msa_hmm_layer.cell.length[model_index]
-    emissions = [em.emission_kernel[model_index].numpy() for em in alignment.msa_hmm_layer.cell.emitter]
+    L = am.msa_hmm_layer.cell.length[model_index]
+    emissions = [em.emission_kernel[model_index].numpy() for em in am.msa_hmm_layer.cell.emitter]
     transitions = { key : kernel.numpy() 
-                         for key, kernel in alignment.msa_hmm_layer.cell.transitioner.transition_kernel[model_index].items()}
-    dtype = alignment.msa_hmm_layer.cell.dtype
+                         for key, kernel in am.msa_hmm_layer.cell.transitioner.transition_kernel[model_index].items()}
+    dtype = am.msa_hmm_layer.cell.dtype
     emission_dummy = [d((1, em.shape[-1]), dtype).numpy() for d,em in zip(emission_dummy, emissions)]
     transition_dummy = { key : transition_dummy[key](t.shape, dtype).numpy() for key, t in transitions.items()}
     init_flank_dummy = init_flank_dummy((1), dtype).numpy()
@@ -896,101 +525,6 @@ def update_kernels(alignment,
                                                   transition_dummy["match_to_end"][0])
     return transitions_new, emissions_new, init_flank_new
 
-
-def write_models_to_file(filepath, alignment, pack=True):
-    """ Writes the underlying models of an alignment instance to file.
-    Args: 
-        alignment: An Alignment object.
-        filepath: Path of the written file.
-        pack: If true, the output will be a zip file, otherwise a directory.
-    """
-    Path(filepath).mkdir(parents=True, exist_ok=True)
-    #serialize metadata
-    d = {
-        "fasta_file" : alignment.fasta_file.filename,
-        "batch_size" : alignment.batch_size,
-        "gap_symbol" : alignment.gap_symbol,
-        "gap_symbol_insertions" : alignment.gap_symbol_insertions,
-    }
-    with open(filepath+"/meta.json", "w") as metafile:
-        metafile.write(json.dumps(d, indent=4))
-    #serialize indices
-    np.savetxt(filepath+"/indices", alignment.indices, fmt='%i')
-    #save the model
-    alignment.model.save(filepath+"/model", save_traces=False)
-    if pack:
-        shutil.make_archive(filepath, "zip", filepath)
-        try:
-            shutil.rmtree(filepath)
-        except OSError as e:
-            print("Error: %s - %s." % (e.filename, e.strerror))
-
-
-def load_models_from_file(filepath, from_packed=True, custom_batch_gen=None):
-    """ Recreates an alignment instance with underlying models from file.
-    Args:
-        filepath: Path of the file to load.
-        from_packed: Pass true or false depending on the pack argument used with write_models_to_file.
-    Returns:
-        An alignment instance with equivalent behavior as the alignment instance used while saving the model.
-    """
-    if from_packed:
-        shutil.unpack_archive(filepath+".zip", filepath)
-    #deserialize metadata    
-    with open(filepath+"/meta.json") as metafile:
-        d = json.load(metafile)
-    fasta_file = fasta.Fasta(d["fasta_file"])
-    #deserialize indices
-    indices = np.loadtxt(filepath+"/indices", dtype=int)
-    #load the model
-    model = tf.keras.models.load_model(filepath+"/model", 
-                                       custom_objects={"AncProbsLayer": anc_probs.AncProbsLayer, 
-                                                       "MsaHmmLayer": msa_hmm_layer.MsaHmmLayer,
-                                                       "MsaHmmCell": msa_hmm_cell.MsaHmmCell, 
-                                                       "ProfileHMMTransitioner": trans.ProfileHMMTransitioner, 
-                                                       "ProfileHMMEmitter": emit.ProfileHMMEmitter,
-                                                       "AminoAcidPrior": priors.AminoAcidPrior,
-                                                       "NullPrior": priors.NullPrior,
-                                                       "ProfileHMMTransitionPrior": priors.ProfileHMMTransitionPrior})
-    if from_packed:
-        #after loading remove unpacked files and keep only the archive
-        try:
-            shutil.rmtree(filepath)
-        except OSError as e:
-            print("Error: %s - %s." % (e.filepath, e.strerror))
-    batch_gen = train.DefaultBatchGenerator() if custom_batch_gen is None else custom_batch_gen
-    alignment = Alignment(fasta_file, 
-                          batch_gen, 
-                          indices,
-                          d["batch_size"], 
-                          model,
-                          d["gap_symbol"], 
-                          d["gap_symbol_insertions"])
-    return alignment
-
-    
-def compute_loglik(alignment, max_ll_estimate = 200000):
-    if alignment.fasta_file.num_seq > max_ll_estimate:
-        #estimate the ll only on a subset, otherwise for millions of 
-        # sequences this step takes rather long for little benefit
-        ll_subset = np.arange(alignment.fasta_file.num_seq)
-        np.random.shuffle(ll_subset)
-        ll_subset = ll_subset[:max_ll_estimate]
-        ll_subset = np.sort(ll_subset)
-    else:
-        #use the sorted indices for optimal length distributions in batches
-        ll_subset = alignment.fasta_file.sorted_indices
-    ds = train.make_dataset(ll_subset, 
-                            alignment.batch_generator,
-                            alignment.batch_size, 
-                            shuffle=False)
-    loglik = np.zeros((alignment.msa_hmm_layer.cell.num_models))
-    for x, _ in ds:
-        loglik += np.sum(alignment.model(x), axis=0)
-    loglik /= ll_subset.size
-    prior = alignment.msa_hmm_layer.cell.get_prior_log_density().numpy()/alignment.fasta_file.num_seq
-    return loglik, prior
-
     
 def get_full_length_estimate(fasta_file, config):
     n = fasta_file.num_seq
@@ -1025,9 +559,9 @@ def _fasta_file_messages(fasta_file, seq_count_warning_threshold=100):
         print(f"Warning: You are aligning {fasta_file.num_seq} sequences, although learnMSA is designed for large scale alignments. We recommend to have a sufficiently deep training dataset of at least {seq_count_warning_threshold} sequences for accurate results.")
         
         
-def _get_initializers(alignment):
+def _get_initializers(am):
     emission_init = [em.emission_init 
-                       for em in alignment.msa_hmm_layer.cell.emitter]
-    transition_init = alignment.msa_hmm_layer.cell.transitioner.transition_init
-    flank_init = alignment.msa_hmm_layer.cell.transitioner.flank_init
+                       for em in am.msa_hmm_layer.cell.emitter]
+    transition_init = am.msa_hmm_layer.cell.transitioner.transition_init
+    flank_init = am.msa_hmm_layer.cell.transitioner.flank_init
     return emission_init, transition_init, flank_init

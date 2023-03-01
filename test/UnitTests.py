@@ -699,19 +699,19 @@ class TestMSAHMM(unittest.TestCase):
         for i in range(len(length)):
             #test decoding
             #test first core block isolated
-            decoding_core_results = msa_hmm.align.decode_core(length[i], state_seqs_max_lik[i], indices[i])
+            decoding_core_results = msa_hmm.AlignmentModel.decode_core(length[i], state_seqs_max_lik[i], indices[i])
             assert_decoding_core_results(decoding_core_results, (ref_consensus[i], 
                                                                  ref_insertion_lens[i],
                                                                  ref_insertion_start[i],
                                                                  ref_finished[i])) 
             #test left flank insertions isolated
-            left_flank_lens, left_flank_start = msa_hmm.align.decode_flank(state_seqs_max_lik[i], 
+            left_flank_lens, left_flank_start = msa_hmm.AlignmentModel.decode_flank(state_seqs_max_lik[i], 
                                                                           flank_state_id = 0, 
                                                                           indices = np.array([0,0,0,0,0,0,0,0]))
             self.assert_vec(left_flank_lens, ref_left_flank_lens[i])
             self.assert_vec(left_flank_start, np.array([0,0,0,0,0,0,0,0]))
             #test whole decoding
-            core_blocks, left_flank, right_flank, unannotated_segments = msa_hmm.align.decode(length[i], state_seqs_max_lik[i])
+            core_blocks, left_flank, right_flank, unannotated_segments = msa_hmm.AlignmentModel.decode(length[i], state_seqs_max_lik[i])
             self.assertEqual(len(core_blocks), ref_num_blocks[i])
             assert_decoding_core_results(core_blocks[0], (ref_consensus[i], 
                                                          ref_insertion_lens[i],
@@ -729,26 +729,26 @@ class TestMSAHMM(unittest.TestCase):
             self.assert_vec(right_flank[1], ref_right_flank_start[i])
             
             #test conversion of decoded data to an anctual alignment in table form
-            left_flank_block = msa_hmm.align.get_insertion_block(sequences[i], 
+            left_flank_block = msa_hmm.AlignmentModel.get_insertion_block(sequences[i], 
                                                                  left_flank[0], 
                                                                  np.amax(left_flank[0]),
                                                                  left_flank[1],
                                                                  align_to_right=True)
             self.assert_vec(left_flank_block, ref_left_flank_block[i])
-            right_flank_block = msa_hmm.align.get_insertion_block(sequences[i], 
+            right_flank_block = msa_hmm.AlignmentModel.get_insertion_block(sequences[i], 
                                                                  right_flank[0], 
                                                                  np.amax(right_flank[0]),
                                                                  right_flank[1])
             self.assert_vec(right_flank_block, ref_right_flank_block[i])
             ins_lens = core_blocks[0][1][:,0] #just check the first insert for simplicity
             ins_start = core_blocks[0][2][:,0]
-            ins_block = msa_hmm.align.get_insertion_block(sequences[i], 
+            ins_block = msa_hmm.AlignmentModel.get_insertion_block(sequences[i], 
                                                           ins_lens, 
                                                           np.amax(ins_lens),
                                                           ins_start)
             self.assert_vec(ins_block, ref_ins_block[i])
             for (C,IL,IS,f), ref in zip(core_blocks, ref_core_blocks[i]):
-                alignment_block = msa_hmm.align.get_alignment_block(sequences[i], 
+                alignment_block = msa_hmm.AlignmentModel.get_alignment_block(sequences[i], 
                                                                     C,IL,np.amax(IL, axis=0),IS)
                 self.assert_vec(alignment_block, ref)
                 
@@ -976,14 +976,14 @@ class TestAncProbs(unittest.TestCase):
                                                           model_lengths=[model_length], 
                                                           config=config,
                                                           fasta_file=fasta_file)
-            msa = msa_hmm.Alignment(fasta_file, 
-                                    batch_gen, 
-                                    ind, 
-                                    batch_size=n, 
-                                    model=model)
-            self.assert_anc_probs_layer(msa.encoder_model.layers[-1], case["config"])
+            am = msa_hmm.AlignmentModel(fasta_file, 
+                                        batch_gen, 
+                                        ind, 
+                                        batch_size=n, 
+                                        model=model)
+            self.assert_anc_probs_layer(am.encoder_model.layers[-1], case["config"])
             for x,_ in ds:
-                anc_prob_seqs = msa.encoder_model(x).numpy()[:,:,:-1]
+                anc_prob_seqs = am.encoder_model(x).numpy()[:,:,:-1]
                 shape = (case["config"]["num_models"], n, sequences.shape[2], case["config"]["num_rate_matrices"], 26)
                 anc_prob_seqs = np.reshape(anc_prob_seqs, shape)
             if "expected_anc_probs" in case:
@@ -1082,15 +1082,15 @@ class TestModelSurgery(unittest.TestCase):
                                                       fasta_file=fasta_file)
         batch_gen = msa_hmm.train.DefaultBatchGenerator()
         batch_gen.configure(fasta_file, config)
-        alignment = msa_hmm.Alignment(fasta_file, 
+        am = msa_hmm.AlignmentModel(fasta_file, 
                                       batch_gen,
                                       np.arange(fasta_file.num_seq),
                                       32, 
                                       model)
-        return alignment
+        return am
         
     def test_discard_or_expand_positions(self):
-        alignment = self.make_test_alignment()
+        am = self.make_test_alignment()
         #a simple alignment to test detection of
         #too sparse columns and too frequent insertions
         ref_seqs = [
@@ -1100,17 +1100,17 @@ class TestModelSurgery(unittest.TestCase):
             "..........-.--...ICaaaF--.I-nnn",
             "..........FnE-...ICaaaF-LnI-nnn"
         ]
-        aligned_sequences = alignment.to_string(model_index=0, add_block_sep=False)
+        aligned_sequences = am.to_string(model_index=0, add_block_sep=False)
         for s, ref_s in zip(aligned_sequences, ref_seqs):
             self.assertEqual(s, ref_s)
-        self.assertTrue(0 in alignment.metadata)
+        self.assertTrue(0 in am.metadata)
         #shape: [number of domain hits, length]
-        deletions = np.sum(alignment.metadata[0].consensus == -1, axis=1)
+        deletions = np.sum(am.metadata[0].consensus == -1, axis=1)
         self.assert_vec(deletions, [[3,4,2,0,3], [1,4,3,1,3]]) 
         #shape: [number of domain hits, num seq]
-        self.assert_vec(alignment.metadata[0].finished, [[False,False,True,False,False], [True,True,True,True,True]]) 
+        self.assert_vec(am.metadata[0].finished, [[False,False,True,False,False], [True,True,True,True,True]]) 
         #shape: [number of domain hits, num seq, L-1 inner positions]
-        self.assert_vec(alignment.metadata[0].insertion_lens, [[[0, 0, 3, 0],
+        self.assert_vec(am.metadata[0].insertion_lens, [[[0, 0, 3, 0],
                                                   [0, 0, 2, 0],
                                                   [0, 0, 2, 0],
                                                   [0, 0, 0, 0],
@@ -1121,7 +1121,7 @@ class TestModelSurgery(unittest.TestCase):
                                                   [0, 0, 0, 0],
                                                   [0, 0, 0, 0],
                                                   [0, 0, 1, 0]]]) 
-        pos_expand, expansion_lens, pos_discard = msa_hmm.align.get_discard_or_expand_positions(alignment)
+        pos_expand, expansion_lens, pos_discard = msa_hmm.align.get_discard_or_expand_positions(am)
         pos_expand = pos_expand[0]
         expansion_lens = expansion_lens[0]
         pos_discard = pos_discard[0]
@@ -1149,7 +1149,7 @@ class TestModelSurgery(unittest.TestCase):
         
         
     def test_update_kernels(self):
-        alignment = self.make_test_alignment()
+        am = self.make_test_alignment()
         pos_expand = np.array([2,3,5])
         expansion_lens = np.array([9,1,3])
         pos_discard = np.array([4])
@@ -1172,7 +1172,7 @@ class TestModelSurgery(unittest.TestCase):
                             "end_to_unannotated_segment" : tf.constant_initializer(77),
                             "end_to_right_flank" : tf.constant_initializer(77),
                             "end_to_terminal" : tf.constant_initializer(77) }
-        transitions_new, emissions_new,_ = msa_hmm.align.update_kernels(alignment, 0,
+        transitions_new, emissions_new,_ = msa_hmm.align.update_kernels(am, 0,
                                                               pos_expand, expansion_lens, pos_discard,
                                                               emission_init2, transition_init2, tf.constant_initializer(0.0))
         ref_consensus = "FE"+"A"*9+"LAI"+"A"*3
@@ -1351,8 +1351,8 @@ class TestAlignment(unittest.TestCase):
         batch_gen = msa_hmm.train.DefaultBatchGenerator()
         batch_gen.configure(fasta_file, msa_hmm.config.make_default(1))
         #create alignment after building model
-        subalignment = msa_hmm.Alignment(fasta_file, batch_gen, subset, 32, model)
-        subalignment_strings = subalignment.to_string(0, add_block_sep=False)
+        sub_am = msa_hmm.AlignmentModel(fasta_file, batch_gen, subset, 32, model)
+        subalignment_strings = sub_am.to_string(0, add_block_sep=False)
         ref_subalignment = ["FE...LIX...", "FE...LIXbac", "FEabcLIX..."]
         for s,r in zip(subalignment_strings, ref_subalignment):
             self.assertEqual(s,r)
@@ -1368,14 +1368,14 @@ class TestAlignment(unittest.TestCase):
         config = msa_hmm.config.make_default(1)
         config["max_surgery_runs"] = 2 #do minimal surgery 
         config["epochs"] = [5,1,5]
-        alignment = msa_hmm.align.fit_and_align(fasta_file, 
+        am = msa_hmm.align.fit_and_align(fasta_file, 
                                                 config=config,
                                                 subset=ref_subset, 
                                                 verbose=False)
         #some friendly thresholds to check if the alignments does make sense at all
-        self.assertTrue(alignment.loglik > -70)
-        self.assertTrue(alignment.msa_hmm_layer.cell.length[0] > 25)
-        alignment.to_file(os.path.dirname(__file__)+"/data/egf.out.fasta", 0)
+        self.assertTrue(am.loglik > -70)
+        self.assertTrue(am.msa_hmm_layer.cell.length[0] > 25)
+        am.to_file(os.path.dirname(__file__)+"/data/egf.out.fasta", 0)
         pred_fasta_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/egf.out.fasta")
         p,r = pred_fasta_file.precision_recall(ref_file)
         tc = pred_fasta_file.tc_score(ref_file)
@@ -1544,45 +1544,45 @@ class TestModelToFile(unittest.TestCase):
         batch_gen.configure(fasta_file, config)
         ind = np.array([0,1])
         batch_size = 2
-        alignment = msa_hmm.align.Alignment(fasta_file, batch_gen, ind, batch_size, model)
+        am = msa_hmm.AlignmentModel(fasta_file, batch_gen, ind, batch_size, model)
         tf.get_logger().setLevel('ERROR') #prints some info and unrelevant warnings
-        msa_hmm.align.write_models_to_file(test_filepath, alignment)
+        am.write_models_to_file(test_filepath)
         tf.get_logger().setLevel('WARNING')
         
         #remember how the decoded MSA looks and delete the alignment object
         #todo: the MSA is currently nonsense, but it should be enough to test in Viterbi runs are consistent
         tf.get_logger().setLevel('ERROR') #prints expected warnings about retracing
-        msa_str = alignment.to_string(model_index = 0)
+        msa_str = am.to_string(model_index = 0)
         tf.get_logger().setLevel('WARNING')
-        del alignment
+        del am
         
         #load again
-        deserialized_alignment = msa_hmm.align.load_models_from_file(test_filepath, custom_batch_gen=batch_gen)
+        deserialized_am = msa_hmm.AlignmentModel.load_models_from_file(test_filepath, custom_batch_gen=batch_gen)
         
         #test if parameters are the same
-        deserialized_emission_kernel = deserialized_alignment.msa_hmm_layer.cell.emitter[0].emission_kernel[0].numpy()
+        deserialized_emission_kernel = deserialized_am.msa_hmm_layer.cell.emitter[0].emission_kernel[0].numpy()
         np.testing.assert_equal(emission_kernel, deserialized_emission_kernel)
         
-        deserialized_insertion_kernel = deserialized_alignment.msa_hmm_layer.cell.emitter[0].insertion_kernel[0].numpy()
+        deserialized_insertion_kernel = deserialized_am.msa_hmm_layer.cell.emitter[0].insertion_kernel[0].numpy()
         np.testing.assert_equal(insertion_kernel, deserialized_insertion_kernel)
         
         for key, k in transition_kernel.items():
             deserialized_k = model.layers[-3].cell.transitioner.transition_kernel[0][key].numpy()
             np.testing.assert_equal(k, deserialized_k)
             
-        deserialized_flank_init_kernel = deserialized_alignment.msa_hmm_layer.cell.transitioner.flank_init_kernel[0].numpy()
+        deserialized_flank_init_kernel = deserialized_am.msa_hmm_layer.cell.transitioner.flank_init_kernel[0].numpy()
         np.testing.assert_equal(flank_init_kernel, deserialized_flank_init_kernel)
         
-        deserialized_tau_kernel = deserialized_alignment.model.layers[-4].tau_kernel.numpy()
+        deserialized_tau_kernel = deserialized_am.model.layers[-4].tau_kernel.numpy()
         np.testing.assert_equal(tau_kernel, deserialized_tau_kernel)
         
         #test if likelihood is the same as before
-        loglik_in_deserialized_model = deserialized_alignment.model([seq, np.array([[0]])]).numpy()
+        loglik_in_deserialized_model = deserialized_am.model([seq, np.array([[0]])]).numpy()
         np.testing.assert_equal(loglik, loglik_in_deserialized_model)
         
         #test MSA as string
         tf.get_logger().setLevel('ERROR') #prints expected warnings about retracing
-        msa_str_from_deserialized_model = deserialized_alignment.to_string(model_index = 0)
+        msa_str_from_deserialized_model = deserialized_am.to_string(model_index = 0)
         tf.get_logger().setLevel('WARNING')
         self.assertEqual(msa_str, msa_str_from_deserialized_model)
         

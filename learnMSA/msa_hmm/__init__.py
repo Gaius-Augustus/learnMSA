@@ -1,6 +1,6 @@
 import learnMSA.msa_hmm.Viterbi as viterbi
 import learnMSA.msa_hmm.Align as align
-from learnMSA.msa_hmm.Align import Alignment
+from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
 import learnMSA.msa_hmm.Fasta as fasta
 import learnMSA.msa_hmm.Training as train
 import learnMSA.msa_hmm.Emitter as emit
