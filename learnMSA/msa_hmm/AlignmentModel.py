@@ -220,7 +220,7 @@ class AlignmentModel():
     def compute_log_prior(self):
         """ Computes the logarithmic prior value of each underlying model.
         """
-        prior = self.msa_hmm_layer.cell.get_prior_log_density().numpy()/self.fasta_file.num_seq
+        return self.msa_hmm_layer.cell.get_prior_log_density().numpy()/self.fasta_file.num_seq
     
     def compute_AIC(self, max_seq=200000, loglik=None):
         """ Computes the Akaike information criterion for each underlying model. 
@@ -241,7 +241,7 @@ class AlignmentModel():
             (Relevant for users not using the default emitter: Uses the make_B_amino method of the first emitter.)
         """
         #compute the match sequence of all models padded with terminal symbols 
-        match_seqs = tf.zeros((self.num_models, max(self.length)+1, msa_hmm_layer.cell.dim))
+        match_seqs = np.zeros((self.num_models, max(self.length)+1, self.msa_hmm_layer.cell.dim))
         match_seqs[:,:,-1] = 1 #initialize with terminal symbols
         for i,L in enumerate(self.length):
             match_seqs[i, :L] = self.msa_hmm_layer.cell.emitter[0].make_B_amino()[i,1:L+1]
@@ -249,8 +249,10 @@ class AlignmentModel():
         match_seqs = tf.stack([match_seqs]*self.num_models, axis=1)
         #rate the match seqs with respect to the models and cancel out self-rating
         
-        #TODO this does not work; model expects indices rather than distributions
-        consensus_logliks = self.model(match_seqs)
+        #TODO this does not work with self.model which expects indices rather than distributions
+        #this is a workaround, but will break with a user defined encoder model
+        #we skip the anc probs for simplicity as this would require fitting evolutionary times
+        consensus_logliks = self.msa_hmm_layer(match_seqs)
         
         consensus_logliks *= 1-tf.eye(self.num_models)
         # Axis 1 means we reduce over the batch dimension rather than the model dimension,

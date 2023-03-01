@@ -317,7 +317,7 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
         return tf.matmul(inputs, self.A)
     
     def get_prior_log_densities(self):
-        return self.prior(self.probs, self.make_flank_init_prob())
+        return self.prior(self.make_probs(), self.make_flank_init_prob())
     
     def duplicate(self, model_indices=None):
         if model_indices is None:

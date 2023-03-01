@@ -10,8 +10,8 @@ import itertools
 import seaborn as sns
 
 
-def plot_logo(alignment, model_index, ax):
-    hmm_cell = alignment.msa_hmm_layer.cell
+def plot_logo(am, model_index, ax):
+    hmm_cell = am.msa_hmm_layer.cell
     hmm_cell.recurrent_init()
     length = hmm_cell.length[model_index]
     
@@ -21,7 +21,7 @@ def plot_logo(alignment, model_index, ax):
     #reduce to std AA alphabet 
     emissions = hmm_cell.emitter[0].make_B_amino().numpy()[model_index, 1:length+1,:20][:,logomaker_perm]
     background = hmm_cell.emitter[0].make_B_amino().numpy()[model_index, 0, :20][logomaker_perm]
-    #background = hmm_cell.emitter[0].emission_init[model_index]((length,25), dtype=alignment.msa_hmm_layer.dtype)[0, :20]
+    #background = hmm_cell.emitter[0].emission_init[model_index]((length,25), dtype=am.msa_hmm_layer.dtype)[0, :20]
     information_content = tf.keras.losses.KLDivergence(reduction=tf.keras.losses.Reduction.NONE)(
                                                          emissions,
                                                          np.expand_dims(background, 0))
@@ -46,7 +46,7 @@ def plot_logo(alignment, model_index, ax):
 
 
     
-def plot_hmm(alignment, 
+def plot_hmm(am, 
              model_index,
              ax,
                edge_show_threshold=1e-2, #grey out edges below this threshold (label_probs=False requires adjustment)
@@ -58,7 +58,7 @@ def plot_hmm(alignment,
                active_transition_color="#000000",
                inactive_transition_color="#E0E0E0"
                 ):
-    hmm_cell = alignment.msa_hmm_layer.cell
+    hmm_cell = am.msa_hmm_layer.cell
     hmm_cell.recurrent_init()
     length = hmm_cell.length[model_index]
     
@@ -132,9 +132,9 @@ def plot_hmm(alignment,
     nx.draw_networkx_labels(G, label_pos, labels=node_labels, font_size=8)
     
     for k, (seq_i, path_color) in enumerate(zip(seq_indices, path_colors)):
-        ds = msa_hmm.train.make_dataset(np.array([seq_i]), alignment.batch_generator, batch_size=1, shuffle=False)
+        ds = msa_hmm.train.make_dataset(np.array([seq_i]), am.batch_generator, batch_size=1, shuffle=False)
         for x, _ in ds:
-            sequence = alignment.encoder_model(x)  
+            sequence = am.encoder_model(x)  
         hidden_seq = msa_hmm.viterbi.viterbi(sequence, hmm_cell).numpy()[model_index]
         hidden_seq = list(hidden_seq[0])
         for i in range(len(hidden_seq)):
@@ -184,29 +184,29 @@ def plot_hmm(alignment,
     if len(seq_indices) > 0:
         f = lambda c: ax.plot([],[], color=c)[0]
         handles = [f(col) for col in path_colors]
-        labels = [alignment.fasta_file.seq_ids[seq_i] for seq_i in seq_indices]
+        labels = [am.fasta_file.seq_ids[seq_i] for seq_i in seq_indices]
         leg = ax.legend(handles, labels, loc="lower right", prop={'size': 18})
         for line in leg.get_lines():
             line.set_linewidth(8.0)
     plt.subplots_adjust(left=0.4, right=0.6, top=0.9, bottom=0.1)
     
     
-def plot_anc_probs(alignment, 
+def plot_anc_probs(am, 
                    model_index,
                    seqs=[0,1,2], 
                    pos=list(range(6)), 
                    rescale=True, 
                    title="Site-wise ancestral probabilities"):
     n, m = len(seqs), len(pos)
-    ds = msa_hmm.train.make_dataset(alignment.indices[seqs], 
-                                    alignment.batch_generator,
+    ds = msa_hmm.train.make_dataset(am.indices[seqs], 
+                                    am.batch_generator,
                                     batch_size=n, 
                                     shuffle=False)
     for x,_ in ds:
-        ancs = alignment.encoder_model(x).numpy()[model_index]
-    i = [l.name for l in alignment.encoder_model.layers].index("anc_probs_layer")
-    anc_probs_layer = alignment.encoder_model.layers[i]
-    indices = np.stack([alignment.indices]*alignment.msa_hmm_layer.cell.num_models)
+        ancs = am.encoder_model(x).numpy()[model_index]
+    i = [l.name for l in am.encoder_model.layers].index("anc_probs_layer")
+    anc_probs_layer = am.encoder_model.layers[i]
+    indices = np.stack([am.indices]*am.msa_hmm_layer.cell.num_models)
     indices = np.expand_dims(indices, -1)
     tau = anc_probs_layer.make_tau(indices)[model_index]
     if rescale:
@@ -221,11 +221,11 @@ def plot_anc_probs(alignment,
     f.suptitle(title, fontsize=16)
     
     
-def plot_rate_matrices(alignment,
+def plot_rate_matrices(am,
                        model_index,
                        title="normalized rate matrix (1 time unit = 1 expected mutation per site)"):
-    i = [l.name for l in alignment.encoder_model.layers].index("anc_probs_layer")
-    anc_probs_layer = alignment.encoder_model.layers[i]
+    i = [l.name for l in am.encoder_model.layers].index("anc_probs_layer")
+    anc_probs_layer = am.encoder_model.layers[i]
     Q = anc_probs_layer.make_Q()[model_index]
     k = Q.shape[0]
     f, axes = plt.subplots(1, k, sharey=True)
@@ -240,7 +240,7 @@ def plot_rate_matrices(alignment,
     f.suptitle(title, fontsize=16)
     
     
-def print_and_plot(alignment, 
+def print_and_plot(am, 
                    model_index = None,
                    max_seq = 20, 
                    seqs_to_plot = [0,1,2], 
@@ -252,22 +252,22 @@ def print_and_plot(alignment,
                    anc_probs_filename="",
                    logo_filename=""):
     if model_index is None:
-        model_index = alignment.best_model
+        model_index = am.best_model
     # print the alignment
-    msa = alignment.to_string(model_index)
-    i = [l.name for l in alignment.encoder_model.layers].index("anc_probs_layer")
-    anc_probs_layer = alignment.encoder_model.layers[i]
-    ds = msa_hmm.train.make_dataset(alignment.indices, 
-                            alignment.batch_generator,
-                            alignment.batch_size, 
+    msa = am.to_string(model_index)
+    i = [l.name for l in am.encoder_model.layers].index("anc_probs_layer")
+    anc_probs_layer = am.encoder_model.layers[i]
+    ds = msa_hmm.train.make_dataset(am.indices, 
+                            am.batch_generator,
+                            am.batch_size, 
                             shuffle=False)
-    ll = alignment.model.predict(ds)[:,model_index] + alignment.prior[model_index]
+    ll = am.model.predict(ds)[:,model_index] + am.compute_log_prior()[model_index]
     for i,s in enumerate(msa[:max_seq]):
-        indices = np.array([[alignment.indices[i]]]*alignment.msa_hmm_layer.cell.num_models)
+        indices = np.array([[am.indices[i]]]*am.msa_hmm_layer.cell.num_models)
         tau = anc_probs_layer.make_tau(indices)[model_index]
         param_string = "l=%.2f" % (ll[i]) + "_t=%.2f" % tau
         if seq_ids:
-            print(f">{alignment.fasta_file.seq_ids[alignment.indices[i]]} "+param_string)
+            print(f">{am.fasta_file.seq_ids[am.indices[i]]} "+param_string)
         else:
             print(">"+param_string)
         print(s)
@@ -277,18 +277,18 @@ def print_and_plot(alignment,
         #plot the model
         fig = plt.figure(frameon=False)
         ax = fig.add_axes([0, 0, 1, 1])
-        plot_hmm(alignment, model_index, ax, 
-                 seq_indices=alignment.indices[seqs_to_plot],
+        plot_hmm(am, model_index, ax, 
+                 seq_indices=am.indices[seqs_to_plot],
                  path_colors=["#CC6600", "#0000cc", "#00cccc"])   
         if model_filename != "":
             plt.savefig(model_filename, bbox_inches='tight')
     if show_anc_probs:
-        plot_anc_probs(alignment, model_index, seqs=seqs_to_plot)
+        plot_anc_probs(am, model_index, seqs=seqs_to_plot)
         if anc_probs_filename != "":
             plt.savefig(anc_probs_filename, bbox_inches='tight')
     if show_logo:
         fig, ax = plt.subplots()
-        plot_logo(alignment, model_index, ax)
+        plot_logo(am, model_index, ax)
         if logo_filename != "":
             plt.savefig(logo_filename, bbox_inches='tight')
         

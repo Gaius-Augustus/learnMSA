@@ -7,6 +7,7 @@ import learnMSA.msa_hmm.Fasta as fasta
 import learnMSA.msa_hmm.Training as train
 from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
 from learnMSA.msa_hmm.Configuration import as_str, assert_config
+from pathlib import Path
 
 
 def get_initial_model_lengths(fasta_file, config, random=True):
@@ -530,7 +531,7 @@ def select_model(am, config, verbose):
     return best
             
     
-def select_best_posterior(am, verbose=False):
+def select_model_posterior(am, verbose=False):
     expected_state = get_state_expectations(am.fasta_file,
                                             am.batch_generator,
                                             np.arange(am.fasta_file.num_seq),
@@ -539,13 +540,13 @@ def select_best_posterior(am, verbose=False):
                                             am.encoder_model)
     posterior_sums = [np.sum(expected_state[i, 1:am.length[i]+1]) for i in range(am.num_models)]
     if verbose:
-        print("Per model total expected match states:", posterior_sums)
+        print("Total expected match states:", posterior_sums)
     return posterior_sums
 
 
 #TODO: the default is to use the prior although not using is seems to be very slightly better
 #the default argument should change later to false but keep using prior for now for legacy reasons
-def select_best_loglik(am, verbose=False, use_prior=True):
+def select_model_loglik(am, verbose=False, use_prior=True):
     loglik = am.compute_loglik()
     score = loglik
     if use_prior:
@@ -554,22 +555,25 @@ def select_best_loglik(am, verbose=False, use_prior=True):
     if verbose:
         if use_prior:
             likelihoods = ["%.4f" % ll + " (%.4f)" % p for ll,p in zip(loglik, prior)]
-            print("Per model likelihoods (priors): ", likelihoods)
+            print("Likelihoods (priors): ", likelihoods)
         else:
             likelihoods = ["%.4f" % ll for ll in loglik]
-            print("Per model likelihoods: ", likelihoods)
+            print("Likelihoods: ", likelihoods)
     return score
 
 
-def select_best_AIC(am, verbose=False):
-    loglik = select_best_loglik(am, verbose, use_prior=False)
+def select_model_AIC(am, verbose=False):
+    loglik = select_model_loglik(am, verbose, use_prior=False)
     num_param = 34 * np.array(am.length) + 25
     aic = -2 * loglik * fasta_file.num_seq + 2*num_param
     return aic
 
 
-def select_best_consensus(am, verbose=False):
-    raise SystemExit("select_best_consensus not implemented yet") 
+def select_model_consensus(am, verbose=False):
+    consensus = am.compute_consensus_score()
+    if verbose:
+        print("Consensus scores: ", ["%.4f" % c for c in consensus])
+    return consensus
     
     
 def _make_defaults_if_none(model_generator, batch_generator):
