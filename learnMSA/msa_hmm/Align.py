@@ -18,6 +18,22 @@ import json
 import shutil
 
  
+
+
+def get_initial_model_lengths(fasta_file, config, random=True):
+    #initial model length
+    model_length = np.quantile(fasta_file.seq_lens, q=config["length_init_quantile"])
+    model_length *= config["len_mul"]
+    model_length = max(3., model_length)
+    if random:
+        scale = (3 + model_length/30)
+        lens = np.round(np.random.normal(loc=model_length, scale=scale, size=config["num_models"])).astype(np.int32)
+        lens = np.maximum(lens, 3)
+        return lens
+    else:
+        return [model_length] * config["num_models"]
+    
+    
 """ Trains k independent models on the sequences in a fasta file and returns k "lazy" alignments, where "lazy" means 
     that decoding will only be carried out when the user wants to print the alignment or write it to a file. 
     Decoding is usually expensive and typically it should only be done after a model selection step.
@@ -37,6 +53,7 @@ def fit_and_align(fasta_file,
                   model_generator=None,
                   batch_generator=None,
                   subset=None,
+                  initial_model_length_callback=get_initial_model_lengths,
                   verbose=True):
     assert_config(config)
     model_generator, batch_generator = _make_defaults_if_none(model_generator, batch_generator)
@@ -46,7 +63,7 @@ def fit_and_align(fasta_file,
     if subset is None:
         subset = np.arange(fasta_file.num_seq)
     full_length_estimate = get_full_length_estimate(fasta_file, config) 
-    model_lengths = get_initial_model_lengths(fasta_file, config)
+    model_lengths = initial_model_length_callback(fasta_file, config)
     #model surgery
     last_iteration=config["max_surgery_runs"]==1
     for i in range(config["max_surgery_runs"]):
@@ -141,6 +158,7 @@ def run_learnMSA(train_filename,
                  batch_generator=None,
                  ref_filename="", 
                  verbose=True, 
+                  initial_model_length_callback=get_initial_model_lengths,
                  select_best_for_comparison=True):
     """ Wraps fit_and_align and adds file parsing, verbosity, model selection, reference file comparison and an outfile file.
     Args: 
@@ -174,6 +192,7 @@ def run_learnMSA(train_filename,
                                   model_generator=model_generator,
                                   batch_generator=batch_generator,
                                   subset=subset, 
+                                  initial_model_length_callback=initial_model_length_callback,
                                   verbose=verbose)
         if verbose:
             print("Time for alignment:", "%.4f" % (time.time()-t_a))
@@ -981,20 +1000,6 @@ def get_full_length_estimate(fasta_file, config):
     #a rough estimate of a set of only full-length sequences
     full_length_estimate = fasta_file.sorted_indices[k:]
     return full_length_estimate
-
-
-def get_initial_model_lengths(fasta_file, config, random=True):
-    #initial model length
-    model_length = np.quantile(fasta_file.seq_lens, q=config["length_init_quantile"])
-    model_length *= config["len_mul"]
-    model_length = max(3., model_length)
-    if random:
-        scale = (3 + model_length/30)
-        lens = np.round(np.random.normal(loc=model_length, scale=scale, size=config["num_models"])).astype(np.int32)
-        lens = np.maximum(lens, 3)
-        return lens
-    else:
-        return [model_length] * config["num_models"]
     
     
 def get_low_seq_num_batch_size(n):
