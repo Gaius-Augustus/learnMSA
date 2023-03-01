@@ -85,19 +85,6 @@ def fit_and_align(fasta_file,
                                    batch_size=batch_size, 
                                    model=model)
         if last_iteration:
-            loglik, prior = am.compute_loglik(), am.compute_log_prior()
-            am.loglik = loglik 
-            am.prior = prior
-            expected_state = get_state_expectations(fasta_file,
-                                    batch_generator,
-                                    np.arange(am.fasta_file.num_seq),
-                                    batch_size,
-                                    am.msa_hmm_layer,
-                                    am.encoder_model)
-            am.expected_state = expected_state
-            if verbose:
-                print("Fitted models with MAP estimates = ", 
-                      ",".join("%.4f" % (l + p) for l,p in zip(loglik, prior)))
             break
         if i == 0: # remember the initializers used in the first iteration
             emission_init_0, transition_init_0, flank_init_0 = _get_initializers(am)
@@ -189,24 +176,7 @@ def run_learnMSA(train_filename,
         print("Out of memory. A resource was exhausted.")
         print("Try reducing the batch size (-b). The current batch size was: "+str(config["batch_size"])+".")
         sys.exit(e.error_code)
-    if config["model_criterion"] == "loglik":
-        am.best_model = np.argmax(am.loglik + am.prior)
-    elif config["model_criterion"] == "posterior":
-        posterior_sums = [np.sum(am.expected_state[i, 1:am.length[i]+1]) for i in range(am.num_models)]
-        am.best_model = np.argmax(posterior_sums)
-        if verbose:
-            print("Per model total expected match states:", posterior_sums)
-    elif config["model_criterion"] == "AIC":
-        num_param = 34 * np.array(am.length) + 25
-        aic = -2 * am.loglik * fasta_file.num_seq + 2*num_param
-        am.best_model = np.argmax(aic)
-    else:
-        raise SystemExit("Invalid model selection criterion. Valid criteria are loglik, AIC and posterior.") 
-    if verbose:
-        likelihoods = ["%.4f" % ll + " (%.4f)" % p for ll,p in zip(am.loglik, am.prior)]
-        print("Per model likelihoods (priors): ", likelihoods)
-        print("Selection criterion:", config["model_criterion"])
-        print("Best model: ", am.best_model, "(0-based)")
+    am.best_model = select_model(am, config, verbose)
         
     Path(os.path.dirname(out_filename)).mkdir(parents=True, exist_ok=True)
     t = time.time()
@@ -542,6 +512,64 @@ def get_low_seq_num_batch_size(n):
     batch_size = int(np.ceil(n*0.5))
     batch_size -= batch_size % num_devices
     return max(batch_size, num_devices)
+
+
+def select_model(am, config, verbose):
+    selection_criteria = {
+        "posterior": select_model_posterior,
+        "loglik": select_model_loglik,
+        "AIC": select_model_AIC,
+        "consensus": select_model_consensus
+    }
+    if config["model_criterion"] not in selection_criteria:
+        raise SystemExit(f"Invalid model selection criterion. Valid criteria are: {list(selection_criteria.key())}.") 
+    scores = selection_criteria[config["model_criterion"]](am, verbose)
+    best = np.argmax(scores)
+    print("Selection criterion:", config["model_criterion"])
+    print("Best model: ", best, "(0-based)")
+    return best
+            
+    
+def select_best_posterior(am, verbose=False):
+    expected_state = get_state_expectations(am.fasta_file,
+                                            am.batch_generator,
+                                            np.arange(am.fasta_file.num_seq),
+                                            am.batch_size,
+                                            am.msa_hmm_layer,
+                                            am.encoder_model)
+    posterior_sums = [np.sum(expected_state[i, 1:am.length[i]+1]) for i in range(am.num_models)]
+    if verbose:
+        print("Per model total expected match states:", posterior_sums)
+    return posterior_sums
+
+
+#TODO: the default is to use the prior although not using is seems to be very slightly better
+#the default argument should change later to false but keep using prior for now for legacy reasons
+def select_best_loglik(am, verbose=False, use_prior=True):
+    loglik = am.compute_loglik()
+    score = loglik
+    if use_prior:
+        prior = am.compute_log_prior()
+        score += prior
+    if verbose:
+        if use_prior:
+            likelihoods = ["%.4f" % ll + " (%.4f)" % p for ll,p in zip(loglik, prior)]
+            print("Per model likelihoods (priors): ", likelihoods)
+        else:
+            likelihoods = ["%.4f" % ll for ll in loglik]
+            print("Per model likelihoods: ", likelihoods)
+    return score
+
+
+def select_best_AIC(am, verbose=False):
+    loglik = select_best_loglik(am, verbose, use_prior=False)
+    num_param = 34 * np.array(am.length) + 25
+    aic = -2 * loglik * fasta_file.num_seq + 2*num_param
+    return aic
+
+
+def select_best_consensus(am, verbose=False):
+    raise SystemExit("select_best_consensus not implemented yet") 
     
     
 def _make_defaults_if_none(model_generator, batch_generator):

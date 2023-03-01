@@ -1373,7 +1373,7 @@ class TestAlignment(unittest.TestCase):
                                                 subset=ref_subset, 
                                                 verbose=False)
         #some friendly thresholds to check if the alignments does make sense at all
-        self.assertTrue(am.loglik > -70)
+        self.assertTrue(np.amin(am.compute_loglik()) > -70)
         self.assertTrue(am.msa_hmm_layer.cell.length[0] > 25)
         am.to_file(os.path.dirname(__file__)+"/data/egf.out.fasta", 0)
         pred_fasta_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/egf.out.fasta")
