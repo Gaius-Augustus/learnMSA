@@ -43,8 +43,6 @@ def plot_logo(am, model_index, ax):
     logo.ax.set_ylabel('information content')
     logo.ax.set_xlim([-1, len(information_content_df)])
     
-
-
     
 def plot_hmm(am, 
              model_index,

@@ -4,6 +4,7 @@ import learnMSA.msa_hmm.AncProbsLayer as anc_probs
 import learnMSA.msa_hmm.MsaHmmLayer as msa_hmm_layer
 import learnMSA.msa_hmm.MsaHmmCell as msa_hmm_cell
 import learnMSA.msa_hmm.Fasta as fasta
+import learnMSA.msa_hmm.Configuration as config
 import learnMSA.msa_hmm.Training as train
 import learnMSA.msa_hmm.Viterbi as viterbi
 import learnMSA.msa_hmm.Priors as priors
@@ -277,6 +278,7 @@ class AlignmentModel():
         Path(filepath).mkdir(parents=True, exist_ok=True)
         #serialize metadata
         d = {
+            "num_models" : self.num_models,
             "fasta_file" : self.fasta_file.filename,
             "batch_size" : self.batch_size,
             "gap_symbol" : self.gap_symbol,
@@ -287,7 +289,7 @@ class AlignmentModel():
         #serialize indices
         np.savetxt(filepath+"/indices", self.indices, fmt='%i')
         #save the model
-        self.model.save(filepath+"/model", save_traces=False)
+        self.model.save(filepath+"/model", save_traces=False) 
         if pack:
             shutil.make_archive(filepath, "zip", filepath)
             try:
@@ -329,7 +331,9 @@ class AlignmentModel():
                 shutil.rmtree(filepath)
             except OSError as e:
                 print("Error: %s - %s." % (e.filepath, e.strerror))
+        #todo: this is currently a bit limited because it creates a default batch gen from a default config
         batch_gen = train.DefaultBatchGenerator() if custom_batch_gen is None else custom_batch_gen
+        batch_gen.configure(fasta_file, config.make_default(d["num_models"])) 
         return cls(fasta_file, 
                   batch_gen, 
                   indices,

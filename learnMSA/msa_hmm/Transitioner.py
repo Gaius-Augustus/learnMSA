@@ -3,6 +3,7 @@ import numpy as np
 import learnMSA.msa_hmm.Initializers as initializers
 import learnMSA.msa_hmm.Priors as priors
 import learnMSA.msa_hmm.Configuration as config
+from tensorflow.python.training.tracking.data_structures import NoDependency #see https://github.com/tensorflow/tensorflow/issues/36916
 
 class ProfileHMMTransitioner(tf.keras.layers.Layer):
     """ A transitioner defines which transitions between HMM states are allowed, how they are initialized
@@ -23,7 +24,8 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
                 frozen_kernels={},
                 **kwargs):
         super(ProfileHMMTransitioner, self).__init__(**kwargs)
-        self.transition_init = [transition_init] if isinstance(transition_init, dict) else transition_init 
+        transition_init = [transition_init] if isinstance(transition_init, dict) else transition_init 
+        self.transition_init = NoDependency(transition_init)
         self.flank_init = [flank_init] if not hasattr(flank_init, '__iter__') else flank_init 
         self.prior = prior
         self.frozen_kernels = frozen_kernels
@@ -383,8 +385,10 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
     
     def get_config(self):
         config = super(ProfileHMMTransitioner, self).get_config()
+        for key in self.transition_kernel[0].keys():
+            config[key] = [self.transition_kernel[i][key].numpy() for i in range(self.num_models)]
         config.update({
-            "transition_init" : [{key : k.numpy() for key, k in d.items()} for d in self.transition_kernel],
+            "num_models" : len(self.transition_kernel),
             "flank_init" : [k.numpy() for k in self.flank_init_kernel],
             "prior" : self.prior,
             "frozen_kernels" : self.frozen_kernels
@@ -393,9 +397,11 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
     
     @classmethod
     def from_config(cls, config):
-        transition_init = []
-        for d in config["transition_init"]:
-            transition_init.append( {key: initializers.ConstantInitializer(k) for key,k in d.items()} )
+        transition_init = [{} for i in range(config.pop("num_models"))]
+        for key,_ in _make_explicit_transition_kernel_parts(1):
+            kernels = config.pop(key)
+            for i,d in enumerate(transition_init):
+                d[key] = initializers.ConstantInitializer(kernels[i])
         config["transition_init"] = transition_init
         config["flank_init"] = [initializers.ConstantInitializer(k) for k in config["flank_init"]]
         return cls(**config)
