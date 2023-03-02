@@ -235,7 +235,7 @@ class AlignmentModel():
             loglik = self.compute_loglik(max_seq)
         num_param = 34 * np.array(self.length) + 25
         aic = -2 * loglik * self.fasta_file.num_seq + 2*num_param
-        return aic
+        return aic 
     
     def compute_consensus_score(self):
         """ Computes a consensus score that rates how plausible each model is with respect to all other models.

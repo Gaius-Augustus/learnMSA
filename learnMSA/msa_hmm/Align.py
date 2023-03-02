@@ -177,7 +177,7 @@ def run_learnMSA(train_filename,
         print("Out of memory. A resource was exhausted.")
         print("Try reducing the batch size (-b). The current batch size was: "+str(config["batch_size"])+".")
         sys.exit(e.error_code)
-    am.best_model = select_model(am, config, verbose)
+    am.best_model = select_model(am, config["model_criterion"], verbose)
         
     Path(os.path.dirname(out_filename)).mkdir(parents=True, exist_ok=True)
     t = time.time()
@@ -515,19 +515,20 @@ def get_low_seq_num_batch_size(n):
     return max(batch_size, num_devices)
 
 
-def select_model(am, config, verbose):
+def select_model(am, model_criterion, verbose):
     selection_criteria = {
         "posterior": select_model_posterior,
         "loglik": select_model_loglik,
         "AIC": select_model_AIC,
         "consensus": select_model_consensus
     }
-    if config["model_criterion"] not in selection_criteria:
-        raise SystemExit(f"Invalid model selection criterion. Valid criteria are: {list(selection_criteria.key())}.") 
-    scores = selection_criteria[config["model_criterion"]](am, verbose)
+    if model_criterion not in selection_criteria:
+        raise SystemExit(f"Invalid model selection criterion. Valid criteria are: {list(selection_criteria.keys())}.") 
+    scores = selection_criteria[model_criterion](am, verbose)
     best = np.argmax(scores)
-    print("Selection criterion:", config["model_criterion"])
-    print("Best model: ", best, "(0-based)")
+    if verbose:
+        print("Selection criterion:", model_criterion)
+        print("Best model: ", best, "(0-based)")
     return best
             
     
@@ -548,7 +549,7 @@ def select_model_posterior(am, verbose=False):
 #the default argument should change later to false but keep using prior for now for legacy reasons
 def select_model_loglik(am, verbose=False, use_prior=True):
     loglik = am.compute_loglik()
-    score = loglik
+    score = tf.identity(loglik)
     if use_prior:
         prior = am.compute_log_prior()
         score += prior
@@ -564,9 +565,8 @@ def select_model_loglik(am, verbose=False, use_prior=True):
 
 def select_model_AIC(am, verbose=False):
     loglik = select_model_loglik(am, verbose, use_prior=False)
-    num_param = 34 * np.array(am.length) + 25
-    aic = -2 * loglik * fasta_file.num_seq + 2*num_param
-    return aic
+    aic = am.compute_AIC(loglik=loglik)
+    return -aic #negate as we want to take the maximum
 
 
 def select_model_consensus(am, verbose=False):
