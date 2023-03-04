@@ -61,6 +61,7 @@ class MsaHmmCell(tf.keras.layers.Layer):
         self.log_A_dense_t = tf.transpose(self.log_A_dense, [0,2,1])
         self.init_dist = self.make_initial_distribution()
         self.init = True
+        self.init2 = True
     
     
     def make_initial_distribution(self):
@@ -95,6 +96,9 @@ class MsaHmmCell(tf.keras.layers.Layer):
         if self.init:
             R = old_scaled_forward
             self.init = False
+        elif self.init2:
+            R = old_scaled_forward
+            self.init2 = False
         else:
             R = self.transitioner(old_scaled_forward)
         scaled_forward = tf.multiply(E, R, name="scaled_forward")

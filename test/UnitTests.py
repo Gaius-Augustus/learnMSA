@@ -13,6 +13,7 @@ tf.get_logger().setLevel('WARNING')
 from learnMSA import msa_hmm 
 import itertools
 import shutil
+from test import RefModels as ref
 
 class TestFasta(unittest.TestCase):
 
@@ -28,248 +29,108 @@ class TestFasta(unittest.TestCase):
         self.assertEqual(fasta2.aminoacid_seq_str(0), "PSPCQNGGLCFMSGDDTDYTCACPTGFSG")
         self.assertEqual(fasta2.aminoacid_seq_str(7), "SSPCQNGGMCFMSGDDTDYTCACPTGFSG")
         self.assertEqual(fasta2.aminoacid_seq_str(-1), "CSSSPCNAEGTVRCEDKKGDFLCHCFTGWAGAR")
-        
-        
-def make_test_transition_init():
-        inits = [{"begin_to_match" : [0.6, 0.1, 0.1, 0.1],
-                  "match_to_end" : [0.01, 0.05, 0.05, 1],
-                  "match_to_match" : [0.97, 0.5, 0.6], 
-                  "match_to_insert" : [0.01, 0.05, 0.3],
-                  "insert_to_match" : [0.5, 0.5, 0.5], 
-                  "insert_to_insert" : [0.5, 0.5, 0.5],
-                  "match_to_delete" : [0.1, 0.01, 0.4, 0.05], 
-                   "delete_to_match" : [0.8, 0.5, 0.8, 1],
-                   "delete_to_delete" : [0.2, 0.5, 0.2],
-                   #must assume that flaking probs are tied
-                   "left_flank_loop" : [0.6], 
-                   "left_flank_exit" : [0.4],
-                   "right_flank_loop" : [0.6], 
-                   "right_flank_exit" : [0.4],
-                   "unannotated_segment_loop" : [0.9], 
-                   "unannotated_segment_exit" : [0.1],
-                   "end_to_unannotated_segment" : [0.2], 
-                  "end_to_right_flank" : [0.7], 
-                  "end_to_terminal" : [0.1]},
-                {"begin_to_match" : [0.7, 0.1, 0.1],
-                  "match_to_end" : [0.01, 0.05, 1],
-                  "match_to_match" : [0.97, 0.5], 
-                  "match_to_insert" : [0.01, 0.05],
-                  "insert_to_match" : [0.5, 0.9], 
-                  "insert_to_insert" : [0.5, 0.1],
-                  "match_to_delete" : [0.1, 0.01, 0.4], 
-                   "delete_to_match" : [0.8, 0.5, 1],
-                   "delete_to_delete" : [0.2, 0.5],
-                   #must assume that flaking probs are tied
-                   "left_flank_loop" : [0.6], 
-                   "left_flank_exit" : [0.4],
-                   "right_flank_loop" : [0.6], 
-                   "right_flank_exit" : [0.4],
-                   "unannotated_segment_loop" : [0.9], 
-                   "unannotated_segment_exit" : [0.1],
-                   "end_to_unannotated_segment" : [0.2], 
-                  "end_to_right_flank" : [0.7], 
-                  "end_to_terminal" : [0.1]}]
-        inits = [{part_name : tf.constant_initializer(np.log(p))
-                                  for part_name,p in d.items()} for d in inits]
-        return inits
-    
 
 class TestMsaHmmCell(unittest.TestCase):
+    
+    def __init__(self, *args, **kwargs):
+        super(TestMsaHmmCell, self).__init__(*args, **kwargs)
+        self.length = [4,3]
+        self.emission_init = [ref.make_emission_init_A(), ref.make_emission_init_B()]
+        self.insertion_init = [ref.make_insertion_init() for i in range(2)]
+        self.transition_init = [ref.make_transition_init_A(), ref.make_transition_init_B()]
+        A1, B1, I1 = ref.get_ref_model_A()
+        A2, B2, I2 = ref.get_ref_model_B()
+        self.A_ref = [A1, A2]
+        self.B_ref = [B1, B2]
+        self.init_ref = [I1, I2]
+        self.ref_alpha = [ref.get_ref_forward_A(), ref.get_ref_forward_B()]
+        self.ref_lik = [ref.get_ref_lik_A(), ref.get_ref_lik_B()]
+        self.ref_scaled_alpha = [ref.get_ref_scaled_forward_A(), ref.get_ref_scaled_forward_B()]
+    
+    def make_test_cell(self, models):
+        if not hasattr(models, '__iter__'):
+            models = [models]
+        length = [self.length[i] for i in models]
+        e = [self.emission_init[i] for i in models]
+        i = [self.insertion_init[i] for i in models]
+        emitter = msa_hmm.emit.ProfileHMMEmitter(emission_init = e, 
+                                                 insertion_init = i)
+        t = [self.transition_init[i] for i in models]
+        f = [msa_hmm.initializers.make_default_flank_init() for _ in models]
+        transitioner = msa_hmm.trans.ProfileHMMTransitioner(transition_init = t,
+                                                           flank_init = f)
+        hmm_cell = msa_hmm.MsaHmmCell(length, emitter, transitioner)
+        hmm_cell.build((None,None,3))
+        return hmm_cell, length
    
- 
-    def test_A(self):
-        length = 4
-        transition_kernel_initializers = make_test_transition_init()[0]
-        emission_kernel_initializer = tf.constant_initializer(np.zeros((length, 2)))
-        insertion_kernel_initializer = tf.constant_initializer(np.zeros((2)))
-        emitter = msa_hmm.emit.ProfileHMMEmitter(emission_init = emission_kernel_initializer,
-                                                insertion_init = insertion_kernel_initializer)
-        transitioner = msa_hmm.trans.ProfileHMMTransitioner(transition_init = transition_kernel_initializers)
-        hmm_cell = msa_hmm.MsaHmmCell(length, emitter, transitioner)
-        hmm_cell.build((None,None,3))
-        A = hmm_cell.transitioner.make_A()
-        # [LEFT_FLANK, MATCH x length, INSERT x length-1, UNANNOTATED_SEGMENT, RIGHT_FLANK, TERMINAL]
-        A_ref = np.zeros((hmm_cell.max_num_states, hmm_cell.max_num_states))
-        A_ref[0,0] = .6
-        A_ref[0,1] = .4*.6
-        A_ref[0,2] = .4*(.1 + .1*.8)
-        A_ref[0,3] = .4*(.1 + .1*.2*.5)
-        A_ref[0,4] = .4*(.1 + .1*.2*.5*.8)
-        A_ref[0,8] = .4*.1*.2*.5*.2*.2
-        A_ref[0,9] = .4*.1*.2*.5*.2*.7
-        A_ref[0,10] = .4*.1*.2*.5*.2*.1
-        A_ref[np.arange(1,4),np.arange(2,5)] = [0.97, 0.5, 0.6]
-        A_ref[np.arange(1,4),np.arange(5,8)] = [0.01, 0.05, 0.3]
-        A_ref[1,3] = .01*.5
-        A_ref[1,4] = .01*.5*.8
-        A_ref[1,8] = .2*(.01*.5*.2+.01)
-        A_ref[1,9] = .7*(.01*.5*.2+.01)
-        A_ref[1,10] = .1*(.01*.5*.2+.01)
-        A_ref[2,4] = .4*.8
-        A_ref[2,8] = .2*(.4*.2+.05)
-        A_ref[2,9] = .7*(.4*.2+.05)
-        A_ref[2,10] = .1*(.4*.2+.05)
-        A_ref[3,8] = .2*(.05+.05)
-        A_ref[3,9] = .7*(.05+.05)
-        A_ref[3,10] = .1*(.05+.05)
-        A_ref[4,8] = .2
-        A_ref[4,9] = .7
-        A_ref[4,10] = .1
-        A_ref[np.arange(5,8),np.arange(2,5)] = [0.5, 0.5, 0.5]
-        A_ref[np.arange(5,8),np.arange(5,8)] = [0.5, 0.5, 0.5]
-        A_ref[8,8] = .9 + .1*.1*.2*.5*.2*.2
-        A_ref[8,1] = .1*.6
-        A_ref[8,2] = .1*(.1+.1*.8)
-        A_ref[8,3] = .1*(.1+.1*.2*.5)
-        A_ref[8,4] = .1*(.1+.1*.2*.5*.8)
-        A_ref[8,9] = .1*.1*.2*.5*.2*.7
-        A_ref[8,10] = .1*.1*.2*.5*.2*.1
-        A_ref[9,9] = 0.6
-        A_ref[9,10] = 0.4
-        A_ref[10,10] = 1
-        for i in range(hmm_cell.max_num_states):
-            for j in range(hmm_cell.max_num_states):
-                np.testing.assert_almost_equal(A[0,i,j], 
-                                               A_ref[i,j], 
-                                               decimal=5,
-                                               err_msg=str(i)+","+str(j))
+    def test_single_models(self):
+        for i in range(2):
+            hmm_cell, length = self.make_test_cell(i)
+            hmm_cell.recurrent_init()
+            A = hmm_cell.transitioner.make_A()
+            init = hmm_cell.transitioner.make_initial_distribution()
+            B = hmm_cell.emitter[0].make_B()
+            np.testing.assert_almost_equal(A[0], self.A_ref[i], decimal=5) #allow some decimal errors from softmaxes
+            np.testing.assert_almost_equal(B[0], self.B_ref[i], decimal=5) 
+            np.testing.assert_almost_equal(init[0,0], self.init_ref[i], decimal=5) 
+            imp_log_probs = hmm_cell.transitioner.make_implicit_log_probs()[0][0]
+            for part_name in imp_log_probs.keys():
+                self.assertTrue(part_name in [part[0] for part in hmm_cell.transitioner.implicit_transition_parts[0]], 
+                                part_name + " is in the kernel but not under the expected kernel parts. Wrong spelling?")
+            for part_name,l in hmm_cell.transitioner.implicit_transition_parts[0]:
+                if part_name in imp_log_probs:
+                    kernel_length = tf.size(imp_log_probs[part_name]).numpy()
+                    self.assertTrue(kernel_length == l, 
+                                    "\"" + part_name + "\" implicit probs array has length " + str(kernel_length) + " but kernel length is " + str(l))
         
-        imp_log_probs = hmm_cell.transitioner.make_implicit_log_probs()[0][0]
-        for part_name in imp_log_probs.keys():
-            self.assertTrue(part_name in [part[0] for part in hmm_cell.transitioner.implicit_transition_parts[0]], 
-                            part_name + " is in the kernel but not under the expected kernel parts. Wrong spelling?")
-        for part_name,l in hmm_cell.transitioner.implicit_transition_parts[0]:
-            if part_name in imp_log_probs:
-                kernel_length = tf.size(imp_log_probs[part_name]).numpy()
-                self.assertTrue(kernel_length == l, 
-                                "\"" + part_name + "\" implicit probs array has length " + str(kernel_length) + " but kernel length is " + str(l))
-                
-                
-    def test_B(self):
-        length = 3
-        transition_kernel_initializers = make_test_transition_init()[1]
-        emission_kernel_initializer = tf.constant_initializer(np.zeros((length, 2)))
-        insertion_kernel_initializer = tf.constant_initializer(np.zeros((2)))
-        emitter = msa_hmm.emit.ProfileHMMEmitter(emission_init = emission_kernel_initializer,
-                                                insertion_init = insertion_kernel_initializer)
-        transitioner = msa_hmm.trans.ProfileHMMTransitioner(transition_init = transition_kernel_initializers)
-        hmm_cell = msa_hmm.MsaHmmCell(length, emitter, transitioner)
-        hmm_cell.build((None,None,3))
+    def test_multi_models(self):
+        models = [0,1]
+        hmm_cell, length = self.make_test_cell(models)
+        hmm_cell.recurrent_init()
         A = hmm_cell.transitioner.make_A()
-        # [LEFT_FLANK, MATCH x length, INSERT x length-1, UNANNOTATED_SEGMENT, RIGHT_FLANK, TERMINAL]
-        A_ref = np.zeros((hmm_cell.max_num_states, hmm_cell.max_num_states))
-        A_ref[0,0] = .6
-        A_ref[0,1] = .4*.7
-        A_ref[0,2] = .4*(.1 + .1*.8)
-        A_ref[0,3] = .4*(.1 + .1*.2*.5)
-        A_ref[0,6] = .4*.1*.2*.5*.2
-        A_ref[0,7] = .4*.1*.2*.5*.7
-        A_ref[0,8] = .4*.1*.2*.5*.1
-        A_ref[np.arange(1,3),np.arange(2,4)] = [0.97, 0.5]
-        A_ref[np.arange(1,3),np.arange(4,6)] = [0.01, 0.05]
-        A_ref[1,3] = .01*.5
-        A_ref[1,6] = .2*(.01*.5+.01)
-        A_ref[1,7] = .7*(.01*.5+.01)
-        A_ref[1,8] = .1*(.01*.5+.01)
-        A_ref[2,6] = .2*(.4+.05)
-        A_ref[2,7] = .7*(.4+.05)
-        A_ref[2,8] = .1*(.4+.05)
-        A_ref[3,6] = .2
-        A_ref[3,7] = .7
-        A_ref[3,8] = .1
-        A_ref[np.arange(4,6),np.arange(2,4)] = [0.5, 0.9]
-        A_ref[np.arange(4,6),np.arange(4,6)] = [0.5, 0.1]
-        A_ref[6,6] = .9 + .1*.1*.2*.5*.2
-        A_ref[6,1] = .1*.7
-        A_ref[6,2] = .1*(.1+.1*.8)
-        A_ref[6,3] = .1*(.1+.1*.2*.5)
-        A_ref[6,7] = .1*.1*.2*.5*.7
-        A_ref[6,8] = .1*.1*.2*.5*.1
-        A_ref[7,7] = 0.6
-        A_ref[7,8] = 0.4
-        A_ref[8,8] = 1
-        for i in range(hmm_cell.max_num_states):
-            for j in range(hmm_cell.max_num_states):
-                np.testing.assert_almost_equal(A[0,i,j], 
-                                               A_ref[i,j], 
-                                               decimal=5,
-                                               err_msg=str(i)+","+str(j))
+        init = hmm_cell.transitioner.make_initial_distribution()
+        B = hmm_cell.emitter[0].make_B()
+        for i in models:
+            q = hmm_cell.num_states[i]
+            np.testing.assert_almost_equal(A[i, :q, :q], self.A_ref[i], decimal=5) #allow some decimal errors from softmaxes
+            np.testing.assert_almost_equal(B[i, :q], self.B_ref[i], decimal=5) 
+            np.testing.assert_almost_equal(init[0,i,:q], self.init_ref[i], decimal=5) 
         
-        imp_log_probs = hmm_cell.transitioner.make_implicit_log_probs()[0][0]
-        for part_name in imp_log_probs.keys():
-            self.assertTrue(part_name in [part[0] for part in hmm_cell.transitioner.implicit_transition_parts[0]], 
-                            part_name + " is in the kernel but not under the expected kernel parts. Wrong spelling?")
-        for part_name,l in hmm_cell.transitioner.implicit_transition_parts[0]:
-            if part_name in imp_log_probs:
-                kernel_length = tf.size(imp_log_probs[part_name]).numpy()
-                self.assertTrue(kernel_length == l, 
-                                "\"" + part_name + "\" implicit probs array has length " + str(kernel_length) + " but kernel length is " + str(l))
-                
+    def test_single_model_forward(self):
+        seq = tf.one_hot([[0,1,0,2]], 3)
+        for i in range(2):
+            hmm_cell, length = self.make_test_cell(i)
+            hmm_cell.recurrent_init()
+            hmm_cell.init = False #todo: replace this hack 
+            scaled_forward, loglik = hmm_cell.get_initial_state(batch_size=1)
+            for j in range(4):
+                col = seq[:,j]
+                log_forward, (scaled_forward, loglik) = hmm_cell(col, (scaled_forward, loglik))
+                ref_forward = self.ref_alpha[i][j]
+                ref_scaled_forward = self.ref_scaled_alpha[i][j]
+                np.testing.assert_almost_equal(np.exp(log_forward)[0], ref_forward, decimal=4)
+                np.testing.assert_almost_equal(scaled_forward[0], ref_scaled_forward, decimal=4)
+            np.testing.assert_almost_equal(np.exp(loglik), self.ref_lik[i], decimal=4)
                 
     def test_multi_model_forward(self):
-        length = [4,3]
-        transition_kernel_initializers = make_test_transition_init()
-        #alphabet: {A,B}
-        emission_kernel_initializer1 = np.log([[0.5, 0.5], [0.1, 0.9], [0.7, 0.3], [0.9, 0.1]])
-        emission_kernel_initializer2 = np.log([[0.5, 0.5], [0.1, 0.9], [0.7, 0.3]])
-        emission_kernel_initializer = [tf.constant_initializer(emission_kernel_initializer1), 
-                                       tf.constant_initializer(emission_kernel_initializer2)]
-        insertion_kernel_initializer = np.log([0.5, 0.5])
-        insertion_kernel_initializer = [tf.constant_initializer(insertion_kernel_initializer)]*2
-        emitter = msa_hmm.emit.ProfileHMMEmitter(emission_init = emission_kernel_initializer, 
-                                                 insertion_init = insertion_kernel_initializer)
-        transitioner = msa_hmm.trans.ProfileHMMTransitioner(transition_init = transition_kernel_initializers,
-                                                            flank_init = [msa_hmm.initializers.make_default_flank_init()]*2)
-        hmm_cell = msa_hmm.MsaHmmCell(length, emitter, transitioner)
-        seq = tf.one_hot([[0,1,0]], 3)
-        hmm_cell.build(seq.shape)
+        models = [0,1]
+        hmm_cell, length = self.make_test_cell(models)
         hmm_cell.recurrent_init()
-        forward, loglik = hmm_cell.get_initial_state(batch_size=1)
-        forward = np.reshape(forward, (2, -1, hmm_cell.max_num_states))
-        loglik = np.reshape(loglik, (2, -1, 1))
-        ref_forward_scores = np.array([[[0.5, 0.3, 0.09, 
-                                         0.055, 0.054, 0, 
-                                         0, 0, 0.0002, 
-                                         0.0007, 0.0001], 
-                                        [0.25, 0.15, 0.009, 
-                                         0.0385, 0.0486, 0, 
-                                         0, 0, 0.0001, 
-                                         0.00035, 0],
-                                        [0.1510422, 0.0604229, 0.2963477, 
-                                        0.0098184, 0.0075282, 0.0015104, 
-                                        0.0004531, 0.01163025, 0.0112615, 
-                                        0.0392749, 0],
-                                        [0.07689372, 0.0313308, 0.0119539, 
-                                         0.184681, 0.173231, 0.001153, 
-                                         0.0127664, 0.007433, 0.016715, 
-                                         0.0483981, 0]], 
-                                      [[0.5, 0.35, 0.09,
-                                        0.055, 0, 0,
-                                        0.001, 0.0035, 0.0005,
-                                        0, 0], 
-                                        [0.25   , 0.175  , 0.009  , 
-                                         0.0385 , 0.     , 0.     , 
-                                         0.0005 , 0.00175, 0.     ,
-                                         0, 0],
-                                        [0.075     , 0.0350175 , 0.1689831 , 
-                                         0.00491415, 0.000875  , 0.000225  , 
-                                         0.00484255, 0.01668642, 0.        ,
-                                         0, 0],
-                                        [0.0225    , 0.01066949, 0.00398916, 
-                                         0.06175568, 0.00039384, 0.00423583, 
-                                         0.01035781, 0.03363126, 0.        ,
-                                         0, 0]]]) 
-        for j in range(2):
-            np.testing.assert_almost_equal(forward[j:(j+1)], ref_forward_scores[j:(j+1), :1]) 
-        for i in range(1,3):
-            _, (forward, loglik) = hmm_cell(np.repeat(seq[np.newaxis,:,i-1], len(length), axis=0), 
-                                            (forward, loglik))
-            forward = np.reshape(forward, (2, -1, hmm_cell.max_num_states))
-            loglik = np.reshape(loglik, (2, -1, 1))
-            for j in range(2):
-                ref = ref_forward_scores[j:(j+1), i:(i+1)]
-                np.testing.assert_almost_equal(forward[j:(j+1)], ref / np.sum(ref), decimal=4)
-                
+        hmm_cell.init = False #todo: replace this hack 
+        scaled_forward, loglik = hmm_cell.get_initial_state(batch_size=1)
+        seq = tf.one_hot([[0,1,0,2]], 3)
+        for j in range(4):
+            col = np.repeat(seq[:,j], len(models), axis=0)
+            log_forward, (scaled_forward, loglik) = hmm_cell(col, (scaled_forward, loglik))
+            for i in range(2):
+                q = hmm_cell.num_states[i]
+                ref_forward = self.ref_alpha[i][j]
+                ref_scaled_forward = self.ref_scaled_alpha[i][j]
+                np.testing.assert_almost_equal(np.exp(log_forward)[i,:q], ref_forward, decimal=4)
+                np.testing.assert_almost_equal(scaled_forward[i,:q], ref_scaled_forward, decimal=4)
+        for i in range(2):
+            np.testing.assert_almost_equal(np.exp(loglik[i]), self.ref_lik[i], decimal=4)
+        
     def test_duplication(self):
         length = [4,3]
         transition_kernel_initializers = make_test_transition_init()
@@ -1586,9 +1447,7 @@ class TestModelToFile(unittest.TestCase):
         tf.get_logger().setLevel('WARNING')
         self.assertEqual(msa_str, msa_str_from_deserialized_model)
         
-        
-        
-            
-        
+
+    
 if __name__ == '__main__':
     unittest.main()
