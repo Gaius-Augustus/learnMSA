@@ -44,8 +44,10 @@ class TestMsaHmmCell(unittest.TestCase):
         self.B_ref = [B1, B2]
         self.init_ref = [I1, I2]
         self.ref_alpha = [ref.get_ref_forward_A(), ref.get_ref_forward_B()]
+        self.ref_beta = [ref.get_ref_backward_A(), ref.get_ref_backward_B()]
         self.ref_lik = [ref.get_ref_lik_A(), ref.get_ref_lik_B()]
         self.ref_scaled_alpha = [ref.get_ref_scaled_forward_A(), ref.get_ref_scaled_forward_B()]
+        self.ref_posterior_probs = [ref.get_ref_posterior_probs_A(), ref.get_ref_posterior_probs_B()]
     
     def make_test_cell(self, models):
         if not hasattr(models, '__iter__'):
@@ -101,11 +103,12 @@ class TestMsaHmmCell(unittest.TestCase):
         for i in range(2):
             hmm_cell, length = self.make_test_cell(i)
             hmm_cell.recurrent_init()
-            hmm_cell.init = False #todo: replace this hack 
             scaled_forward, loglik = hmm_cell.get_initial_state(batch_size=1)
+            init = True
             for j in range(4):
                 col = seq[:,j]
-                log_forward, (scaled_forward, loglik) = hmm_cell(col, (scaled_forward, loglik))
+                log_forward, (scaled_forward, loglik) = hmm_cell(col, (scaled_forward, loglik), init=init)
+                init = False
                 ref_forward = self.ref_alpha[i][j]
                 ref_scaled_forward = self.ref_scaled_alpha[i][j]
                 np.testing.assert_almost_equal(np.exp(log_forward)[0], ref_forward, decimal=4)
@@ -116,12 +119,13 @@ class TestMsaHmmCell(unittest.TestCase):
         models = [0,1]
         hmm_cell, length = self.make_test_cell(models)
         hmm_cell.recurrent_init()
-        hmm_cell.init = False #todo: replace this hack 
         scaled_forward, loglik = hmm_cell.get_initial_state(batch_size=1)
         seq = tf.one_hot([[0,1,0,2]], 3)
+        init = True
         for j in range(4):
             col = np.repeat(seq[:,j], len(models), axis=0)
-            log_forward, (scaled_forward, loglik) = hmm_cell(col, (scaled_forward, loglik))
+            log_forward, (scaled_forward, loglik) = hmm_cell(col, (scaled_forward, loglik), init=init)
+            init = False
             for i in range(2):
                 q = hmm_cell.num_states[i]
                 ref_forward = self.ref_alpha[i][j]
@@ -130,22 +134,49 @@ class TestMsaHmmCell(unittest.TestCase):
                 np.testing.assert_almost_equal(scaled_forward[i,:q], ref_scaled_forward, decimal=4)
         for i in range(2):
             np.testing.assert_almost_equal(np.exp(loglik[i]), self.ref_lik[i], decimal=4)
-        
+            
+    def test_multi_model_layer(self):
+        models = [0,1]
+        hmm_cell, length = self.make_test_cell(models)
+        hmm_layer = msa_hmm.MsaHmmLayer(hmm_cell, use_prior=False)
+        seq = tf.one_hot([[0,1,0,2]], 3)
+        #we have to expand the seq dimension
+        #we have 2 identical inputs for 2 models respectively
+        #the batch size is still 1
+        seq = np.repeat(seq[np.newaxis], len(models), axis=0)
+        loglik = hmm_layer(seq)
+        log_forward,_ = hmm_layer.forward_recursion(seq)
+        log_backward = hmm_layer.backward_recursion(seq)
+        state_posterior_log_probs = hmm_layer.state_posterior_log_probs(seq)
+        for i in range(2):
+            q = hmm_cell.num_states[i]
+            np.testing.assert_almost_equal(np.exp(loglik[i]), self.ref_lik[i])
+            np.testing.assert_almost_equal(np.exp(log_forward)[i,0,:,:q], self.ref_alpha[i], decimal=6)
+            np.testing.assert_almost_equal(np.exp(log_backward)[i,0,:,:q], self.ref_beta[i], decimal=6)
+            np.testing.assert_almost_equal(np.exp(state_posterior_log_probs[i,0,:,:q]), self.ref_posterior_probs[i], decimal=6)
+            
+    #also test the hmm layer in a compiled model and use model.predict
+    #the cell call is traced once in this case which can cause trouble with the initial step
+    def test_multi_model_tf_model(self):
+        models = [0,1]
+        hmm_cell, length = self.make_test_cell(models)
+        hmm_layer = msa_hmm.MsaHmmLayer(hmm_cell, use_prior=False)
+        sequences = tf.keras.Input(shape=(None,None,3), name="sequences", dtype=tf.float32)
+        loglik = hmm_layer(sequences)
+        hmm_tf_model = tf.keras.Model(inputs=[sequences], outputs=[loglik])
+        hmm_tf_model.compile()
+        seq = tf.one_hot([[0,1,0,2]], 3)
+        #we have to expand the seq dimension
+        #we have 2 identical inputs for 2 models respectively
+        #the batch size is still 1
+        seq = np.repeat(seq[np.newaxis], len(models), axis=0)
+        loglik = hmm_tf_model.predict(seq)
+        for i in range(2):
+            np.testing.assert_almost_equal(np.exp(loglik[i]), self.ref_lik[i])
+            
     def test_duplication(self):
-        length = [4,3]
-        transition_kernel_initializers = make_test_transition_init()
-        #alphabet: {A,B}
-        emission_kernel_initializer1 = np.log([[0.5, 0.5], [0.1, 0.9], [0.7, 0.3], [0.9, 0.1]])
-        emission_kernel_initializer2 = np.log([[0.1, 0.9], [0.4, 0.6], [0.5, 0.5]])
-        emission_kernel_initializer = [tf.constant_initializer(emission_kernel_initializer1), 
-                                       tf.constant_initializer(emission_kernel_initializer2)]
-        insertion_kernel_initializer = [tf.constant_initializer(np.log([0.5, 0.5])), 
-                                        tf.constant_initializer(np.log([0.3, 0.7]))]
-        emitter = msa_hmm.emit.ProfileHMMEmitter(emission_init = emission_kernel_initializer, 
-                                                 insertion_init = insertion_kernel_initializer)
-        transitioner = msa_hmm.trans.ProfileHMMTransitioner(transition_init = transition_kernel_initializers,
-                                                            flank_init = [msa_hmm.initializers.make_default_flank_init()]*2)
-        hmm_cell = msa_hmm.MsaHmmCell(length, emitter, transitioner)
+        models = [0,1]
+        hmm_cell, length = self.make_test_cell(models)
         test_shape = [None, None, 3]
         hmm_cell.build(test_shape)
         
@@ -154,15 +185,15 @@ class TestMsaHmmCell(unittest.TestCase):
             transitioner_copy = hmm_cell_copy.transitioner
             for i,j in enumerate(model_indices):
                 #match emissions
-                ref_kernel = emitter.emission_kernel[j].numpy()
+                ref_kernel = hmm_cell.emitter[0].emission_kernel[j].numpy()
                 kernel_copy = emitter_copy[0].emission_init[i](ref_kernel.shape)
                 np.testing.assert_almost_equal(kernel_copy, ref_kernel)
                 #insertions
-                ref_ins_kernel = emitter.insertion_kernel[j].numpy()
+                ref_ins_kernel = hmm_cell.emitter[0].insertion_kernel[j].numpy()
                 ins_kernel_copy = emitter_copy[0].insertion_init[i](ref_ins_kernel.shape)
                 np.testing.assert_almost_equal(ins_kernel_copy, ref_ins_kernel)
                 #transitioners
-                for key, ref_kernel in transitioner.transition_kernel[j].items():
+                for key, ref_kernel in hmm_cell.transitioner.transition_kernel[j].items():
                     ref_kernel = ref_kernel.numpy()
                     kernel_copy = transitioner_copy.transition_init[i][key](ref_kernel.shape)
                     np.testing.assert_almost_equal(kernel_copy, ref_kernel)
@@ -616,7 +647,7 @@ class TestMSAHMM(unittest.TestCase):
                
     def test_backward(self):
         length = [4]
-        transition_kernel_initializers = make_test_transition_init()[0]
+        transition_kernel_initializers = ref.make_transition_init_A()
         #alphabet: {A,B}
         emission_kernel_initializer = np.log([[0.5, 0.5], [0.1, 0.9], [0.7, 0.3], [0.9, 0.1]])
         emission_kernel_initializer = tf.constant_initializer(emission_kernel_initializer)
@@ -637,8 +668,8 @@ class TestMSAHMM(unittest.TestCase):
                                 0.30000002, 0.         ]])
         for i in range(2):
             actual = np.exp(backward_seqs[0,0,-(i+1)])
-            ref = backward_ref[i] + hmm_cell.epsilon
-            np.testing.assert_almost_equal(actual, ref, decimal=5)
+            r = backward_ref[i] + hmm_cell.epsilon
+            np.testing.assert_almost_equal(actual, r, decimal=5)
             
             
     def test_posterior_state_probabilities(self):
@@ -986,7 +1017,7 @@ class TestModelSurgery(unittest.TestCase):
         pos_expand = pos_expand[0]
         expansion_lens = expansion_lens[0]
         pos_discard = pos_discard[0]
-        self.assert_vec(pos_expand, [2,3,5])
+        self.assert_vec(pos_expand, [0,3,5])
         self.assert_vec(expansion_lens, [2,2,3])
         self.assert_vec(pos_discard, [1])
         

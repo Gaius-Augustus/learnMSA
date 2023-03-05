@@ -4,7 +4,7 @@ import numpy as np
 class MsaHmmLayer(tf.keras.layers.Layer):
     def __init__(self, 
                  cell, 
-                 num_seq,
+                 num_seq=1,
                  use_prior=True,
                  **kwargs
                 ):
@@ -27,22 +27,47 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         
         
     def forward_recursion(self, inputs, training=False):
+        """ Computes the forward recursion for multiple models where each model
+            receives a batch of sequences as input.
+        Args:
+            inputs: Sequences. Shape: (num_model, b, seq_len, s)
+        Returns:
+            forward variables: Shape: (num_model, b, seq_len, q)
+            log-likelihoods: Shape: (num_model, b)
+        """
+        #initialize transition- and emission-matricies
         self.cell.recurrent_init()
         num_model, b, seq_len, s = tf.unstack(tf.shape(inputs))
         initial_state = self.cell.get_initial_state(batch_size=b)
+        #reshape to 3D inputs for RNN (cell will reshape back in each step)
         inputs = tf.reshape(inputs, (num_model*b, seq_len, s))
-        forward, _, loglik = self.rnn(inputs, initial_state=initial_state, training=training)
+        #do one initialization step
+        #this way, tf will compile two versions of the cell call, one with init=True and one without
+        forward_1, step_1_state = self.cell(inputs[:,0], initial_state, training, init=True)
+        #run forward with the output of the first step as initial state
+        forward, _, loglik = self.rnn(inputs[:,1:], initial_state=step_1_state, training=training)
+        #prepend the separate first step to the other forward steps
+        forward = tf.concat([forward_1[:,tf.newaxis], forward], axis=1)
         forward = tf.reshape(forward, (num_model, b, seq_len, -1))
         loglik = tf.reshape(loglik, (num_model, b))
         return forward, loglik
     
     
     def backward_recursion(self, inputs):
+        """ Computes the backward recursion for multiple models where each model
+            receives a batch of sequences as input.
+        Args:
+            inputs: Sequences. Shape: (num_model, b, seq_len, s)
+        Returns:
+            backward variables: Shape: (num_model, b, seq_len, q)
+        """
         self.cell.recurrent_init()
         num_model, b, seq_len, s = tf.unstack(tf.shape(inputs))
         initial_state = self.cell.get_initial_backward_state(batch_size=b)
         inputs = tf.reshape(inputs, (num_model*b, seq_len, s))
         self.cell.reverse_direction()
+        #note that for backward, we can ignore the initial step like we did it in
+        #forward, because we assume that all inputs have terminal tokens
         backward, _, _ = self.rnn_backward(inputs, initial_state=initial_state)
         self.cell.reverse_direction()
         backward = tf.reshape(backward, (num_model, b, seq_len, -1))

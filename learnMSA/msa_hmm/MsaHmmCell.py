@@ -60,8 +60,6 @@ class MsaHmmCell(tf.keras.layers.Layer):
         self.log_A_dense = self.transitioner.make_log_A()
         self.log_A_dense_t = tf.transpose(self.log_A_dense, [0,2,1])
         self.init_dist = self.make_initial_distribution()
-        self.init = True
-        self.init2 = True
     
     
     def make_initial_distribution(self):
@@ -85,7 +83,7 @@ class MsaHmmCell(tf.keras.layers.Layer):
         return em_probs
 
     
-    def call(self, inputs, states, training=None):
+    def call(self, inputs, states, training=None, init=False):
         """ Computes one recurrent step of the Forward DP.
         """
         old_scaled_forward, old_loglik = states
@@ -93,12 +91,8 @@ class MsaHmmCell(tf.keras.layers.Layer):
         old_loglik = tf.reshape(old_loglik, (self.num_models, -1, 1))
         inputs = tf.reshape(inputs, (self.num_models, -1, self.dim))
         E = self.emission_probs(inputs)
-        if self.init:
+        if init:
             R = old_scaled_forward
-            self.init = False
-        elif self.init2:
-            R = old_scaled_forward
-            self.init2 = False
         else:
             R = self.transitioner(old_scaled_forward)
         scaled_forward = tf.multiply(E, R, name="scaled_forward")
