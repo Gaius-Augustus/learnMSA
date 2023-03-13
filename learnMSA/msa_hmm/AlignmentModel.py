@@ -203,7 +203,7 @@ class AlignmentModel():
             # sequences this step takes rather long for little benefit
             ll_subset = np.arange(self.fasta_file.num_seq)
             np.random.shuffle(ll_subset)
-            ll_subset = ll_subset[:max_ll_estimate]
+            ll_subset = ll_subset[:max_seq]
             ll_subset = np.sort(ll_subset)
         else:
             #use the sorted indices for optimal length distributions in batches
