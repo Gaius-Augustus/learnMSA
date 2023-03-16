@@ -258,7 +258,7 @@ class AlignmentModel():
         consensus_logliks *= 1-tf.eye(self.num_models)
         # Axis 1 means we reduce over the batch dimension rather than the model dimension,
         # so output i will be the mean loglik if we input all other match sequenes to model i.
-        # Using axis 0 here is NOT the same!
+        # Using axis 0 here is not the same!
         # Consider the case that all models have the same match sequence but one model allows many deletions or insertions.
         # This model is the outlier and should clearly have the lowest score.
         # With axis=0, the likelihood of the outlier model under all other models is high and the scores of the other models will have a penalty
