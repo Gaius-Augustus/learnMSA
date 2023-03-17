@@ -5,6 +5,7 @@ import os
 import sys
 import learnMSA.msa_hmm.Fasta as fasta
 import learnMSA.msa_hmm.Training as train
+import learnMSA.msa_hmm.Initializers as initializers
 from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
 from learnMSA.msa_hmm.Configuration import as_str, assert_config
 from pathlib import Path
@@ -49,13 +50,18 @@ def fit_and_align(fasta_file,
     model_generator, batch_generator = _make_defaults_if_none(model_generator, batch_generator)
     if verbose:
         _fasta_file_messages(fasta_file)
-    n = fasta_file.num_seq
     if subset is None:
         subset = np.arange(fasta_file.num_seq)
     full_length_estimate = get_full_length_estimate(fasta_file, config) 
     model_lengths = initial_model_length_callback(fasta_file, config)
-    #model surgery
+    if hasattr(config["emitter"], '__iter__'):
+        emission_dummy = [em.emission_init[0] for em in config["emitter"]]
+    else:
+        emission_dummy = [config["emitter"].emission_init[0]]
+    transition_dummy = config["transitioner"].transition_init[0]
+    flank_init_dummy = config["transitioner"].flank_init[0]
     last_iteration=config["max_surgery_runs"]==1
+    # 2 staged main loop: Fits model parameters with GD and optimized model architecture with surgery
     for i in range(config["max_surgery_runs"]):
         if callable(config["batch_size"]):
             batch_size = config["batch_size"](model_lengths, fasta_file.max_len)
@@ -63,9 +69,9 @@ def fit_and_align(fasta_file,
             batch_size = config["batch_size"]
         #set the batch size to something smaller than the dataset size even though
         #for low sequence numbers it would be feasible to train on all data at once
-        batch_size = min(batch_size, get_low_seq_num_batch_size(n))
+        batch_size = min(batch_size, get_low_seq_num_batch_size(fasta_file.num_seq))
         if last_iteration:    
-            train_indices = np.arange(n)
+            train_indices = np.arange(fasta_file.num_seq)
             decode_indices = subset
         else:
             train_indices = full_length_estimate
@@ -87,37 +93,12 @@ def fit_and_align(fasta_file,
                                    model=model)
         if last_iteration:
             break
-        if i == 0: # remember the initializers used in the first iteration
-            emission_init_0, transition_init_0, flank_init_0 = _get_initializers(am)
-        surgery_converged = True
-        #duplicate the previous emitters and transitioner and replace their initializers later
-        config["emitter"] = [em.duplicate() for em in am.msa_hmm_layer.cell.emitter]
-        config["transitioner"] = am.msa_hmm_layer.cell.transitioner.duplicate()
-        pos_expand, expansion_lens, pos_discard = get_discard_or_expand_positions(am, 
-                                                                                    del_t=config["surgery_del"], 
-                                                                                    ins_t=config["surgery_ins"])
-        for k in range(config["num_models"]):
-            surgery_converged &= pos_expand[k].size == 0 and pos_discard[k].size == 0
-            if verbose:
-                print(f"expansions model {k}:", list(zip(pos_expand[k], expansion_lens[k])))
-                print(f"discards model {k}:", pos_discard[k])
-            transition_init, emission_init, flank_init = update_kernels(am, 
-                                                                        k,
-                                                                        pos_expand[k],
-                                                                        expansion_lens[k], 
-                                                                        pos_discard[k],
-                                                                        [e[k] for e in emission_init_0], 
-                                                                        transition_init_0[k], 
-                                                                        flank_init_0[k])
-            for em, old_em, e_init in zip(config["emitter"], am.msa_hmm_layer.cell.emitter, emission_init):
-                em.emission_init[k] = tf.constant_initializer(e_init) 
-                em.insertion_init[k] = tf.constant_initializer(old_em.insertion_kernel[k].numpy())
-            config["transitioner"].transition_init[k] = {key : tf.constant_initializer(t) 
-                                         for key,t in transition_init.items()}
-            config["transitioner"].flank_init[k] = tf.constant_initializer(flank_init)
-            model_lengths[k] = emission_init[0].shape[0]
-            if model_lengths[k] < 3: 
-                raise SystemExit("A problem occured during model surgery: A pHMM is too short (length <= 2).") 
+        config, model_lengths, surgery_converged = do_model_surgery(am, 
+                                                                    config,
+                                                                    emission_dummy, 
+                                                                    transition_dummy, 
+                                                                    flank_init_dummy, 
+                                                                    verbose)
         if config["encoder_weight_extractor"] is not None:
             if verbose:
                 print("Used the encoder_weight_extractor callback to pass the encoder parameters to the next iteration.")
@@ -515,6 +496,41 @@ def get_low_seq_num_batch_size(n):
     return max(batch_size, num_devices)
 
 
+def do_model_surgery(am : AlignmentModel, config, emission_dummy, transition_dummy, flank_init_dummy, verbose=False):
+    config = dict(config)
+    surgery_converged = True
+    #duplicate the previous emitters and transitioner and replace their initializers later
+    config["emitter"] = [em.duplicate() for em in am.msa_hmm_layer.cell.emitter]
+    config["transitioner"] = am.msa_hmm_layer.cell.transitioner.duplicate()
+    pos_expand, expansion_lens, pos_discard = get_discard_or_expand_positions(am, 
+                                                                                del_t=config["surgery_del"], 
+                                                                                ins_t=config["surgery_ins"])
+    model_lengths = [0]*config["num_models"]
+    for k in range(config["num_models"]):
+        surgery_converged &= pos_expand[k].size == 0 and pos_discard[k].size == 0
+        if verbose:
+            print(f"expansions model {k}:", list(zip(pos_expand[k], expansion_lens[k])))
+            print(f"discards model {k}:", pos_discard[k])
+        transition_init, emission_init, flank_init = update_kernels(am, 
+                                                                    k,
+                                                                    pos_expand[k],
+                                                                    expansion_lens[k], 
+                                                                    pos_discard[k],
+                                                                    emission_dummy, 
+                                                                    transition_dummy, 
+                                                                    flank_init_dummy)
+        for em, old_em, e_init in zip(config["emitter"], am.msa_hmm_layer.cell.emitter, emission_init):
+            em.emission_init[k] = initializers.ConstantInitializer(e_init) 
+            em.insertion_init[k] = initializers.ConstantInitializer(old_em.insertion_kernel[k].numpy())
+        config["transitioner"].transition_init[k] = {key : initializers.ConstantInitializer(t) 
+                                     for key,t in transition_init.items()}
+        config["transitioner"].flank_init[k] = initializers.ConstantInitializer(flank_init)
+        model_lengths[k] = emission_init[0].shape[0]
+        if model_lengths[k] < 3: 
+            raise SystemExit("A problem occured during model surgery: A pHMM is too short (length <= 2).") 
+    return config, model_lengths, surgery_converged
+
+
 def select_model(am, model_criterion, verbose):
     selection_criteria = {
         "posterior": select_model_posterior,
@@ -589,11 +605,3 @@ def _fasta_file_messages(fasta_file, seq_count_warning_threshold=100):
         print(f"Warning: The file {fasta_file.filename} already contains gaps. Realining the raw sequences.")
     if fasta_file.num_seq < seq_count_warning_threshold:
         print(f"Warning: You are aligning {fasta_file.num_seq} sequences, although learnMSA is designed for large scale alignments. We recommend to have a sufficiently deep training dataset of at least {seq_count_warning_threshold} sequences for accurate results.")
-        
-        
-def _get_initializers(am):
-    emission_init = [em.emission_init 
-                       for em in am.msa_hmm_layer.cell.emitter]
-    transition_init = am.msa_hmm_layer.cell.transitioner.transition_init
-    flank_init = am.msa_hmm_layer.cell.transitioner.flank_init
-    return emission_init, transition_init, flank_init
