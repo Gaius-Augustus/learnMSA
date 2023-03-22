@@ -62,7 +62,7 @@ def make_default(default_num_models = 5):
         "encoder_initializer" : initializers.make_default_anc_probs_init(default_num_models),
         "model_criterion" : "AIC", #AIC is slightly better than loglik on average over multiple benchmarks
         "encoder_weight_extractor" : None,
-        "mutate_models" : False,
+        "experimental_evolve_upper_half" : False,
         "allow_user_keys_in_config" : False
     }
     return default
