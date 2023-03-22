@@ -101,13 +101,18 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
     def call(self, inputs):
         """ 
         Args: 
-                inputs: Shape (k, b, s) (Shape (b, s) works as well if all models should get the same input.)
+                inputs: A tensor of shape (k, ... , s) 
         Returns:
-                Shape (k, b, q)
+                A tensor with emission probabilities of shape (k, ... , q) where "..." is identical to inputs.
         """
+        input_shape = tf.shape(inputs)
+        inputs = tf.reshape(inputs, (tf.shape(inputs)[0], -1, input_shape[-1]))
         # batch matmul of k emission matrices with the b x s input matrix 
         # with broadcasting of the inputs
-        return tf.matmul(inputs, self.B_transposed)
+        emit = tf.matmul(inputs, self.B_transposed)
+        emit_shape = tf.concat([tf.shape(self.B_transposed)[:1], input_shape[1:-1], tf.shape(self.B_transposed)[-1:]], 0)
+        emit = tf.reshape(emit, emit_shape)
+        return emit
     
     def get_prior_log_density(self):
         return self.prior(self.make_B(), self.length)
