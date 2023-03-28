@@ -3,7 +3,11 @@ import numpy as np
 import learnMSA.msa_hmm.Initializers as initializers
 import learnMSA.msa_hmm.Priors as priors
 import learnMSA.msa_hmm.Configuration as config
-from tensorflow.python.training.tracking.data_structures import NoDependency #see https://github.com/tensorflow/tensorflow/issues/36916
+from packaging import version
+if version.parse(tf.__version__) < version.parse("2.11.0"):
+    from tensorflow.python.training.tracking.data_structures import NoDependency #see https://github.com/tensorflow/tensorflow/issues/36916
+else:
+    from tensorflow.python.trackable.data_structures import NoDependency 
 
 class ProfileHMMTransitioner(tf.keras.layers.Layer):
     """ A transitioner defines which transitions between HMM states are allowed, how they are initialized
