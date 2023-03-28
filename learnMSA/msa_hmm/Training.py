@@ -17,7 +17,7 @@ def generic_model_generator(encoder_layers,
         msa_hmm_layer: An instance of MsaHmmLayer.
     """
     num_models = msa_hmm_layer.cell.num_models
-    sequences = tf.keras.Input(shape=(None,None,), name="sequences", dtype=tf.uint8)
+    sequences = tf.keras.Input(shape=(None,None), name="sequences", dtype=tf.uint8)
     indices = tf.keras.Input(shape=(None,), name="indices", dtype=tf.int64)
     #in the input pipeline, we need the batch dimension to come first to make multi GPU work 
     #we transpose here, because all learnMSA layers require the model dimension to come first

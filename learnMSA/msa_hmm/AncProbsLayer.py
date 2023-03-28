@@ -211,10 +211,12 @@ class AncProbsLayer(tf.keras.layers.Layer):
         Args:
             inputs: Input sequences. Shape: (num_model, b, L) or (num_models, b, L, s). The latter format (non index)
                     is only supported for raw amino acid input.
-            rate_indices: Indices that map each input sequences to an evolutionary times. Shape: (num_model, b)
+            rate_indices: Indices that map each input sequences to an evolutionary time. Shape: (num_model, b)
         Returns:
             Ancestral probabilities. Shape: (num_model, b, L, num_matrices*s)
         """
+        rate_indices = tf.identity(rate_indices) #take care of numpy inputs
+        rate_indices.set_shape([self.num_models,None]) #resolves tf 2.12 issues
         input_indices = len(inputs.shape) == 3 
         if input_indices:
             mask = inputs < 20

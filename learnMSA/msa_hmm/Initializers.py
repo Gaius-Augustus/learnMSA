@@ -93,7 +93,14 @@ class MatchTransitionInitializer(tf.keras.initializers.Initializer):
     def __repr__(self):
         return f"DefaultMatchTransition({self.val[self.i]})"
     
-class RandomNormalInitializer(tf.keras.initializers.RandomNormal):
+class RandomNormalInitializer(tf.keras.initializers.Initializer):
+    def __init__(self, mean=0.0, stddev=0.05):
+        self.mean = mean
+        self.stddev = stddev
+    
+    def __call__(self, shape, dtype=None, **kwargs):
+        return tf.random.normal(shape, mean=self.mean, stddev=self.stddev, dtype=dtype if dtype != None else tf.float32)
+        
     def __repr__(self):
         return f"Norm({self.mean}, {self.stddev})"
     
