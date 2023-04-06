@@ -5,7 +5,21 @@
 # Introduction
 Multiple sequence alignment formulated as a statistical machine learning problem, where an optimal profile hidden Markov model for a potentially very large family of protein sequences is searched and an alignment is decoded. We use an automatically differentiable variant of the Forward algorithm.
 
-# InstallationlearnM
+## Features
+
+- Aligns large numbers of protein sequences with state-of-the-art accuracy
+- Enables ultra-large alignment of millions of sequences 
+- Scales linear in the number of sequences
+- Memory efficient (depending on sequence length, aligning millions of sequences on a laptop is possible)
+- (optional) GPU acceleration 
+
+## Current limitations
+
+- Requires many sequences (in most cases starting at 1000, a few 100 might still be enough) to achieve state-of-the-art accuracy
+- Only for protein sequences
+- Increasingly slow for long proteins with a length > 1000 residues
+
+# Installation
 
 Choose according to your preference:
 
