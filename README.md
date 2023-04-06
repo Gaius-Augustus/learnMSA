@@ -5,7 +5,7 @@
 # Introduction
 Multiple sequence alignment formulated as a statistical machine learning problem, where an optimal profile hidden Markov model for a potentially very large family of protein sequences is searched and an alignment is decoded. We use an automatically differentiable variant of the Forward algorithm.
 
-# Installation
+# InstallationlearnM
 
 Choose according to your preference:
 
@@ -31,15 +31,9 @@ Choose according to your preference:
   
 ## With GPU support
 
-*Optional, but recommended for proteins longer than 100 residues. The instructions above may be sufficient if the cudnn and cudatoolkit packages are already installed on your system.*
+*Optional, but recommended for proteins longer than 100 residues.*
 
-You have to meet the [TensorFlow GPU](https://www.tensorflow.org/install/gpu) requirements. A GPU installation out of the box (including cudnn and cudatoolkit) is possible by typing:
-
-```
-conda create -n learnMSA tensorflow-gpu
-conda activate learnMSA
-pip install learnMSA
-```
+You have to meet the [TensorFlow GPU](https://www.tensorflow.org/install/gpu) requirements. The install instructions above are sufficient if the cudnn and cudatoolkit packages are installed on your system.
 
 LearnMSA will notify you whether it finds any GPUs it can use or it will fall back to CPU.
 
