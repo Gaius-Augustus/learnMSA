@@ -12,6 +12,7 @@ Multiple sequence alignment formulated as a statistical machine learning problem
 - Scales linear in the number of sequences
 - Memory efficient (depending on sequence length, aligning millions of sequences on a laptop is possible)
 - (optional) GPU acceleration 
+- Visualize a profile HMM or a sequence logo of the consensus motif
 
 ## Current limitations
 
