@@ -67,7 +67,18 @@ def make_default(default_num_models = 5):
     }
     return default
 
+def _make_assert_text(message, current_value):
+    return message + f" Your input was {current_value}."
+
 def assert_config(config):
+    assert config["max_surgery_runs"] > 0, \
+        _make_assert_text("Requires as least 1 surgery run.", config["max_surgery_runs"])
+    assert config["length_init_quantile"] >= 0. and config["length_init_quantile"] <= 1., \
+        _make_assert_text("The given quantile is not in range [0,1].", config["length_init_quantile"])
+    assert config["surgery_quantile"] >= 0. and config["surgery_quantile"] <= 1., \
+        _make_assert_text("The given quantile is not in range [0,1].", config["surgery_quantile"])
+    assert config["len_mul"] >= 0., \
+        _make_assert_text("The multiplier must be greater than zero.", config["surgery_quantile"])
     assert "num_models" in config
     default = make_default(config["num_models"])
     for key in default:

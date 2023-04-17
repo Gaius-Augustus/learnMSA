@@ -25,13 +25,38 @@ def run_main():
     parser.add_argument("-o", "--out_file", dest="output_file", type=str, required=True,
                         help="Filepath for the output alignment.")
     parser.add_argument("-n", "--num_model", dest="num_model", type=int, default=1,
-                        help="Number of models trained in parallel (default 1).")
+                        help="Number of models trained in parallel. (default: %(default)s)")
     parser.add_argument("-s", "--silent", dest="silent", action='store_true', help="Prevents output to stdout.")
     parser.add_argument("-r", "--ref_file", dest="ref_file", type=str, default="", help=argparse.SUPPRESS) #useful for debudding, do not expose to users
     parser.add_argument("-b", "--batch", dest="batch_size", type=int, default=-1,
-                        help="Should be lowered if memory issues with the default settings occur. Default: Adaptive, depending on model length (128-512).")
+                        help="Should be lowered if memory issues with the default settings occur. Default: Adaptive, depending on model length (64-512).")
     parser.add_argument("-d", "--cuda_visible_devices", dest="cuda_visible_devices", type=str, default="default",
                         help="Controls the GPU devices visible to learnMSA as a comma-separated list of device IDs. The value -1 forces learnMSA to run on CPU. Per default, learnMSA attempts to use all available GPUs.")
+    
+    parser.add_argument("--max_surgery_runs", dest="max_surgery_runs", type=int, default=4, 
+                        help="Maximum number of model surgery iterations. (default: %(default)s)")
+    parser.add_argument("--length_init_quantile", dest="length_init_quantile", type=float, default=0.5, 
+                        help="Quantile of the input sequence lengths that defines the initial model lengths. (default: %(default)s)")
+    parser.add_argument("--surgery_quantile", dest="surgery_quantile", type=float, default=0.5, 
+                        help="learnMSA will not use sequences shorter than this quantile for training during all iterations except the last. (default: %(default)s)")
+    parser.add_argument("--min_surgery_seqs", dest="min_surgery_seqs", type=int, default=10000, 
+                        help="Minimum number of sequences used per iteration. Overshadows the effect of --surgery_quantile. (default: %(default)s)")
+    parser.add_argument("--len_mul", dest="len_mul", type=float, default=0.8, 
+                        help="Multiplicative constant for the quantile used to define the initial model length (see --length_init_quantile). (default: %(default)s)")
+    parser.add_argument("--learning_rate", dest="learning_rate", type=float, default=0.1, 
+                        help="The learning rate used during gradient descent. (default: %(default)s)")
+    parser.add_argument("--epochs", dest="epochs", type=int, nargs=3, default=[10, 2, 10],
+                       help="Scheme for the number of training epochs during the first, an intermediate and the last iteration (expects 3 integers in this order). (default: %(default)s)")
+    parser.add_argument("--surgery_del", dest="surgery_del", type=float, default=0.5,
+                       help="Will discard match states that are expected less often than this fraction. (default: %(default)s)")
+    parser.add_argument("--surgery_ins", dest="surgery_ins", type=float, default=0.5,
+                       help="Will expand insertions that are expected more often than this fraction. (default: %(default)s)")
+    parser.add_argument("--model_criterion", dest="model_criterion", type=str, default="AIC",
+                       help="Criterion for model selection. (default: %(default)s)")
+    parser.add_argument("--alpha_flank", dest="alpha_flank", type=float, default=7000, help=argparse.SUPPRESS)
+    parser.add_argument("--alpha_single", dest="alpha_single", type=float, default=1e9, help=argparse.SUPPRESS)
+    parser.add_argument("--alpha_frag", dest="alpha_frag", type=float, default=1e4, help=argparse.SUPPRESS)
+    
     args = parser.parse_args()
     
     if not args.silent:
@@ -60,7 +85,21 @@ def run_main():
     
     config["batch_size"] = args.batch_size if args.batch_size > 0 else msa_hmm.config.get_adaptive_batch_size
     config["num_models"] = args.num_model
-    
+    config["max_surgery_runs"] = args.max_surgery_runs
+    config["length_init_quantile"] = args.length_init_quantile
+    config["surgery_quantile"] = args.surgery_quantile
+    config["min_surgery_seqs"] = args.min_surgery_seqs
+    config["len_mul"] = args.len_mul
+    config["learning_rate"] = args.learning_rate
+    config["epochs"] = args.epochs
+    config["surgery_del"] = args.surgery_del
+    config["surgery_ins"] = args.surgery_ins
+    config["model_criterion"] = args.model_criterion
+    transitioners = config["transitioner"] if hasattr(config["transitioner"], '__iter__') else [config["transitioner"]]
+    for trans in transitioners:
+        trans.prior.alpha_flank = args.alpha_flank
+        trans.prior.alpha_single = args.alpha_single
+        trans.prior.alpha_frag = args.alpha_frag
     _ = msa_hmm.align.run_learnMSA(train_filename = args.input_file,
                                     out_filename = args.output_file,
                                     config = config, 
