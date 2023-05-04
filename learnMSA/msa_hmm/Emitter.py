@@ -71,10 +71,14 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
             The emission matrix.
         """
         em, ins = self.emission_kernel[i], self.insertion_kernel[i]
+        length = self.length[i]
+        return self.make_emission_matrix_from_kernels(em, ins, length)
+    
+    def make_emission_matrix_from_kernels(self, em, ins, length):
         s = em.shape[-1]
         emissions = tf.concat([tf.expand_dims(ins, 0), 
                                em, 
-                               tf.stack([ins]*(self.length[i]+1))] , axis=0)
+                               tf.stack([ins]*(length+1))] , axis=0)
         emissions = tf.nn.softmax(emissions)
         emissions = tf.concat([emissions, tf.zeros_like(emissions[:,:1])], axis=-1) 
         end_state_emission = tf.one_hot([s], s+1, dtype=em.dtype) 
