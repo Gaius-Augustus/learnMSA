@@ -146,7 +146,7 @@ def make_dataset(indices, batch_generator, batch_size=512, shuffle=True):
                 deterministic=True)
     ds_y = tf.data.Dataset.from_tensor_slices(tf.zeros(1)).batch(batch_size).repeat()
     ds = tf.data.Dataset.zip((ds, ds_y))
-    ds = ds.prefetch(tf.data.AUTOTUNE) #preprocessings and training steps in parallel
+    ds = ds.prefetch(2) #preprocessings and training steps in parallel
     return ds
     
 

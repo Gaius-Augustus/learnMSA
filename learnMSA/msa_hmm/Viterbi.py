@@ -135,9 +135,9 @@ def get_state_seqs_max_lik(fasta_file,
     state_seqs_max_lik = np.zeros((hmm_cell.num_models, indices.size, seq_len), 
                                   dtype=np.uint16) 
     if encoder:
-        @tf.function(input_signature=[tf.TensorSpec(x.shape, dtype=x.dtype) for x in encoder.inputs])
-        def call_viterbi(inputs, indices):
-            encoded_seq = encoder([inputs, indices])
+        @tf.function(input_signature=[[tf.TensorSpec(x.shape, dtype=x.dtype) for x in encoder.inputs]])
+        def call_viterbi(inputs):
+            encoded_seq = encoder(inputs)
             #todo: this can be improved by encoding only for required models, not all
             encoded_seq = tf.gather(encoded_seq, model_ids, axis=0)
             viterbi_seq = viterbi(encoded_seq, hmm_cell)
@@ -150,7 +150,7 @@ def get_state_seqs_max_lik(fasta_file,
         else:
             seq = encoder(inputs) 
         #todo: this can be improved by encoding only for required models, not all
-        seq = tf.boolean_mask(seq, model_ids, axis=0)
+        seq = tf.gather(seq, model_ids, axis=0)
         return viterbi(seq, hmm_cell)
     
     for i,q in enumerate(hmm_cell.num_states):
@@ -160,7 +160,7 @@ def get_state_seqs_max_lik(fasta_file,
         if hasattr(batch_generator, "return_only_sequences") and batch_generator.return_only_sequences:
             state_seqs_max_lik_batch = call_viterbi_single(inputs).numpy()
         else:
-            state_seqs_max_lik_batch = call_viterbi(inputs[0], inputs[1]).numpy()
+            state_seqs_max_lik_batch = call_viterbi(inputs).numpy()
         _,b,l = state_seqs_max_lik_batch.shape
         state_seqs_max_lik[:, i:i+b, :l] = state_seqs_max_lik_batch
         i += b 

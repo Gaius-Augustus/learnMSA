@@ -17,7 +17,8 @@ def get_initial_model_lengths(fasta_file, config, random=True):
     model_length *= config["len_mul"]
     model_length = max(3., model_length)
     if random:
-        scale = (3 + model_length/30)
+        #scale = (3 + model_length/30)
+        scale = (1 + model_length/50)
         lens = np.round(np.random.normal(loc=model_length, scale=scale, size=config["num_models"])).astype(np.int32)
         lens = np.maximum(lens, 3)
         return lens
@@ -235,9 +236,9 @@ def get_state_expectations(fasta_file,
     
     cell = msa_hmm_layer.cell
     
-    @tf.function(input_signature=[tf.TensorSpec(x.shape, dtype=x.dtype) for x in encoder.inputs])
-    def batch_posterior_state_probs(inputs, indices):
-        encoded_seq = encoder([inputs, indices]) 
+    @tf.function(input_signature=[[tf.TensorSpec(x.shape, dtype=x.dtype) for x in encoder.inputs]])
+    def batch_posterior_state_probs(inputs):
+        encoded_seq = encoder(inputs) 
         posterior_probs = msa_hmm_layer.state_posterior_log_probs(encoded_seq)
         posterior_probs = tf.math.exp(posterior_probs)
         #compute expected number of visits per hidden state and sum over batch dim
@@ -249,12 +250,12 @@ def get_state_expectations(fasta_file,
     if reduce:
         posterior_probs = tf.zeros((cell.num_models, cell.max_num_states), cell.dtype) 
         for inputs, _ in ds:
-            posterior_probs += batch_posterior_state_probs(inputs[0], inputs[1])
+            posterior_probs += batch_posterior_state_probs(inputs)
         return posterior_probs.numpy()
     else:
         posterior_probs = np.zeros((cell.num_models, num_indices, cell.max_num_states), cell.dtype) 
         for i, (inputs, _) in enumerate(ds):
-            posterior_probs[:,i*batch_size : (i+1)*batch_size] = batch_posterior_state_probs(inputs[0], inputs[1])
+            posterior_probs[:,i*batch_size : (i+1)*batch_size] = batch_posterior_state_probs(inputs)
         return posterior_probs
     
         

@@ -63,20 +63,18 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
         self.B = self.make_B()
         self.B_transposed = tf.transpose(self.B, [0,2,1])
         
-    def make_emission_matrix(self, em, ins, length):
+    def make_emission_matrix(self, i):
         """Constructs an emission matrix from kernels with a shared insertion distribution.
         Args:
-           s: Alphabet size.
-           em: Emission distribution logits (kernel).
-           ins: Shared insertion distribution (kernel).
-           length: Model length.
+           i: Model index.
         Returns:
             The emission matrix.
         """
+        em, ins = self.emission_kernel[i], self.insertion_kernel[i]
         s = em.shape[-1]
         emissions = tf.concat([tf.expand_dims(ins, 0), 
                                em, 
-                               tf.stack([ins]*(length+1))] , axis=0)
+                               tf.stack([ins]*(self.length[i]+1))] , axis=0)
         emissions = tf.nn.softmax(emissions)
         emissions = tf.concat([emissions, tf.zeros_like(emissions[:,:1])], axis=-1) 
         end_state_emission = tf.one_hot([s], s+1, dtype=em.dtype) 
@@ -85,8 +83,8 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
         
     def make_B(self):
         emission_matrices = []
-        for em, ins, length in zip(self.emission_kernel, self.insertion_kernel, self.length):
-            em_mat = self.make_emission_matrix(em, ins, length) 
+        for i in range(self.num_models):
+            em_mat = self.make_emission_matrix(i) 
             padding = self.max_num_states - em_mat.shape[0]
             em_mat_pad = tf.pad(em_mat, [[0, padding], [0,0]])
             emission_matrices.append(em_mat_pad)

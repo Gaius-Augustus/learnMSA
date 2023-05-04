@@ -193,7 +193,7 @@ def plot_anc_probs(am,
                    model_index,
                    seqs=[0,1,2], 
                    pos=list(range(6)), 
-                   rescale=True, 
+                   rescale=False, 
                    title="Site-wise ancestral probabilities"):
     n, m = len(seqs), len(pos)
     ds = msa_hmm.train.make_dataset(am.indices[seqs], 
