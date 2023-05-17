@@ -107,7 +107,8 @@ class TestMsaHmmCell(unittest.TestCase):
             init = True
             for j in range(4):
                 col = seq[:,j]
-                log_forward, (scaled_forward, loglik) = hmm_cell(col, (scaled_forward, loglik), init=init)
+                emission_probs = hmm_cell.emission_probs(col)
+                log_forward, (scaled_forward, loglik) = hmm_cell(emission_probs, (scaled_forward, loglik), init=init)
                 init = False
                 ref_forward = self.ref_alpha[i][j]
                 ref_scaled_forward = self.ref_scaled_alpha[i][j]
@@ -124,7 +125,8 @@ class TestMsaHmmCell(unittest.TestCase):
         init = True
         for j in range(4):
             col = np.repeat(seq[:,j], len(models), axis=0)
-            log_forward, (scaled_forward, loglik) = hmm_cell(col, (scaled_forward, loglik), init=init)
+            emission_probs = hmm_cell.emission_probs(col)
+            log_forward, (scaled_forward, loglik) = hmm_cell(emission_probs, (scaled_forward, loglik), init=init)
             init = False
             for i in range(2):
                 q = hmm_cell.num_states[i]
@@ -280,12 +282,14 @@ class TestMSAHMM(unittest.TestCase):
         forward, loglik = hmm_cell.get_initial_state(batch_size=2)
         self.assertEqual(loglik[0], 0)
         #next match state should always yield highest probability
+        sequences = tf.transpose(sequences, [1,0,2,3])
+        emission_probs = hmm_cell.emission_probs(sequences)
         for i in range(length):
-            _, (forward, loglik) = hmm_cell(sequences[:,:,i], (forward, loglik))
+            _, (forward, loglik) = hmm_cell(emission_probs[:,:,i], (forward, loglik))
             self.assertEqual(np.argmax(forward[0]), i+1)
         last_loglik = loglik
         #check correct end in match state
-        _, (forward, loglik) = hmm_cell(sequences[:,:,4], (forward, loglik))
+        _, (forward, loglik) = hmm_cell(emission_probs[:,:,4], (forward, loglik))
         self.assertEqual(np.argmax(forward[0]), 2*length+2)
         
         hmm_cell.recurrent_init()
@@ -295,16 +299,18 @@ class TestMSAHMM(unittest.TestCase):
         sequences = tf.one_hot(sequences, len(msa_hmm.fasta.alphabet))
         self.assertEqual(sequences.shape, (2,1,10,len(msa_hmm.fasta.alphabet)))
         forward, loglik = hmm_cell.get_initial_state(batch_size=2)
+        sequences = tf.transpose(sequences, [1,0,2,3])
+        emission_probs = hmm_cell.emission_probs(sequences)
         for i in range(length):
-            _, (forward, loglik) = hmm_cell(sequences[:,:,i], (forward, loglik))
+            _, (forward, loglik) = hmm_cell(emission_probs[:,:,i], (forward, loglik))
             self.assertEqual(np.argmax(forward[0]), i+1)
             self.assertEqual(np.argmax(forward[1]), i+1)
-        _, (forward, loglik) = hmm_cell(sequences[:,:,length], (forward, loglik))
+        _, (forward, loglik) = hmm_cell(emission_probs[:,:,length], (forward, loglik))
         self.assertEqual(np.argmax(forward[0]), 2*length+2)
         self.assertEqual(np.argmax(forward[1]), 2*length)
         for i in range(4):
             old_loglik = loglik
-            _, (forward, loglik) = hmm_cell(sequences[:,:,length+1+i], (forward, loglik))
+            _, (forward, loglik) = hmm_cell(emission_probs[:,:,length+1+i], (forward, loglik))
             #the first sequence is shorter and padded with end-symbols
             #the first end symbol in each sequence affects the likelihood, but this is the
             #same constant for all sequences in the batch

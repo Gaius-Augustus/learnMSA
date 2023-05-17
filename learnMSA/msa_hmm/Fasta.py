@@ -206,7 +206,7 @@ class Fasta:
     
     def column_str(self, i):
         col = ""
-        for j in self.ref_seq[:,i]:
+        for j in self.ref_seq[i]:
             col += alphabet[j]
         return col
     

@@ -47,6 +47,8 @@ class MsaHmmCell(tf.keras.layers.Layer):
             
     def build(self, input_shape):
         self.dim = input_shape[-1]
+        if self.built:
+            return
         for em in self.emitter:
             em.build(input_shape)
         self.transitioner.build(input_shape)
@@ -83,14 +85,13 @@ class MsaHmmCell(tf.keras.layers.Layer):
         return em_probs
 
     
-    def call(self, inputs, states, training=None, init=False):
+    def call(self, emission_probs, states, training=None, init=False):
         """ Computes one recurrent step of the Forward DP.
         """
         old_scaled_forward, old_loglik = states
         old_scaled_forward = tf.reshape(old_scaled_forward, (self.num_models, -1, self.max_num_states))
         old_loglik = tf.reshape(old_loglik, (self.num_models, -1, 1))
-        inputs = tf.reshape(inputs, (self.num_models, -1, self.dim))
-        E = self.emission_probs(inputs)
+        E = tf.reshape(emission_probs, (self.num_models, -1, self.max_num_states))
         if init:
             R = old_scaled_forward
         else:
@@ -150,7 +151,6 @@ class MsaHmmCell(tf.keras.layers.Layer):
         sub_emitter = [e.duplicate(model_indices) for e in self.emitter]
         sub_transitioner = self.transitioner.duplicate(model_indices)
         subset_cell = MsaHmmCell(sub_lengths, sub_emitter, sub_transitioner)
-        subset_cell.dim = self.dim
         return subset_cell
     
     

@@ -4,23 +4,18 @@ import learnMSA.msa_hmm.Training as train
 import time
 
 
-def viterbi_step(gamma_prev, sequences_i, hmm_cell):
+def viterbi_step(gamma_prev, emission_probs_i, hmm_cell):
     """ Computes one Viterbi dynamic programming step.
     Args:
         gamma_prev: Viterbi values of the previous recursion. Shape (num_models, b, q)
-        sequences_i: i-th vertical sequence slice. Shape (num_models, b, s)
+        emission_probs_i: Emission probabilities of the i-th vertical input slice. Shape (num_models, b, q)
         hmm_cell: HMM cell with the models under which decoding should happen.
     """
     epsilon = tf.constant(np.finfo(np.float32).tiny)
-    
     #very very inefficient!?
     a = tf.expand_dims(hmm_cell.log_A_dense, 1) + tf.expand_dims(gamma_prev, -1)
-    #a = tf.linalg.matmul()
     a = tf.reduce_max(a, axis=-2)
-    
-    b = hmm_cell.emission_probs(sequences_i)
-    b += epsilon
-    b = tf.math.log(b)
+    b = tf.math.log(emission_probs_i + epsilon)
     gamma_next = a + b
     return gamma_next
 
@@ -35,7 +30,8 @@ def viterbi_dyn_prog(sequences, hmm_cell):
     """
     epsilon = tf.constant(np.finfo(np.float32).tiny)
     init = tf.transpose(hmm_cell.init_dist, (1,0,2)) #(num_models, 1, q)
-    b0 = hmm_cell.emission_probs(sequences[:,:,0])
+    emission_probs = hmm_cell.emission_probs(sequences)
+    b0 = emission_probs[:,:,0]
     gamma_val = tf.math.log(init+epsilon) + tf.math.log(b0+epsilon)
     gamma_val = tf.cast(gamma_val, dtype=hmm_cell.dtype) 
     L = tf.shape(sequences)[-2]
@@ -43,7 +39,7 @@ def viterbi_dyn_prog(sequences, hmm_cell):
     gamma = tf.TensorArray(hmm_cell.dtype, size=L)
     gamma = gamma.write(0, gamma_val)
     for i in tf.range(1, L):
-        gamma_val = viterbi_step(gamma_val, sequences[:,:,i], hmm_cell)
+        gamma_val = viterbi_step(gamma_val, emission_probs[:,:,i], hmm_cell)
         gamma = gamma.write(i, gamma_val) 
     gamma = tf.transpose(gamma.stack(), [1,2,0,3])
     return gamma

@@ -22,7 +22,10 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         
         
     def build(self, input_shape):
-        self.rnn.build((None, input_shape[-2], input_shape[-1])) #also builds the cell
+        # build the cell 
+        self.cell.build((None, input_shape[-2], input_shape[-1]))
+        # build the RNN layer with a different input shape
+        self.rnn.build((None, input_shape[-2], self.cell.max_num_states))
         self.built = True
         
         
@@ -40,12 +43,13 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         num_model, b, seq_len, s = tf.unstack(tf.shape(inputs))
         initial_state = self.cell.get_initial_state(batch_size=b)
         #reshape to 3D inputs for RNN (cell will reshape back in each step)
-        inputs = tf.reshape(inputs, (num_model*b, seq_len, s))
+        emission_probs = self.cell.emission_probs(inputs)
+        emission_probs = tf.reshape(emission_probs, (num_model*b, seq_len, self.cell.max_num_states))
         #do one initialization step
         #this way, tf will compile two versions of the cell call, one with init=True and one without
-        forward_1, step_1_state = self.cell(inputs[:,0], initial_state, training, init=True)
+        forward_1, step_1_state = self.cell(emission_probs[:,0], initial_state, training, init=True)
         #run forward with the output of the first step as initial state
-        forward, _, loglik = self.rnn(inputs[:,1:], initial_state=step_1_state, training=training)
+        forward, _, loglik = self.rnn(emission_probs[:,1:], initial_state=step_1_state, training=training)
         #prepend the separate first step to the other forward steps
         forward = tf.concat([forward_1[:,tf.newaxis], forward], axis=1)
         forward = tf.reshape(forward, (num_model, b, seq_len, -1))
@@ -64,11 +68,12 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         self.cell.recurrent_init()
         num_model, b, seq_len, s = tf.unstack(tf.shape(inputs))
         initial_state = self.cell.get_initial_backward_state(batch_size=b)
-        inputs = tf.reshape(inputs, (num_model*b, seq_len, s))
+        emission_probs = self.cell.emission_probs(inputs)
+        emission_probs = tf.reshape(emission_probs, (num_model*b, seq_len, self.cell.max_num_states))
         self.cell.reverse_direction()
         #note that for backward, we can ignore the initial step like we did it in
         #forward, because we assume that all inputs have terminal tokens
-        backward, _, _ = self.rnn_backward(inputs, initial_state=initial_state)
+        backward, _, _ = self.rnn_backward(emission_probs, initial_state=initial_state)
         self.cell.reverse_direction()
         backward = tf.reshape(backward, (num_model, b, seq_len, -1))
         backward = tf.reverse(backward, [-2])
