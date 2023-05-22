@@ -29,6 +29,10 @@ class TestFasta(unittest.TestCase):
         self.assertEqual(fasta2.aminoacid_seq_str(0), "PSPCQNGGLCFMSGDDTDYTCACPTGFSG")
         self.assertEqual(fasta2.aminoacid_seq_str(7), "SSPCQNGGMCFMSGDDTDYTCACPTGFSG")
         self.assertEqual(fasta2.aminoacid_seq_str(-1), "CSSSPCNAEGTVRCEDKKGDFLCHCFTGWAGAR")
+        
+    def test_ambiguous_amino_acids(self):
+        fasta = msa_hmm.fasta.Fasta("test/data/ambiguous.fasta", single_seq_ok=True)
+        self.assertEqual(fasta.aminoacid_seq_str(0), "AGCTXXXXXX")
 
 class TestMsaHmmCell(unittest.TestCase):
     
@@ -325,7 +329,7 @@ class TestMSAHMM(unittest.TestCase):
     def test_viterbi(self):
         length = [5, 3]
         emission_init = [tf.constant_initializer(string_to_one_hot("FELIX").numpy()*20),
-                         tf.constant_initializer(string_to_one_hot("ABC").numpy()*20)]
+                         tf.constant_initializer(string_to_one_hot("AHC").numpy()*20)]
         transition_init = [msa_hmm.initializers.make_default_transition_init(MM = 0, 
                                                                     MI = 0,
                                                                     MD = 0,
@@ -346,7 +350,7 @@ class TestMSAHMM(unittest.TestCase):
         hmm_cell = msa_hmm.MsaHmmCell(length, emitter, transitioner)
         hmm_cell.build((None, None, 26))
         hmm_cell.recurrent_init()
-        fasta_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/felix.fa")
+        fasta_file = msa_hmm.fasta.Fasta(os.path.dirname(__file__)+"/data/felix.fa", replace_BZJ=False)
         ref_seqs = np.array([#model 1
                              [[1,2,3,4,5,12,12,12,12,12,12,12,12,12,12],
                              [0,0,0,1,2,3,4,5,12,12,12,12,12,12,12],
@@ -468,10 +472,10 @@ class TestMSAHMM(unittest.TestCase):
         
         s = msa_hmm.fasta.s
         A = msa_hmm.fasta.alphabet.index("A")
-        B = msa_hmm.fasta.alphabet.index("B")
+        H = msa_hmm.fasta.alphabet.index("H")
         C = msa_hmm.fasta.alphabet.index("C")
         a = msa_hmm.fasta.alphabet.index("A")+s
-        b = msa_hmm.fasta.alphabet.index("B")+s
+        h = msa_hmm.fasta.alphabet.index("H")+s
         c = msa_hmm.fasta.alphabet.index("C")+s
         F = msa_hmm.fasta.alphabet.index("F")
         E = msa_hmm.fasta.alphabet.index("E")
@@ -487,7 +491,7 @@ class TestMSAHMM(unittest.TestCase):
         gap = 2*s-1
             
         ref_left_flank_block = [ np.array([[gap]*3, #model 1
-                                         [a,b,c],
+                                         [a,h,c],
                                          [gap]*3, 
                                         [gap]*3, 
                                         [gap, gap, a],
@@ -496,7 +500,7 @@ class TestMSAHMM(unittest.TestCase):
                                         [gap]*3]), 
                                 np.array([[gap,f,e,l,i,x], #model 2
                                          [gap]*6,
-                                         [f,e,l,i,x, b], 
+                                         [f,e,l,i,x, h], 
                                         [gap,f,e,l,i,x],  
                                          [gap]*6,
                                         [gap,gap,gap,gap,f,e], 
@@ -504,12 +508,12 @@ class TestMSAHMM(unittest.TestCase):
                                         [gap,gap,gap,f,e,l]]) ]
         ref_right_flank_block = [ np.array([[gap]*3,  #model 1
                                           [gap]*3,
-                                          [b,a,c], 
+                                          [h,a,c], 
                                           [a,gap,gap], 
-                                          [b, gap, gap],
+                                          [h, gap, gap],
                                           [gap]*3, 
                                           [gap]*3, 
-                                          [a,b,c]]), 
+                                          [a,h,c]]), 
                                  np.array([[gap]*5,  #model 2
                                           [f,e,l,i,x],
                                           [gap]*5,
@@ -524,7 +528,7 @@ class TestMSAHMM(unittest.TestCase):
                                   [gap]*2, 
                                   [gap]*2, 
                                   [gap]*2,
-                                  [a,b], 
+                                  [a,h], 
                                   [gap]*2]), 
                           np.array([[gap]*3, 
                                   [gap]*3, 
@@ -540,9 +544,9 @@ class TestMSAHMM(unittest.TestCase):
                                      [F,gap,gap,E,gap,gap,gap,L,gap,gap,gap,I,gap,gap,gap,X],
                                      [F,gap,gap,E,gap,gap,gap,L,gap,gap,gap,I,gap,gap,gap,X],
                                      [GAP,gap,gap,E,gap,gap,gap,L,gap,gap,gap,I,gap,gap,gap,GAP],
-                                     [F,gap,gap,E,a,b,c,L,gap,gap,gap,I,gap,gap,gap,X],
-                                     [F,a,b,E,gap,gap,gap,L,a,gap,gap,I,a,b,c,X],
-                                     [F,gap,gap,E,gap,gap,gap,L,a,b,c,I,gap,gap,gap,X]]),
+                                     [F,gap,gap,E,a,h,c,L,gap,gap,gap,I,gap,gap,gap,X],
+                                     [F,a,h,E,gap,gap,gap,L,a,gap,gap,I,a,h,c,X],
+                                     [F,gap,gap,E,gap,gap,gap,L,a,h,c,I,gap,gap,gap,X]]),
                           np.array([[GAP]*5,
                                     [GAP]*5,
                                     [GAP]*5,
@@ -553,13 +557,13 @@ class TestMSAHMM(unittest.TestCase):
                                     [GAP]*5])], 
                             #model 2
                          [np.array([[GAP, gap, gap, gap, GAP, GAP],
-                                     [A,gap, gap, gap, B, C],
+                                     [A,gap, gap, gap, H, C],
                                      [A,gap, gap, gap, GAP, C],
-                                     [A,gap, gap, gap, B,C],
-                                     [A,e,l,i,B,GAP],
-                                     [A,gap, gap, gap, B, C],
-                                     [A, gap, gap, gap, B, GAP],
-                                     [A, gap, gap, gap, B, C]]),
+                                     [A,gap, gap, gap, H, C],
+                                     [A,e,l,i,H,GAP],
+                                     [A,gap, gap, gap, H, C],
+                                     [A, gap, gap, gap, H, GAP],
+                                     [A, gap, gap, gap, H, C]]),
                           np.array([[GAP]*3,
                                     [GAP]*3,
                                     [GAP]*3,
@@ -567,7 +571,7 @@ class TestMSAHMM(unittest.TestCase):
                                     [GAP]*3,
                                     [GAP]*3,
                                     [A,GAP,GAP],
-                                    [A,B,C]])] ]
+                                    [A,H,C]])] ]
         ref_num_blocks = [2, 3]
         #second domain hit
         ref_consensus_2 = [ #model 1
@@ -1251,7 +1255,7 @@ class TestAlignment(unittest.TestCase):
         #create alignment after building model
         sub_am = msa_hmm.AlignmentModel(fasta_file, batch_gen, subset, 32, model)
         subalignment_strings = sub_am.to_string(0, add_block_sep=False)
-        ref_subalignment = ["FE...LIX...", "FE...LIXbac", "FEabcLIX..."]
+        ref_subalignment = ["FE...LIX...", "FE...LIXhac", "FEahcLIX..."]
         for s,r in zip(subalignment_strings, ref_subalignment):
             self.assertEqual(s,r)
        
@@ -1297,7 +1301,7 @@ class ConsoleTest(unittest.TestCase):
         single_seq_expected_err = f"File {single_seq} contains only a single sequence."
         faulty_format_expected_err = f"Can not read sequences from file {faulty_format}. Expected a file in FASTA format containing at least 2 sequences."
         empty_seq_expected_err = f"File {empty_seq} contains an empty sequence: \'zweite Sequenz\'."
-        unknown_symbol_expected_err = f"In file {unknown_symbol}: Found unknown character(s) J in sequence \'erste Sequenz\'. Allowed alphabet: ARNDCQEGHILKMFPSTWYVBZXUO."
+        unknown_symbol_expected_err = f"In file {unknown_symbol}: Found unknown character(s) ? in sequence \'erste Sequenz\'. Allowed alphabet: ARNDCQEGHILKMFPSTWYVBZXUO."
         faulty_msa_expected_err = f"In file {faulty_msa}: Although they contain gaps, the input sequences have different lengths. The file seems to contain a malformed alignment."
         
         test = subprocess.Popen(["python", "learnMSA.py", "--silent", "-o", "test.out", "-i", single_seq], stderr=subprocess.PIPE)

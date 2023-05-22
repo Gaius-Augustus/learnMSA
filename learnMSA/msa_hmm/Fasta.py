@@ -23,11 +23,13 @@ class Fasta:
     def __init__(self, 
                  filename, #fasta file to parse
                  aligned = False, #automatically assumes an alignment if gaps are found, this flag only has to be set manually, if the file contains a gapless alignment
-                 single_seq_ok = False
+                 single_seq_ok = False,
+                 replace_BZJ = True
                 ):
         self.filename = filename
         self.aligned = aligned
         self.single_seq_ok = single_seq_ok
+        self.replace_BZJ = replace_BZJ
         self.read_seqs(filename)
         if self.gaps:
             self.compute_targets()
@@ -48,14 +50,17 @@ class Fasta:
                     self.raw_seq.append("")
                 elif len(self.raw_seq) > 0:
                     self.raw_seq[-1] += line
+            
+        if self.replace_BZJ:
+            for c in ["b", "B", "z", "Z", "j", "J"]:
+                replace_in_strings(self.raw_seq, c, 'X')
                         
-                    
         self.gaps = self.validate()
         
         if self.gaps:    
             self.alignment_len = len(self.raw_seq[0])
             replace_in_strings(self.raw_seq, '.', '-')
-            
+                        
         for i,c in enumerate(alphabet[:-1]):
             replace_in_strings(self.raw_seq, c, str(i)+' ')
             replace_in_strings(self.raw_seq, c.lower(), str(i)+' ')
