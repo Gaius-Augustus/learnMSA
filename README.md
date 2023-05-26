@@ -64,7 +64,7 @@ Requirements:
 - [TensorFlow](https://github.com/tensorflow/tensorflow) (tested versions: 2.5, >=2.7)
 - [networkx](https://networkx.org/) 
 - [logomaker](https://logomaker.readthedocs.io/en/latest/) 
-- python >= 3.7
+- python 3.9 (there are known issues with 3.7 which is deprecated and 3.8 is untested)
 
 1. Clone the repository: 
 
