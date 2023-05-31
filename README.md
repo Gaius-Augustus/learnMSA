@@ -38,7 +38,7 @@ Choose according to your preference:
   
   <code>conda activate learnMSA</code>.
   
-  If you do not want to use environments, we recommend to use [Miniconda](https://docs.conda.io/en/latest/miniconda.html) to have a clean base environment.
+  We recommend to use [Miniconda](https://docs.conda.io/en/latest/miniconda.html) to have a clean base environment.
 
 ## Using pip
 
