@@ -9,7 +9,7 @@ Multiple sequence alignment formulated as a statistical machine learning problem
 
 - Aligns large numbers of protein sequences with state-of-the-art accuracy
 - Enables ultra-large alignment of millions of sequences 
-- Scales linear in the number of sequences
+- Scales linear in the number of sequences (does not require a guide tree)
 - Memory efficient (depending on sequence length, aligning millions of sequences on a laptop is possible)
 - (optional) GPU acceleration 
 - Visualize a profile HMM or a sequence logo of the consensus motif
@@ -38,7 +38,7 @@ Choose according to your preference:
   
   <code>conda activate learnMSA</code>.
   
-  If you do not want to use environments, we recommend to use [Miniconda](https://docs.conda.io/en/latest/miniconda.html) to have a clean base environment.
+  We recommend to use [Miniconda](https://docs.conda.io/en/latest/miniconda.html) to have a clean base environment.
 
 ## Using pip
 
@@ -64,7 +64,7 @@ Requirements:
 - [TensorFlow](https://github.com/tensorflow/tensorflow) (tested versions: 2.5, >=2.7)
 - [networkx](https://networkx.org/) 
 - [logomaker](https://logomaker.readthedocs.io/en/latest/) 
-- python >= 3.7
+- python 3.9 (there are known issues with 3.7 which is deprecated and 3.8 is untested)
 
 1. Clone the repository: 
 
