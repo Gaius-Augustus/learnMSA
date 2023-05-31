@@ -9,7 +9,7 @@ Multiple sequence alignment formulated as a statistical machine learning problem
 
 - Aligns large numbers of protein sequences with state-of-the-art accuracy
 - Enables ultra-large alignment of millions of sequences 
-- Scales linear in the number of sequences
+- Scales linear in the number of sequences (does not require a guide tree)
 - Memory efficient (depending on sequence length, aligning millions of sequences on a laptop is possible)
 - (optional) GPU acceleration 
 - Visualize a profile HMM or a sequence logo of the consensus motif
