@@ -635,7 +635,7 @@ class TestMSAHMM(unittest.TestCase):
                                                                  left_flank[0], 
                                                                  np.amax(left_flank[0]),
                                                                  left_flank[1],
-                                                                 align_to_right=True)
+                                                                 adjust_to_right=True)
             self.assert_vec(left_flank_block, ref_left_flank_block[i])
             right_flank_block = msa_hmm.AlignmentModel.get_insertion_block(sequences[i], 
                                                                  right_flank[0], 
@@ -654,7 +654,23 @@ class TestMSAHMM(unittest.TestCase):
                                                                     C,IL,np.amax(IL, axis=0),IS)
                 self.assert_vec(alignment_block, ref)
                 
+                
+    def test_aligned_insertions(self):
+        sequences = np.array([[1, 2, 3, 4, 5],
+                              [6, 7, 8, 9, 10],
+                              [11, 12, 13, 14, 15]])
+        lens = np.array([5, 4, 3])
+        starts = np.array([0, 1, 2])
+        custom_columns = np.array([[0, 1, 2, 3, 4, -1],
+                                   [0, 1, 4, 5, -1, -1],
+                                   [2, 3, 4, -1, -1, -1]])
+        block = msa_hmm.AlignmentModel.get_insertion_block(sequences, lens, 6, starts, custom_columns=custom_columns)
+        expected_block = np.array([[1,  2,  3,  4,  5,  25],
+                                   [7,  8,  25, 25, 9,  10 ],
+                                   [25, 25, 13, 14, 15, 25]])
+        self.assert_vec(block, expected_block+26)
                
+        
     def test_backward(self):
         length = [4]
         transition_kernel_initializers = ref.make_transition_init_A()

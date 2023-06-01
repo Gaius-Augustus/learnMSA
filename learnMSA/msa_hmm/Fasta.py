@@ -160,6 +160,11 @@ class Fasta:
         diff = np.diff(np.insert(cumsum, 0, 0.0, axis=1), axis=1) 
         diff_where = [np.argwhere(diff[i,:]).flatten() for i in range(diff.shape[0])]
         self.membership_targets = np.concatenate(diff_where).flatten()
+        
+    def get_membership_targets(self, i):
+        s = self.starting_pos[i]
+        e = s + self.seq_lens[i]
+        return self.membership_targets[s:e]
       
     
     

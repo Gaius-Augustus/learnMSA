@@ -15,6 +15,140 @@ import shutil
 from pathlib import Path
 
 
+
+
+
+    
+        
+        
+# utility class used in AlignmentModel storing useful information on a specific alignment
+class AlignmentMetaData():
+    def __init__(self, 
+                 core_blocks, 
+                 left_flank, 
+                 right_flank, 
+                 unannotated_segments):
+        self.consensus = np.stack([C for C,_,_,_ in core_blocks])
+        self.insertion_lens = np.stack([IL for _,IL,_,_ in core_blocks])
+        self.insertion_start = np.stack([IS for _,_,IS,_ in core_blocks])
+        self.finished = np.stack([f for _,_,_,f in core_blocks])
+        self.left_flank_len = np.stack(left_flank[0])
+        self.left_flank_start = np.stack(left_flank[1])
+        self.right_flank_len = np.stack(right_flank[0])
+        self.right_flank_start = np.stack(right_flank[1])
+        if len(unannotated_segments) > 0:
+            self.unannotated_segments_len = np.stack([l for l,_ in unannotated_segments])
+            self.unannotated_segments_start = np.stack([s for _,s in unannotated_segments])
+            self.unannotated_segment_lens_total = np.amax(self.unannotated_segments_len, axis=1)
+        else:
+            self.unannotated_segment_lens_total = 0
+        self.num_repeats = self.consensus.shape[0]
+        self.consensus_len = self.consensus.shape[1]
+        self.left_flank_len_total = np.amax(self.left_flank_len)
+        self.right_flank_len_total = np.amax(self.right_flank_len)
+        self.insertion_lens_total = np.amax(self.insertion_lens, axis=1)
+        self.alignment_len = (self.left_flank_len_total + 
+                              self.consensus_len*self.num_repeats + 
+                              np.sum(self.insertion_lens_total) + 
+                              np.sum(self.unannotated_segment_lens_total) +
+                              self.right_flank_len_total)
+        
+        
+class AlignedInsertions():
+    def __init__(self, 
+                 aligned_insertions = None,
+                 aligned_left_flank = None,
+                 aligned_right_flank = None,
+                 aligned_unannotated_segments = None):
+        """ 
+        Args: 
+            aligned_insertions: List of lists of pairs (indices, fasta file with aligned slices) or None. Inner lists have length equal to length of model -1. Outer list has length num_repeats.
+            aligned_left_flank: A pair (indices, fasta file with aligned slices) or None.
+            aligned_right_flank: A pair (indices, fasta file with aligned slices) or None.
+            unannotated_data: List of pairs (indices, fasta file with aligned slices) or None of length num_repeats-1.
+        """
+        self.aligned_insertions = aligned_insertions
+        self.aligned_left_flank = aligned_left_flank
+        self.aligned_right_flank = aligned_right_flank
+        self.aligned_unannotated_segments = aligned_unannotated_segments
+        
+        def _process(fasta_file):
+            custom_columns = np.zeros((fasta_file.num_seq, np.amax(fasta_file.alignment_len)), dtype=np.int32)
+            for i in range(fasta_file.num_seq):
+                cols = fasta_file.get_membership_targets(i)
+                custom_columns[i, :cols.size] = cols
+            return custom_columns
+                
+        
+        if aligned_insertions is None:
+            self.ext_insertions = 0
+        else:
+            self.custom_columns_insertions = []
+            for repeat in aligned_insertions:
+                self.custom_columns_insertions.append([])
+                for x in repeat:
+                    if x is None:
+                        self.custom_columns_insertions[-1].append(None)
+                    else:
+                        self.custom_columns_insertions[-1].append(_process(x[1]))
+            self.ext_insertions = np.array([[np.amax(x)+1 if x is not None else 0 for x in repeats] for repeats in self.custom_columns_insertions])
+        
+        if aligned_left_flank is None:
+            self.ext_left_flank = 0
+        else:
+            self.custom_columns_left_flank = _process(aligned_left_flank[1])
+            self.ext_left_flank = np.amax(self.custom_columns_left_flank)+1
+        
+        if aligned_right_flank is None:
+            self.ext_right_flank = 0
+        else:
+            self.custom_columns_right_flank = _process(aligned_right_flank[1])
+            self.ext_right_flank = np.amax(self.custom_columns_right_flank)+1
+            
+        if aligned_unannotated_segments is None:
+            self.ext_unannotated = 0
+        else:
+            self.custom_columns_unannotated_segments = [_process(x[1]) if x is not None else None for x in aligned_unannotated_segments]
+            self.ext_unannotated = np.array([np.amax(x)+1 if x is not None else 0 for x in self.custom_columns_unannotated_segments])
+    
+    def get_custom_columns_insertion(self, batch_indices, r):
+        if self.aligned_insertions is None:
+            return None
+        else:
+            return [self._get_custom_columns(batch_indices, self.aligned_insertions[r][i][0], self.custom_columns_insertions[r][i], self.ext_insertions[r,i])
+                       if self.aligned_insertions[r][i] is not None else None
+                       for i in range(len(self.aligned_insertions[r]))]
+    
+    def get_custom_columns_left_flank(self, batch_indices):
+        if self.aligned_left_flank is None:
+            return None
+        else:
+            return self._get_custom_columns(batch_indices, self.aligned_left_flank[0], self.custom_columns_left_flank, self.ext_left_flank)
+    
+    def get_custom_columns_right_flank(self, batch_indices):
+        if self.aligned_right_flank is None:
+            return None
+        else:
+            return self._get_custom_columns(batch_indices, self.aligned_right_flank[0], self.custom_columns_right_flank, self.ext_right_flank)
+        
+    def get_custom_columns_unannotated_segment(self, batch_indices, r):
+        if self.aligned_unannotated_segments is None:
+            return None
+        else:
+            if self.aligned_unannotated_segments[r] is None:
+                return None
+            else:
+                return self._get_custom_columns(batch_indices, self.aligned_unannotated_segments[r][0], self.custom_columns_unannotated_segments[r], self.ext_unannotated[r])
+            
+    def _get_custom_columns(self, batch_indices, custom_indices, custom_columns, max_len):
+        columns = np.stack([np.arange(max_len)]*batch_indices.shape[0])
+        for i, c in zip(custom_indices, custom_columns):
+            columns[batch_indices == i, :c.size] = c 
+        return columns
+        
+
+
+
 class AlignmentModel():
     """ Decodes alignments from a number of models, stores them in a memory friendly representation and
         generates table-form (memory unfriendly) alignments on demand (batch-wise mode possible).
@@ -83,7 +217,7 @@ class AlignmentModel():
             decoded_data = AlignmentModel.decode(l,max_lik_seqs)
             self.metadata[i] = AlignmentMetaData(*decoded_data)
         
-    def to_string(self, model_index, batch_size=100000, add_block_sep=True):
+    def to_string(self, model_index, batch_size=100000, add_block_sep=True, aligned_insertions : AlignedInsertions = AlignedInsertions()):
         """ Uses one model to decode an alignment and returns the sequences with gaps in a list.
             Note that this method is not suitable im memory is limited and alignment depths and width are large.
         Args:
@@ -91,19 +225,20 @@ class AlignmentModel():
             batch_size: Defines how many sequences are decoded at a time with no effect on the output MSA. It can be useful to
                         lower this if memory is sufficient to store the table-form alignment but GPU memory used for decoding a batch is limited.
             add_block_sep: If true, columns containing a special character are added to the alignment indicating domain boundaries.
+            aligned_insertions: Can be used to override insertion metadata if insertions are aligned after the main procedure.
         """
         alignment_strings_all = []
         n = self.indices.size
         i = 0
         while i < n:
             batch_indices = np.arange(i, min(n, i+batch_size))
-            batch_alignment = self.get_batch_alignment(model_index, batch_indices, add_block_sep)
+            batch_alignment = self.get_batch_alignment(model_index, batch_indices, add_block_sep, aligned_insertions)
             alignment_strings = self.batch_to_string(batch_alignment)
             alignment_strings_all.extend(alignment_strings)
             i += batch_size
         return alignment_strings_all
     
-    def to_file(self, filepath, model_index, batch_size=100000, add_block_sep=False):
+    def to_file(self, filepath, model_index, batch_size=100000, add_block_sep=False, aligned_insertions : AlignedInsertions = AlignedInsertions()):
         """ Uses one model to decode an alignment and stores it in fasta file format. Currently no other output format is supported.
             The file is written batch wise. The memory required for this operation must be large enough to hold decode and store a single batch
             of aligned sequences but not the whole alignment.
@@ -112,13 +247,14 @@ class AlignmentModel():
             batch_size: Defines how many sequences are decoded at a time with no effect on the output MSA. It can be useful to
                         lower this if memory is sufficient to store the table-form alignment but GPU memory used for decoding a batch is limited.
             add_block_sep: If true, columns containing a special character are added to the alignment indicating domain boundaries.
+            aligned_insertions: Can be used to override insertion metadata if insertions are aligned after the main procedure.
         """
         with open(filepath, "w") as output_file:
             n = self.indices.size
             i = 0
             while i < n:
                 batch_indices = np.arange(i, min(n, i+batch_size))
-                batch_alignment = self.get_batch_alignment(model_index, batch_indices, add_block_sep)
+                batch_alignment = self.get_batch_alignment(model_index, batch_indices, add_block_sep, aligned_insertions)
                 alignment_strings = self.batch_to_string(batch_alignment)
                 for s, seq_ind in zip(alignment_strings, batch_indices):
                     seq_id = self.fasta_file.seq_ids[self.indices[seq_ind]]
@@ -126,7 +262,7 @@ class AlignmentModel():
                     output_file.write(s+"\n")
                 i += batch_size
     
-    def get_batch_alignment(self, model_index, batch_indices, add_block_sep):
+    def get_batch_alignment(self, model_index, batch_indices, add_block_sep, aligned_insertions : AlignedInsertions = AlignedInsertions()):
         """ Returns a dense matrix representing a subset of sequences
             as specified by batch_indices with respect to the alignment of all sequences
             (i.e. the sub alignment can contain gap-only columns and stacking all batches 
@@ -135,9 +271,11 @@ class AlignmentModel():
             model_index: Specifies the model for decoding. Use a suitable criterion like loglik to decide for a model.
             batch_indices: Sequence indices / indices of alignment rows.
             add_block_sep: If true, columns containing a special character are added to the alignment indicating domain boundaries.
+            aligned_insertions: Can be used to override insertion metadata if insertions are aligned after the main procedure.
         """
         if not model_index in self.metadata:
             self._build_alignment([model_index])
+        data = self.metadata[model_index]
         b = batch_indices.size
         sequences = np.zeros((b, self.fasta_file.max_len), dtype=np.uint16) + (fasta.s-1)
         for i,j in enumerate(batch_indices):
@@ -147,40 +285,43 @@ class AlignmentModel():
         if add_block_sep:
             sep = np.zeros((b,1), dtype=np.uint16) + 2*fasta.s
         left_flank_block = AlignmentModel.get_insertion_block(sequences, 
-                                               self.metadata[model_index].left_flank_len[batch_indices],
-                                               self.metadata[model_index].left_flank_len_total,
-                                               self.metadata[model_index].left_flank_start[batch_indices],
-                                               align_to_right=True)
+                                               data.left_flank_len[batch_indices],
+                                               max(data.left_flank_len_total, aligned_insertions.ext_left_flank),
+                                               data.left_flank_start[batch_indices],
+                                               adjust_to_right=True,
+                                               custom_columns=aligned_insertions.get_custom_columns_left_flank(batch_indices))
         blocks.append(left_flank_block)
         if add_block_sep:
             blocks.append(sep)
-        for i in range(self.metadata[model_index].num_repeats):
-            consensus = self.metadata[model_index].consensus[i]
-            ins_len = self.metadata[model_index].insertion_lens[i]
-            ins_start = self.metadata[model_index].insertion_start[i]
-            ins_len_total = self.metadata[model_index].insertion_lens_total[i]
+        for i in range(data.num_repeats):
+            consensus = data.consensus[i]
+            ins_len = data.insertion_lens[i]
+            ins_start = data.insertion_start[i]
             alignment_block = AlignmentModel.get_alignment_block(sequences, 
                                                   consensus[batch_indices], 
                                                   ins_len[batch_indices], 
-                                                  ins_len_total,
-                                                  ins_start[batch_indices])
+                                                  np.maximum(data.insertion_lens_total, aligned_insertions.ext_insertions)[i],
+                                                  ins_start[batch_indices],
+                                                  custom_columns=aligned_insertions.get_custom_columns_insertion(batch_indices, i))
             blocks.append(alignment_block)
             if add_block_sep:
                 blocks.append(sep)
-            if i < self.metadata[model_index].num_repeats-1:
-                unannotated_segment_l = self.metadata[model_index].unannotated_segments_len[i]
-                unannotated_segment_s = self.metadata[model_index].unannotated_segments_start[i]
+            if i < data.num_repeats-1:
+                unannotated_segment_l = data.unannotated_segments_len[i]
+                unannotated_segment_s = data.unannotated_segments_start[i]
                 unannotated_block = AlignmentModel.get_insertion_block(sequences, 
                                                         unannotated_segment_l[batch_indices],
-                                                        self.metadata[model_index].unannotated_segment_lens_total[i],
-                                                        unannotated_segment_s[batch_indices])
+                                                        np.maximum(data.unannotated_segment_lens_total, aligned_insertions.ext_unannotated)[i],
+                                                        unannotated_segment_s[batch_indices],
+                                                        custom_columns=aligned_insertions.get_custom_columns_unannotated_segment(batch_indices, i))
                 blocks.append(unannotated_block)
                 if add_block_sep:
                     blocks.append(sep)
         right_flank_block = AlignmentModel.get_insertion_block(sequences, 
-                                               self.metadata[model_index].right_flank_len[batch_indices],
-                                               self.metadata[model_index].right_flank_len_total,
-                                               self.metadata[model_index].right_flank_start[batch_indices])
+                                               data.right_flank_len[batch_indices],
+                                               max(data.right_flank_len_total, aligned_insertions.ext_right_flank),
+                                               data.right_flank_start[batch_indices],
+                                               custom_columns=aligned_insertions.get_custom_columns_right_flank(batch_indices))
         blocks.append(right_flank_block)
         batch_alignment = np.concatenate(blocks, axis=1)
         return batch_alignment
@@ -443,25 +584,28 @@ class AlignmentModel():
 
 
     @classmethod
-    def get_insertion_block(cls, sequences, lens, maxlen, starts, align_to_right=False):
+    def get_insertion_block(cls, sequences, lens, maxlen, starts, adjust_to_right=False, custom_columns=None):
         """ Constructs one insertion block from an implicitly represented alignment.
         Args: 
         Returns:
         """
-        A = np.arange(sequences.shape[0])
-        block = np.zeros((sequences.shape[0], maxlen), dtype=np.uint8) + (fasta.s-1)
-        lens = np.copy(lens)
-        active = lens > 0
+        n = sequences.shape[0]
+        A = np.arange(n)
+        block = np.zeros((n, maxlen), dtype=np.uint8) + (fasta.s-1)
+        count_down_lens = np.copy(lens)
+        active = count_down_lens > 0
         i = 0
+        columns = np.stack([np.arange(maxlen)]*n) if custom_columns is None else custom_columns
         while np.any(active):
             aa = sequences[A[active], starts[active] + i]
-            block[active, i] = aa
-            lens -= 1
-            active = lens > 0
+            block[active, columns[active,i]] = aa
+            count_down_lens -= 1
+            active = count_down_lens > 0
             i += 1
-        if align_to_right:
+        if adjust_to_right and custom_columns is None:
             block_right_aligned = np.zeros_like(block) + (fasta.s-1)
             for i in range(maxlen):
+                
                 block_right_aligned[A, (maxlen-lens+i)%maxlen] = block[:, i]
             block = block_right_aligned
         block += fasta.s #lower case
@@ -469,7 +613,7 @@ class AlignmentModel():
 
 
     @classmethod
-    def get_alignment_block(cls, sequences, consensus, ins_len, ins_len_total, ins_start):
+    def get_alignment_block(cls, sequences, consensus, ins_len, ins_len_total, ins_start, custom_columns=None):
         """ Constructs one core model hit block from an implicitly represented alignment.
         Args: 
         Returns:
@@ -491,44 +635,10 @@ class AlignmentModel():
             block[:,i:i+ins_l_total] = cls.get_insertion_block(sequences,
                                                            ins_l,
                                                            ins_l_total, 
-                                                           ins_s)
+                                                           ins_s, 
+                                                           custom_columns[c] if custom_columns is not None else None)
             i += ins_l_total
         #final column
         no_gap = consensus[:,-1] != -1
         block[no_gap,i] = sequences[A[no_gap],consensus[:,-1][no_gap]]
         return block
-
-    
-        
-        
-# utility class used in AlignmentModel storing useful information on a specific alignment
-class AlignmentMetaData():
-    def __init__(self, 
-                 core_blocks, 
-                 left_flank, 
-                 right_flank, 
-                 unannotated_segments):
-        self.consensus = np.stack([C for C,_,_,_ in core_blocks])
-        self.insertion_lens = np.stack([IL for _,IL,_,_ in core_blocks])
-        self.insertion_start = np.stack([IS for _,_,IS,_ in core_blocks])
-        self.finished = np.stack([f for _,_,_,f in core_blocks])
-        self.left_flank_len = np.stack(left_flank[0])
-        self.left_flank_start = np.stack(left_flank[1])
-        self.right_flank_len = np.stack(right_flank[0])
-        self.right_flank_start = np.stack(right_flank[1])
-        if len(unannotated_segments) > 0:
-            self.unannotated_segments_len = np.stack([l for l,_ in unannotated_segments])
-            self.unannotated_segments_start = np.stack([s for _,s in unannotated_segments])
-            self.unannotated_segment_lens_total = np.amax(self.unannotated_segments_len, axis=1)
-        else:
-            self.unannotated_segment_lens_total = 0
-        self.num_repeats = self.consensus.shape[0]
-        self.consensus_len = self.consensus.shape[1]
-        self.left_flank_len_total = np.amax(self.left_flank_len)
-        self.right_flank_len_total = np.amax(self.right_flank_len)
-        self.insertion_lens_total = np.amax(self.insertion_lens, axis=1)
-        self.alignment_len = (self.left_flank_len_total + 
-                              self.consensus_len*self.num_repeats + 
-                              np.sum(self.insertion_lens_total) + 
-                              np.sum(self.unannotated_segment_lens_total) +
-                              self.right_flank_len_total)
