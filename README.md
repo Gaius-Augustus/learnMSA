@@ -3,7 +3,7 @@
 # learnMSA: Learning and Aligning large Protein Families
 
 # Introduction
-Multiple sequence alignment formulated as a statistical machine learning problem, where an optimal profile hidden Markov model for a potentially very large family of protein sequences is searched and an alignment is decoded. We use an automatically differentiable variant of the Forward algorithm.
+Multiple sequence alignment formulated as a statistical machine learning problem, where an optimal profile hidden Markov model for a potentially ultra-large family of protein sequences is searched and an alignment is decoded. We use an automatically differentiable variant of the Forward algorithm.
 
 ## Features
 
