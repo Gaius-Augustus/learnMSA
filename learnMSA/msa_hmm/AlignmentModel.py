@@ -636,7 +636,7 @@ class AlignmentModel():
                                                            ins_l,
                                                            ins_l_total, 
                                                            ins_s, 
-                                                           custom_columns[c] if custom_columns is not None else None)
+                                                           custom_columns = custom_columns[c] if custom_columns is not None else None)
             i += ins_l_total
         #final column
         no_gap = consensus[:,-1] != -1
