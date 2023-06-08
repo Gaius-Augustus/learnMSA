@@ -9,7 +9,7 @@ import learnMSA.msa_hmm.Initializers as initializers
 from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
 from learnMSA.msa_hmm.Configuration import as_str, assert_config
 from pathlib import Path
-
+from learnMSA.msa_hmm.AlignInsertions import make_aligned_insertions
 
 def get_initial_model_lengths(fasta_file, config, random=True):
     #initial model length
@@ -120,6 +120,10 @@ def run_learnMSA(train_filename,
                  model_generator=None,
                  batch_generator=None,
                  ref_filename="", 
+                 align_insertions=False,
+                 insertion_aligner="famsa",
+                 aligner_threads=0,
+                 insertion_slice_dir="tmp",
                  verbose=True, 
                   initial_model_length_callback=get_initial_model_lengths,
                  select_best_for_comparison=True):
@@ -132,6 +136,10 @@ def run_learnMSA(train_filename,
         batch_generator: Optional callback that generates sequence batches defined by user(if None, the default batch generator will be used).
         ref_filename: Optional filepath to a reference alignment. If given, the computed alignment is scored and 
                         the score is returned along with the alignment.
+        align_insertions: If true, a third party aligner is used to align long insertions after the main MSA step.
+        insertion_aligner: Tool to align insertions; "famsa" is installed by default and "clustalo" or "t_coffee" are supported but must be installed manually.
+        aligner_threads: Number of threads to use by the aligner.
+        insertion_slice_dir: Directory where the aligned insertion slices are stored.
         verbose: If False, all output messages will be disabled.
         select_best_for_comparison: If False, all trained models, not just the one with highest score, will be scored.
     Returns:
@@ -167,7 +175,12 @@ def run_learnMSA(train_filename,
         
     Path(os.path.dirname(out_filename)).mkdir(parents=True, exist_ok=True)
     t = time.time()
-    am.to_file(out_filename, am.best_model)
+    
+    if align_insertions:
+        aligned_insertions = make_aligned_insertions(am, insertion_slice_dir, insertion_aligner, aligner_threads, verbose=verbose)
+        am.to_file(out_filename, am.best_model, aligned_insertions = aligned_insertions)
+    else:
+        am.to_file(out_filename, am.best_model)
     
     if verbose:
         print("time for generating output:", "%.4f" % (time.time()-t))

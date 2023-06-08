@@ -14,12 +14,6 @@ import json
 import shutil
 from pathlib import Path
 
-
-
-
-
-    
-        
         
 # utility class used in AlignmentModel storing useful information on a specific alignment
 class AlignmentMetaData():
