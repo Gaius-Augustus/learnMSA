@@ -87,12 +87,14 @@ def make_aligned_insertions(am, directory, method="famsa", threads=0, verbose=Tr
 
 
 def make_slice_msa(slice_file, method="famsa", threads=0):
+    
     if method == "famsa":
         if which(method) is None:
             print("Aligner famsa is not installed or not in PATH. Consider installing it with conda install -c bioconda famsa.")
             sys.exit(1)
         else:
             result = subprocess.run(["famsa", "-t", str(threads), slice_file, slice_file+".aln"])
+            
     elif method == "clustalo":
         if which(method) is None:
             print("Aligner clustalo is not installed or not in PATH. Consider installing it with conda install -c bioconda clustalo.")
@@ -102,6 +104,7 @@ def make_slice_msa(slice_file, method="famsa", threads=0):
                 result = subprocess.run(["famsa", "--threads", str(threads), "-i", slice_file, "-o", slice_file+".aln", "--force"])
             else:
                 result = subprocess.run(["clustalo", "-i", slice_file, "-o", slice_file+".aln", "--force"])
+                
     elif method == "t_coffee":
         if which(method) is None:
             print("Aligner t_coffee is not installed or not in PATH. Consider installing it with conda install -c bioconda t-coffee."+
