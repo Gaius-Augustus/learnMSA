@@ -6,7 +6,7 @@ from shutil import which
 import sys
 
 
-def find_long_insertions_and_write_slice(fasta_file, lens, starts, name, directory, t = 20, k=2, verbose=True):
+def find_long_insertions_and_write_slice(fasta_file, lens, starts, name, directory, t = 20, k=2, max_insertions_len=500, verbose=True):
         """
         Finds insertions that have at least length t. If there are at least k of these sequences, writes them to file.
         Args: 
@@ -32,7 +32,7 @@ def find_long_insertions_and_write_slice(fasta_file, lens, starts, name, directo
                         if aa in segment:
                             only_non_standard_aa = False
                             break
-                    if only_non_standard_aa:
+                    if only_non_standard_aa or lengths[j] > max_insertions_len:
                         to_delete.append(j)
                     else:
                         slice_file.write(">"+fasta_file.seq_ids[which[j]]+"\n")
