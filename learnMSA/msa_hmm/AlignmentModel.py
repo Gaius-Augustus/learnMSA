@@ -589,7 +589,9 @@ class AlignmentModel():
         count_down_lens = np.copy(lens)
         active = count_down_lens > 0
         i = 0
-        columns = np.stack([np.arange(maxlen)]*n) if custom_columns is None else custom_columns
+        columns = np.stack([np.arange(maxlen)]*n) 
+        if custom_columns is not None:
+            columns[:, :custom_columns.size] = custom_columns
         while np.any(active):
             aa = sequences[A[active], starts[active] + i]
             block[active, columns[active,i]] = aa
