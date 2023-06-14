@@ -16,9 +16,7 @@ def find_long_insertions_and_write_slice(fasta_file, lens, starts, name, directo
         """
         at_least_t = lens >= t
         lengths = lens[at_least_t]
-        if lengths.size > k:
-            if verbose:
-                print(f"Long insertions found at {name}: {lengths.size}.")
+        if lengths.size > 1:
             which = np.squeeze(np.argwhere(at_least_t))
             start = starts[at_least_t]
             filename = f"{directory}/slice_{name}"
@@ -38,7 +36,10 @@ def find_long_insertions_and_write_slice(fasta_file, lens, starts, name, directo
                         slice_file.write(">"+fasta_file.seq_ids[which[j]]+"\n")
                         slice_file.write(segment+"\n")
             which = np.delete(which, to_delete)
-            return (which, filename)
+            if which.size > k:
+                if verbose:
+                    print(f"Long insertions found at {name}: {which.size}.")
+                return (which, filename)
         
         
 def make_aligned_insertions(am, directory, method="famsa", threads=0, verbose=True):
