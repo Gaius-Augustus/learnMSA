@@ -26,7 +26,7 @@ def generic_model_generator(encoder_layers,
     forward_seq = transposed_sequences
     for layer in encoder_layers:
         forward_seq = layer(forward_seq, transposed_indices)
-    loglik = msa_hmm_layer(forward_seq)
+    loglik = msa_hmm_layer(forward_seq, transposed_indices)
     #transpose back to make model.predict work correctly
     loglik = tf.transpose(loglik)
     model = tf.keras.Model(inputs=[sequences, indices], 
@@ -36,6 +36,7 @@ def generic_model_generator(encoder_layers,
 def make_msa_hmm_layer(effective_num_seq,
                         model_lengths, 
                         config,
+                        sequence_weights=None,
                         alphabet_size=25):
     """Constructs a cell and a MSA HMM layer given a config.
     """
@@ -44,6 +45,7 @@ def make_msa_hmm_layer(effective_num_seq,
     msa_hmm_layer = MsaHmmLayer(msa_hmm_cell, 
                                 effective_num_seq,
                                 use_prior=config["use_prior"],
+                                sequence_weights=sequence_weights,
                                 dtype=tf.float32)
     return msa_hmm_layer
 
@@ -69,6 +71,7 @@ def default_model_generator(num_seq,
                             model_lengths, 
                             config,
                             fasta_file,
+                            sequence_weights=None,
                             alphabet_size=25):
     """A callback that constructs the default learnMSA model.
     Args:
@@ -77,13 +80,14 @@ def default_model_generator(num_seq,
         model_lengths: List of pHMM lengths.
         config: Dictionary storing the configuration.
         fasta_file: A fasta_file. This is part of the model generator callback because the generated model might depends on data like maximum sequence length.
+        sequence_weights: Optional likelihood weights per sequence.
         alphabet_size: Number of symbols without the terminal symbol (i.e. 25 for amino acids).
     """
     num_models = config["num_models"]
     assert len(model_lengths) == num_models, \
         (f"The list of given model lengths ({len(model_lengths)}) should"
          + f" match the number of models specified in the configuration({num_models}).")
-    msa_hmm_layer = make_msa_hmm_layer(effective_num_seq, model_lengths, config, alphabet_size)
+    msa_hmm_layer = make_msa_hmm_layer(effective_num_seq, model_lengths, config, sequence_weights, alphabet_size)
     anc_probs_layer = make_anc_probs_layer(num_seq, config)
     model = generic_model_generator([anc_probs_layer], msa_hmm_layer)
     return model
@@ -158,6 +162,7 @@ def fit_model(model_generator,
               config,
               batch_size, 
               epochs,
+              sequence_weights=None,
               verbose=True):
     assert_config(config)
     tf.keras.backend.clear_session() #frees occupied memory 
@@ -166,12 +171,17 @@ def fit_model(model_generator,
     if verbose:
         print("Fitting models of lengths", model_lengths, "on", indices.shape[0], "sequences.")
         print("Batch size=", batch_size, "Learning rate=", config["learning_rate"])
+        if sequence_weights is not None:
+            print("Using sequence weights ", sequence_weights, ".")
+        else:
+            print("Don't use sequence weights.")
     def make_and_compile():
         model = model_generator(num_seq=fasta_file.num_seq,
                                 effective_num_seq=indices.shape[0],
                                 model_lengths=model_lengths,
                                 config=config,
-                                fasta_file=fasta_file)
+                                fasta_file=fasta_file,
+                                sequence_weights=sequence_weights)
         model.compile(optimizer=optimizer)
         return model
     num_gpu = len([x.name for x in tf.config.list_logical_devices() if x.device_type == 'GPU']) 

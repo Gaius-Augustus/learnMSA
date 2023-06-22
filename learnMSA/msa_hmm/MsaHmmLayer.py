@@ -95,6 +95,23 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         backward = self.backward_recursion(inputs)
         loglik = loglik[:,:,tf.newaxis,tf.newaxis]
         return forward + backward - loglik
+    
+    
+    def apply_sequence_weights(self, loglik, indices):
+        if self.sequence_weights is not None:
+            loglik *= tf.gather(self.sequence_weights, indices)
+        return loglik
+    
+    
+    #compute the prior, scale it depending on seq weights
+    def compute_prior(self):
+        prior = self.cell.get_prior_log_density(add_metrics=False)
+        prior = tf.reduce_mean(prior)
+        if self.sequence_weights is not None:
+            prior /= self.weight_sum
+        elif self.num_seqs is not None:
+            prior /= self.num_seqs
+        return prior
         
         
     def call(self, inputs, indices=None, training=False):
@@ -105,21 +122,12 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         Returns:
             log-likelihoods: Sequences. Shape: (num_model, b)
         """
-        #compute individual likelihoods
         inputs = tf.cast(inputs, self.dtype)
         _, loglik = self.forward_recursion(inputs, training=training)
-        #weight per-sequence likelihoods with sequence weights and average
-        if self.sequence_weights is not None:
-            loglik *= tf.gather(self.sequence_weights, indices)
+        loglik = self.apply_sequence_weights(loglik, indices)
         loglik_mean = tf.reduce_mean(loglik) #mean over both models and batches
-        #compute the prior, scale it depending on seq weights
         if self.use_prior:
-            prior = self.cell.get_prior_log_density(add_metrics=False)
-            prior = tf.reduce_mean(prior)
-            if self.sequence_weights is not None:
-                prior /= self.weight_sum
-            elif self.num_seqs is not None:
-                prior /= self.num_seqs
+            prior = self.compute_prior()
             MAP = loglik_mean + prior
             self.add_loss(tf.squeeze(-MAP))
         else:
@@ -130,6 +138,7 @@ class MsaHmmLayer(tf.keras.layers.Layer):
             if self.use_prior:
                 self.add_metric(prior, "logprior")
         return loglik
+        
         
     def get_config(self):
         config = super(MsaHmmLayer, self).get_config()

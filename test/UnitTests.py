@@ -714,11 +714,18 @@ class TestMSAHMM(unittest.TestCase):
             p = hmm_layer.state_posterior_log_probs(seq)
         p = np.exp(p)
         np.testing.assert_almost_equal(np.sum(p, -1), 1., decimal=4)
-            
+        
+
+    def test_sequence_weights(self):
+        sequence_weights = np.array([0.1, 0.2, 0.5, 1, 2, 3])
+        hmm_layer = msa_hmm.MsaHmmLayer(msa_hmm.MsaHmmCell(32), sequence_weights=sequence_weights)
+        loglik = np.array([[1,2,3], [4,5,6]])
+        indices = np.array([[0,1,2], [3,4,5]])
+        weighted_loglik = hmm_layer.apply_sequence_weights(loglik, indices)
+        np.testing.assert_equal(np.array([[0.1,0.4,1.5], [4.,10.,18.]]), weighted_loglik)
                 
                 
-                
-                
+                            
 class TestAncProbs(unittest.TestCase):
     
     def __init__(self, *args, **kwargs):

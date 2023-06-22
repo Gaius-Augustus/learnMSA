@@ -46,6 +46,7 @@ def fit_and_align(fasta_file,
                   batch_generator=None,
                   subset=None,
                   initial_model_length_callback=get_initial_model_lengths,
+                  sequence_weights=None,
                   verbose=True):
     assert_config(config)
     model_generator, batch_generator = _make_defaults_if_none(model_generator, batch_generator)
@@ -86,6 +87,7 @@ def fit_and_align(fasta_file,
                                           config,
                                           batch_size=batch_size, 
                                           epochs=epochs_this_iteration,
+                                          sequence_weights=sequence_weights,
                                           verbose=verbose)
         am = AlignmentModel(fasta_file,
                                    batch_generator,
@@ -124,6 +126,7 @@ def run_learnMSA(train_filename,
                  insertion_aligner="famsa",
                  aligner_threads=0,
                  insertion_slice_dir="tmp",
+                 sequence_weights=None,
                  verbose=True, 
                   initial_model_length_callback=get_initial_model_lengths,
                  select_best_for_comparison=True):
@@ -164,6 +167,7 @@ def run_learnMSA(train_filename,
                                   batch_generator=batch_generator,
                                   subset=subset, 
                                   initial_model_length_callback=initial_model_length_callback,
+                                  sequence_weights=sequence_weights,
                                   verbose=verbose)
         if verbose:
             print("Time for alignment:", "%.4f" % (time.time()-t_a))
