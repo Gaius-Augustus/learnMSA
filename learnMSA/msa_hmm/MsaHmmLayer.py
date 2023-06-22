@@ -97,9 +97,14 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         return forward + backward - loglik
     
     
-    def apply_sequence_weights(self, loglik, indices):
+    def apply_sequence_weights(self, loglik, indices, aggregate=False):
         if self.sequence_weights is not None:
-            loglik *= tf.gather(self.sequence_weights, indices)
+            weights = tf.gather(self.sequence_weights, indices)
+            loglik *= weights
+            if aggregate:
+                loglik = tf.reduce_sum(loglik) / tf.reduce_sum(weights) #mean over both models and batches
+        elif aggregate:
+            loglik = tf.reduce_mean(loglik) #mean over both models and batches
         return loglik
     
     
@@ -124,8 +129,7 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         """
         inputs = tf.cast(inputs, self.dtype)
         _, loglik = self.forward_recursion(inputs, training=training)
-        loglik = self.apply_sequence_weights(loglik, indices)
-        loglik_mean = tf.reduce_mean(loglik) #mean over both models and batches
+        loglik_mean = self.apply_sequence_weights(loglik, indices, aggregate=True)
         if self.use_prior:
             prior = self.compute_prior()
             MAP = loglik_mean + prior
