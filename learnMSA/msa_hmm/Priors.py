@@ -80,7 +80,7 @@ class ProfileHMMTransitionPrior(tf.keras.layers.Layer):
         delete_comp: The number of components for the delete prior.
         alpha_flank: Favors high probability of staying one of the 3 flanking states.
         alpha_single: Favors high probability for a single main model hit (avoid looping paths).
-        alpha_frag: Favors models with high prob. to enter at the first match and exit after the last match.
+        alpha_global: Favors models with high prob. to enter at the first match and exit after the last match.
         epsilon: A small constant for numerical stability.
     """
     def __init__(self, 
@@ -89,7 +89,10 @@ class ProfileHMMTransitionPrior(tf.keras.layers.Layer):
                  delete_comp=1,
                  alpha_flank = 7000,
                  alpha_single = 1e9,
-                 alpha_frag = 1e4,
+                 alpha_global = 1e4,
+                 alpha_flank_compl = 1,
+                 alpha_single_compl = 1,
+                 alpha_global_compl = 1,
                  epsilon=1e-16, 
                  **kwargs):
         super(ProfileHMMTransitionPrior, self).__init__(**kwargs)
@@ -101,7 +104,10 @@ class ProfileHMMTransitionPrior(tf.keras.layers.Layer):
         #"Plan7" states and transitions
         self.alpha_flank = alpha_flank
         self.alpha_single = alpha_single
-        self.alpha_frag = alpha_frag
+        self.alpha_global = alpha_global
+        self.alpha_flank_compl = alpha_flank_compl
+        self.alpha_single_compl = alpha_single_compl
+        self.alpha_global_compl = alpha_global_compl
         self.epsilon = epsilon
         
     def load(self, dtype):
@@ -130,7 +136,7 @@ class ProfileHMMTransitionPrior(tf.keras.layers.Layer):
         delete_dirichlet = []
         flank_prior = []
         hit_prior = []
-        enex_prior = []
+        global_prior = []
         for i,probs in enumerate(probs_list):
             log_probs = {part_name : tf.math.log(p) for part_name, p in probs.items()}
             #match state transitions
@@ -148,14 +154,20 @@ class ProfileHMMTransitionPrior(tf.keras.layers.Layer):
                                probs["delete_to_delete"]], axis=-1)
             delete_dirichlet.append( tf.reduce_sum(self.delete_dirichlet.log_pdf(p_delete)) )
             #other transitions
-            flank = self.alpha_flank * log_probs["unannotated_segment_loop"] #todo: handle as extra case?
-            flank += self.alpha_flank * log_probs["right_flank_loop"]
-            flank += self.alpha_flank * log_probs["left_flank_loop"]
-            flank += self.alpha_flank * log_probs["end_to_right_flank"]
-            flank += self.alpha_flank * tf.math.log(flank_init_prob[i])
+            flank = (self.alpha_flank - 1) * log_probs["unannotated_segment_loop"] #todo: handle as extra case?
+            flank += (self.alpha_flank - 1) * log_probs["right_flank_loop"]
+            flank += (self.alpha_flank - 1) * log_probs["left_flank_loop"]
+            flank += (self.alpha_flank - 1) * log_probs["end_to_right_flank"]
+            flank += (self.alpha_flank - 1) * tf.math.log(flank_init_prob[i])
+            flank += (self.alpha_flank_compl - 1) * log_probs["unannotated_segment_exit"] #todo: handle as extra case?
+            flank += (self.alpha_flank_compl - 1) * log_probs["right_flank_exit"]
+            flank += (self.alpha_flank_compl - 1) * log_probs["left_flank_exit"]
+            flank += (self.alpha_flank_compl - 1) * tf.math.log(probs["end_to_unannotated_segment"] + probs["end_to_terminal"])
+            flank += (self.alpha_flank_compl - 1) * tf.math.log(1-flank_init_prob[i])
             flank_prior.append(tf.squeeze(flank))
             #uni-hit
-            hit = self.alpha_single * tf.math.log(probs["end_to_right_flank"] + probs["end_to_terminal"]) 
+            hit = (self.alpha_single - 1) * tf.math.log(probs["end_to_right_flank"] + probs["end_to_terminal"]) 
+            hit += (self.alpha_single_compl - 1) * tf.math.log(probs["end_to_unannotated_segment"]) 
             hit_prior.append(tf.squeeze(hit))
             #uniform entry/exit prior
             #rescale begin_to_match to sum to 1
@@ -163,15 +175,18 @@ class ProfileHMMTransitionPrior(tf.keras.layers.Layer):
             btm = probs["begin_to_match"] / div
             enex = tf.expand_dims(btm, 1) * tf.expand_dims(probs["match_to_end"], 0)
             enex = tf.linalg.band_part(enex, 0, -1)
-            enex = tf.math.log(tf.math.maximum(self.epsilon, 1 - enex))
-            enex_prior.append( self.alpha_frag * (tf.reduce_sum(enex) - enex[0, -1]) )
+            log_enex = tf.math.log(tf.math.maximum(self.epsilon, 1 - enex))
+            log_enex_compl = tf.math.log(tf.math.maximum(self.epsilon, enex))
+            glob = (self.alpha_global - 1) * (tf.reduce_sum(log_enex) - log_enex[0, -1])
+            glob += (self.alpha_global_compl - 1) * (tf.reduce_sum(log_enex_compl) - log_enex_compl[0, -1])
+            global_prior.append( glob )
         prior_val = {
             "match_prior" : match_dirichlet,
             "insert_prior" : insert_dirichlet,
             "delete_prior" : delete_dirichlet,
             "flank_prior" : flank_prior,
             "hit_prior" : hit_prior,
-            "enex_prior" : enex_prior}
+            "global_prior" : global_prior}
         prior_val = {k : tf.stack(v) for k,v in prior_val.items()}
         return prior_val
     
@@ -183,13 +198,14 @@ class ProfileHMMTransitionPrior(tf.keras.layers.Layer):
              "delete_comp" : self.delete_comp, 
              "alpha_flank" : self.alpha_flank, 
              "alpha_single" : self.alpha_single, 
-             "alpha_frag" : self.alpha_frag, 
+             "alpha_global" : self.alpha_global, 
+             "alpha_flank_compl" : self.alpha_flank_compl, 
+             "alpha_single_compl" : self.alpha_single_compl, 
+             "alpha_global_compl" : self.alpha_global_compl, 
              "epsilon" : self.epsilon
         }
         config.update(cell_config)
         return config
     
     def __repr__(self):
-        return f"ProfileHMMTransitionPrior(match_comp={self.match_comp}, insert_comp={self.insert_comp}, delete_comp={self.delete_comp}, alpha_flank={self.alpha_flank}, alpha_single={self.alpha_single}, alpha_frag={self.alpha_frag})"
-
-    
+        return f"ProfileHMMTransitionPrior(match_comp={self.match_comp}, insert_comp={self.insert_comp}, delete_comp={self.delete_comp}, alpha_flank={self.alpha_flank}, alpha_single={self.alpha_single}, alpha_global={self.alpha_global}, alpha_flank_compl={self.alpha_flank_compl}, alpha_single_compl={self.alpha_single_compl}, alpha_global_compl={self.alpha_global_compl})"

@@ -53,13 +53,16 @@ def run_main():
                        help="Will expand insertions that are expected more often than this fraction. (default: %(default)s)")
     parser.add_argument("--model_criterion", dest="model_criterion", type=str, default="AIC",
                        help="Criterion for model selection. (default: %(default)s)")
-    parser.add_argument("--alpha_flank", dest="alpha_flank", type=float, default=7000, help=argparse.SUPPRESS)
-    parser.add_argument("--alpha_single", dest="alpha_single", type=float, default=1e9, help=argparse.SUPPRESS)
-    parser.add_argument("--alpha_frag", dest="alpha_frag", type=float, default=1e4, help=argparse.SUPPRESS)
-    
     
     parser.add_argument("--align_insertions", dest="align_insertions", action='store_true', help="Aligns long insertions with a third party aligner after the main MSA step. (default: %(default)s)")
     parser.add_argument("--insertion_slice_dir", dest="insertion_slice_dir", type=str, default="tmp", help="Directory where the alignments of the sliced insertions are stored. (default: %(default)s)")
+    
+    parser.add_argument("--alpha_flank", dest="alpha_flank", type=float, default=7000, help=argparse.SUPPRESS)
+    parser.add_argument("--alpha_single", dest="alpha_single", type=float, default=1e9, help=argparse.SUPPRESS)
+    parser.add_argument("--alpha_global", dest="alpha_global", type=float, default=1e4, help=argparse.SUPPRESS)
+    parser.add_argument("--alpha_flank_compl", dest="alpha_flank_compl", type=float, default=1, help=argparse.SUPPRESS)
+    parser.add_argument("--alpha_single_compl", dest="alpha_single_compl", type=float, default=1, help=argparse.SUPPRESS)
+    parser.add_argument("--alpha_global_compl", dest="alpha_global_compl", type=float, default=1, help=argparse.SUPPRESS)
     
     
     args = parser.parse_args()
@@ -104,7 +107,10 @@ def run_main():
     for trans in transitioners:
         trans.prior.alpha_flank = args.alpha_flank
         trans.prior.alpha_single = args.alpha_single
-        trans.prior.alpha_frag = args.alpha_frag
+        trans.prior.alpha_global = args.alpha_global
+        trans.prior.alpha_flank_compl = args.alpha_flank_compl
+        trans.prior.alpha_single_compl = args.alpha_single_compl
+        trans.prior.alpha_global_compl = args.alpha_global_compl
     if args.align_insertions:
         os.makedirs(args.insertion_slice_dir, exist_ok = True) 
     _ = msa_hmm.align.run_learnMSA(train_filename = args.input_file,
