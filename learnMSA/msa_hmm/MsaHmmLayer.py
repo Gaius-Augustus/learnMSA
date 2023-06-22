@@ -4,12 +4,12 @@ import numpy as np
 class MsaHmmLayer(tf.keras.layers.Layer):
     def __init__(self, 
                  cell, 
-                 num_seq=1,
+                 num_seqs=None,
                  use_prior=True,
+                 sequence_weights=None,
                  **kwargs
                 ):
         super(MsaHmmLayer, self).__init__(**kwargs)
-        self.num_seq = num_seq
         self.cell = cell
         self.rnn = tf.keras.layers.RNN(self.cell, 
                                        return_sequences=True, 
@@ -18,7 +18,11 @@ class MsaHmmLayer(tf.keras.layers.Layer):
                                                 return_sequences=True, 
                                                 return_state=True,
                                                 go_backwards=True)
+        self.num_seqs = num_seqs
         self.use_prior = use_prior 
+        self.sequence_weights = sequence_weights
+        if sequence_weights is not None:
+            self.weight_sum = np.sum(sequence_weights)
         
         
     def build(self, input_shape):
@@ -93,24 +97,34 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         return forward + backward - loglik
         
         
-    def call(self, inputs, training=False):
+    def call(self, inputs, indices=None, training=False):
         """ Computes log-likelihoods per model and sequence.
         Args:
             inputs: Sequences. Shape: (num_model, b, seq_len, s)
+            indices: Optional sequence indices required to assign sequence weights. Shape: (num_model, b)
         Returns:
             log-likelihoods: Sequences. Shape: (num_model, b)
         """
+        #compute individual likelihoods
         inputs = tf.cast(inputs, self.dtype)
         _, loglik = self.forward_recursion(inputs, training=training)
+        #weight per-sequence likelihoods with sequence weights and average
+        if self.sequence_weights is not None:
+            loglik *= tf.gather(self.sequence_weights, indices)
         loglik_mean = tf.reduce_mean(loglik) #mean over both models and batches
+        #compute the prior, scale it depending on seq weights
         if self.use_prior:
             prior = self.cell.get_prior_log_density(add_metrics=False)
             prior = tf.reduce_mean(prior)
-            prior /= self.num_seq
+            if self.sequence_weights is not None:
+                prior /= self.weight_sum
+            elif self.num_seqs is not None:
+                prior /= self.num_seqs
             MAP = loglik_mean + prior
             self.add_loss(tf.squeeze(-MAP))
         else:
             self.add_loss(tf.squeeze(-loglik_mean))
+        #tensorflow output summary statistics-
         if training:
             self.add_metric(loglik_mean, "loglik")
             if self.use_prior:
@@ -121,7 +135,8 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         config = super(MsaHmmLayer, self).get_config()
         config.update({ 
              "cell" : self.cell,
-             "num_seq" : self.num_seq, 
-             "use_prior" : self.use_prior
+             "num_seqs" : self.num_seqs,
+             "use_prior" : self.use_prior, 
+             "sequence_weights" : self.sequence_weights
         })
         return config
