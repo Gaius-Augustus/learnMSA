@@ -1,3 +1,4 @@
 .ipynb_checkpoints
 __pycache__
 interactive.alignment.fasta
+test/data/egf.out.fasta
