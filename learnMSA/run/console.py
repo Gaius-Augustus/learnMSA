@@ -39,7 +39,7 @@ def run_main():
                         help="Quantile of the input sequence lengths that defines the initial model lengths. (default: %(default)s)")
     parser.add_argument("--surgery_quantile", dest="surgery_quantile", type=float, default=0.5, 
                         help="learnMSA will not use sequences shorter than this quantile for training during all iterations except the last. (default: %(default)s)")
-    parser.add_argument("--min_surgery_seqs", dest="min_surgery_seqs", type=int, default=10000, 
+    parser.add_argument("--min_surgery_seqs", dest="min_surgery_seqs", type=int, default=100000, 
                         help="Minimum number of sequences used per iteration. Overshadows the effect of --surgery_quantile. (default: %(default)s)")
     parser.add_argument("--len_mul", dest="len_mul", type=float, default=0.8, 
                         help="Multiplicative constant for the quantile used to define the initial model length (see --length_init_quantile). (default: %(default)s)")
@@ -56,6 +56,9 @@ def run_main():
     
     parser.add_argument("--align_insertions", dest="align_insertions", action='store_true', help="Aligns long insertions with a third party aligner after the main MSA step. (default: %(default)s)")
     parser.add_argument("--insertion_slice_dir", dest="insertion_slice_dir", type=str, default="tmp", help="Directory where the alignments of the sliced insertions are stored. (default: %(default)s)")
+    
+    parser.add_argument("--sequence_weights", dest="sequence_weights", action='store_true', help="Uses mmseqs2 to rapidly cluster the sequences and compute sequence weights before the MSA. (default: %(default)s)")
+    parser.add_argument("--cluster_dir", dest="cluster_dir", type=str, default="tmp", help="Directory where the sequence clustering is stored. (default: %(default)s)")
     
     parser.add_argument("--alpha_flank", dest="alpha_flank", type=float, default=7000, help=argparse.SUPPRESS)
     parser.add_argument("--alpha_single", dest="alpha_single", type=float, default=1e9, help=argparse.SUPPRESS)
@@ -113,12 +116,17 @@ def run_main():
         trans.prior.alpha_global_compl = args.alpha_global_compl
     if args.align_insertions:
         os.makedirs(args.insertion_slice_dir, exist_ok = True) 
+    if args.sequence_weights:
+        sequence_weights = msa_hmm.align.compute_sequence_weights(args.input_file, args.cluster_dir)
+    else:
+        sequence_weights = None
     _ = msa_hmm.align.run_learnMSA(train_filename = args.input_file,
                                     out_filename = args.output_file,
                                     config = config, 
                                     ref_filename = args.ref_file,
                                     align_insertions=args.align_insertions,
                                     insertion_slice_dir=args.insertion_slice_dir,
+                                    sequence_weights = sequence_weights,
                                     verbose = not args.silent)
             
             

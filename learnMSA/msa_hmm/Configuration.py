@@ -44,7 +44,7 @@ def make_default(default_num_models = 5):
         "max_surgery_runs" : 4,
         "length_init_quantile" : 0.5,
         "surgery_quantile" : 0.5,
-        "min_surgery_seqs" : 1e4,
+        "min_surgery_seqs" : 1e5,
         "len_mul" : 0.8,
         "batch_size" : get_adaptive_batch_size,
         "learning_rate" : 0.1,

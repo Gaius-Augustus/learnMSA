@@ -6,13 +6,14 @@ from shutil import which
 import sys
 
 
-def find_long_insertions_and_write_slice(fasta_file, lens, starts, name, directory, t = 20, k=2, max_insertions_len=500, verbose=True):
+def find_long_insertions_and_write_slice(fasta_file, lens, starts, name, directory, t = 20, k=2, max_insertions_len=500, max_insertions_len_below_seq_ok = 100, verbose=True):
         """
         Finds insertions that have at least length t. If there are at least k of these sequences, writes them to file.
         Args: 
             fasta_file: Fasta file containing the complete sequences.
             lens, starts: Arrays of length n where n is the number of sequences in fasta_file. Indicate how long insertions are and where they start respectively.
             name: Identifier for the location of the slice (e.g. left_flank or match_5).
+            directory: Directory where slice files are written.
         """
         at_least_t = lens >= t
         lengths = lens[at_least_t]
@@ -30,7 +31,9 @@ def find_long_insertions_and_write_slice(fasta_file, lens, starts, name, directo
                         if aa in segment:
                             only_non_standard_aa = False
                             break
-                    if only_non_standard_aa or lengths[j] > max_insertions_len:
+                    if (only_non_standard_aa or 
+                        (lengths[j] > max_insertions_len and 
+                         which.size > max_insertions_len_below_seq_ok)):
                         to_delete.append(j)
                     else:
                         slice_file.write(">"+fasta_file.seq_ids[which[j]]+"\n")

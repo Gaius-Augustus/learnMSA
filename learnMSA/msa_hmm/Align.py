@@ -10,6 +10,9 @@ from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
 from learnMSA.msa_hmm.Configuration import as_str, assert_config
 from pathlib import Path
 from learnMSA.msa_hmm.AlignInsertions import make_aligned_insertions
+import subprocess
+from shutil import which
+import pandas as pd
 
 def get_initial_model_lengths(fasta_file, config, random=True):
     #initial model length
@@ -573,6 +576,44 @@ def do_model_surgery(iteration, am : AlignmentModel, config, emission_dummy, tra
         if model_lengths[-1] < 3: 
             raise SystemExit("A problem occured during model surgery: A pHMM is too short (length <= 2).") 
     return config, model_lengths, surgery_converged
+
+
+#computes clustering based sequence weights if mmseqs2 is installed
+def compute_sequence_weights(fasta_filename, directory, cluster_seq_id=0.5):
+    if which("mmseqs") is None:
+        print("mmseqs2 is not installed or not in PATH. Consider installing it with conda install -c bioconda mmseqs2 or disable sequence weighting.")
+        sys.exit(1)
+    else:
+        cluster_files = directory+"/"+os.path.splitext(os.path.basename(fasta_filename))[0]
+        result = subprocess.run(["mmseqs", 
+                                 "easy-linclust", 
+                                 fasta_filename, 
+                                 cluster_files,
+                                 "tmp",
+                                 "--cov-mode", "1",
+                                 "--cluster-mode", "2",
+                                 "--alignment-mode", "3",
+                                 "--kmer-per-seq", "100",
+                                 "--min-seq-id", str(cluster_seq_id),
+                                 "-v", "0"
+                                 ])
+        clustering = pd.read_csv(cluster_files + "_cluster.tsv", sep="\t", names=["representative", "sequence"])
+        cluster_counts = clustering.groupby("representative").size().to_frame("cluster_size")
+        clustering = clustering.merge(cluster_counts, how="left", on="representative")
+        clustering["weight"] = 1/clustering["cluster_size"]
+        clustering = clustering.set_index("sequence")
+
+        fasta_file = fasta.Fasta(fasta_filename)
+        ids = fasta_file.seq_ids
+        #mmseqs2 omits database names and database specific accession numbers, we have to omit them too
+        #i.e. from ">database|accession|name" mmseqs only keeps ">name"
+        for i in range(len(ids)):
+            if "|" in ids[i]:
+                pos = ids[i].rfind("|")
+                if pos != -1:
+                    ids[i] = ids[i][pos+1:]
+        sequence_weights = np.array(clustering.loc[ids].weight, dtype=np.float32)
+        return sequence_weights
 
 
 def get_model_scores(am, model_criterion, verbose):

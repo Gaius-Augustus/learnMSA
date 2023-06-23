@@ -41,7 +41,7 @@ class AminoAcidPrior(tf.keras.layers.Layer):
         prior = self.emission_dirichlet_mix.log_pdf(B)
         prior = tf.reshape(prior, (k, max_model_length))
         prior *= tf.cast(tf.sequence_mask(lengths), B.dtype)
-        return prior 
+        return prior
     
     def get_config(self):
         config = super(AminoAcidPrior, self).get_config()

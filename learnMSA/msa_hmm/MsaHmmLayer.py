@@ -102,7 +102,8 @@ class MsaHmmLayer(tf.keras.layers.Layer):
             weights = tf.gather(self.sequence_weights, indices)
             loglik *= weights
             if aggregate:
-                loglik = tf.reduce_sum(loglik) / tf.reduce_sum(weights) #mean over both models and batches
+                loglik = tf.reduce_sum(loglik, axis=1) / tf.reduce_sum(weights, axis=1) #mean over batch 
+                loglik = tf.reduce_mean(loglik) #mean over models
         elif aggregate:
             loglik = tf.reduce_mean(loglik) #mean over both models and batches
         return loglik
