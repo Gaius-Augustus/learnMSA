@@ -117,6 +117,7 @@ def run_main():
     if args.align_insertions:
         os.makedirs(args.insertion_slice_dir, exist_ok = True) 
     if args.sequence_weights:
+        os.makedirs(args.cluster_dir, exist_ok = True) 
         sequence_weights = msa_hmm.align.compute_sequence_weights(args.input_file, args.cluster_dir)
     else:
         sequence_weights = None
