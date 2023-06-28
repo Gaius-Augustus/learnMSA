@@ -595,6 +595,7 @@ def compute_sequence_weights(fasta_filename, directory, cluster_seq_id=0.5):
                                  "--alignment-mode", "3",
                                  "--kmer-per-seq", "100",
                                  "--min-seq-id", str(cluster_seq_id),
+                                 "--remove-tmp-files", "true",
                                  "-v", "0"
                                  ])
         clustering = pd.read_csv(cluster_files + "_cluster.tsv", sep="\t", names=["representative", "sequence"])

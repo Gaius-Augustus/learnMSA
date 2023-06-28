@@ -26,12 +26,14 @@ def find_long_insertions_and_write_slice(fasta_file, lens, starts, name, directo
                 for j in range(lengths.size):
                     aa_seq = fasta_file.aminoacid_seq_str(which[j])
                     segment = aa_seq[start[j] : start[j] + lengths[j]]
-                    only_non_standard_aa = True
-                    for aa in fasta.alphabet[:20]:
-                        if aa in segment:
-                            only_non_standard_aa = False
-                            break
-                    if (only_non_standard_aa or 
+                    #sometimes segments look strange (like ones consisting only of X)
+                    #this can cause problems in the downstream aligner, omit these segments
+                    non_standard_freq = 0
+                    for aa in fasta.alphabet[20:]:
+                        non_standard_freq += segment.count(aa)
+                    non_standard_freq /= len(segment)
+                    mostly_non_standard_aa = non_standard_freq > 0.5
+                    if (mostly_non_standard_aa or 
                         (lengths[j] > max_insertions_len and 
                          which.size > max_insertions_len_below_seq_ok)):
                         to_delete.append(j)
@@ -123,5 +125,5 @@ def make_slice_msa(slice_file, method="famsa", threads=0):
         sys.exit(1)
 
     if result.returncode != 0:
-        print(f"Failed to align insertions with {method}. Aligner returned: {subprocess.returncode}.")
+        print(f"Failed to align insertions with {method}. Aligner returned: {result.returncode}.")
         sys.exit(1)
