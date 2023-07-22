@@ -11,7 +11,7 @@ Multiple sequence alignment formulated as a statistical machine learning problem
 - Enables ultra-large alignment of millions of sequences 
 - Scales linear in the number of sequences (does not require a guide tree)
 - Memory efficient (depending on sequence length, aligning millions of sequences on a laptop is possible)
-- (optional) GPU acceleration 
+- GPU acceleration 
 - Visualize a profile HMM or a sequence logo of the consensus motif
 
 ## Current limitations
@@ -27,30 +27,38 @@ Choose according to your preference:
 ## Using Bioconda
   
   If you haven't done it yet, set up [Bioconda channels](https://bioconda.github.io/) first.
+
+  *Recommended way to install learnMSA (including aligned insertion support via famsa):*
+
+  ```
+  conda install mamba
+  mamba create -n learnMSA_env tensorflow==2.10.0 learnMSA famsa
+  ```
   
-  We recommend to install in a clean environment:
+  *Without aligned insertion support*
+
+  ```
+  conda install mamba
+  mamba create -n learnMSA_env tensorflow==2.10.0 learnMSA
+  ```
   
-  <code>conda create -n learnMSA learnMSA</code>
-  
-  which creates an environment called learnMSA and installs the package learnMSA.
+  which creates an environment called `learnMSA_env` and installs learnMSA in it.
   
   To run learnMSA, you have to activate the environment first:
   
-  <code>conda activate learnMSA</code>.
-  
-  We recommend to use [Miniconda](https://docs.conda.io/en/latest/miniconda.html) to have a clean base environment.
+  <code>conda activate learnMSA_env</code>.
+
+  While in principle we attempt to support all tensorflow versions since 2.5.0, there are known incompatiblities with tf >= 2.12.0. We recommend tensorflow version 2.10.0 if there are no particular reasons to use something else.
 
 ## Using pip
-
+  
   <code>pip install learnMSA</code>
   
 ## With GPU support
 
-*Optional, but recommended for proteins longer than 100 residues.*
+*Optional, but recommended for proteins longer than 100 residues. The install instructions above may already be sufficient to support GPU depending on your system. LearnMSA will notify you whether it finds any GPUs it can use or it will fall back to CPU.*
 
-You have to meet the [TensorFlow GPU](https://www.tensorflow.org/install/gpu) requirements. The install instructions above are sufficient if the cudnn and cudatoolkit packages are installed on your system.
-
-LearnMSA will notify you whether it finds any GPUs it can use or it will fall back to CPU.
+You have to meet the [TensorFlow GPU](https://www.tensorflow.org/install/gpu) requirements.
 
 ## Command line use after installing with Bioconda or pip
 
@@ -58,12 +66,19 @@ LearnMSA will notify you whether it finds any GPUs it can use or it will fall ba
   
 <code>learnMSA -h</code>
 
+*New since learnMSA version 1.2.0:*
+
+<code>learnMSA -i INPUT_FILE -o OUTPUT_FILE --align_insertions</code>
+
+This will trigger a quick, seperate alignment phase of insertions left unaligned by learnMSA after the main step. Insertions are aligned with `famsa`, which has to be installed by the user.
+
 ## Manual installation
 
 Requirements:
-- [TensorFlow](https://github.com/tensorflow/tensorflow) (tested versions: 2.5, >=2.7)
+- [TensorFlow](https://github.com/tensorflow/tensorflow) (we recommend 2.10.0, tested versions: 2.5, >=2.7)
 - [networkx](https://networkx.org/) 
-- [logomaker](https://logomaker.readthedocs.io/en/latest/) 
+- [logomaker](https://logomaker.readthedocs.io/en/latest/)
+- [seaborn](https://seaborn.pydata.org/)
 - python 3.9 (there are known issues with 3.7 which is deprecated and 3.8 is untested)
 
 1. Clone the repository: 
@@ -72,7 +87,7 @@ Requirements:
   
 2. Install dependencies:
 
-  <code>pip install tensorflow logomaker networkx</code>
+  <code>pip install tensorflow==2.10.0 logomaker networkx seaborn</code>
   
 3. Run:
 
@@ -84,6 +99,10 @@ Requirements:
 ## Interactive notebook with visualization:
 
 Run the notebook <code>MsaHmm.ipynb</code> with juypter.
+
+# Version 1.2.0 improvements
+
+- insertions that were left unaligned by learnMSA can now be aligned retroactively by a third party aligner which improves accuracy on the HomFam benchmark by about 2%-points
 
 # Version 1.1.0 improvements
 
