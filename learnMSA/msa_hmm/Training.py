@@ -167,6 +167,7 @@ def fit_model(model_generator,
     assert_config(config)
     tf.keras.backend.clear_session() #frees occupied memory 
     tf.get_logger().setLevel('ERROR')
+    batch_generator.configure(fasta_file, config)
     optimizer = tf.optimizers.Adam(config["learning_rate"])
     if verbose:
         print("Fitting models of lengths", model_lengths, "on", indices.shape[0], "sequences.")
@@ -199,7 +200,6 @@ def fit_model(model_generator,
     else:
          model = make_and_compile()
     steps = max(10, int(100*np.sqrt(indices.shape[0])/batch_size))
-    batch_generator.configure(fasta_file, config)
     dataset = make_dataset(indices, 
                            batch_generator, 
                            batch_size,
