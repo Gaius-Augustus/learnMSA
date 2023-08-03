@@ -2,6 +2,6 @@
 __pycache__
 interactive.alignment.fasta
 test/data/egf.out.fasta
-protein_language_models/esm2/
-protein_language_models/protT5_model/
-protein_language_models/proteinBERT_model/
+learnMSA/protein_language_models/esm2/
+learnMSA/protein_language_models/protT5_model/
+learnMSA/protein_language_models/proteinBERT_model/
