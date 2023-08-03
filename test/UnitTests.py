@@ -1512,6 +1512,34 @@ class TestModelToFile(unittest.TestCase):
         self.assertEqual(msa_str, msa_str_from_deserialized_model)
         
 
+class TestLanguageModelExtension(unittest.TestCase):
     
+    def test_regularizer(self):
+        # test the regularizer
+        reg_shared = msa_hmm.priors.L2EmbeddingRegularizer(1, 1, True)
+        reg_non_shared = msa_hmm.priors.L2EmbeddingRegularizer(1, 1, False)
+        reg_shared.load("float32")
+        reg_non_shared.load("float32")
+        #just test the embedding part
+        lengths = [5, 6]
+        B = np.zeros((2, 20, 101), dtype=np.float32)
+        B[0, :2*lengths[0]+2, 25:] = 2.
+        B[0, 1:lengths[0]+1, 25:] = 3.
+        B[1, :2*lengths[1]+2, 25:] = 5.
+        B[1, 1:lengths[1]+1, 25:] = 4.
+        r1 = reg_shared.get_reg(B, lengths)
+        r2 = reg_non_shared.get_reg(B, lengths)
+        self.assertTrue( all(r1[0,:-1] == 75 * 9 + 75 * 4) )
+        self.assertTrue( r1[0,-1] == 0 )
+        self.assertTrue( all(r1[1,:-1] == 75 * 16 + 75 * 25) )
+        self.assertTrue( all(r2[0,:-1] == 75 * 9 + 7 * 75 * 4 / 5) )
+        self.assertTrue( r2[0,-1] == 0 )
+        self.assertTrue( all(r2[1,:-1] == 75 * 16 + 8 * 75 * 25 / 6) )
+            
+            
+# class TestScoringModel(unittest.TestCase):
+#     pass
+            
+        
 if __name__ == '__main__':
     unittest.main()

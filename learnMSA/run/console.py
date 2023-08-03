@@ -67,13 +67,15 @@ def run_main():
     parser.add_argument("--alpha_single_compl", dest="alpha_single_compl", type=float, default=1, help=argparse.SUPPRESS)
     parser.add_argument("--alpha_global_compl", dest="alpha_global_compl", type=float, default=1, help=argparse.SUPPRESS)
     
+    parser.add_argument("--use_language_model", dest="use_language_model", action='store_true', help="Uses a large protein lanague model to generate per-token embeddings that guide the MSA step. (default: %(default)s)")
     
     args = parser.parse_args()
     
     if not args.silent:
         print(f"learnMSA (version {version}) - multiple alignment of protein sequences")
     
-    #import after argparsing to avoid long delay with -h option
+    #import after argparsing to avoid long delay with -h option and to allow the user to change CUDA settings
+    #before importing tensorflow
     if not args.cuda_visible_devices == "default":
         os.environ["CUDA_VISIBLE_DEVICES"] = args.cuda_visible_devices  
     from .. import msa_hmm
@@ -118,17 +120,43 @@ def run_main():
         os.makedirs(args.insertion_slice_dir, exist_ok = True) 
     if args.sequence_weights:
         os.makedirs(args.cluster_dir, exist_ok = True) 
-        sequence_weights = msa_hmm.align.compute_sequence_weights(args.input_file, args.cluster_dir)
+        sequence_weights = msa_hmm.align.compute_sequence_weights(args.input_file, args.cluster_dir, config["cluster_seq_id"])
     else:
         sequence_weights = None
-    _ = msa_hmm.align.run_learnMSA(train_filename = args.input_file,
-                                    out_filename = args.output_file,
-                                    config = config, 
-                                    ref_filename = args.ref_file,
-                                    align_insertions=args.align_insertions,
-                                    insertion_slice_dir=args.insertion_slice_dir,
-                                    sequence_weights = sequence_weights,
-                                    verbose = not args.silent)
+    if args.use_language_model:
+        emission_init = [msa_hmm.initialize.EmbeddingEmissionInitializer() for _ in range(config["num_models"])]
+        if config["use_shared_embedding_insertions"]:
+            insertion_init = [EmbeddingEmissionInitializer() for _ in range(config["num_models"])]
+        else:
+            insertion_init = [msa_hmm.initializers.make_default_insertion_init() for _ in range(config["num_models"])]
+        config["emitter"] = EmbeddingEmitter(config["lm_name"], 
+                                             config["reduced_embedding_dim"],
+                                             config["embedding_l2_match"], 
+                                             config["embedding_l2_insert"], 
+                                             emission_init=emission_init, 
+                                             insertion_init=insertion_init,
+                                             use_shared_embedding_insertions=config["use_shared_embedding_insertions"],
+                                             frozen_insertions=config["frozen_insertions"],
+                                             use_finetuned_lm=config["use_finetuned_lm"])
+        alignment_model = msa_hmm.align.run_learnMSA(train_filename = args.input_file,
+                                                      out_filename = args.output_file,
+                                                      config = config,  
+                                                      ref_filename = args.ref_file,
+                                                      model_generator=msa_hmm.train.embedding_model_generator,
+                                                      batch_generator=msa_hmm.train.EmbeddingBatchGenerator(config["lm_name"], config["reduced_embedding_dim"], use_finetuned_lm=config["use_finetuned_lm"]),
+                                                      sequence_weights=sequence_weights,
+                                                      verbose=not args.silent,
+                                                      align_insertions=args.align_insertions,
+                                                      insertion_slice_dir=args.insertion_slice_dir)
+    else:
+        _ = msa_hmm.align.run_learnMSA(train_filename = args.input_file,
+                                        out_filename = args.output_file,
+                                        config = config, 
+                                        ref_filename = args.ref_file,
+                                        align_insertions=args.align_insertions,
+                                        insertion_slice_dir=args.insertion_slice_dir,
+                                        sequence_weights = sequence_weights,
+                                        verbose = not args.silent)
             
             
 if __name__ == '__main__':

@@ -209,3 +209,53 @@ class ProfileHMMTransitionPrior(tf.keras.layers.Layer):
     
     def __repr__(self):
         return f"ProfileHMMTransitionPrior(match_comp={self.match_comp}, insert_comp={self.insert_comp}, delete_comp={self.delete_comp}, alpha_flank={self.alpha_flank}, alpha_single={self.alpha_single}, alpha_global={self.alpha_global}, alpha_flank_compl={self.alpha_flank_compl}, alpha_single_compl={self.alpha_single_compl}, alpha_global_compl={self.alpha_global_compl})"
+    
+
+class L2EmbeddingRegularizer(AminoAcidPrior):
+    """ A simple L2 regularizer for the embedding match states
+    """
+    def __init__(self, 
+                 L2_match, 
+                 L2_insert,
+                 use_shared_embedding_insertions):
+        super().__init__()
+        self.L2_match = L2_match
+        self.L2_insert = L2_insert
+        self.use_shared_embedding_insertions = use_shared_embedding_insertions
+        
+    def get_reg(self, B, lengths):
+        max_model_length = tf.reduce_max(lengths)
+        length_mask = tf.cast(tf.sequence_mask(lengths), B.dtype)
+        #square all parameters
+        B_emb_sq = tf.math.square(B[...,25:-1])
+        #reduce the embedding dimension
+        B_emb_sq = tf.reduce_sum(B_emb_sq, -1)
+        #regularization per match is just the sum of the respective squares 
+        #(we will deal with non-match states in the end)
+        reg_emb = B_emb_sq[:,1:max_model_length+1]
+        #depending on how we implemented insertions, we add a different insertion term to all matches
+        if self.use_shared_embedding_insertions:
+            #all insertions are the same, just use the first one 
+            reg_ins = B_emb_sq[:,:1]
+        else:
+            #insertions differ, use their average
+            B_emb_sq_just_matches = reg_emb * length_mask
+            B_emb_sq_just_inserts = tf.reduce_sum(B_emb_sq, axis=1, keepdims=True) - tf.reduce_sum(B_emb_sq_just_matches, axis=1, keepdims=True)
+            reg_ins = B_emb_sq_just_inserts / tf.expand_dims(tf.cast(lengths, B.dtype), -1)
+        reg = self.L2_match * reg_emb + self.L2_insert * reg_ins
+        #zero padding for non match states
+        reg *= length_mask
+        return reg
+        
+    def __call__(self, B, lengths):
+        """L2 regularization for each match state.
+        Args:
+        B: A stack of k emission matrices. Shape: (k, q, s)
+        Returns:
+        A tensor with the L2 regularization values. Shape: (k, max_model_length)
+        """
+        #amino acid prior
+        B_amino = B[:,:,:25]
+        prior_aa = super().__call__(B_amino, lengths)
+        reg = self.get_reg(B, lengths)
+        return prior_aa - reg #the result is maximized, so we have to negate the regularizer

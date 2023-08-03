@@ -141,3 +141,28 @@ def make_default_transition_init(MM=1,
         "end_to_right_flank" : RandomNormalInitializer(RF, scale),
         "end_to_terminal" : RandomNormalInitializer(T, scale) }
     return transition_init_kernel
+
+
+global_emb = np.zeros((32), dtype=np.float32)
+
+class EmbeddingEmissionInitializer(tf.keras.initializers.Initializer):
+    """ Initializes the embedding distributions by assigning a AA background distribution to the first 25 positions
+        and a precomputed global average embedding for the other positions.
+    """
+
+    def __init__(self,
+                 aa_dist=np.log(background_distribution), 
+                 global_emb=global_emb):
+        self.aa_dist = aa_dist
+        self.global_emb = global_emb
+
+    def __call__(self, shape, dtype=None, **kwargs):
+        assert shape[-1] >= self.aa_dist.size
+        aa_dist = tf.cast(self.aa_dist, dtype)
+        global_emb = tf.cast(self.global_emb, dtype)
+        aa_init = tf.reshape(tf.tile(aa_dist, tf.cast(tf.math.reduce_prod(shape[:-1], keepdims=True), tf.int32)), list(shape[:-1])+[self.aa_dist.size])
+        emb_init = tf.reshape(tf.tile(global_emb, tf.cast(tf.math.reduce_prod(shape[:-1], keepdims=True), tf.int32)), list(shape[:-1])+[shape[-1]-self.aa_dist.size])
+        return tf.concat([aa_init, emb_init], axis=-1)
+    
+    def __repr__(self):
+        return f"EmbeddingEmissionInitializer()"
