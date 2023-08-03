@@ -108,6 +108,7 @@ def run_main():
     config["surgery_del"] = args.surgery_del
     config["surgery_ins"] = args.surgery_ins
     config["model_criterion"] = args.model_criterion
+    config["use_language_model"] = args.use_language_model
     transitioners = config["transitioner"] if hasattr(config["transitioner"], '__iter__') else [config["transitioner"]]
     for trans in transitioners:
         trans.prior.alpha_flank = args.alpha_flank
@@ -124,12 +125,14 @@ def run_main():
     else:
         sequence_weights = None
     if args.use_language_model:
-        emission_init = [msa_hmm.initialize.EmbeddingEmissionInitializer() for _ in range(config["num_models"])]
+        config["learning_rate"] = 0.05
+        config["epochs"] = [10, 4, 20]
+        emission_init = [msa_hmm.initializers.EmbeddingEmissionInitializer() for _ in range(config["num_models"])]
         if config["use_shared_embedding_insertions"]:
-            insertion_init = [EmbeddingEmissionInitializer() for _ in range(config["num_models"])]
+            insertion_init = [msa_hmm.initializers.EmbeddingEmissionInitializer() for _ in range(config["num_models"])]
         else:
             insertion_init = [msa_hmm.initializers.make_default_insertion_init() for _ in range(config["num_models"])]
-        config["emitter"] = EmbeddingEmitter(config["lm_name"], 
+        config["emitter"] = msa_hmm.emit.EmbeddingEmitter(config["lm_name"], 
                                              config["reduced_embedding_dim"],
                                              config["embedding_l2_match"], 
                                              config["embedding_l2_insert"], 

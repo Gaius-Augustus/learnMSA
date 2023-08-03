@@ -1,8 +1,11 @@
 import tensorflow as tf
 import numpy as np
+import os
 import learnMSA.msa_hmm.Initializers as initializers
 import learnMSA.msa_hmm.Priors as priors
-    
+from learnMSA.protein_language_models.BilinearSymmetric import make_scoring_model
+import learnMSA.protein_language_models as plm
+
     
 
 class ProfileHMMEmitter(tf.keras.layers.Layer):
@@ -168,7 +171,7 @@ class EmbeddingEmitter(ProfileHMMEmitter):
                  use_finetuned_lm=True):
         super(EmbeddingEmitter, self).__init__(emission_init, 
                                                insertion_init,
-                                               L2EmbeddingRegularizer(L2_match, L2_insert, use_shared_embedding_insertions), 
+                                               priors.L2EmbeddingRegularizer(L2_match, L2_insert, use_shared_embedding_insertions), 
                                                frozen_insertions=frozen_insertions)
         self.lm_name = lm_name
         self.reduced_embedding_dim = reduced_embedding_dim
@@ -178,9 +181,9 @@ class EmbeddingEmitter(ProfileHMMEmitter):
         self.use_finetuned_lm = use_finetuned_lm
         self.scoring_model = make_scoring_model(plm.common.dims[lm_name], reduced_embedding_dim, dropout=0.0)
         if use_finetuned_lm:
-            self.scoring_model.load_weights(f"scoring_models/{lm_name}_{reduced_embedding_dim}/checkpoints")
+            self.scoring_model.load_weights(os.path.dirname(__file__)+f"/../protein_language_models/scoring_models/{lm_name}_{reduced_embedding_dim}/checkpoints")
         else:
-            self.scoring_model.load_weights(f"scoring_models_frozen/{lm_name}_{reduced_embedding_dim}/checkpoints")
+            self.scoring_model.load_weights(os.path.dirname(__file__)+f"/../protein_language_models/scoring_models_frozen/{lm_name}_{reduced_embedding_dim}/checkpoints")
         self.scoring_model.layers[-1].trainable = False #don't forget to freeze the scoring model!
         
     def build(self, input_shape):

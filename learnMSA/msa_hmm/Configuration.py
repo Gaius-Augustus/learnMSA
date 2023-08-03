@@ -69,10 +69,11 @@ def make_default(default_num_models = 5):
         "embedding_l2_insert" : 0,
         "use_shared_embedding_insertions" : True,
         "frozen_insertions" : True,
-        "lm_name" : "esm",
+        "lm_name" : "esm2",
         "reduced_embedding_dim" : 32,
         "use_finetuned_lm" : False,
         "cluster_seq_id" : 0.9,
+        "use_language_model" : False,
         "allow_user_keys_in_config" : False
     }
     return default

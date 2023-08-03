@@ -1,7 +1,9 @@
 import tensorflow as tf
 import numpy as np
 import gc
+import os
 from functools import partial
+from learnMSA.protein_language_models.BilinearSymmetric import make_scoring_model
 import learnMSA.protein_language_models as plm
 from learnMSA.msa_hmm.MsaHmmCell import MsaHmmCell
 from learnMSA.msa_hmm.MsaHmmLayer import MsaHmmLayer
@@ -182,9 +184,9 @@ class EmbeddingBatchGenerator(DefaultBatchGenerator):
         language_model, encoder = self._load_language_model(fasta_file)
         self.scoring_model = make_scoring_model(language_model.dim, self.reduced_embedding_dim, dropout=0.0)
         if self.use_finetuned_lm:
-            self.scoring_model.load_weights(f"scoring_models/{self.lm_name}_{self.reduced_embedding_dim}/checkpoints")
+            self.scoring_model.load_weights(os.path.dirname(__file__)+f"/../protein_language_models/scoring_models/{self.lm_name}_{self.reduced_embedding_dim}/checkpoints")
         else:
-            self.scoring_model.load_weights(f"scoring_models_frozen/{self.lm_name}_{self.reduced_embedding_dim}/checkpoints")
+            self.scoring_model.load_weights(os.path.dirname(__file__)+f"/../protein_language_models/scoring_models_frozen/{self.lm_name}_{self.reduced_embedding_dim}/checkpoints")
         self.scoring_model.layers[-1].trainable = False #don't forget to freeze the scoring model!
         if self.cache_embeddings:
             if len(self.embedding_cache) == 0:
@@ -345,7 +347,7 @@ def generic_embedding_model_generator(encoder_layers,
     num_models = msa_hmm_layer.cell.num_models
     sequences = tf.keras.Input(shape=(None,None), name="sequences", dtype=tf.uint8)
     indices = tf.keras.Input(shape=(None,), name="indices", dtype=tf.int64)
-    embeddings = tf.keras.Input(shape=(None,None,embedding_dim), name="embeddings", dtype=tf.float32)
+    embeddings = tf.keras.Input(shape=(None,None,33), name="embeddings", dtype=tf.float32)
     #in the input pipeline, we need the batch dimension to come first to make multi GPU work 
     #we transpose here, because all learnMSA layers require the model dimension to come first
     transposed_sequences = tf.transpose(sequences, [1,0,2])
