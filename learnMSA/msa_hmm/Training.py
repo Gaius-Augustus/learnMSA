@@ -4,7 +4,6 @@ import gc
 import os
 from functools import partial
 from learnMSA.protein_language_models.BilinearSymmetric import make_scoring_model
-import learnMSA.protein_language_models as plm
 from learnMSA.msa_hmm.MsaHmmCell import MsaHmmCell
 from learnMSA.msa_hmm.MsaHmmLayer import MsaHmmLayer
 from learnMSA.msa_hmm.AncProbsLayer import AncProbsLayer
@@ -144,6 +143,9 @@ class DefaultBatchGenerator():
         
         
 class EmbeddingBatchGenerator(DefaultBatchGenerator):
+    # only import contextual when lm features are required
+    import learnMSA.protein_language_models as plm
+
     """ Computes batches of input sequences along with static embeddings.
         cache_embeddings: If true, all embeddings will be computed once when configuring the generator and kept in memory. Otherwise they are loaded on the fly.
     """

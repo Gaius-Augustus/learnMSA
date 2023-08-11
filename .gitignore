@@ -9,3 +9,4 @@ build/
 dist/
 clustering/
 learnMSA.egg-info/
+tmp/

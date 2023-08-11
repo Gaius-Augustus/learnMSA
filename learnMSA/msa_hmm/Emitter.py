@@ -4,7 +4,6 @@ import os
 import learnMSA.msa_hmm.Initializers as initializers
 import learnMSA.msa_hmm.Priors as priors
 from learnMSA.protein_language_models.BilinearSymmetric import make_scoring_model
-import learnMSA.protein_language_models as plm
 
     
 
@@ -179,6 +178,8 @@ class EmbeddingEmitter(ProfileHMMEmitter):
         self.L2_insert = L2_insert
         self.use_shared_embedding_insertions = use_shared_embedding_insertions
         self.use_finetuned_lm = use_finetuned_lm
+        # only import contextual when lm features are required
+        import learnMSA.protein_language_models as plm
         self.scoring_model = make_scoring_model(plm.common.dims[lm_name], reduced_embedding_dim, dropout=0.0)
         if use_finetuned_lm:
             self.scoring_model.load_weights(os.path.dirname(__file__)+f"/../protein_language_models/scoring_models/{lm_name}_{reduced_embedding_dim}/checkpoints")
