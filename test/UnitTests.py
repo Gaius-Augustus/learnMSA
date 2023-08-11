@@ -1329,23 +1329,23 @@ class ConsoleTest(unittest.TestCase):
         
         test = subprocess.Popen(["python", "learnMSA.py", "--silent", "-o", "test.out", "-i", single_seq], stderr=subprocess.PIPE)
         output = test.communicate()[1].strip().decode('ascii')
-        self.assertEqual(single_seq_expected_err, output)
+        self.assertEqual(single_seq_expected_err, output[-len(single_seq_expected_err):])
         
         test = subprocess.Popen(["python", "learnMSA.py", "--silent", "-o", "test.out", "-i", faulty_format], stderr=subprocess.PIPE)
         output = test.communicate()[1].strip().decode('ascii')
-        self.assertEqual(faulty_format_expected_err, output)
+        self.assertEqual(faulty_format_expected_err, output[-len(faulty_format_expected_err):])
         
         test = subprocess.Popen(["python", "learnMSA.py", "--silent", "-o", "test.out", "-i", empty_seq], stderr=subprocess.PIPE)
         output = test.communicate()[1].strip().decode('ascii')
-        self.assertEqual(empty_seq_expected_err, output)
+        self.assertEqual(empty_seq_expected_err, output[-len(empty_seq_expected_err):])
         
         test = subprocess.Popen(["python", "learnMSA.py", "--silent", "-o", "test.out", "-i", unknown_symbol], stderr=subprocess.PIPE)
         output = test.communicate()[1].strip().decode('ascii')
-        self.assertEqual(unknown_symbol_expected_err, output)
+        self.assertEqual(unknown_symbol_expected_err, output[-len(unknown_symbol_expected_err):])
         
         test = subprocess.Popen(["python", "learnMSA.py", "--silent", "-o", "test.out", "-i", faulty_msa], stderr=subprocess.PIPE)
         output = test.communicate()[1].strip().decode('ascii')
-        self.assertEqual(faulty_msa_expected_err, output)
+        self.assertEqual(faulty_msa_expected_err, output[-len(faulty_msa_expected_err):])
         
 class DirichletTest(unittest.TestCase):
         

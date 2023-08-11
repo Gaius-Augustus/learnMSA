@@ -26,6 +26,21 @@ def get_adaptive_batch_size(model_lengths, max_seq_len):
         return 64*num_devices
     else:
         return 32*num_devices
+    
+def get_adaptive_batch_size_with_language_model(model_lengths, max_seq_len):
+    num_gpu = len([x.name for x in tf.config.list_logical_devices() if x.device_type == 'GPU']) 
+    num_devices = num_gpu + int(num_gpu==0) #account for the CPU-only case 
+    model_length = max(model_lengths)
+    if max_seq_len < 200 and model_length < 180:
+        return 200*num_devices
+    elif max_seq_len < 520 and model_length < 230:
+        return 100*num_devices
+    elif max_seq_len < 700 and model_length < 420:
+        return 50*num_devices
+    elif max_seq_len < 850 and model_length < 550:
+        return 25*num_devices
+    else:
+        return 12*num_devices
 
 #the configuration can be changed by experienced users
 #proper command line support for these parameters will be added in the future

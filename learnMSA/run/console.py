@@ -125,6 +125,7 @@ def run_main():
     else:
         sequence_weights = None
     if args.use_language_model:
+        config["batch_size"] = msa_hmm.config.get_adaptive_batch_size_with_language_model
         config["learning_rate"] = 0.05
         config["epochs"] = [10, 4, 20]
         emission_init = [msa_hmm.initializers.EmbeddingEmissionInitializer() for _ in range(config["num_models"])]

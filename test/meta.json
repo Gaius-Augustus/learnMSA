@@ -1,0 +1,6 @@
+{
+    "fasta_file": "test/data/egf.fasta",
+    "batch_size": 512,
+    "gap_symbol": "-",
+    "gap_symbol_insertions": "."
+}
