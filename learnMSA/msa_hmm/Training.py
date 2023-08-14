@@ -272,6 +272,11 @@ def make_dataset(indices, batch_generator, batch_size=512, shuffle=True):
     ds_y = tf.data.Dataset.from_tensor_slices(tf.zeros(1)).batch(batch_size).repeat()
     ds = tf.data.Dataset.zip((ds, ds_y))
     ds = ds.prefetch(2) #preprocessings and training steps in parallel
+    # get rid of a warning, see https://github.com/tensorflow/tensorflow/issues/42146
+    # in case of multi GPU, we want to split the data dimension accross GPUs
+    options = tf.data.Options()
+    options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.DATA
+    ds = ds.with_options(options)
     return ds
     
 
@@ -312,9 +317,9 @@ def fit_model(model_generator,
     if num_gpu > 1:       
         
         #workaround: https://github.com/tensorflow/tensorflow/issues/50487
-        import atexit
+        #import atexit
         mirrored_strategy = tf.distribute.MirroredStrategy()    
-        atexit.register(mirrored_strategy._extended._collective_ops._pool.close) # type: ignore
+        #atexit.register(mirrored_strategy._extended._collective_ops._pool.close) # type: ignore
         
         with mirrored_strategy.scope():
             model = make_and_compile()
