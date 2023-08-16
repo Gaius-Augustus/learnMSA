@@ -1,6 +1,6 @@
 import tensorflow as tf
 import numpy as np
-import learnMSA.msa_hmm.Fasta as fasta
+from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 import learnMSA.msa_hmm.AncProbsLayer as anc_probs
 import learnMSA.msa_hmm.DirichletMixture as dm
 import os
@@ -25,7 +25,7 @@ class ConstantInitializer(tf.keras.initializers.Constant):
         else:
             return f"Const(shape={self.value.shape})"
     
-R, p = anc_probs.parse_paml(anc_probs.LG_paml, fasta.alphabet[:-1])
+R, p = anc_probs.parse_paml(anc_probs.LG_paml, SequenceDataset.alphabet[:-1])
 exchangeability_init = anc_probs.inverse_softplus(R + 1e-32)
 
 

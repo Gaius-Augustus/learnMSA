@@ -1,6 +1,7 @@
 import tensorflow as tf
 import numpy as np
 import learnMSA.msa_hmm.Training as train
+from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 import time
 
 
@@ -97,18 +98,18 @@ def viterbi(sequences, hmm_cell):
     return viterbi_backtracking(hmm_cell, gamma)
 
 
-def get_state_seqs_max_lik(fasta_file,
+def get_state_seqs_max_lik(data : SequenceDataset,
                            batch_generator,
                            indices,
                            batch_size,
                            hmm_cell, 
                            model_ids,
                            encoder=None):
-    """ Runs batch-wise viterbi on all sequences in fasta_file as specified by indices.
+    """ Runs batch-wise viterbi on all sequences in the dataset as specified by indices.
     Args:
-        fasta_file: Fasta file object.
+        data: The sequence dataset.
         batch_generator: Batch generator.
-        indices: Indices that specify which sequences in fasta_file should be decoded. 
+        indices: Indices that specify which sequences in the dataset should be decoded. 
         batch_size: Specifies how many sequences will be decoded in parallel. 
         hmm_cell: MsaHmmCell object. 
         encoder: Optional eget_state_seqs_max_likncoder model that is applied to the sequences before Viterbi.
@@ -120,13 +121,13 @@ def get_state_seqs_max_lik(fasta_file,
     num_devices = num_gpu + int(num_gpu==0) #account for the CPU-only case 
     batch_size = int(batch_size / num_devices)
     #compute an optimized order for decoding that sorts sequences of equal length into the same batch
-    sorted_indices = np.array([[i,j] for l,i,j in sorted(zip(fasta_file.seq_lens[indices], indices, range(indices.size)))])
+    sorted_indices = np.array([[i,j] for l,i,j in sorted(zip(data.seq_lens[indices], indices, range(indices.size)))])
     hmm_cell.recurrent_init()
     ds = train.make_dataset(sorted_indices[:,0], 
                             batch_generator, 
                             batch_size,
                             shuffle=False)
-    seq_len = fasta_file.seq_lens[sorted_indices[-1,0]]+1
+    seq_len = data.seq_lens[sorted_indices[-1,0]]+1
     #initialize with terminal states
     state_seqs_max_lik = np.zeros((hmm_cell.num_models, indices.size, seq_len), 
                                   dtype=np.uint16) 

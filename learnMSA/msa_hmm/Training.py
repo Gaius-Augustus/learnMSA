@@ -8,6 +8,7 @@ from learnMSA.msa_hmm.MsaHmmCell import MsaHmmCell
 from learnMSA.msa_hmm.MsaHmmLayer import MsaHmmLayer
 from learnMSA.msa_hmm.AncProbsLayer import AncProbsLayer
 from learnMSA.msa_hmm.Configuration import assert_config
+from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 
         
 
@@ -74,17 +75,18 @@ def default_model_generator(num_seq,
                             effective_num_seq,
                             model_lengths, 
                             config,
-                            fasta_file,
+                            data : SequenceDataset = None,
                             sequence_weights=None,
                             alphabet_size=25,
                             generic_gen=generic_model_generator):
-    """A callback that constructs the default learnMSA model.
+    """A callback that constructs the default learnMSA model. Can be used as a template for custom generators.
     Args:
         num_seq: The total number of sequences to align.
         effective_num_seq: The actual number of sequences currently used for training (model surgery might use only a subset).
         model_lengths: List of pHMM lengths.
         config: Dictionary storing the configuration.
-        fasta_file: A fasta_file. This is part of the model generator callback because the generated model might depends on data like maximum sequence length.
+        data: The sequence dataset corresponding to this model. Typically but not necessarily equal to the training data of the model. 
+              This is part of the model generator callback because the generated model might depends on some sequence information like maximum length.
         sequence_weights: Optional likelihood weights per sequence.
         alphabet_size: Number of symbols without the terminal symbol (i.e. 25 for amino acids).
     """
@@ -107,28 +109,28 @@ class DefaultBatchGenerator():
         self.shuffle = shuffle
         self.configured = False
         
-    def configure(self, fasta_file, config):
-        self.fasta_file = fasta_file
+    def configure(self, data : SequenceDataset, config):
+        self.data = data
         self.num_models = config["num_models"]
-        self.permutations = [np.arange(fasta_file.num_seq) for _ in range(self.num_models)]
+        self.permutations = [np.arange(data.num_seq) for _ in range(self.num_models)]
         for p in self.permutations:
             np.random.shuffle(p)
         self.configured = True
         
     def __call__(self, indices):
         if not self.configured:
-            raise ValueError("A batch generator must be configured with the configure(fasta_file, config) method.") 
+            raise ValueError("A batch generator must be configured with the configure(data, config) method.") 
         #use a different permutation of the sequences per trained model
         if self.shuffle:
             permutated_indices = np.stack([perm[indices] for perm in self.permutations], axis=1)
         else:
             permutated_indices = np.stack([indices]*self.num_models, axis=1)
-        max_len = np.max(self.fasta_file.seq_lens[permutated_indices])
+        max_len = np.max(self.data.seq_lens[permutated_indices])
         batch = np.zeros((indices.shape[0], self.num_models, max_len+1), dtype=np.uint8) 
         batch += self.alphabet_size #initialize with terminal symbols
         for i,perm_ind in enumerate(permutated_indices):
             for k,j in enumerate(perm_ind):
-                batch[i, k, :self.fasta_file.seq_lens[j]] = self.fasta_file.get_raw_seq(j)
+                batch[i, k, :self.data.seq_lens[j]] = self.data.get_encoded_seq(j)
         if self.return_only_sequences:
             return batch
         else:
@@ -163,9 +165,9 @@ class EmbeddingBatchGenerator(DefaultBatchGenerator):
         if self.cache_embeddings:
             self.embedding_cache = []
             
-    def _load_language_model(self, fasta_file) -> (plm.common.LanguageModel, plm.common.InputEncoder):
+    def _load_language_model(self, data : SequenceDataset) -> (plm.common.LanguageModel, plm.common.InputEncoder):
         if self.lm_name == "proteinBERT":
-            language_model, encoder = plm.proteinbert.get_proteinBERT_model_and_encoder(max_len = fasta_file.max_len+2)
+            language_model, encoder = plm.proteinbert.get_proteinBERT_model_and_encoder(max_len = data.max_len+2)
         elif self.lm_name == "esm2":
             language_model, encoder = plm.esm2.ESM2LanguageModel(), plm.esm2.ESM2InputEncoder()
         elif self.lm_name == "protT5":
@@ -181,9 +183,9 @@ class EmbeddingBatchGenerator(DefaultBatchGenerator):
         reduced_emb = bilinear_symmetric_layer._reduce(emb, training=False, softmax_on_reduce_dim=False)
         return reduced_emb
         
-    def configure(self, fasta_file, config):
-        super().configure(fasta_file, config)
-        language_model, encoder = self._load_language_model(fasta_file)
+    def configure(self, data : SequenceDataset, config):
+        super().configure(data, config)
+        language_model, encoder = self._load_language_model(data)
         self.scoring_model = make_scoring_model(language_model.dim, self.reduced_embedding_dim, dropout=0.0)
         if self.use_finetuned_lm:
             self.scoring_model.load_weights(os.path.dirname(__file__)+f"/../protein_language_models/scoring_models/{self.lm_name}_{self.reduced_embedding_dim}/checkpoints")
@@ -192,18 +194,18 @@ class EmbeddingBatchGenerator(DefaultBatchGenerator):
         self.scoring_model.layers[-1].trainable = False #don't forget to freeze the scoring model!
         if self.cache_embeddings:
             if len(self.embedding_cache) == 0:
-                self.batch_size = config["batch_size"]([0], fasta_file.max_len) if callable(config["batch_size"]) else config["batch_size"]
+                self.batch_size = config["batch_size"]([0], data.max_len) if callable(config["batch_size"]) else config["batch_size"]
                 if self.lm_name == "esm2s":
                     self.batch_size //= 2
                 if self.lm_name == "protT5":
                     self.batch_size //= 4
                 if self.lm_name == "esm2":
                     self.batch_size //= 4
-                for i in range(0, fasta_file.num_seq, self.batch_size):
-                    seq_batch = [fasta_file.aminoacid_seq_str(j) for j in range(i, min(i+self.batch_size, fasta_file.num_seq))]      
+                for i in range(0, data.num_seq, self.batch_size):
+                    seq_batch = [str(data.get_record(j).seq) for j in range(i, min(i+self.batch_size, data.num_seq))]      
                     emb = self._compute_reduced_embeddings(seq_batch, language_model, encoder).numpy() #move to cpu 
                     for j in range(emb.shape[0]):
-                        self.embedding_cache.append(emb[j, :fasta_file.seq_lens[i+j]])
+                        self.embedding_cache.append(emb[j, :data.seq_lens[i+j]])
                 # once we have cached the (lower dimensional) embeddings do a cleanup
                 tf.keras.backend.clear_session()
                 gc.collect()
@@ -212,12 +214,12 @@ class EmbeddingBatchGenerator(DefaultBatchGenerator):
                 
     def _get_reduced_embedding(self, i):
         """ Returns a 2D tensor of shape (length of sequence i, reduced_embedding_dim) that contains the embeddings of
-            the i-th sequence in the fasta file used to configure the batch generator.
+            the i-th sequence in the dataset used to configure the batch generator.
         """
         if self.cache_embeddings:
             emb = self.embedding_cache[i]
         else: #load the embeddings dynamically (not recommended, currently implemented inefficiently)
-            seq = self.fasta_file.aminoacid_seq_str(i)
+            seq = str(self.data.get_record(i).seq)
             emb = self._compute_reduced_embeddings([seq], self.language_model, self.encoder)[0]
         return emb
                 
@@ -267,11 +269,13 @@ def make_dataset(indices, batch_generator, batch_size=512, shuffle=True):
     ds = ds.batch(batch_size)
     ds = ds.map(lambda i: tf.numpy_function(func=batch_generator,
                 inp=[i], Tout=batch_generator.get_out_types()),
-                num_parallel_calls=tf.data.AUTOTUNE,
+                # no parallel processing if using an indexed dataset
+                num_parallel_calls=None if batch_generator.data.indexed else tf.data.AUTOTUNE,
                 deterministic=True)
     ds_y = tf.data.Dataset.from_tensor_slices(tf.zeros(1)).batch(batch_size).repeat()
     ds = tf.data.Dataset.zip((ds, ds_y))
-    ds = ds.prefetch(2) #preprocessings and training steps in parallel
+    if not batch_generator.data.indexed:
+        ds = ds.prefetch(2) #preprocessings and training steps in parallel
     # get rid of a warning, see https://github.com/tensorflow/tensorflow/issues/42146
     # in case of multi GPU, we want to split the data dimension accross GPUs
     options = tf.data.Options()
@@ -282,7 +286,7 @@ def make_dataset(indices, batch_generator, batch_size=512, shuffle=True):
 
 def fit_model(model_generator,
               batch_generator,
-              fasta_file,
+              data : SequenceDataset,
               indices,
               model_lengths, 
               config,
@@ -293,7 +297,7 @@ def fit_model(model_generator,
     assert_config(config)
     tf.keras.backend.clear_session() #frees occupied memory 
     tf.get_logger().setLevel('ERROR')
-    batch_generator.configure(fasta_file, config)
+    batch_generator.configure(data, config)
     optimizer = tf.optimizers.Adam(config["learning_rate"])
     if verbose:
         print("Fitting models of lengths", model_lengths, "on", indices.shape[0], "sequences.")
@@ -303,11 +307,11 @@ def fit_model(model_generator,
         else:
             print("Don't use sequence weights.")
     def make_and_compile():
-        model = model_generator(num_seq=fasta_file.num_seq,
+        model = model_generator(num_seq=data.num_seq,
                                 effective_num_seq=indices.shape[0],
                                 model_lengths=model_lengths,
                                 config=config,
-                                fasta_file=fasta_file,
+                                data=data,
                                 sequence_weights=sequence_weights)
         model.compile(optimizer=optimizer)
         return model

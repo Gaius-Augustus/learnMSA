@@ -5,10 +5,9 @@ import learnMSA.msa_hmm.Emitter as emit
 import learnMSA.msa_hmm.Transitioner as trans
 
 class MsaHmmCell(tf.keras.layers.Layer):
-    """ A general cell for (p)HMM training. It is meant to be used with the generic RNN-layer.
-        It computes the likelihood of a batch of sequences, computes a prior value and provides 
-        functionality (through the injected emitter and transitioner) to construct the emission- 
-        and transition-matricies also used elsewhere e.g. during Viterbi.
+    """ A general cell that computes one recursion step of the forward algorithm in its call method and can also compute the backward algorithm.
+        It is meant to be used with the generic RNN-layer to compute the likelihood of a batch of sequences. It also wraps a prior and provides 
+        functionality (through the injected emitter and transitioner) to construct the emission- and transition-matricies also used elsewhere e.g. during Viterbi.
         Based on https://github.com/mslehre/classify-seqs/blob/main/HMMCell.py.
     Args:
         length: Model length / number of match states or a list of lengths.

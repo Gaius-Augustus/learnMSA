@@ -1,17 +1,17 @@
 import numpy as np
-import learnMSA.msa_hmm.Fasta as fasta
+from learnMSA.msa_hmm.SequenceDataset import SequenceDataset, AlignedDataset
 import learnMSA.msa_hmm.AlignmentModel as alignment_model
 import subprocess
 from shutil import which
 import sys
 
 
-def find_long_insertions_and_write_slice(fasta_file, lens, starts, name, directory, t = 20, k=2, max_insertions_len=500, max_insertions_len_below_seq_ok = 100, verbose=True):
+def find_long_insertions_and_write_slice(data : SequenceDataset, lens, starts, name, directory, t = 20, k=2, max_insertions_len=500, max_insertions_len_below_seq_ok = 100, verbose=True):
         """
         Finds insertions that have at least length t. If there are at least k of these sequences, writes them to file.
         Args: 
-            fasta_file: Fasta file containing the complete sequences.
-            lens, starts: Arrays of length n where n is the number of sequences in fasta_file. Indicate how long insertions are and where they start respectively.
+            data: Dataset of all sequences.
+            lens, starts: Arrays of length n where n is the number of sequences in the dataset. Indicate how long insertions are and where they start respectively.
             name: Identifier for the location of the slice (e.g. left_flank or match_5).
             directory: Directory where slice files are written.
         """
@@ -24,12 +24,12 @@ def find_long_insertions_and_write_slice(fasta_file, lens, starts, name, directo
             to_delete = []
             with open(filename, "w") as slice_file:
                 for j in range(lengths.size):
-                    aa_seq = fasta_file.aminoacid_seq_str(which[j])
+                    aa_seq = str(data.get_record(which[j]).seq)
                     segment = aa_seq[start[j] : start[j] + lengths[j]]
                     #sometimes segments look strange (like ones consisting only of X)
                     #this can cause problems in the downstream aligner, omit these segments
                     non_standard_freq = 0
-                    for aa in fasta.alphabet[20:]:
+                    for aa in data.alphabet[20:]:
                         non_standard_freq += segment.count(aa)
                     non_standard_freq /= len(segment)
                     mostly_non_standard_aa = non_standard_freq > 0.5
@@ -38,7 +38,7 @@ def find_long_insertions_and_write_slice(fasta_file, lens, starts, name, directo
                          which.size > max_insertions_len_below_seq_ok)):
                         to_delete.append(j)
                     else:
-                        slice_file.write(">"+fasta_file.seq_ids[which[j]]+"\n")
+                        slice_file.write(">"+data.seq_ids[which[j]]+"\n")
                         slice_file.write(segment+"\n")
             which = np.delete(which, to_delete)
             if which.size > k:
@@ -57,13 +57,13 @@ def make_aligned_insertions(am, directory, method="famsa", threads=0, verbose=Tr
     for r in range(data.num_repeats):
         insertions_long.append([])
         for i in range(data.insertion_lens.shape[2]):
-            ins_long = find_long_insertions_and_write_slice(am.fasta_file, data.insertion_lens[r, :, i], data.insertion_start[r, :, i], f"ins_{r}_{i}", directory, verbose=verbose)
+            ins_long = find_long_insertions_and_write_slice(am.data, data.insertion_lens[r, :, i], data.insertion_start[r, :, i], f"ins_{r}_{i}", directory, verbose=verbose)
             insertions_long[-1].append(ins_long)
-    left_flank_long = find_long_insertions_and_write_slice(am.fasta_file, data.left_flank_len, data.left_flank_start, "left_flank", directory, verbose=verbose)
-    right_flank_long = find_long_insertions_and_write_slice(am.fasta_file, data.right_flank_len, data.right_flank_start, "right_flank", directory, verbose=verbose)
+    left_flank_long = find_long_insertions_and_write_slice(am.data, data.left_flank_len, data.left_flank_start, "left_flank", directory, verbose=verbose)
+    right_flank_long = find_long_insertions_and_write_slice(am.data, data.right_flank_len, data.right_flank_start, "right_flank", directory, verbose=verbose)
     unannotated_long = []
     for r in range(data.num_repeats-1):
-        unannotated_long.append(find_long_insertions_and_write_slice(am.fasta_file, data.unannotated_segments_len[r], data.unannotated_segments_start[r], f"unannotated_{r}", directory, verbose=verbose))
+        unannotated_long.append(find_long_insertions_and_write_slice(am.data, data.unannotated_segments_len[r], data.unannotated_segments_start[r], f"unannotated_{r}", directory, verbose=verbose))
         
     slice_files = []
     if left_flank_long is not None:
@@ -78,52 +78,64 @@ def make_aligned_insertions(am, directory, method="famsa", threads=0, verbose=Tr
         if unannotated_long[r] is not None:
             slice_files.append(f"{directory}/slice_unannotated_{r}")
             
-    #align insertions
-    for slice_file in slice_files:
-        make_slice_msa(slice_file, method, threads)
+    make_slice_msas(slice_files, method, threads)
         
     #merge msa
-    insertions_long = [[(x[0], fasta.Fasta(x[1]+".aln", aligned=True)) if x is not None else None for x in repeats] for repeats in insertions_long]
-    left_flank_long = (left_flank_long[0],  fasta.Fasta(left_flank_long[1]+".aln", aligned=True)) if left_flank_long is not None else None
-    right_flank_long = (right_flank_long[0],  fasta.Fasta(right_flank_long[1]+".aln", aligned=True)) if right_flank_long is not None else None
-    unannotated_long = [(x[0], fasta.Fasta(x[1]+".aln", aligned=True)) if x is not None else None for x in unannotated_long]
+    insertions_long = [[(x[0], AlignedDataset(x[1]+".aln", "fasta")) if x is not None else None for x in repeats] for repeats in insertions_long]
+    left_flank_long = (left_flank_long[0],  AlignedDataset(left_flank_long[1]+".aln", "fasta")) if left_flank_long is not None else None
+    right_flank_long = (right_flank_long[0],  AlignedDataset(right_flank_long[1]+".aln", "fasta")) if right_flank_long is not None else None
+    unannotated_long = [(x[0], AlignedDataset(x[1]+".aln", "fasta")) if x is not None else None for x in unannotated_long]
     
     aligned_insertions = alignment_model.AlignedInsertions(insertions_long, left_flank_long, right_flank_long, unannotated_long)
     return aligned_insertions
 
 
-def make_slice_msa(slice_file, method="famsa", threads=0):
-    
+def make_slice_msas(slice_files, method="famsa", threads=0):
     if method == "famsa":
-        if which(method) is None:
-            print("Aligner famsa is not installed or not in PATH. Consider installing it with conda install -c bioconda famsa.")
-            sys.exit(1)
-        else:
-            result = subprocess.run(["famsa", "-t", str(threads), slice_file, slice_file+".aln"])
-            
+        result_code = align_with_famsa(slice_files, threads)
     elif method == "clustalo":
-        if which(method) is None:
-            print("Aligner clustalo is not installed or not in PATH. Consider installing it with conda install -c bioconda clustalo.")
-            sys.exit(1)
-        else:
-            if threads:
-                result = subprocess.run(["famsa", "--threads", str(threads), "-i", slice_file, "-o", slice_file+".aln", "--force"])
-            else:
-                result = subprocess.run(["clustalo", "-i", slice_file, "-o", slice_file+".aln", "--force"])
-                
+        result_code = align_with_clustalo(slice_files, threads)
     elif method == "t_coffee":
-        if which(method) is None:
-            print("Aligner t_coffee is not installed or not in PATH. Consider installing it with conda install -c bioconda t-coffee."+
-                  "Note: As of writing this, there is also an outdated conda package called t_coffee (underscore). Please make sure to install the correct one.")
-            sys.exit(1)
-        else:
-            result = subprocess.run(["t_coffee", "-thread", str(threads), "-reg", "-seq", slice_file, 
-                                     "-nseq", "100", "-tree", "mbed", "-method", "mafftginsi_msa", 
-                                     "-outfile", slice_file+".aln", "-quiet"])
+       result_code = align_with_t_coffee(slice_files, threads)
     else:
         print(f"Unknown aligner {method}")
         sys.exit(1)
-
-    if result.returncode != 0:
+    if result_code != 0:
         print(f"Failed to align insertions with {method}. Aligner returned: {result.returncode}.")
         sys.exit(1)
+
+
+def align_with_famsa(slice_files, threads):
+    #from pyfamsa import Aligner, Sequence
+    #fasta_file = fasta.Fasta(filename)
+    #sequences = [Sequence(fasta_file.seq_ids[i], fasta_file.aminoacid_seq_str(i)) for i in range(fasta_file.num_seq)]
+    if which("famsa") is None:
+        print("Aligner famsa is not installed or not in PATH. Consider installing it with conda install -c bioconda famsa.")
+        sys.exit(1)
+    for slice_file in slice_files:
+        result = subprocess.run(["famsa", "-t", str(threads), slice_file, slice_file+".aln"])
+    return result.returncode
+
+
+def align_with_clustalo(slice_files, threads):
+    if which("clustalo") is None:
+        print("Aligner clustalo is not installed or not in PATH. Consider installing it with conda install -c bioconda clustalo.")
+        sys.exit(1)
+    for slice_file in slice_files:
+        if threads:
+            result = subprocess.run(["clustalo", "--threads", str(threads), "-i", slice_file, "-o", slice_file+".aln", "--force"])
+        else:
+            result = subprocess.run(["clustalo", "-i", slice_file, "-o", slice_file+".aln", "--force"])
+    return result.returncode
+
+
+def align_with_t_coffee(slice_files, threads):
+    if which("t_coffee") is None:
+        print("Aligner t_coffee is not installed or not in PATH. Consider installing it with conda install -c bioconda t-coffee."+
+                "Note: As of writing this, there is also an outdated conda package called t_coffee (underscore). Please make sure to install the correct one.")
+        sys.exit(1)
+    for slice_file in slice_files:
+        result = subprocess.run(["t_coffee", "-thread", str(threads), "-reg", "-seq", slice_file, 
+                                        "-nseq", "100", "-tree", "mbed", "-method", "mafftginsi_msa", 
+                                        "-outfile", slice_file+".aln", "-quiet"])
+    return result.returncode

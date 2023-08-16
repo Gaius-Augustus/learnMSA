@@ -3,7 +3,7 @@ import numpy as np
 import learnMSA.msa_hmm.AncProbsLayer as anc_probs
 import learnMSA.msa_hmm.MsaHmmLayer as msa_hmm_layer
 import learnMSA.msa_hmm.MsaHmmCell as msa_hmm_cell
-import learnMSA.msa_hmm.Fasta as fasta
+from learnMSA.msa_hmm.SequenceDataset import SequenceDataset, AlignedDataset
 import learnMSA.msa_hmm.Configuration as config
 import learnMSA.msa_hmm.Training as train
 import learnMSA.msa_hmm.Viterbi as viterbi
@@ -56,20 +56,20 @@ class AlignedInsertions():
                  aligned_unannotated_segments = None):
         """ 
         Args: 
-            aligned_insertions: List of lists of pairs (indices, fasta file with aligned slices) or None. Inner lists have length equal to length of model -1. Outer list has length num_repeats.
-            aligned_left_flank: A pair (indices, fasta file with aligned slices) or None.
-            aligned_right_flank: A pair (indices, fasta file with aligned slices) or None.
-            unannotated_data: List of pairs (indices, fasta file with aligned slices) or None of length num_repeats-1.
+            aligned_insertions: List of lists of pairs (indices, SequenceDataset with aligned slices) or None. Inner lists have length equal to length of model -1. Outer list has length num_repeats.
+            aligned_left_flank: A pair (indices, SequenceDataset with aligned slices) or None.
+            aligned_right_flank: A pair (indices, SequenceDataset with aligned slices) or None.
+            unannotated_data: List of pairs (indices, SequenceDataset with aligned slices) or None of length num_repeats-1.
         """
         self.aligned_insertions = aligned_insertions
         self.aligned_left_flank = aligned_left_flank
         self.aligned_right_flank = aligned_right_flank
         self.aligned_unannotated_segments = aligned_unannotated_segments
         
-        def _process(fasta_file):
-            custom_columns = np.zeros((fasta_file.num_seq, np.amax(fasta_file.alignment_len)), dtype=np.int32)
-            for i in range(fasta_file.num_seq):
-                cols = fasta_file.get_membership_targets(i)
+        def _process(msa_data : AlignedDataset):
+            custom_columns = np.zeros((msa_data.num_seq, np.amax(msa_data.alignment_len)), dtype=np.int32)
+            for i in range(msa_data.num_seq):
+                cols = msa_data.get_column_map(i)
                 custom_columns[i, :cols.size] = cols
             return custom_columns
                 
@@ -147,23 +147,23 @@ class AlignmentModel():
     """ Decodes alignments from a number of models, stores them in a memory friendly representation and
         generates table-form (memory unfriendly) alignments on demand (batch-wise mode possible).
     Args:
-        fasta_file: A fasta file with the sequences to decode.
+        data: The dataset of sequences.
         batch_generator: An already configured batch generator.
-        indices: (A subset of) The sequence indices from the fasta to align (1D).
+        indices: (A subset of) The sequence indices from the dataset to align (1D).
         batch_size: Controls memory consumption of viterbi.
         model: A learnMSA model which internally might represent multiple pHMM models.
         gap_symbol: Character used to denote missing match positions.
         gap_symbol_insertions: Character used to denote insertions in other sequences.
     """
     def __init__(self, 
-                 fasta_file, 
+                 data : SequenceDataset, 
                  batch_generator,
                  indices, 
                  batch_size, 
                  model,
                  gap_symbol="-",
                  gap_symbol_insertions="."):
-        self.fasta_file = fasta_file
+        self.data = data
         self.batch_generator = batch_generator
         self.indices = indices
         self.batch_size = batch_size
@@ -180,9 +180,9 @@ class AlignmentModel():
         assert self.encoder_model is not None, "Can not find a MsaHmmLayer in the specified model."
         self.gap_symbol = gap_symbol
         self.gap_symbol_insertions = gap_symbol_insertions
-        self.output_alphabet = np.array((fasta.alphabet[:-1] + 
+        self.output_alphabet = np.array((list(data.get_alphabet_no_gap()) + 
                                         [gap_symbol] + 
-                                        [aa.lower() for aa in fasta.alphabet[:-1]] + 
+                                        list(data.get_alphabet_no_gap().lower()) + 
                                         [gap_symbol_insertions, "$"]))
         self.metadata = {}
         self.num_models = self.msa_hmm_layer.cell.num_models
@@ -200,7 +200,7 @@ class AlignmentModel():
             cell_copy = self.msa_hmm_layer.cell.duplicate(models)
             
         cell_copy.build((self.num_models, None, None, self.msa_hmm_layer.cell.dim))
-        state_seqs_max_lik = viterbi.get_state_seqs_max_lik(self.fasta_file,
+        state_seqs_max_lik = viterbi.get_state_seqs_max_lik(self.data,
                                                             self.batch_generator,
                                                             self.indices,
                                                             self.batch_size,
@@ -251,7 +251,7 @@ class AlignmentModel():
                 batch_alignment = self.get_batch_alignment(model_index, batch_indices, add_block_sep, aligned_insertions)
                 alignment_strings = self.batch_to_string(batch_alignment)
                 for s, seq_ind in zip(alignment_strings, batch_indices):
-                    seq_id = self.fasta_file.seq_ids[self.indices[seq_ind]]
+                    seq_id = self.data.seq_ids[self.indices[seq_ind]]
                     output_file.write(">"+seq_id+"\n")
                     output_file.write(s+"\n")
                 i += batch_size
@@ -271,14 +271,14 @@ class AlignmentModel():
             self._build_alignment([model_index])
         data = self.metadata[model_index]
         b = batch_indices.size
-        sequences = np.zeros((b, self.fasta_file.max_len), dtype=np.uint16) + (fasta.s-1)
+        sequences = np.zeros((b, self.data.max_len), dtype=np.uint16) + (len(self.data.alphabet)-1)
         for i,j in enumerate(batch_indices):
-            l = self.fasta_file.seq_lens[self.indices[j]]
-            sequences[i, :l] = self.fasta_file.get_raw_seq(self.indices[j])
+            l = self.data.seq_lens[self.indices[j]]
+            sequences[i, :l] = self.data.get_encoded_seq(self.indices[j])
         blocks = []  
         if add_block_sep:
-            sep = np.zeros((b,1), dtype=np.uint16) + 2*fasta.s
-        left_flank_block = AlignmentModel.get_insertion_block(sequences, 
+            sep = np.zeros((b,1), dtype=np.uint16) + 2*len(self.data.alphabet)
+        left_flank_block = self.get_insertion_block(sequences, 
                                                data.left_flank_len[batch_indices],
                                                max(data.left_flank_len_total, aligned_insertions.ext_left_flank),
                                                data.left_flank_start[batch_indices],
@@ -291,7 +291,7 @@ class AlignmentModel():
             consensus = data.consensus[i]
             ins_len = data.insertion_lens[i]
             ins_start = data.insertion_start[i]
-            alignment_block = AlignmentModel.get_alignment_block(sequences, 
+            alignment_block = self.get_alignment_block(sequences, 
                                                   consensus[batch_indices], 
                                                   ins_len[batch_indices], 
                                                   np.maximum(data.insertion_lens_total, aligned_insertions.ext_insertions)[i],
@@ -303,7 +303,7 @@ class AlignmentModel():
             if i < data.num_repeats-1:
                 unannotated_segment_l = data.unannotated_segments_len[i]
                 unannotated_segment_s = data.unannotated_segments_start[i]
-                unannotated_block = AlignmentModel.get_insertion_block(sequences, 
+                unannotated_block = self.get_insertion_block(sequences, 
                                                         unannotated_segment_l[batch_indices],
                                                         np.maximum(data.unannotated_segment_lens_total, aligned_insertions.ext_unannotated)[i],
                                                         unannotated_segment_s[batch_indices],
@@ -311,7 +311,7 @@ class AlignmentModel():
                 blocks.append(unannotated_block)
                 if add_block_sep:
                     blocks.append(sep)
-        right_flank_block = AlignmentModel.get_insertion_block(sequences, 
+        right_flank_block = self.get_insertion_block(sequences, 
                                                data.right_flank_len[batch_indices],
                                                max(data.right_flank_len_total, aligned_insertions.ext_right_flank),
                                                data.right_flank_start[batch_indices],
@@ -331,18 +331,18 @@ class AlignmentModel():
         """ Computes the logarithmic likelihood for each underlying model.
         Args:
             max_seq: Threshold for the number of sequences used to compute the loglik. If
-                    the underlying fasta file has mroe sequences, a random subset is drawn.
+                    the dataset has more sequences, a random subset is drawn.
         """
-        if self.fasta_file.num_seq > max_seq:
+        if self.data.num_seq > max_seq:
             #estimate the ll only on a subset, otherwise for millions of 
             # sequences this step takes rather long for little benefit
-            ll_subset = np.arange(self.fasta_file.num_seq)
+            ll_subset = np.arange(self.data.num_seq)
             np.random.shuffle(ll_subset)
             ll_subset = ll_subset[:max_seq]
             ll_subset = np.sort(ll_subset)
         else:
             #use the sorted indices for optimal length distributions in batches
-            ll_subset = self.fasta_file.sorted_indices
+            ll_subset = np.array([i for l,i in sorted(zip(self.data.seq_lens, range(self.data.num_seq)))])
         ds = train.make_dataset(ll_subset, 
                                 self.batch_generator,
                                 self.batch_size, 
@@ -356,20 +356,23 @@ class AlignmentModel():
     def compute_log_prior(self):
         """ Computes the logarithmic prior value of each underlying model.
         """
-        return self.msa_hmm_layer.cell.get_prior_log_density().numpy()/self.fasta_file.num_seq
+        if self.data.num_seq > 0:
+            return self.msa_hmm_layer.cell.get_prior_log_density().numpy()/self.data.num_seq
+        else:
+            return 0
     
     def compute_AIC(self, max_seq=200000, loglik=None):
         """ Computes the Akaike information criterion for each underlying model. 
         Args:
             max_seq: Threshold for the number of sequences used to compute the loglik. If
-                    the underlying fasta file has mroe sequences, a random subset is drawn.
+                    the dataset has mroe sequences, a random subset is drawn.
             loglik: This argument can be set if the loglik was computed before via compute_loglik to avoid overhead. 
                     If None, the loglik will be computed internally.
         """
         if loglik is None:
             loglik = self.compute_loglik(max_seq)
         num_param = 34 * np.array(self.length) + 25
-        aic = -2 * loglik * self.fasta_file.num_seq + 2*num_param
+        aic = -2 * loglik * self.data.num_seq + 2*num_param
         return aic 
     
     def compute_consensus_score(self):
@@ -414,7 +417,8 @@ class AlignmentModel():
         #serialize metadata
         d = {
             "num_models" : self.num_models,
-            "fasta_file" : self.fasta_file.filename,
+            "dataset_file" : self.data.filename,
+            "file_format" : self.data.fmt,
             "batch_size" : self.batch_size,
             "gap_symbol" : self.gap_symbol,
             "gap_symbol_insertions" : self.gap_symbol_insertions,
@@ -447,7 +451,7 @@ class AlignmentModel():
         #deserialize metadata    
         with open(filepath+"/meta.json") as metafile:
             d = json.load(metafile)
-        fasta_file = fasta.Fasta(d["fasta_file"])
+        data = SequenceDataset(d["dataset_file"], d["file_format"])
         #deserialize indices
         indices = np.loadtxt(filepath+"/indices", dtype=int)
         #load the model
@@ -468,8 +472,8 @@ class AlignmentModel():
                 print("Error: %s - %s." % (e.filepath, e.strerror))
         #todo: this is currently a bit limited because it creates a default batch gen from a default config
         batch_gen = train.DefaultBatchGenerator() if custom_batch_gen is None else custom_batch_gen
-        batch_gen.configure(fasta_file, config.make_default(d["num_models"])) 
-        return cls(fasta_file, 
+        batch_gen.configure(data, config.make_default(d["num_models"])) 
+        return cls(data, 
                   batch_gen, 
                   indices,
                   d["batch_size"], 
@@ -577,15 +581,15 @@ class AlignmentModel():
         return core_blocks, left_flank, right_flank, unannotated_segments
 
 
-    @classmethod
-    def get_insertion_block(cls, sequences, lens, maxlen, starts, adjust_to_right=False, custom_columns=None):
+    def get_insertion_block(self, sequences, lens, maxlen, starts, adjust_to_right=False, custom_columns=None):
         """ Constructs one insertion block from an implicitly represented alignment.
         Args: 
         Returns:
         """
         n = sequences.shape[0]
         A = np.arange(n)
-        block = np.zeros((n, maxlen), dtype=np.uint8) + (fasta.s-1)
+        s = len(self.data.alphabet)
+        block = np.zeros((n, maxlen), dtype=np.uint8) + s - 1
         count_down_lens = np.copy(lens)
         active = count_down_lens > 0
         i = 0
@@ -599,24 +603,23 @@ class AlignmentModel():
             active = count_down_lens > 0
             i += 1
         if adjust_to_right and custom_columns is None:
-            block_right_aligned = np.zeros_like(block) + (fasta.s-1)
+            block_right_aligned = np.zeros_like(block) + s - 1
             for i in range(maxlen):
                 
                 block_right_aligned[A, (maxlen-lens+i)%maxlen] = block[:, i]
             block = block_right_aligned
-        block += fasta.s #lower case
+        block += s #lower case
         return block
 
 
-    @classmethod
-    def get_alignment_block(cls, sequences, consensus, ins_len, ins_len_total, ins_start, custom_columns=None):
+    def get_alignment_block(self, sequences, consensus, ins_len, ins_len_total, ins_start, custom_columns=None):
         """ Constructs one core model hit block from an implicitly represented alignment.
         Args: 
         Returns:
         """
         A = np.arange(sequences.shape[0])
         length = consensus.shape[1] + np.sum(ins_len_total)
-        block = np.zeros((sequences.shape[0], length), dtype=np.uint8) + (fasta.s-1)
+        block = np.zeros((sequences.shape[0], length), dtype=np.uint8) + len(self.data.alphabet) - 1
         i = 0
         for c in range(consensus.shape[1]-1):
             column = consensus[:,c]
@@ -628,7 +631,7 @@ class AlignmentModel():
             block[no_gap,i] = sequences[A[no_gap],column[no_gap]]
             i += 1
             #insertion
-            block[:,i:i+ins_l_total] = cls.get_insertion_block(sequences,
+            block[:,i:i+ins_l_total] = self.get_insertion_block(sequences,
                                                            ins_l,
                                                            ins_l_total, 
                                                            ins_s, 
