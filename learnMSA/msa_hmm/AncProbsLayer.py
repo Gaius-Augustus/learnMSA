@@ -1,6 +1,7 @@
 import tensorflow as tf
 import numpy as np
 import learnMSA.msa_hmm.Initializers as initializers
+from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 
 """Ancestral Probability Layer
 Learn one or several rate matrices jointly with a downstream model. Amino acid sequences can be smeared towards expected amino acid distributions after
@@ -247,11 +248,11 @@ class AncProbsLayer(tf.keras.layers.Layer):
                                    self.transposed)
         if input_indices:
             anc_probs *= mask
-            anc_probs = tf.pad(anc_probs, [[0,0], [0,0], [0,0], [0,0], [0,6]])
-            rest = tf.expand_dims(tf.one_hot(inputs, 26), -2) * (1-mask)
+            anc_probs = tf.pad(anc_probs, [[0,0], [0,0], [0,0], [0,0], [0,len(SequenceDataset.alphabet)-20]])
+            rest = tf.expand_dims(tf.one_hot(inputs, len(SequenceDataset.alphabet)), -2) * (1-mask)
             anc_probs += rest
             num_model, b, L = tf.unstack(tf.shape(inputs))
-            anc_probs = tf.reshape(anc_probs, (num_model, b, L, self.num_matrices * 26) )
+            anc_probs = tf.reshape(anc_probs, (num_model, b, L, self.num_matrices * len(SequenceDataset.alphabet)) )
         else:
             num_model, b, L, _ = tf.unstack(tf.shape(inputs))
             anc_probs = tf.reshape(anc_probs, (num_model, b, L, self.num_matrices * 20) )

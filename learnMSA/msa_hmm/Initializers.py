@@ -37,7 +37,7 @@ dirichlet = model.layers[-1]
 background_distribution = dirichlet.expectation()
 #the prior was trained on example distributions over the 20 amino acid alphabet
 #the additional frequencies for 'B', 'Z',  'X', 'U', 'O' were derived from Pfam
-extra = [2.03808244e-05, 1.02731819e-05, 7.92076933e-04, 5.84256792e-08, 1e-32]
+extra = [7.92076933e-04, 5.84256792e-08, 1e-32]
 background_distribution = np.concatenate([background_distribution, extra], axis=0)
 background_distribution /= np.sum(background_distribution)
 

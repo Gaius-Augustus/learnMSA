@@ -417,8 +417,6 @@ class AlignmentModel():
         #serialize metadata
         d = {
             "num_models" : self.num_models,
-            "dataset_file" : self.data.filename,
-            "file_format" : self.data.fmt,
             "batch_size" : self.batch_size,
             "gap_symbol" : self.gap_symbol,
             "gap_symbol_insertions" : self.gap_symbol_insertions,
@@ -438,7 +436,7 @@ class AlignmentModel():
 
     
     @classmethod
-    def load_models_from_file(cls, filepath, from_packed=True, custom_batch_gen=None):
+    def load_models_from_file(cls, filepath, data:SequenceDataset, from_packed=True, custom_batch_gen=None):
         """ Recreates an AlignmentModel instance with underlying models from file.
         Args:
             filepath: Path of the file to load.
@@ -451,7 +449,6 @@ class AlignmentModel():
         #deserialize metadata    
         with open(filepath+"/meta.json") as metafile:
             d = json.load(metafile)
-        data = SequenceDataset(d["dataset_file"], d["file_format"])
         #deserialize indices
         indices = np.loadtxt(filepath+"/indices", dtype=int)
         #load the model
@@ -581,14 +578,15 @@ class AlignmentModel():
         return core_blocks, left_flank, right_flank, unannotated_segments
 
 
-    def get_insertion_block(self, sequences, lens, maxlen, starts, adjust_to_right=False, custom_columns=None):
+    @classmethod
+    def get_insertion_block(cls, sequences, lens, maxlen, starts, adjust_to_right=False, custom_columns=None):
         """ Constructs one insertion block from an implicitly represented alignment.
         Args: 
         Returns:
         """
         n = sequences.shape[0]
         A = np.arange(n)
-        s = len(self.data.alphabet)
+        s = len(SequenceDataset.alphabet)
         block = np.zeros((n, maxlen), dtype=np.uint8) + s - 1
         count_down_lens = np.copy(lens)
         active = count_down_lens > 0
@@ -612,14 +610,15 @@ class AlignmentModel():
         return block
 
 
-    def get_alignment_block(self, sequences, consensus, ins_len, ins_len_total, ins_start, custom_columns=None):
+    @classmethod
+    def get_alignment_block(cls, sequences, consensus, ins_len, ins_len_total, ins_start, custom_columns=None):
         """ Constructs one core model hit block from an implicitly represented alignment.
         Args: 
         Returns:
         """
         A = np.arange(sequences.shape[0])
         length = consensus.shape[1] + np.sum(ins_len_total)
-        block = np.zeros((sequences.shape[0], length), dtype=np.uint8) + len(self.data.alphabet) - 1
+        block = np.zeros((sequences.shape[0], length), dtype=np.uint8) + len(SequenceDataset.alphabet) - 1
         i = 0
         for c in range(consensus.shape[1]-1):
             column = consensus[:,c]
@@ -631,7 +630,7 @@ class AlignmentModel():
             block[no_gap,i] = sequences[A[no_gap],column[no_gap]]
             i += 1
             #insertion
-            block[:,i:i+ins_l_total] = self.get_insertion_block(sequences,
+            block[:,i:i+ins_l_total] = cls.get_insertion_block(sequences,
                                                            ins_l,
                                                            ins_l_total, 
                                                            ins_s, 

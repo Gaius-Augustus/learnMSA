@@ -117,12 +117,11 @@ def fit_and_align(data : SequenceDataset,
     return am
 
 
-def run_learnMSA(train_filename,
+def run_learnMSA(data : SequenceDataset,
                  out_filename,
                  config, 
                  model_generator=None,
                  batch_generator=None,
-                 file_fmt="fasta",
                  subset_ids=[], 
                  align_insertions=False,
                  insertion_aligner="famsa",
@@ -134,12 +133,11 @@ def run_learnMSA(train_filename,
                  select_best_for_comparison=True):
     """ Wraps fit_and_align and adds file parsing, verbosity, model selection, reference file comparison and an outfile file.
     Args: 
-        train_filename: Path of a file with the sequences. 
+        data: Dataset of sequences. 
         out_filename: Filepath of the output fasta file with the aligned sequences.
         config: Configuration that can be used to control training and decoding (see msa_hmm.config.make_default).
         model_generator: Optional callback that generates a user defined model (if None, the default model generator will be used). 
         batch_generator: Optional callback that generates sequence batches defined by user(if None, the default batch generator will be used).
-        file_fmt: Format of the input file (see Bio.SeqIO).
         subset_ids: A list of sequence ids occuring in the training data. If non-empty, only these sequences will be aligned.
         align_insertions: If true, a third party aligner is used to align long insertions after the main MSA step.
         insertion_aligner: Tool to align insertions; "famsa" is installed by default and "clustalo" or "t_coffee" are supported but must be installed manually.
@@ -150,10 +148,8 @@ def run_learnMSA(train_filename,
         An AlignmentModel object.
     """
     if verbose:
-        print("Training of", config["num_models"], "models on file", os.path.basename(train_filename))
-        print("Configuration:", as_str(config))
-    # load the file
-    data = SequenceDataset(train_filename, file_fmt)  
+        print("Training of", config["num_models"], "models on file", os.path.basename(data.filename))
+        print("Configuration:", as_str(config)) 
     # optionally load the reference and find the corresponding sequences in the train file
     subset = np.array([data.seq_ids.index(sid) for sid in subset_ids]) if subset_ids else None
     try:
@@ -575,16 +571,18 @@ def compute_sequence_weights(fasta_filename, directory, cluster_seq_id=0.5):
         clustering["weight"] = 1/clustering["cluster_size"]
         clustering = clustering.set_index("sequence")
 
-        fasta_dataset = SequenceDataset(fasta_filename, "fasta")
-        ids = fasta_dataset.seq_ids
-        #mmseqs2 omits database names and database specific accession numbers, we have to omit them too
-        #i.e. from ">database|accession|name" mmseqs only keeps ">name"
-        for i in range(len(ids)):
-            if "|" in ids[i]:
-                pos = ids[i].rfind("|")
-                if pos != -1:
-                    ids[i] = ids[i][pos+1:]
-        sequence_weights = np.array(clustering.loc[ids].weight, dtype=np.float32)
+        with SequenceDataset(fasta_filename, "fasta") as data:
+            data.validate_dataset()
+            ids = data.seq_ids
+            #mmseqs2 omits database names and database specific accession numbers, we have to omit them too
+            #i.e. from ">database|accession|name" mmseqs only keeps ">name"
+            for i in range(len(ids)):
+                if "|" in ids[i]:
+                    pos = ids[i].rfind("|")
+                    if pos != -1:
+                        ids[i] = ids[i][pos+1:]
+            sequence_weights = np.array(clustering.loc[ids].weight, dtype=np.float32)
+
         return sequence_weights
 
 

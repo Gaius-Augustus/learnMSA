@@ -42,7 +42,7 @@ def make_msa_hmm_layer(effective_num_seq,
                         model_lengths, 
                         config,
                         sequence_weights=None,
-                        alphabet_size=25):
+                        alphabet_size=len(SequenceDataset.alphabet)-1):
     """Constructs a cell and a MSA HMM layer given a config.
     """
     assert_config(config)
@@ -77,7 +77,7 @@ def default_model_generator(num_seq,
                             config,
                             data : SequenceDataset = None,
                             sequence_weights=None,
-                            alphabet_size=25,
+                            alphabet_size=len(SequenceDataset.alphabet)-1,
                             generic_gen=generic_model_generator):
     """A callback that constructs the default learnMSA model. Can be used as a template for custom generators.
     Args:
@@ -88,7 +88,7 @@ def default_model_generator(num_seq,
         data: The sequence dataset corresponding to this model. Typically but not necessarily equal to the training data of the model. 
               This is part of the model generator callback because the generated model might depends on some sequence information like maximum length.
         sequence_weights: Optional likelihood weights per sequence.
-        alphabet_size: Number of symbols without the terminal symbol (i.e. 25 for amino acids).
+        alphabet_size: Number of symbols without the terminal symbol.
     """
     num_models = config["num_models"]
     assert len(model_lengths) == num_models, \
@@ -102,7 +102,7 @@ def default_model_generator(num_seq,
 
 
 class DefaultBatchGenerator():
-    def __init__(self, return_only_sequences=False, shuffle=True, alphabet_size=25):
+    def __init__(self, return_only_sequences=False, shuffle=True, alphabet_size=len(SequenceDataset.alphabet)-1):
         #generate a unique permutation of the sequence indices for each model to train
         self.return_only_sequences = return_only_sequences
         self.alphabet_size = alphabet_size
@@ -146,7 +146,6 @@ class DefaultBatchGenerator():
         
 class EmbeddingBatchGenerator(DefaultBatchGenerator):
     # only import contextual when lm features are required
-    import learnMSA.protein_language_models as plm
 
     """ Computes batches of input sequences along with static embeddings.
         cache_embeddings: If true, all embeddings will be computed once when configuring the generator and kept in memory. Otherwise they are loaded on the fly.
@@ -165,7 +164,8 @@ class EmbeddingBatchGenerator(DefaultBatchGenerator):
         if self.cache_embeddings:
             self.embedding_cache = []
             
-    def _load_language_model(self, data : SequenceDataset) -> (plm.common.LanguageModel, plm.common.InputEncoder):
+    def _load_language_model(self, data : SequenceDataset):
+        import learnMSA.protein_language_models as plm
         if self.lm_name == "proteinBERT":
             language_model, encoder = plm.proteinbert.get_proteinBERT_model_and_encoder(max_len = data.max_len+2)
         elif self.lm_name == "esm2":
@@ -319,14 +319,17 @@ def fit_model(model_generator,
     if verbose:
         print("Using", num_gpu, "GPUs.")
     if num_gpu > 1:       
-        
-        #workaround: https://github.com/tensorflow/tensorflow/issues/50487
-        #import atexit
-        mirrored_strategy = tf.distribute.MirroredStrategy()    
-        #atexit.register(mirrored_strategy._extended._collective_ops._pool.close) # type: ignore
-        
-        with mirrored_strategy.scope():
+        if config["use_language_model"]:
+            print("Found multiple GPUs, but using a language model is currently not supported in multi-GPU mode. Using single GPU.")
             model = make_and_compile()
+        else:
+            #workaround: https://github.com/tensorflow/tensorflow/issues/50487
+            #import atexit
+            mirrored_strategy = tf.distribute.MirroredStrategy()    
+            #atexit.register(mirrored_strategy._extended._collective_ops._pool.close) # type: ignore
+            
+            with mirrored_strategy.scope():
+                model = make_and_compile()
     else:
          model = make_and_compile()
     steps = max(10, int(100*np.sqrt(indices.shape[0])/batch_size))

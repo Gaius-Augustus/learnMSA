@@ -3,6 +3,7 @@ import numpy as np
 import os
 import learnMSA.msa_hmm.Initializers as initializers
 import learnMSA.msa_hmm.Priors as priors
+from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 from learnMSA.protein_language_models.BilinearSymmetric import make_scoring_model
 
     
@@ -188,7 +189,7 @@ class EmbeddingEmitter(ProfileHMMEmitter):
         self.scoring_model.layers[-1].trainable = False #don't forget to freeze the scoring model!
         
     def build(self, input_shape):
-        s = 25 + self.reduced_embedding_dim
+        s = len(SequenceDataset.alphabet)-1 + self.reduced_embedding_dim
         if self.use_shared_embedding_insertions:
             #the default emitter would construct an emission matrix matching the last input dimension
             #in this case the last input dimension is the full embedding depth whereas the emission matrix
@@ -204,7 +205,7 @@ class EmbeddingEmitter(ProfileHMMEmitter):
                                             name="emission_kernel_"+str(i))
                                         for i,(length, init) in enumerate(zip(self.length, self.emission_init))]
             self.insertion_kernel = [ self.add_weight(
-                                    shape=[25],
+                                    shape=[len(SequenceDataset.alphabet)-1],
                                     initializer=init,
                                     name="insertion_kernel_"+str(i),
                                     trainable=not self.frozen_insertions) 
@@ -253,14 +254,14 @@ class EmbeddingEmitter(ProfileHMMEmitter):
         inputs = tf.reshape(inputs, (num_models, -1, d)) 
         
         #compute amino acid emissions
-        aa_inputs = inputs[..., :26]
-        aa_B_transposed = self.B_transposed[:,:26,:]
+        aa_inputs = inputs[..., :len(SequenceDataset.alphabet)]
+        aa_B_transposed = self.B_transposed[:,:len(SequenceDataset.alphabet),:]
         aa_emission_probs = tf.matmul(aa_inputs, aa_B_transposed)
         aa_emission_probs = tf.reshape(aa_emission_probs, emit_shape)
         
         #compute embedding emission probs
-        emb_inputs = inputs[..., 26:]
-        emb_B = self.B[..., 26:]
+        emb_inputs = inputs[..., len(SequenceDataset.alphabet):]
+        emb_B = self.B[..., len(SequenceDataset.alphabet):]
         #embedding scores that sum to 1 over all valid input sequence positions
         emb_emission_probs = self.compute_emission_probs(emb_B, emb_inputs, emit_shape, terminal_padding, self.temperature) 
         emission_probs = aa_emission_probs * emb_emission_probs
@@ -268,15 +269,15 @@ class EmbeddingEmitter(ProfileHMMEmitter):
     
     
     def make_emission_matrix(self, i):
-        aa_em = self.emission_kernel[i][:, :25]
-        emb_em = self.emission_kernel[i][:, 25:]
+        aa_em = self.emission_kernel[i][:, :len(SequenceDataset.alphabet)-1]
+        emb_em = self.emission_kernel[i][:, len(SequenceDataset.alphabet)-1:]
         #drop the terminal state probs since we have identical ones for the embeddings
-        aa_emissions = self.make_emission_matrix_from_kernels(aa_em, self.insertion_kernel[i][:25], self.length[i])
+        aa_emissions = self.make_emission_matrix_from_kernels(aa_em, self.insertion_kernel[i][:len(SequenceDataset.alphabet)-1], self.length[i])
         """ Construct the emission matrix the same way as usual but leave away the softmax.
         """
         s = emb_em.shape[-1]
         if self.use_shared_embedding_insertions:
-            emb_ins = self.insertion_kernel[i][25:]
+            emb_ins = self.insertion_kernel[i][len(SequenceDataset.alphabet)-1:]
             emb_em = tf.concat([tf.expand_dims(emb_ins, 0), 
                                emb_em, 
                                tf.stack([emb_ins]*(self.length[i]+1))] , axis=0)
@@ -312,4 +313,4 @@ class EmbeddingEmitter(ProfileHMMEmitter):
     def make_B_amino(self):
         """ A variant of make_B used for plotting the HMM. Can be overridden for more complex emissions. Per default this is equivalent to make_B
         """
-        return self.make_B()[:,:,:25]
+        return self.make_B()[:,:,:len(SequenceDataset.alphabet)-1]

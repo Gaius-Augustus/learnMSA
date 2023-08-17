@@ -1,6 +1,7 @@
 import os
 import tensorflow as tf
 import learnMSA.msa_hmm.DirichletMixture as dm
+from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 
 
 class AminoAcidPrior(tf.keras.layers.Layer):
@@ -227,7 +228,7 @@ class L2EmbeddingRegularizer(AminoAcidPrior):
         max_model_length = tf.reduce_max(lengths)
         length_mask = tf.cast(tf.sequence_mask(lengths), B.dtype)
         #square all parameters
-        B_emb_sq = tf.math.square(B[...,25:-1])
+        B_emb_sq = tf.math.square(B[...,len(SequenceDataset.alphabet)-1:-1])
         #reduce the embedding dimension
         B_emb_sq = tf.reduce_sum(B_emb_sq, -1)
         #regularization per match is just the sum of the respective squares 
@@ -255,7 +256,7 @@ class L2EmbeddingRegularizer(AminoAcidPrior):
         A tensor with the L2 regularization values. Shape: (k, max_model_length)
         """
         #amino acid prior
-        B_amino = B[:,:,:25]
+        B_amino = B[:,:,:len(SequenceDataset.alphabet)-1]
         prior_aa = super().__call__(B_amino, lengths)
         reg = self.get_reg(B, lengths)
         return prior_aa - reg #the result is maximized, so we have to negate the regularizer

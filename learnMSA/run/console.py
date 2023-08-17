@@ -27,12 +27,12 @@ def run_main():
     parser.add_argument("-n", "--num_model", dest="num_model", type=int, default=5,
                         help="Number of models trained in parallel. (default: %(default)s)")
     parser.add_argument("-s", "--silent", dest="silent", action='store_true', help="Prevents output to stdout.")
-    parser.add_argument("-r", "--ref_file", dest="ref_file", type=str, default="", help=argparse.SUPPRESS) #useful for debudding, do not expose to users
     parser.add_argument("-b", "--batch", dest="batch_size", type=int, default=-1,
                         help="Should be lowered if memory issues with the default settings occur. Default: Adaptive, depending on model length (64-512).")
     parser.add_argument("-d", "--cuda_visible_devices", dest="cuda_visible_devices", type=str, default="default",
                         help="Controls the GPU devices visible to learnMSA as a comma-separated list of device IDs. The value -1 forces learnMSA to run on CPU. Per default, learnMSA attempts to use all available GPUs.")
-    
+    parser.add_argument("-f", "--format", dest="format", type=str, default="fasta", help="Sequence file format (supports all of Biopython's SeqIO formats).")
+
     parser.add_argument("--max_surgery_runs", dest="max_surgery_runs", type=int, default=4, 
                         help="Maximum number of model surgery iterations. (default: %(default)s)")
     parser.add_argument("--length_init_quantile", dest="length_init_quantile", type=float, default=0.5, 
@@ -53,6 +53,7 @@ def run_main():
                        help="Will expand insertions that are expected more often than this fraction. (default: %(default)s)")
     parser.add_argument("--model_criterion", dest="model_criterion", type=str, default="AIC",
                        help="Criterion for model selection. (default: %(default)s)")
+    parser.add_argument("--indexed_data", dest="indexed_data", action='store_true', help="Don't load all data into memory at once at the cost of training time.")
     
     parser.add_argument("--align_insertions", dest="align_insertions", action='store_true', help="Aligns long insertions with a third party aligner after the main MSA step. (default: %(default)s)")
     parser.add_argument("--insertion_slice_dir", dest="insertion_slice_dir", type=str, default="tmp", help="Directory where the alignments of the sliced insertions are stored. (default: %(default)s)")
@@ -78,7 +79,8 @@ def run_main():
     #before importing tensorflow
     if not args.cuda_visible_devices == "default":
         os.environ["CUDA_VISIBLE_DEVICES"] = args.cuda_visible_devices  
-    from .. import msa_hmm
+    from ..msa_hmm import Configuration, Initializers, Align, Emitter, Training
+    from ..msa_hmm.SequenceDataset import SequenceDataset
     import tensorflow as tf
     from tensorflow.python.client import device_lib
     
@@ -94,9 +96,9 @@ def run_main():
 
         print("Found tensorflow version", tf.__version__)
     
-    config = msa_hmm.config.make_default(args.num_model)
+    config = Configuration.make_default(args.num_model)
     
-    config["batch_size"] = args.batch_size if args.batch_size > 0 else msa_hmm.config.get_adaptive_batch_size
+    config["batch_size"] = args.batch_size if args.batch_size > 0 else Configuration.get_adaptive_batch_size
     config["num_models"] = args.num_model
     config["max_surgery_runs"] = args.max_surgery_runs
     config["length_init_quantile"] = args.length_init_quantile
@@ -121,19 +123,23 @@ def run_main():
         os.makedirs(args.insertion_slice_dir, exist_ok = True) 
     if args.sequence_weights:
         os.makedirs(args.cluster_dir, exist_ok = True) 
-        sequence_weights = msa_hmm.align.compute_sequence_weights(args.input_file, args.cluster_dir, config["cluster_seq_id"])
+        try:
+            sequence_weights = Align.compute_sequence_weights(args.input_file, args.cluster_dir, config["cluster_seq_id"])
+        except Exception as e:
+            print("Error while computing sequence weights. Using uniform weights instead.")
+            sequence_weights = None
     else:
         sequence_weights = None
     if args.use_language_model:
-        config["batch_size"] = msa_hmm.config.get_adaptive_batch_size_with_language_model
+        config["batch_size"] = Configuration.get_adaptive_batch_size_with_language_model
         config["learning_rate"] = 0.05
         config["epochs"] = [10, 4, 20]
-        emission_init = [msa_hmm.initializers.EmbeddingEmissionInitializer() for _ in range(config["num_models"])]
+        emission_init = [Initializers.EmbeddingEmissionInitializer() for _ in range(config["num_models"])]
         if config["use_shared_embedding_insertions"]:
-            insertion_init = [msa_hmm.initializers.EmbeddingEmissionInitializer() for _ in range(config["num_models"])]
+            insertion_init = [Initializers.EmbeddingEmissionInitializer() for _ in range(config["num_models"])]
         else:
-            insertion_init = [msa_hmm.initializers.make_default_insertion_init() for _ in range(config["num_models"])]
-        config["emitter"] = msa_hmm.emit.EmbeddingEmitter(config["lm_name"], 
+            insertion_init = [Initializers.make_default_insertion_init() for _ in range(config["num_models"])]
+        config["emitter"] = Emitter.EmbeddingEmitter(config["lm_name"], 
                                              config["reduced_embedding_dim"],
                                              config["embedding_l2_match"], 
                                              config["embedding_l2_insert"], 
@@ -142,25 +148,25 @@ def run_main():
                                              use_shared_embedding_insertions=config["use_shared_embedding_insertions"],
                                              frozen_insertions=config["frozen_insertions"],
                                              use_finetuned_lm=config["use_finetuned_lm"])
-        alignment_model = msa_hmm.align.run_learnMSA(train_filename = args.input_file,
-                                                      out_filename = args.output_file,
-                                                      config = config,  
-                                                      ref_filename = args.ref_file,
-                                                      model_generator=msa_hmm.train.embedding_model_generator,
-                                                      batch_generator=msa_hmm.train.EmbeddingBatchGenerator(config["lm_name"], config["reduced_embedding_dim"], use_finetuned_lm=config["use_finetuned_lm"]),
-                                                      sequence_weights=sequence_weights,
-                                                      verbose=not args.silent,
-                                                      align_insertions=args.align_insertions,
-                                                      insertion_slice_dir=args.insertion_slice_dir)
+        model_gen = Training.embedding_model_generator     
+        batch_gen = Training.EmbeddingBatchGenerator(config["lm_name"], config["reduced_embedding_dim"], use_finetuned_lm=config["use_finetuned_lm"])   
     else:
-        _ = msa_hmm.align.run_learnMSA(train_filename = args.input_file,
+        model_gen = None
+        batch_gen = None
+        try:
+            with SequenceDataset(args.input_file, "fasta", indexed=args.indexed_data) as data:
+                data.validate_dataset()
+                _ = Align.run_learnMSA(data,
                                         out_filename = args.output_file,
                                         config = config, 
-                                        ref_filename = args.ref_file,
+                                        model_generator=model_gen,
+                                        batch_generator=batch_gen,
                                         align_insertions=args.align_insertions,
                                         insertion_slice_dir=args.insertion_slice_dir,
                                         sequence_weights = sequence_weights,
                                         verbose = not args.silent)
+        except ValueError as e:
+            raise SystemExit(e) 
             
             
 if __name__ == '__main__':

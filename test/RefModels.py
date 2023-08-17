@@ -1,5 +1,5 @@
 import numpy as np
-from learnMSA import msa_hmm 
+from learnMSA.msa_hmm import Initializers 
 
 def make_transition_init_A():
     d = {"begin_to_match" : [0.6, 0.1, 0.1, 0.1],
@@ -21,16 +21,16 @@ def make_transition_init_A():
                "end_to_unannotated_segment" : [0.2], 
               "end_to_right_flank" : [0.7], 
               "end_to_terminal" : [0.1]}
-    return {part_name : msa_hmm.initializers.ConstantInitializer(np.log(p))
+    return {part_name : Initializers.ConstantInitializer(np.log(p))
                               for part_name,p in d.items()} 
     
 def make_emission_init_A():
     emission_kernel_initializer = np.log([[0.5, 0.5], [0.1, 0.9], [0.7, 0.3], [0.9, 0.1]])
-    return msa_hmm.initializers.ConstantInitializer(emission_kernel_initializer)
+    return Initializers.ConstantInitializer(emission_kernel_initializer)
 
 def make_insertion_init():
     insertion_kernel_initializer = np.log([0.5, 0.5])
-    return msa_hmm.initializers.ConstantInitializer(insertion_kernel_initializer)
+    return Initializers.ConstantInitializer(insertion_kernel_initializer)
     
 def make_transition_init_B():
     d = {"begin_to_match" : [0.7, 0.1, 0.1],
@@ -52,12 +52,12 @@ def make_transition_init_B():
                "end_to_unannotated_segment" : [0.2], 
               "end_to_right_flank" : [0.7], 
               "end_to_terminal" : [0.1]}
-    return {part_name : msa_hmm.initializers.ConstantInitializer(np.log(p))
+    return {part_name : Initializers.ConstantInitializer(np.log(p))
                               for part_name,p in d.items()} 
     
 def make_emission_init_B():
     emission_kernel_initializer = np.log([[0.5, 0.5], [0.1, 0.9], [0.7, 0.3]])
-    return msa_hmm.initializers.ConstantInitializer(emission_kernel_initializer)
+    return Initializers.ConstantInitializer(emission_kernel_initializer)
 
     
 def get_ref_model_A():
