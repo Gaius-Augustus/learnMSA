@@ -104,6 +104,24 @@ class TestDataset(unittest.TestCase):
         self.assertTrue(invalid)
 
 
+    def test_from_sequences(self):
+        sequences = [("seq1", "FELIX"), ("seq2", "FEIX")]
+        with SequenceDataset(sequences=sequences) as data:
+            self.assertEqual(data.num_seq, 2)
+            np.testing.assert_equal(data.get_encoded_seq(0), [13, 6, 10, 9, 20])
+            np.testing.assert_equal(data.get_encoded_seq(1), [13, 6, 9, 20])
+
+
+    def test_from_alignment(self):
+        sequences = [("seq1", "FELIX"), ("seq2", "FE-IX")]
+        with AlignedDataset(aligned_sequences=sequences) as data:
+            self.assertEqual(data.num_seq, 2)
+            np.testing.assert_equal(data.get_encoded_seq(0), [13, 6, 10, 9, 20])
+            np.testing.assert_equal(data.get_encoded_seq(1), [13, 6, 9, 20])
+            np.testing.assert_equal(data.get_column_map(0), [0,1,2,3,4])
+            np.testing.assert_equal(data.get_column_map(1), [0,1,3,4])
+
+
 
 
 

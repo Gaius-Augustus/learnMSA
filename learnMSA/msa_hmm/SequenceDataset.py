@@ -1,8 +1,7 @@
 import numpy as np
 import copy
-from Bio import SeqIO
+from Bio import SeqIO, SeqRecord
 import re
-from concurrent import futures
 from functools import partial
 
 
@@ -16,30 +15,40 @@ class SequenceDataset:
     
 
 
-    def __init__(self, filename, fmt="fasta", indexed=False, threads=None):
+    def __init__(self, filename=None, fmt="fasta", sequences=None, indexed=False, threads=None):
         """
         Args:
             filename: Path to a sequence file in any supported format.
             fmt: Format of the file. Can be any format supported by Biopython's SeqIO.
+            sequences: A list of id/sequence pairs as strings. If given, filename and fmt arguments are ignored.
             indexed: If True, Biopython's index method is used to avoid loading the whole file into memory at once. Otherwise 
                     regular parsing is used. Setting this to True will allow constant memory training at the cost of per-step performance.
             threads: Number of threads to use for metadata computation.
         """
-        self.filename = filename
-        self.fmt = fmt
-        self.indexed = indexed
-        try:
-            if indexed:
-                self.record_dict = SeqIO.index(filename, fmt)
-            else:
-                self.record_dict = SeqIO.to_dict(SeqIO.parse(filename, fmt))
+        if sequences is None and filename is None:
+            raise ValueError("Either filename or sequences must be given.")
+        if sequences is None:
+            self.filename = filename
+            self.fmt = fmt
+            self.indexed = indexed
+            try:
+                if indexed:
+                    self.record_dict = SeqIO.index(filename, fmt)
+                else:
+                    self.record_dict = SeqIO.to_dict(SeqIO.parse(filename, fmt))
+                self.parsing_ok = True
+            except ValueError as err:
+                self.parsing_ok = False
+                # hold the error and raise it when calling validate_dataset
+                self.err = err
+            if not self.parsing_ok:
+                return
+        else:
             self.parsing_ok = True
-        except ValueError as err:
-            self.parsing_ok = False
-            # hold the error and raise it when calling validate_dataset
-            self.err = err
-        if not self.parsing_ok:
-            return
+            self.filename = ""
+            self.fmt = ""
+            self.indexed = False
+            self.record_dict = {s[0] : SeqRecord.SeqRecord(s[1], id=s[0]) for s in sequences}
         self.seq_ids = list(self.record_dict)
         self.num_seq = len(self.seq_ids)
         self.seq_lens = np.array([sum([1 for x in str(self.get_record(i).seq) if x.isalpha()]) for i in range(self.num_seq)])
@@ -117,8 +126,8 @@ class AlignedDataset(SequenceDataset):
     Args:
         See SequenceDataset.
     """
-    def __init__(self, filename, fmt="fasta", indexed=False, threads=None):
-        super().__init__(filename, fmt, indexed, threads)
+    def __init__(self, filename=None, fmt="fasta", aligned_sequences=None, indexed=False, threads=None):
+        super().__init__(filename, fmt, aligned_sequences, indexed, threads)
         self.validate_dataset()
         self.msa_matrix = np.zeros((self.num_seq, len(self.get_record(0))), dtype=np.int16)
         for i in range(self.num_seq):

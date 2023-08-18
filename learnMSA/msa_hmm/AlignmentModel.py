@@ -56,10 +56,10 @@ class AlignedInsertions():
                  aligned_unannotated_segments = None):
         """ 
         Args: 
-            aligned_insertions: List of lists of pairs (indices, SequenceDataset with aligned slices) or None. Inner lists have length equal to length of model -1. Outer list has length num_repeats.
-            aligned_left_flank: A pair (indices, SequenceDataset with aligned slices) or None.
-            aligned_right_flank: A pair (indices, SequenceDataset with aligned slices) or None.
-            unannotated_data: List of pairs (indices, SequenceDataset with aligned slices) or None of length num_repeats-1.
+            aligned_insertions: List of lists of pairs (indices, AlignedDataset with aligned slices) or None. Inner lists have length equal to length of model -1. Outer list has length num_repeats.
+            aligned_left_flank: A pair (indices, AlignedDataset with aligned slices) or None.
+            aligned_right_flank: A pair (indices, AlignedDataset with aligned slices) or None.
+            unannotated_data: List of pairs (indices, AlignedDataset with aligned slices) or None of length num_repeats-1.
         """
         self.aligned_insertions = aligned_insertions
         self.aligned_left_flank = aligned_left_flank

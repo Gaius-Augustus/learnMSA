@@ -126,7 +126,6 @@ def run_learnMSA(data : SequenceDataset,
                  align_insertions=False,
                  insertion_aligner="famsa",
                  aligner_threads=0,
-                 insertion_slice_dir="tmp",
                  sequence_weights=None,
                  verbose=True, 
                   initial_model_length_callback=get_initial_model_lengths,
@@ -142,7 +141,6 @@ def run_learnMSA(data : SequenceDataset,
         align_insertions: If true, a third party aligner is used to align long insertions after the main MSA step.
         insertion_aligner: Tool to align insertions; "famsa" is installed by default and "clustalo" or "t_coffee" are supported but must be installed manually.
         aligner_threads: Number of threads to use by the aligner.
-        insertion_slice_dir: Directory where the aligned insertion slices are stored.
         verbose: If False, all output messages will be disabled.
     Returns:
         An AlignmentModel object.
@@ -174,7 +172,7 @@ def run_learnMSA(data : SequenceDataset,
     t = time.time()
     
     if align_insertions:
-        aligned_insertions = make_aligned_insertions(am, insertion_slice_dir, insertion_aligner, aligner_threads, verbose=verbose)
+        aligned_insertions = make_aligned_insertions(am, insertion_aligner, aligner_threads, verbose=verbose)
         am.to_file(out_filename, am.best_model, aligned_insertions = aligned_insertions)
     else:
         am.to_file(out_filename, am.best_model)

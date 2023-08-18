@@ -13,12 +13,15 @@ setup(
     description="learnMSA: Learning and Aligning large Protein Families",
     packages=find_packages(
         where=".",
-        include=["learnMSA", "learnMSA.run", "learnMSA.msa_hmm"]
+        include=["learnMSA", "learnMSA.run", "learnMSA.msa_hmm", "learnMSA.protein_language_models"]
     ),
     install_requires=["tensorflow>=2.5.0",
                       "networkx",
                       "logomaker", 
-                      "seaborn"],
+                      "seaborn",
+                      "biopython>=1.69"
+                      "pyfamsa", 
+                      "transformers"],
     include_package_data=True,
     package_data={'': ["msa_hmm/trained_prior/*/*", "msa_hmm/trained_prior/transition_priors/*/*"]},
     license="MIT",
