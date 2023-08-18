@@ -55,7 +55,7 @@ def run_main():
                        help="Criterion for model selection. (default: %(default)s)")
     parser.add_argument("--indexed_data", dest="indexed_data", action='store_true', help="Don't load all data into memory at once at the cost of training time.")
     
-    parser.add_argument("--align_insertions", dest="align_insertions", action='store_true', help="Aligns long insertions with a third party aligner after the main MSA step. (default: %(default)s)")
+    parser.add_argument("--unaligned_insertions", dest="unaligned_insertions", action='store_true', help="Insertions will be left unaligned.")
     
     parser.add_argument("--sequence_weights", dest="sequence_weights", action='store_true', help="Uses mmseqs2 to rapidly cluster the sequences and compute sequence weights before the MSA. (default: %(default)s)")
     parser.add_argument("--cluster_dir", dest="cluster_dir", type=str, default="tmp", help="Directory where the sequence clustering is stored. (default: %(default)s)")
@@ -158,7 +158,7 @@ def run_main():
                                         config = config, 
                                         model_generator=model_gen,
                                         batch_generator=batch_gen,
-                                        align_insertions=args.align_insertions,
+                                        align_insertions=not args.unaligned_insertions,
                                         sequence_weights = sequence_weights,
                                         verbose = not args.silent)
         except ValueError as e:

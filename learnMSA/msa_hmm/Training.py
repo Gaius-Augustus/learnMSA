@@ -165,13 +165,15 @@ class EmbeddingBatchGenerator(DefaultBatchGenerator):
             self.embedding_cache = []
             
     def _load_language_model(self, data : SequenceDataset):
-        import learnMSA.protein_language_models as plm
         if self.lm_name == "proteinBERT":
-            language_model, encoder = plm.proteinbert.get_proteinBERT_model_and_encoder(max_len = data.max_len+2)
+            from learnMSA.protein_language_models import ProteinBERT
+            language_model, encoder = ProteinBERT.get_proteinBERT_model_and_encoder(max_len = data.max_len+2)
         elif self.lm_name == "esm2":
-            language_model, encoder = plm.esm2.ESM2LanguageModel(), plm.esm2.ESM2InputEncoder()
+            from learnMSA.protein_language_models import ESM2
+            language_model, encoder = ESM2.ESM2LanguageModel(), ESM2.ESM2InputEncoder()
         elif self.lm_name == "protT5":
-            language_model, encoder = plm.prott5.ProtT5LanguageModel(), plm.prott5.ProtT5InputEncoder()
+            from learnMSA.protein_language_models import ProtT5
+            language_model, encoder = ProtT5.ProtT5LanguageModel(), ProtT5.ProtT5InputEncoder()
         if self.use_finetuned_lm:
             language_model.model.load_weights(f"finetuned_models/{self.lm_name}_{self.reduced_embedding_dim}/checkpoints")
         return language_model, encoder
