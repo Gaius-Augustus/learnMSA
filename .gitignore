@@ -1,4 +1,13 @@
 .ipynb_checkpoints
 __pycache__
-interactive.alignment.fasta
+*interactive*
 test/data/egf.out.fasta
+learnMSA/protein_language_models/esm2/
+learnMSA/protein_language_models/protT5_model/
+learnMSA/protein_language_models/proteinBERT_model/
+build/
+dist/
+clustering/
+learnMSA.egg-info/
+tmp/
+test/data/test_model.zip

@@ -16,7 +16,7 @@ def plot_logo(am, model_index, ax):
     length = hmm_cell.length[model_index]
     
     logomaker_alphabet = ["A", "C", "D", "E", "F", "G", "H", "I", "K", "L", "M", "N", "P", "Q", "R", "S", "T", "V", "W", "Y"]
-    logomaker_perm = np.array([msa_hmm.fasta.alphabet.index(aa) for aa in logomaker_alphabet], dtype=int)
+    logomaker_perm = np.array([am.data.alphabet.index(aa) for aa in logomaker_alphabet], dtype=int)
 
     #reduce to std AA alphabet 
     emissions = hmm_cell.emitter[0].make_B_amino().numpy()[model_index, 1:length+1,:20][:,logomaker_perm]
@@ -102,7 +102,7 @@ def plot_hmm(am,
         sort = np.argsort(-B[i+1, :25])
         label = str(i+1)+"\n"
         for j in range(num_aa):
-            label += msa_hmm.fasta.alphabet[sort[j]] + " (" + "%.2f" % B[i+1, sort[j]] + ")\n"
+            label += am.data.alphabet[sort[j]] + " (" + "%.2f" % B[i+1, sort[j]] + ")\n"
         label += "en="+"%.2f" % probs["begin_to_match"][i]+"\n"
         label += "ex="+"%.2f" % probs["match_to_end"][i]+"\n"
         node_labels[i+1] = label
@@ -130,10 +130,10 @@ def plot_hmm(am,
     nx.draw_networkx_labels(G, label_pos, labels=node_labels, font_size=8)
     
     for k, (seq_i, path_color) in enumerate(zip(seq_indices, path_colors)):
-        ds = msa_hmm.train.make_dataset(np.array([seq_i]), am.batch_generator, batch_size=1, shuffle=False)
+        ds = msa_hmm.Training.make_dataset(np.array([seq_i]), am.batch_generator, batch_size=1, shuffle=False)
         for x, _ in ds:
             sequence = am.encoder_model(x)  
-        hidden_seq = msa_hmm.viterbi.viterbi(sequence, hmm_cell).numpy()[model_index]
+        hidden_seq = msa_hmm.Viterbi.viterbi(sequence, hmm_cell).numpy()[model_index]
         hidden_seq = list(hidden_seq[0])
         for i in range(len(hidden_seq)):
             #find silent path parts along delete states
@@ -182,7 +182,7 @@ def plot_hmm(am,
     if len(seq_indices) > 0:
         f = lambda c: ax.plot([],[], color=c)[0]
         handles = [f(col) for col in path_colors]
-        labels = [am.fasta_file.seq_ids[seq_i] for seq_i in seq_indices]
+        labels = [am.data.seq_ids[seq_i] for seq_i in seq_indices]
         leg = ax.legend(handles, labels, loc="lower right", prop={'size': 18})
         for line in leg.get_lines():
             line.set_linewidth(8.0)
@@ -196,7 +196,7 @@ def plot_anc_probs(am,
                    rescale=False, 
                    title="Site-wise ancestral probabilities"):
     n, m = len(seqs), len(pos)
-    ds = msa_hmm.train.make_dataset(am.indices[seqs], 
+    ds = msa_hmm.Training.make_dataset(am.indices[seqs], 
                                     am.batch_generator,
                                     batch_size=n, 
                                     shuffle=False)
@@ -213,7 +213,7 @@ def plot_anc_probs(am,
     axes = axes.flatten()
     f.set_size_inches(3+3*m, 2*n)
     for a,(s,i) in enumerate(itertools.product(seqs, pos)):
-        sns.barplot(x=msa_hmm.fasta.alphabet[:20], y=ancs[s,i,:20], ax=axes[a]);
+        sns.barplot(x=list(am.data.alphabet[:20]), y=ancs[s,i,:20], ax=axes[a]);
         if a % m == 0:
             axes[a].annotate(f"tau={'%.3f'%tau[s]} ->", (0.3,0.9*axes[a].get_ylim()[1]))
     f.suptitle(title, fontsize=16)
@@ -233,7 +233,7 @@ def plot_rate_matrices(am,
     else:
         axes = [axes]
     for i,ax in enumerate(axes):
-        a = msa_hmm.fasta.alphabet[:20]
+        a = list(am.data.alphabet[:20])
         sns.heatmap(Q[i], linewidth=0.5, ax=ax, xticklabels=a, yticklabels=a)
     f.suptitle(title, fontsize=16)
     
@@ -255,7 +255,7 @@ def print_and_plot(am,
     msa = am.to_string(model_index)
     i = [l.name for l in am.encoder_model.layers].index("anc_probs_layer")
     anc_probs_layer = am.encoder_model.layers[i]
-    ds = msa_hmm.train.make_dataset(am.indices, 
+    ds = msa_hmm.Training.make_dataset(am.indices, 
                             am.batch_generator,
                             am.batch_size, 
                             shuffle=False)
@@ -265,7 +265,7 @@ def print_and_plot(am,
         tau = anc_probs_layer.make_tau(indices)[model_index]
         param_string = "l=%.2f" % (ll[i]) + "_t=%.2f" % tau
         if seq_ids:
-            print(f">{am.fasta_file.seq_ids[am.indices[i]]} "+param_string)
+            print(f">{am.data.seq_ids[am.indices[i]]} "+param_string)
         else:
             print(">"+param_string)
         print(s)
@@ -291,11 +291,9 @@ def print_and_plot(am,
             plt.savefig(logo_filename, bbox_inches='tight')
         
         
-def plot_sequence_length_distribution(fasta_filename, 
-                                     bins=100,
-                                     q=0.75):
-    fasta_file = msa_hmm.fasta.Fasta(fasta_filename)
-    x = fasta_file.seq_lens
+def plot_sequence_length_distribution(filename, fmt="fasta", bins=100, q=0.75):
+    data = msa_hmm.SequenceDataset.SequenceDataset(filename, fmt)
+    x = data.seq_lens
     sns.histplot(x, bins=bins)
     #plt.hist(x, density=False, bins=bins);  
     plt.xlabel("Seq. length")

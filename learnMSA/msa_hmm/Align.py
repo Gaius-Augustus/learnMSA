@@ -3,20 +3,22 @@ import numpy as np
 import time
 import os
 import sys
-import learnMSA.msa_hmm.Fasta as fasta
+from pathlib import Path
+import subprocess
+from shutil import which
+import pandas as pd
+from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 import learnMSA.msa_hmm.Training as train
 import learnMSA.msa_hmm.Initializers as initializers
 from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
 from learnMSA.msa_hmm.Configuration import as_str, assert_config
-from pathlib import Path
 from learnMSA.msa_hmm.AlignInsertions import make_aligned_insertions
-import subprocess
-from shutil import which
-import pandas as pd
 
-def get_initial_model_lengths(fasta_file, config, random=True):
+
+
+def get_initial_model_lengths(data : SequenceDataset, config, random=True):
     #initial model length
-    model_length = np.quantile(fasta_file.seq_lens, q=config["length_init_quantile"])
+    model_length = np.quantile(data.seq_lens, q=config["length_init_quantile"])
     model_length *= config["len_mul"]
     model_length = max(3., model_length)
     if random:
@@ -29,21 +31,21 @@ def get_initial_model_lengths(fasta_file, config, random=True):
         return [model_length] * config["num_models"]
     
     
-""" Trains k independent models on the sequences in a fasta file and returns k "lazy" alignments, where "lazy" means 
+""" Trains k independent models on the sequences in a dataset and returns k "lazy" alignments, where "lazy" means 
     that decoding will only be carried out when the user wants to print the alignment or write it to a file. 
     Decoding is usually expensive and typically it should only be done after a model selection step.
 Args: 
-    fasta_file: A Fasta object.
+    data: The sequence dataset to align.
     config: Configuration that can be used to control training and decoding (see msa_hmm.config.make_default).
     model_generator: Optional callback that generates a user defined model (if None, the default model generator will be used). 
     batch_generator: Optional callback that generates sequence batches defined by user (if None, the default batch generator will be used).
     subset: Optional subset of the sequence ids. Only the specified sequences will be aligned but the models will be trained on all sequences 
-            (if None, all sequences in the fasta file will be aligned).
+            (if None, all sequences in the dataset will be aligned).
     verbose: If False, all output messages will be disabled.
 Returns:
     An AlignmentModel object.
 """
-def fit_and_align(fasta_file, 
+def fit_and_align(data : SequenceDataset, 
                   config,
                   model_generator=None,
                   batch_generator=None,
@@ -54,11 +56,11 @@ def fit_and_align(fasta_file,
     assert_config(config)
     model_generator, batch_generator = _make_defaults_if_none(model_generator, batch_generator)
     if verbose:
-        _fasta_file_messages(fasta_file)
+        _dataset_messages(data)
     if subset is None:
-        subset = np.arange(fasta_file.num_seq)
-    full_length_estimate = get_full_length_estimate(fasta_file, config) 
-    model_lengths = initial_model_length_callback(fasta_file, config)
+        subset = np.arange(data.num_seq)
+    full_length_estimate = get_full_length_estimate(data, config) 
+    model_lengths = initial_model_length_callback(data, config)
     if hasattr(config["emitter"], '__iter__'):
         emission_dummy = [em.emission_init[0] for em in config["emitter"]]
     else:
@@ -69,14 +71,14 @@ def fit_and_align(fasta_file,
     # 2 staged main loop: Fits model parameters with GD and optimized model architecture with surgery
     for i in range(config["max_surgery_runs"]):
         if callable(config["batch_size"]):
-            batch_size = config["batch_size"](model_lengths, fasta_file.max_len)
+            batch_size = config["batch_size"](model_lengths, data.max_len)
         else:
             batch_size = config["batch_size"]
         #set the batch size to something smaller than the dataset size even though
         #for low sequence numbers it would be feasible to train on all data at once
-        batch_size = min(batch_size, get_low_seq_num_batch_size(fasta_file.num_seq))
+        batch_size = min(batch_size, get_low_seq_num_batch_size(data.num_seq))
         if last_iteration:    
-            train_indices = np.arange(fasta_file.num_seq)
+            train_indices = np.arange(data.num_seq)
             decode_indices = subset
         else:
             train_indices = full_length_estimate
@@ -84,7 +86,7 @@ def fit_and_align(fasta_file,
         epochs_this_iteration = config["epochs"][0 if i==0 else 1 if not last_iteration else 2]
         model, history = train.fit_model(model_generator,
                                           batch_generator,
-                                          fasta_file,
+                                          data,
                                           train_indices,
                                           model_lengths, 
                                           config,
@@ -92,11 +94,7 @@ def fit_and_align(fasta_file,
                                           epochs=epochs_this_iteration,
                                           sequence_weights=sequence_weights,
                                           verbose=verbose)
-        am = AlignmentModel(fasta_file,
-                                   batch_generator,
-                                   decode_indices,
-                                   batch_size=batch_size, 
-                                   model=model)
+        am = AlignmentModel(data, batch_generator, decode_indices, batch_size=batch_size, model=model)
         if last_iteration:
             break
         config, model_lengths, surgery_converged = do_model_surgery(i,
@@ -119,59 +117,49 @@ def fit_and_align(fasta_file,
     return am
 
 
-def run_learnMSA(train_filename,
+def run_learnMSA(data : SequenceDataset,
                  out_filename,
                  config, 
                  model_generator=None,
                  batch_generator=None,
-                 ref_filename="", 
+                 subset_ids=[], 
                  align_insertions=False,
                  insertion_aligner="famsa",
                  aligner_threads=0,
-                 insertion_slice_dir="tmp",
                  sequence_weights=None,
                  verbose=True, 
                   initial_model_length_callback=get_initial_model_lengths,
                  select_best_for_comparison=True):
     """ Wraps fit_and_align and adds file parsing, verbosity, model selection, reference file comparison and an outfile file.
     Args: 
-        train_filename: Path of a fasta file with the sequences. 
+        data: Dataset of sequences. 
         out_filename: Filepath of the output fasta file with the aligned sequences.
         config: Configuration that can be used to control training and decoding (see msa_hmm.config.make_default).
         model_generator: Optional callback that generates a user defined model (if None, the default model generator will be used). 
         batch_generator: Optional callback that generates sequence batches defined by user(if None, the default batch generator will be used).
-        ref_filename: Optional filepath to a reference alignment. If given, the computed alignment is scored and 
-                        the score is returned along with the alignment.
+        subset_ids: A list of sequence ids occuring in the training data. If non-empty, only these sequences will be aligned.
         align_insertions: If true, a third party aligner is used to align long insertions after the main MSA step.
         insertion_aligner: Tool to align insertions; "famsa" is installed by default and "clustalo" or "t_coffee" are supported but must be installed manually.
         aligner_threads: Number of threads to use by the aligner.
-        insertion_slice_dir: Directory where the aligned insertion slices are stored.
         verbose: If False, all output messages will be disabled.
-        select_best_for_comparison: If False, all trained models, not just the one with highest score, will be scored.
     Returns:
         An AlignmentModel object.
     """
     if verbose:
-        print("Training of", config["num_models"], "models on file", os.path.basename(train_filename))
-        print("Configuration:", as_str(config))
-    # load the file
-    fasta_file = fasta.Fasta(train_filename)  
+        print("Training of", config["num_models"], "models on file", os.path.basename(data.filename))
+        print("Configuration:", as_str(config)) 
     # optionally load the reference and find the corresponding sequences in the train file
-    if ref_filename != "":
-        ref_fasta = fasta.Fasta(ref_filename, aligned=True)
-        subset = np.array([fasta_file.seq_ids.index(sid) for sid in ref_fasta.seq_ids])
-    else:
-        subset = None
+    subset = np.array([data.seq_ids.index(sid) for sid in subset_ids]) if subset_ids else None
     try:
         t_a = time.time()
-        am = fit_and_align(fasta_file, 
-                                  config=config,
-                                  model_generator=model_generator,
-                                  batch_generator=batch_generator,
-                                  subset=subset, 
-                                  initial_model_length_callback=initial_model_length_callback,
-                                  sequence_weights=sequence_weights,
-                                  verbose=verbose)
+        am = fit_and_align(data, 
+                            config=config,
+                            model_generator=model_generator,
+                            batch_generator=batch_generator,
+                            subset=subset, 
+                            initial_model_length_callback=initial_model_length_callback,
+                            sequence_weights=sequence_weights,
+                            verbose=verbose)
         if verbose:
             print("Time for alignment:", "%.4f" % (time.time()-t_a))
     except tf.errors.ResourceExhaustedError as e:
@@ -184,7 +172,7 @@ def run_learnMSA(train_filename,
     t = time.time()
     
     if align_insertions:
-        aligned_insertions = make_aligned_insertions(am, insertion_slice_dir, insertion_aligner, aligner_threads, verbose=verbose)
+        aligned_insertions = make_aligned_insertions(am, insertion_aligner, aligner_threads, verbose=verbose)
         am.to_file(out_filename, am.best_model, aligned_insertions = aligned_insertions)
     else:
         am.to_file(out_filename, am.best_model)
@@ -193,34 +181,10 @@ def run_learnMSA(train_filename,
         print("time for generating output:", "%.4f" % (time.time()-t))
         print("Wrote file", out_filename)
 
-    if ref_filename != "":
-        if select_best_for_comparison:
-            out_file = fasta.Fasta(out_filename, aligned=True) 
-            _,sp = out_file.precision_recall(ref_fasta)
-            #tc = out_file.tc_score(ref_fasta)
-            if verbose:
-                print("SP score =", sp)
-        else:
-            sp = []
-            #without setting the logger level the following code can produce tf retracing warnings 
-            #these warnings are expected in this special case and should be disabled to keep the output clear
-            tf.get_logger().setLevel('ERROR')
-            for i in range(am.msa_hmm_layer.cell.num_models):
-                tmp_file = "tmp.fasta"
-                am.to_file(tmp_file, i)
-                tmp_fasta = fasta.Fasta(tmp_file, aligned=True) 
-                _,sp_i = tmp_fasta.precision_recall(ref_fasta)
-                if verbose:
-                    print(f"Model {i} SP score =", sp_i)
-                os.remove(tmp_file)
-                sp.append(sp_i)
-            tf.get_logger().setLevel('WARNING')
-        return am, sp
-    else:
-        return am
+    return am
     
     
-def get_state_expectations(fasta_file,
+def get_state_expectations(data : SequenceDataset,
                            batch_generator,
                            indices,
                            batch_size,
@@ -229,9 +193,9 @@ def get_state_expectations(fasta_file,
                            reduce=True):
     """ Computes the expected number of occurences per model and state.
     Args:
-        fasta_file: Fasta file object.
+        data: The sequence dataset.
         batch_generator: Batch generator.
-        indices: Indices that specify which sequences in fasta_file should be decoded. 
+        indices: Indices that specify which sequences in the dataset should be decoded. 
         batch_size: Specifies how many sequences will be decoded in parallel. 
         msa_hmm_layer: MsaHmmLayer object. 
         encoder: Encoder model that is applied to the sequences before Viterbi.
@@ -247,7 +211,7 @@ def get_state_expectations(fasta_file,
     #compute an optimized order for decoding that sorts sequences of equal length into the same batch
     indices = np.reshape(indices, (-1))
     num_indices = indices.shape[0]
-    sorted_indices = np.array([[i,j] for l,i,j in sorted(zip(fasta_file.seq_lens[indices], indices, range(num_indices)))])
+    sorted_indices = np.array([[i,j] for l,i,j in sorted(zip(data.seq_lens[indices], indices, range(num_indices)))])
     msa_hmm_layer.cell.recurrent_init()
     ds = train.make_dataset(sorted_indices[:,0], 
                             batch_generator, 
@@ -293,7 +257,7 @@ def get_discard_or_expand_positions(am,
         expansion_lens: A list of arrays with the expansion lengths.
         pos_discard: A list of arrays with match positions to discard.
     """
-    expected_state = get_state_expectations(am.fasta_file,
+    expected_state = get_state_expectations(am.data,
                                     am.batch_generator,
                                     am.indices,
                                     am.batch_size,
@@ -511,13 +475,14 @@ def update_kernels(am,
     return transitions_new, emissions_new, init_flank_new
 
     
-def get_full_length_estimate(fasta_file, config):
-    n = fasta_file.num_seq
+def get_full_length_estimate(data : SequenceDataset, config):
+    n = data.num_seq
     #ignore short sequences for all surgery iterations except the last
     k = int(min(n*config["surgery_quantile"], 
                 max(0, n-config["min_surgery_seqs"])))
     #a rough estimate of a set of only full-length sequences
-    full_length_estimate = fasta_file.sorted_indices[k:]
+    sorted_indices = np.array([i for l,i in sorted(zip(data.seq_lens, range(data.num_seq)))])
+    full_length_estimate = sorted_indices[k:]
     return full_length_estimate
     
     
@@ -604,16 +569,18 @@ def compute_sequence_weights(fasta_filename, directory, cluster_seq_id=0.5):
         clustering["weight"] = 1/clustering["cluster_size"]
         clustering = clustering.set_index("sequence")
 
-        fasta_file = fasta.Fasta(fasta_filename)
-        ids = fasta_file.seq_ids
-        #mmseqs2 omits database names and database specific accession numbers, we have to omit them too
-        #i.e. from ">database|accession|name" mmseqs only keeps ">name"
-        for i in range(len(ids)):
-            if "|" in ids[i]:
-                pos = ids[i].rfind("|")
-                if pos != -1:
-                    ids[i] = ids[i][pos+1:]
-        sequence_weights = np.array(clustering.loc[ids].weight, dtype=np.float32)
+        with SequenceDataset(fasta_filename, "fasta") as data:
+            data.validate_dataset()
+            ids = data.seq_ids
+            #mmseqs2 omits database names and database specific accession numbers, we have to omit them too
+            #i.e. from ">database|accession|name" mmseqs only keeps ">name"
+            for i in range(len(ids)):
+                if "|" in ids[i]:
+                    pos = ids[i].rfind("|")
+                    if pos != -1:
+                        ids[i] = ids[i][pos+1:]
+            sequence_weights = np.array(clustering.loc[ids].weight, dtype=np.float32)
+
         return sequence_weights
 
 
@@ -639,9 +606,9 @@ def select_model(am, model_criterion, verbose):
             
     
 def select_model_posterior(am, verbose=False):
-    expected_state = get_state_expectations(am.fasta_file,
+    expected_state = get_state_expectations(am.data,
                                             am.batch_generator,
-                                            np.arange(am.fasta_file.num_seq),
+                                            np.arange(am.data.num_seq),
                                             am.batch_size,
                                             am.msa_hmm_layer,
                                             am.encoder_model)
@@ -691,8 +658,11 @@ def _make_defaults_if_none(model_generator, batch_generator):
     return model_generator, batch_generator
 
 
-def _fasta_file_messages(fasta_file, seq_count_warning_threshold=100):
-    if fasta_file.gaps:
-        print(f"Warning: The file {fasta_file.filename} already contains gaps. Realining the raw sequences.")
-    if fasta_file.num_seq < seq_count_warning_threshold:
-        print(f"Warning: You are aligning {fasta_file.num_seq} sequences, although learnMSA is designed for large scale alignments. We recommend to have a sufficiently deep training dataset of at least {seq_count_warning_threshold} sequences for accurate results.")
+def _dataset_messages(data : SequenceDataset, seq_count_heuristic_gap_check=100, seq_count_warning_threshold=100):
+    # a quick heuristic check of the first sequences to see if they contain gaps
+    for i in range(seq_count_heuristic_gap_check):
+        record = data.get_record(i)
+        if '-' in record or '.' in record:
+            print(f"Warning: The sequences in {data.filename} seem to be already aligned. learnMSA will ignore any gap character.")
+    if data.num_seq < seq_count_warning_threshold:
+        print(f"Warning: You are aligning {data.num_seq} sequences, although learnMSA is designed for large scale alignments. We recommend to have a sufficiently deep training dataset of at least {seq_count_warning_threshold} sequences for accurate results.")
