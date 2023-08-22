@@ -114,7 +114,7 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
         inputs = tf.reshape(inputs, (tf.shape(inputs)[0], -1, input_shape[-1]))
         # batch matmul of k emission matrices with the b x s input matrix 
         # with broadcasting of the inputs
-        emit = tf.matmul(inputs, self.B_transposed)
+        emit = tf.einsum("kbs,ksq->kbq", inputs, self.B_transposed)
         emit_shape = tf.concat([tf.shape(self.B_transposed)[:1], input_shape[1:-1], tf.shape(self.B_transposed)[-1:]], 0)
         emit = tf.reshape(emit, emit_shape)
         return emit

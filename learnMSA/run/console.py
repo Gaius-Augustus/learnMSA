@@ -150,19 +150,19 @@ def run_main():
     else:
         model_gen = None
         batch_gen = None
-        try:
-            with SequenceDataset(args.input_file, "fasta", indexed=args.indexed_data) as data:
-                data.validate_dataset()
-                _ = Align.run_learnMSA(data,
-                                        out_filename = args.output_file,
-                                        config = config, 
-                                        model_generator=model_gen,
-                                        batch_generator=batch_gen,
-                                        align_insertions=not args.unaligned_insertions,
-                                        sequence_weights = sequence_weights,
-                                        verbose = not args.silent)
-        except ValueError as e:
-            raise SystemExit(e) 
+    try:
+        with SequenceDataset(args.input_file, "fasta", indexed=args.indexed_data) as data:
+            data.validate_dataset()
+            _ = Align.run_learnMSA(data,
+                                    out_filename = args.output_file,
+                                    config = config, 
+                                    model_generator=model_gen,
+                                    batch_generator=batch_gen,
+                                    align_insertions=not args.unaligned_insertions,
+                                    sequence_weights = sequence_weights,
+                                    verbose = not args.silent)
+    except ValueError as e:
+        raise SystemExit(e) 
             
             
 if __name__ == '__main__':

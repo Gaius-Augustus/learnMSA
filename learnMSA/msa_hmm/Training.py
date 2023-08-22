@@ -203,6 +203,7 @@ class EmbeddingBatchGenerator(DefaultBatchGenerator):
                     self.batch_size //= 4
                 if self.lm_name == "esm2":
                     self.batch_size //= 4
+                print("Computing all embeddings (this may take a while).")
                 for i in range(0, data.num_seq, self.batch_size):
                     seq_batch = [str(data.get_record(j).seq) for j in range(i, min(i+self.batch_size, data.num_seq))]      
                     emb = self._compute_reduced_embeddings(seq_batch, language_model, encoder).numpy() #move to cpu 
