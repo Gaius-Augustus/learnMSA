@@ -5,7 +5,8 @@ import learnMSA.msa_hmm.Initializers as initializers
 import learnMSA.msa_hmm.Priors as priors
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 from learnMSA.protein_language_models.BilinearSymmetric import make_scoring_model
-
+from packaging import version
+from tensorflow.python.client import device_lib
     
 
 class ProfileHMMEmitter(tf.keras.layers.Layer):
@@ -114,7 +115,13 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
         inputs = tf.reshape(inputs, (tf.shape(inputs)[0], -1, input_shape[-1]))
         # batch matmul of k emission matrices with the b x s input matrix 
         # with broadcasting of the inputs
-        emit = tf.einsum("kbs,ksq->kbq", inputs, self.B_transposed)
+        gpu = len([x.physical_device_desc for x in device_lib.list_local_devices() if x.device_type == 'GPU']) > 0
+        if version.parse(tf.__version__) < version.parse("2.11.0") or gpu:
+            emit = tf.einsum("kbs,ksq->kbq", inputs, self.B_transposed)
+        else:
+            # something weird happens with batch matmul (or einsam on newer tensorflow versions and CPU) 
+            # use this workaround at the cost of some performance
+            emit = tf.concat([tf.matmul(inputs[i], self.B_transposed[i]) for i in range(self.num_models)], axis=0)
         emit_shape = tf.concat([tf.shape(self.B_transposed)[:1], input_shape[1:-1], tf.shape(self.B_transposed)[-1:]], 0)
         emit = tf.reshape(emit, emit_shape)
         return emit
