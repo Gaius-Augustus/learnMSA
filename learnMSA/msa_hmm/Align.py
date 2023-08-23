@@ -660,7 +660,7 @@ def _make_defaults_if_none(model_generator, batch_generator):
 
 def _dataset_messages(data : SequenceDataset, seq_count_heuristic_gap_check=100, seq_count_warning_threshold=100):
     # a quick heuristic check of the first sequences to see if they contain gaps
-    for i in range(seq_count_heuristic_gap_check):
+    for i in range(min(data.num_seq, seq_count_heuristic_gap_check)):
         record = data.get_record(i)
         if '-' in record or '.' in record:
             print(f"Warning: The sequences in {data.filename} seem to be already aligned. learnMSA will ignore any gap character.")
