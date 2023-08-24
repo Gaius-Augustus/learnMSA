@@ -25,7 +25,7 @@ setup(
     include_package_data=True,
     package_data={'': ["msa_hmm/trained_prior/*/*", 
                         "msa_hmm/trained_prior/transition_priors/*/*",
-                        "msa_hmm/protein_language_models/scoring_models_frozen/esm2_32/*"]},
+                        "protein_language_models/scoring_models_frozen/esm2_32/*"]},
     license="MIT",
     license_files = ("LICENSE.md"),
     entry_points={
