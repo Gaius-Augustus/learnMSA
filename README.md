@@ -94,10 +94,12 @@ Run the notebooks <code>learnMSA_demo.ipynb</code> or <code>learnMSA_with_langua
 # Version 1.3.0 improvements
 
 - Use `pyfamsa` to align insertions, also made aligning insertions the default behavior (also added `--unaligned_insertions` flag).
-- Use `biopython` for data parsing. Many more input file formats are not available as well as the experimental `indexed_data` flag for large datasets that allows constant memory model training. 
-- Multi GPU training works now.
-- Added the highly experimental `--use_language_model` flag that uses a large, pretrained protein language model to guide the MSA and improve alignment accuracy.
+- Use `biopython` for data parsing. Many more input file formats are now available as well as the experimental `indexed_data` flag for large datasets that allows constant memory model training. 
+- Multi GPU training works now. It is mostly beneficial for large datasets with long sequences. It can negatively affect performance otherwise.
+- Added the experimental `--use_language_model` flag that uses a large, pretrained protein language model to guide the MSA and improve alignment accuracy.
   
+![alt text](https://github.com/felbecker/snakeMSA/blob/main/plots/SP_TC.png?raw=true)
+
 # Version 1.2.0 improvements
 
 - insertions that were left unaligned by learnMSA can now be aligned retroactively by a third party aligner which improves accuracy on the HomFam benchmark by about 2%-points
@@ -106,10 +108,6 @@ Run the notebooks <code>learnMSA_demo.ipynb</code> or <code>learnMSA_with_langua
 
 - Parallel training of multiple models and reduced memory footprint (train more models in less time)
 - Customize learnMSA via code (e.g. by changing emission type, prior or the number of rate matricies used to compute ancestral probabilities)
-
-![alt text](https://github.com/Ung0d/MSA-HMM-Analysis/blob/main/fig/boxplots_sp_homfam.png?raw=true)
-![alt text](https://github.com/Ung0d/MSA-HMM-Analysis/blob/main/fig/learnMSA_fast_comparison.png?raw=true)
-![alt text](https://github.com/Ung0d/MSA-HMM-Analysis/blob/main/fig/learnMSA_fast_comparison_large.png?raw=true)
 
 # Publications
 
