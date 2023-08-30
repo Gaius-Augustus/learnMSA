@@ -72,6 +72,10 @@ class SequenceDataset:
         return self.record_dict[self.seq_ids[i]]
 
 
+    def get_standardized_seq(self, i):
+        return str(self.get_record(i).seq).replace('-', '').replace('.', '').upper()
+
+
     def get_alphabet_no_gap(self):
         return type(self).alphabet[:-1]
 

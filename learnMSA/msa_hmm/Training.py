@@ -175,7 +175,7 @@ class EmbeddingBatchGenerator(DefaultBatchGenerator):
             from learnMSA.protein_language_models import ProtT5
             language_model, encoder = ProtT5.ProtT5LanguageModel(), ProtT5.ProtT5InputEncoder()
         if self.use_finetuned_lm:
-            language_model.model.load_weights(f"finetuned_models/{self.lm_name}_{self.reduced_embedding_dim}/checkpoints")
+            language_model.model.load_weights(os.path.dirname(__file__)+f"finetuned_models/{self.lm_name}_{self.reduced_embedding_dim}/checkpoints")
         return language_model, encoder
     
     def _compute_reduced_embeddings(self, seqs, language_model, encoder):
@@ -205,7 +205,7 @@ class EmbeddingBatchGenerator(DefaultBatchGenerator):
                     self.batch_size //= 4
                 print("Computing all embeddings (this may take a while).")
                 for i in range(0, data.num_seq, self.batch_size):
-                    seq_batch = [str(data.get_record(j).seq).replace('-', '').replace('.', '') for j in range(i, min(i+self.batch_size, data.num_seq))]      
+                    seq_batch = [data.get_standardized_seq(j) for j in range(i, min(i+self.batch_size, data.num_seq))]      
                     emb = self._compute_reduced_embeddings(seq_batch, language_model, encoder).numpy() #move to cpu 
                     for j in range(emb.shape[0]):
                         self.embedding_cache.append(emb[j, :data.seq_lens[i+j]])
@@ -222,7 +222,7 @@ class EmbeddingBatchGenerator(DefaultBatchGenerator):
         if self.cache_embeddings:
             emb = self.embedding_cache[i]
         else: #load the embeddings dynamically (not recommended, currently implemented inefficiently)
-            seq = str(self.data.get_record(i).seq)
+            seq = self.data.get_standardized_seq(i)
             emb = self._compute_reduced_embeddings([seq], self.language_model, self.encoder)[0]
         return emb
                 
