@@ -24,7 +24,7 @@ def find_long_insertions_and_get_sequences(data : SequenceDataset, lens, starts,
         id_fragment_pairs = []
         to_delete = [] #keeps track of fragments that are too long
         for j in range(lengths.size):
-            aa_seq = str(data.get_record(which[j]).seq)
+            aa_seq = str(data.get_record(which[j]).seq).upper()
             segment = aa_seq[start[j] : start[j] + lengths[j]]
             #sometimes segments look strange (like ones consisting only of X)
             #this can cause problems in the downstream aligner, omit these segments
@@ -108,7 +108,7 @@ def make_slice_msas(slices, method="famsa", threads=0):
 
 
 def align_with_famsa(slices, threads):
-    #keep conditional import, famsa could be optional in the
+    #keep conditional import, famsa could be optional in the future
     from pyfamsa import Aligner as FamsaAligner, Sequence as FamsaSequence
     aligner = FamsaAligner(threads = threads)
     alignments = {}
