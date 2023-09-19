@@ -159,7 +159,7 @@ class TestMsaHmmCell(unittest.TestCase):
         f = [Initializers.make_default_flank_init() for _ in models]
         transitioner = Transitioner.ProfileHMMTransitioner(transition_init = t,
                                                            flank_init = f)
-        hmm_cell = MsaHmmCell.MsaHmmCell(length, emitter, transitioner)
+        hmm_cell = MsaHmmCell.MsaHmmCell(length, dim=3, emitter=emitter, transitioner=transitioner)
         hmm_cell.build((None,None,3))
         return hmm_cell, length
    
@@ -217,7 +217,6 @@ class TestMsaHmmCell(unittest.TestCase):
     def test_multi_model_forward(self):
         models = [0,1]
         hmm_cell, length = self.make_test_cell(models)
-        hmm_cell.recurrent_init()
         scaled_forward, loglik = hmm_cell.get_initial_state(batch_size=1)
         seq = tf.one_hot([[0,1,0,2]], 3)
         init = True
@@ -369,7 +368,7 @@ class TestMSAHMM(unittest.TestCase):
                                                  insertion_init = tf.keras.initializers.Zeros())
         transitioner = Transitioner.ProfileHMMTransitioner(transition_init = transition_init, 
                                                             flank_init = tf.keras.initializers.Zeros())
-        hmm_cell = MsaHmmCell.MsaHmmCell(length, emitter, transitioner)
+        hmm_cell = MsaHmmCell.MsaHmmCell(length, emitter=emitter, transitioner=transitioner)
         hmm_cell.build((None, None, len(SequenceDataset.alphabet)))
         hmm_cell.recurrent_init()
         filename = os.path.dirname(__file__)+"/data/simple.fa"
@@ -441,7 +440,7 @@ class TestMSAHMM(unittest.TestCase):
                                                  insertion_init = [tf.keras.initializers.Zeros()]*2)
         transitioner = Transitioner.ProfileHMMTransitioner(transition_init = transition_init, 
                                                             flank_init = [tf.keras.initializers.Zeros()]*2)
-        hmm_cell = MsaHmmCell.MsaHmmCell(length, emitter, transitioner)
+        hmm_cell = MsaHmmCell.MsaHmmCell(length, emitter=emitter, transitioner=transitioner)
         hmm_cell.build((None, None, len(SequenceDataset.alphabet)))
         hmm_cell.recurrent_init()
         with SequenceDataset(os.path.dirname(__file__)+"/data/felix.fa") as data:
@@ -777,7 +776,7 @@ class TestMSAHMM(unittest.TestCase):
         emitter = Emitter.ProfileHMMEmitter(emission_init = emission_kernel_initializer, 
                                                  insertion_init = insertion_kernel_initializer)
         transitioner = Transitioner.ProfileHMMTransitioner(transition_init = transition_kernel_initializers)
-        hmm_cell = MsaHmmCell.MsaHmmCell(length, emitter, transitioner)
+        hmm_cell = MsaHmmCell.MsaHmmCell(length, dim=2+1, emitter=emitter, transitioner=transitioner)
         seq = tf.one_hot([[[0,1,0]]], 3)
         hmm_layer = MsaHmmLayer.MsaHmmLayer(hmm_cell, 1)
         hmm_layer.build(seq.shape)
