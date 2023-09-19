@@ -47,7 +47,10 @@ def make_msa_hmm_layer(effective_num_seq,
     """Constructs a cell and a MSA HMM layer given a config.
     """
     assert_config(config)
-    msa_hmm_cell = MsaHmmCell(model_lengths, config["emitter"], config["transitioner"])
+    msa_hmm_cell = MsaHmmCell(model_lengths, 
+                                dim = 24 * config["num_rate_matrices"],
+                                emitter = config["emitter"], 
+                                transitioner = config["transitioner"])
     msa_hmm_layer = MsaHmmLayer(msa_hmm_cell, 
                                 effective_num_seq,
                                 use_prior=config["use_prior"],

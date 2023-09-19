@@ -37,6 +37,7 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
         """ Automatically called when the owner cell is created.
         """
         self.length = cell.length
+        self.dim = cell.dim-1
         assert len(self.length) == len(self.emission_init), \
             f"The number of emission initializers ({len(self.emission_init)}) should match the number of models ({len(self.length)})."
         assert len(self.length) == len(self.insertion_init), \
@@ -46,6 +47,8 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
         self.prior.load(self.dtype)
         
     def build(self, input_shape):
+        if self.built:
+            return
         s = input_shape[-1]-1 # substract one for terminal symbol
         self.emission_kernel = [self.add_weight(
                                         shape=[length, s], 
@@ -129,7 +132,7 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
     def get_prior_log_density(self):
         return self.prior(self.make_B(), self.length)
     
-    def duplicate(self, model_indices=None):
+    def duplicate(self, model_indices=None, share_kernels=False):
         if model_indices is None:
             model_indices = range(len(self.emission_init))
         sub_emission_init = [tf.constant_initializer(self.emission_kernel[i].numpy()) for i in model_indices]
@@ -140,23 +143,21 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
                              prior = self.prior,
                              frozen_insertions = self.frozen_insertions,
                              dtype = self.dtype) 
+        if share_kernels:
+            emitter_copy.emission_kernel = self.emission_kernel
+            emitter_copy.insertion_kernel = self.insertion_kernel
+            emitter_copy.built = True
         return emitter_copy
     
     def get_config(self):
         config = super(ProfileHMMEmitter, self).get_config()
         config.update({
-             "emission_init" : [k.numpy() for k in self.emission_kernel],
-             "insertion_init" : [k.numpy() for k in self.insertion_kernel],
-             "prior" : self.prior,
-             "frozen_insertions" : self.frozen_insertions
+        "emission_init" : self.emission_init,
+        "insertion_init" : self.insertion_init,
+        "prior" : self.prior,
+        "frozen_insertions" : self.frozen_insertions
         })
         return config
-    
-    @classmethod
-    def from_config(cls, config):
-        config["emission_init"] = [initializers.ConstantInitializer(k) for k in config["emission_init"]]
-        config["insertion_init"] = [initializers.ConstantInitializer(k) for k in config["insertion_init"]]
-        return cls(**config)
     
     def __repr__(self):
         return f"ProfileHMMEmitter(\n emission_init={self.emission_init[0]},\n insertion_init={self.insertion_init[0]},\n prior={self.prior},\n frozen_insertions={self.frozen_insertions}, )"
@@ -321,3 +322,8 @@ class EmbeddingEmitter(ProfileHMMEmitter):
         """ A variant of make_B used for plotting the HMM. Can be overridden for more complex emissions. Per default this is equivalent to make_B
         """
         return self.make_B()[:,:,:len(SequenceDataset.alphabet)-1]
+
+
+
+tf.keras.utils.get_custom_objects()["ProfileHMMEmitter"] = ProfileHMMEmitter
+tf.keras.utils.get_custom_objects()["EmbeddingEmitter"] = EmbeddingEmitter

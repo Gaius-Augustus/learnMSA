@@ -17,6 +17,7 @@ class MsaHmmCell(tf.keras.layers.Layer):
     """
     def __init__(self,
                  length, 
+                 dim=24,
                  emitter = None,
                  transitioner = None,
                  **kwargs
@@ -37,21 +38,22 @@ class MsaHmmCell(tf.keras.layers.Layer):
         self.max_num_states = max(self.num_states)
         self.state_size = (tf.TensorShape([self.max_num_states]), tf.TensorShape([1]))
         self.output_size = tf.TensorShape([self.max_num_states])
-        for em in self.emitter:
-            em.cell_init(self)
-        self.transitioner.cell_init(self)
         self.epsilon = tf.constant(1e-32, self.dtype)
         self.reverse = False
+        self.dim = dim
+        self.transitioner.cell_init(self)
+        for em in self.emitter:
+            em.cell_init(self)
             
             
     def build(self, input_shape):
-        self.dim = input_shape[-1]
         if self.built:
             return
         for em in self.emitter:
-            em.build(input_shape)
-        self.transitioner.build(input_shape)
+            em.build((None, input_shape[-2], self.dim))
+        self.transitioner.build((None, input_shape[-2], self.dim))
         self.built = True
+        self.recurrent_init()
 
         
     def recurrent_init(self):
@@ -103,26 +105,24 @@ class MsaHmmCell(tf.keras.layers.Layer):
         scaled_forward = tf.reshape(scaled_forward, (-1, self.max_num_states))
         new_state = [scaled_forward, loglik]
         if self.reverse:
-            log_unscaled_forward = tf.math.log(R + self.epsilon) + old_loglik
-            log_unscaled_forward = tf.reshape(log_unscaled_forward, (-1, self.max_num_states))
+            output = tf.math.log(R + self.epsilon) + old_loglik
+            output = tf.reshape(output, (-1, self.max_num_states))
         else:
-            log_unscaled_forward = tf.math.log(scaled_forward + self.epsilon) + loglik
-        return log_unscaled_forward, new_state
+            output = tf.math.log(scaled_forward + self.epsilon) + loglik
+        return output, new_state
 
     
-    def get_initial_state(self, inputs=None, batch_size=None, _dtype=None):
-        init_dist = tf.repeat(self.make_initial_distribution(), repeats=batch_size, axis=0)
-        init_dist = tf.transpose(init_dist, (1,0,2))
-        init_dist = tf.reshape(init_dist, (-1, self.max_num_states))
-        loglik = tf.zeros((self.num_models*batch_size, 1), dtype=self.dtype)
-        S = [init_dist, loglik]
-        return S
-
-    
-    def get_initial_backward_state(self, inputs=None, batch_size=None, _dtype=None):
-        init_dist = tf.ones((self.num_models*batch_size, self.max_num_states), dtype=self.dtype)
-        loglik = tf.zeros((self.num_models*batch_size, 1), dtype=self.dtype)
-        S = [init_dist, loglik]
+    def get_initial_state(self, inputs=None, batch_size=None, dtype=None):
+        if self.reverse:
+            init_dist = tf.ones((self.num_models*batch_size, self.max_num_states), dtype=self.dtype)
+            loglik = tf.zeros((self.num_models*batch_size, 1), dtype=self.dtype)
+            S = [init_dist, loglik]
+        else:
+            init_dist = tf.repeat(self.make_initial_distribution(), repeats=batch_size, axis=0)
+            init_dist = tf.transpose(init_dist, (1,0,2))
+            init_dist = tf.reshape(init_dist, (-1, self.max_num_states))
+            loglik = tf.zeros((self.num_models*batch_size, 1), dtype=self.dtype)
+            S = [init_dist, loglik]
         return S
 
     
@@ -140,28 +140,37 @@ class MsaHmmCell(tf.keras.layers.Layer):
         return prior
     
     
-    def duplicate(self, model_indices=None):
+    def duplicate(self, model_indices=None, shared_kernels=False):
         """ Returns a new cell by copying the models specified in model_indices from this cell. 
         """
         assert self.built, "Can only duplicate a cell that was built before (i.e. it has kernels)."
         if model_indices is None:
             model_indices = range(self.num_models)
         sub_lengths = [self.length[i] for i in model_indices]
-        sub_emitter = [e.duplicate(model_indices) for e in self.emitter]
-        sub_transitioner = self.transitioner.duplicate(model_indices)
-        subset_cell = MsaHmmCell(sub_lengths, sub_emitter, sub_transitioner)
+        sub_emitter = [e.duplicate(model_indices, shared_kernels) for e in self.emitter]
+        sub_transitioner = self.transitioner.duplicate(model_indices, shared_kernels)
+        subset_cell = MsaHmmCell(sub_lengths, self.dim, sub_emitter, sub_transitioner)
         return subset_cell
     
     
-    #configures the cell for the backward recursion
-    def reverse_direction(self):
-        self.transitioner.transpose()
-        self.reverse = not self.reverse
+    def make_reverse_direction_offspring(self):
+        """ Returns a cell sharing this cells parameters that is configured for computing the backward recursion.
+        """
+        reverse_cell = self.duplicate(shared_kernels=True)
+        reverse_cell.reverse_direction()
+        return reverse_cell
+
+
+    def reverse_direction(self, reverse=True):
+        self.reverse = reverse
+        self.transitioner.reverse = reverse
+
         
     def get_config(self):
         config = super(MsaHmmCell, self).get_config()
         config.update({
              "length" : self.length, 
+             "dim" : self.dim, 
              "num_emitters" : len(self.emitter),
              "transitioner" : self.transitioner
         })
@@ -179,3 +188,6 @@ class MsaHmmCell(tf.keras.layers.Layer):
         config["emitter"] = emitter
         return cls(**config)
 
+
+
+tf.keras.utils.get_custom_objects()["MsaHmmCell"] = MsaHmmCell

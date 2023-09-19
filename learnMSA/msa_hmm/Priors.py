@@ -55,6 +55,7 @@ class AminoAcidPrior(tf.keras.layers.Layer):
     
     def __repr__(self):
         return f"AminoAcidPrior(comp_count={self.comp_count})"
+
     
     
 class NullPrior(tf.keras.layers.Layer):
@@ -72,6 +73,7 @@ class NullPrior(tf.keras.layers.Layer):
         return f"NullPrior()"
     
     
+
 class ProfileHMMTransitionPrior(tf.keras.layers.Layer):
     """The default dirichlet mixture prior for profileHMM transitions.
 
@@ -212,6 +214,7 @@ class ProfileHMMTransitionPrior(tf.keras.layers.Layer):
         return f"ProfileHMMTransitionPrior(match_comp={self.match_comp}, insert_comp={self.insert_comp}, delete_comp={self.delete_comp}, alpha_flank={self.alpha_flank}, alpha_single={self.alpha_single}, alpha_global={self.alpha_global}, alpha_flank_compl={self.alpha_flank_compl}, alpha_single_compl={self.alpha_single_compl}, alpha_global_compl={self.alpha_global_compl})"
     
 
+
 class L2EmbeddingRegularizer(AminoAcidPrior):
     """ A simple L2 regularizer for the embedding match states
     """
@@ -260,3 +263,10 @@ class L2EmbeddingRegularizer(AminoAcidPrior):
         prior_aa = super().__call__(B_amino, lengths)
         reg = self.get_reg(B, lengths)
         return prior_aa - reg #the result is maximized, so we have to negate the regularizer
+
+
+
+tf.keras.utils.get_custom_objects()["AminoAcidPrior"] = AminoAcidPrior
+tf.keras.utils.get_custom_objects()["NullPrior"] = NullPrior
+tf.keras.utils.get_custom_objects()["ProfileHMMTransitionPrior"] = ProfileHMMTransitionPrior
+tf.keras.utils.get_custom_objects()["L2EmbeddingRegularizer"] = L2EmbeddingRegularizer

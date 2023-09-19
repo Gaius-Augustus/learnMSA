@@ -17,7 +17,11 @@ class EmissionInitializer(tf.keras.initializers.Initializer):
     
     def __repr__(self):
         return f"DefaultEmission()"
+
+    def get_config(self):  # To support serialization
+        return {"dist": self.dist}
     
+
 class ConstantInitializer(tf.keras.initializers.Constant):
     def __repr__(self):
         if np.isscalar(self.value):
@@ -92,6 +96,11 @@ class MatchTransitionInitializer(tf.keras.initializers.Initializer):
     
     def __repr__(self):
         return f"DefaultMatchTransition({self.val[self.i]})"
+
+    def get_config(self):  # To support serialization
+        return {"val": self.val, "i": self.i, "scale": self.scale}
+
+
     
 class RandomNormalInitializer(tf.keras.initializers.Initializer):
     def __init__(self, mean=0.0, stddev=0.05):
@@ -103,6 +112,10 @@ class RandomNormalInitializer(tf.keras.initializers.Initializer):
         
     def __repr__(self):
         return f"Norm({self.mean}, {self.stddev})"
+
+    def get_config(self):  # To support serialization
+        return {"mean": self.mean, "stddev": self.stddev}
+    
     
 def make_default_flank_init():
     return ConstantInitializer(0.)
@@ -166,3 +179,15 @@ class EmbeddingEmissionInitializer(tf.keras.initializers.Initializer):
     
     def __repr__(self):
         return f"EmbeddingEmissionInitializer()"
+
+    def get_config(self):  # To support serialization
+        return {"aa_dist": self.aa_dist, "global_emb": self.global_emb}
+
+
+tf.keras.utils.get_custom_objects()["EmissionInitializer"] = EmissionInitializer
+tf.keras.utils.get_custom_objects()["ConstantInitializer"] = ConstantInitializer
+tf.keras.utils.get_custom_objects()["EntryInitializer"] = EntryInitializer
+tf.keras.utils.get_custom_objects()["ExitInitializer"] = ExitInitializer
+tf.keras.utils.get_custom_objects()["MatchTransitionInitializer"] = MatchTransitionInitializer
+tf.keras.utils.get_custom_objects()["RandomNormalInitializer"] = RandomNormalInitializer
+tf.keras.utils.get_custom_objects()["EmbeddingEmissionInitializer"] = EmbeddingEmissionInitializer

@@ -11,13 +11,6 @@ class MsaHmmLayer(tf.keras.layers.Layer):
                 ):
         super(MsaHmmLayer, self).__init__(**kwargs)
         self.cell = cell
-        self.rnn = tf.keras.layers.RNN(self.cell, 
-                                       return_sequences=True, 
-                                       return_state=True)
-        self.rnn_backward = tf.keras.layers.RNN(self.cell, 
-                                                return_sequences=True, 
-                                                return_state=True,
-                                                go_backwards=True)
         self.num_seqs = num_seqs
         self.use_prior = use_prior 
         self.sequence_weights = sequence_weights
@@ -26,11 +19,33 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         
         
     def build(self, input_shape):
-        # build the cell 
+        if self.built:
+            return
+        # build the cell
         self.cell.build((None, input_shape[-2], input_shape[-1]))
-        # build the RNN layer with a different input shape
-        self.rnn.build((None, input_shape[-2], self.cell.max_num_states))
-        self.built = True
+        # make a variant of the forward cell configured for backward
+        self.reverse_cell = self.cell.make_reverse_direction_offspring()
+        # build the reverse cell
+        self.reverse_cell.build((None, input_shape[-2], input_shape[-1]))
+        #make a forward rnn layer
+        self.rnn = tf.keras.layers.RNN(self.cell, 
+                                       return_sequences=True, 
+                                       return_state=True)
+        # make a backward rnn layer
+        self.rnn_backward = tf.keras.layers.RNN(self.reverse_cell, 
+                                                return_sequences=True, 
+                                                return_state=True,
+                                                go_backwards=True)
+        # make a bidirectional rnn layer to run forward and backward in parallel
+        self.bidirectional_rnn = tf.keras.layers.Bidirectional(self.rnn, merge_mode="sum", backward_layer=self.rnn_backward)
+        # Bidirectional makes a copy rather than taking the original rnn, override the copy
+        self.bidirectional_rnn.forward_layer = self.rnn 
+        # build the RNN layers with a different input shape
+        rnn_input_shape = (None, input_shape[-2], self.cell.max_num_states)
+        self.rnn.build(rnn_input_shape)
+        self.rnn_backward.build(rnn_input_shape)
+        self.bidirectional_rnn.build(rnn_input_shape)
+        built = True
         
         
     def forward_recursion(self, inputs, training=False):
@@ -69,32 +84,44 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         Returns:
             backward variables: Shape: (num_model, b, seq_len, q)
         """
-        self.cell.recurrent_init()
+        self.reverse_cell.recurrent_init()
         num_model, b, seq_len, s = tf.unstack(tf.shape(inputs))
-        initial_state = self.cell.get_initial_backward_state(batch_size=b)
-        emission_probs = self.cell.emission_probs(inputs)
+        initial_state = self.reverse_cell.get_initial_state(batch_size=b)
+        emission_probs = self.reverse_cell.emission_probs(inputs)
         emission_probs = tf.reshape(emission_probs, (num_model*b, seq_len, self.cell.max_num_states))
-        self.cell.reverse_direction()
         #note that for backward, we can ignore the initial step like we did it in
         #forward, because we assume that all inputs have terminal tokens
         backward, _, _ = self.rnn_backward(emission_probs, initial_state=initial_state)
-        self.cell.reverse_direction()
         backward = tf.reshape(backward, (num_model, b, seq_len, -1))
         backward = tf.reverse(backward, [-2])
         return backward
     
     
-    def state_posterior_log_probs(self, inputs):
+    def state_posterior_log_probs(self, inputs, training=False):
         """ Computes the log-probability of state q at position i given inputs.
         Args:
             inputs: Sequences. Shape: (num_model, b, seq_len, s)
         Returns:
             state posterior probbabilities: Shape: (num_model, b, seq_len, q)
         """
-        forward, loglik = self.forward_recursion(inputs)
-        backward = self.backward_recursion(inputs)
-        loglik = loglik[:,:,tf.newaxis,tf.newaxis]
-        return forward + backward - loglik
+        num_model, b, seq_len, s = tf.unstack(tf.shape(inputs))
+        self.cell.recurrent_init()
+        self.reverse_cell.recurrent_init()
+        initial_state = self.cell.get_initial_state(batch_size=b)
+        rev_initial_state = self.reverse_cell.get_initial_state(batch_size=b)
+        emission_probs = self.cell.emission_probs(inputs)
+        emission_probs = tf.reshape(emission_probs, (num_model*b, seq_len, self.cell.max_num_states))
+        #forward has to handle the first observation separately
+        forward_1, step_1_state = self.cell(emission_probs[:,0], initial_state, training, init=True)
+        #run forward and backward in parallel
+        posterior, *states = self.bidirectional_rnn(emission_probs[:,1:], initial_state=(*step_1_state, *rev_initial_state), training=training)
+        #because of the bidirectionality, we also have to manually do the last backward step
+        backward_last, _ = self.reverse_cell(emission_probs[:,0], states[2:], training)
+        posterior = tf.concat([(forward_1 + backward_last)[:,tf.newaxis], posterior], axis=1)
+        posterior = tf.reshape(posterior, (num_model, b, seq_len, -1))
+        loglik = tf.reshape(states[1], (num_model, b))
+        posterior -= loglik[:,:,tf.newaxis,tf.newaxis]
+        return posterior
     
     
     def apply_sequence_weights(self, loglik, indices, aggregate=False):
@@ -154,3 +181,6 @@ class MsaHmmLayer(tf.keras.layers.Layer):
              "sequence_weights" : self.sequence_weights
         })
         return config
+
+
+tf.keras.utils.get_custom_objects()["MsaHmmLayer"] = MsaHmmLayer

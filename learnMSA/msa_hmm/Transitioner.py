@@ -35,6 +35,7 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
         self.frozen_kernels = frozen_kernels
         self.epsilon = tf.constant(1e-32, self.dtype)
         self.approx_log_zero = tf.math.log(self.epsilon)
+        self.reverse = False
         
     def cell_init(self, cell):
         """ Automatically called when the owner cell is created.
@@ -60,6 +61,8 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
         self.prior.load(self.dtype)
         
     def build(self, input_shape=None):
+        if self.built:
+            return
         # The (sparse) kernel is subdivided in groups of transitions.
         # To avoid error-prone slicing of a long array into smaller parts,
         # we store the parts as a dictionary and concatenate them later in the correct order.
@@ -89,6 +92,7 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
                                          name="init_logit_"+str(i),
                                          dtype=self.dtype)
                                       for i,init in enumerate(self.flank_init)]
+        tf.keras.utils.get_custom_objects()["ProfileHMMTransitioner"] = ProfileHMMTransitioner
         self.built = True
         
     def recurrent_init(self):
@@ -97,6 +101,7 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
         """
         self.A_sparse, self.implicit_log_probs, self.log_probs, self.probs = self.make_A_sparse(return_probs = True)
         self.A = tf.sparse.to_dense(self.A_sparse)
+        self.A_t = tf.transpose(self.A, (0,2,1))
         
     def make_flank_init_prob(self):
         return tf.math.sigmoid(tf.stack(self.flank_init_kernel))
@@ -320,12 +325,15 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
                 Shape (k, b, q)
         """
         #batch matmul of k inputs with k matricies
-        return tf.matmul(inputs, self.A)
+        if self.reverse:
+            return tf.matmul(inputs, self.A_t)
+        else:
+            return tf.matmul(inputs, self.A)
     
     def get_prior_log_densities(self):
         return self.prior(self.make_probs(), self.make_flank_init_prob())
     
-    def duplicate(self, model_indices=None):
+    def duplicate(self, model_indices=None, share_kernels=False):
         if model_indices is None:
             model_indices = range(len(self.transition_init))
         sub_transition_init = []
@@ -341,11 +349,11 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
                                         prior = self.prior,
                                         frozen_kernels = self.frozen_kernels,
                                         dtype = self.dtype) 
+        if share_kernels:
+            transitioner_copy.transition_kernel = self.transition_kernel
+            transitioner_copy.flank_init_kernel = self.flank_init_kernel
+            transitioner_copy.built = True
         return transitioner_copy
-    
-    #configure the Transitioner for the backward recursion
-    def transpose(self):
-        self.A = tf.transpose(self.A, (0,2,1))
         
     
     def _get_kernel_parts_init_list(self):
@@ -389,11 +397,12 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
     
     def get_config(self):
         config = super(ProfileHMMTransitioner, self).get_config()
-        for key in self.transition_kernel[0].keys():
-            config[key] = [self.transition_kernel[i][key].numpy() for i in range(self.num_models)]
+        if self.built:
+            for key in self.transition_kernel[0].keys():
+                config[key] = [self.transition_kernel[i][key].numpy() for i in range(self.num_models)]
+            config["flank_init"] = [k.numpy() for k in self.flank_init_kernel]
         config.update({
-            "num_models" : len(self.transition_kernel),
-            "flank_init" : [k.numpy() for k in self.flank_init_kernel],
+            "num_models" : self.num_models,
             "prior" : self.prior,
             "frozen_kernels" : self.frozen_kernels
         })
@@ -543,3 +552,8 @@ def _assert_transition_init_kernel(kernel_init, parts):
         
 def _logsumexp(x, y):
     return tf.math.log(tf.math.exp(x) +  tf.math.exp(y))
+
+
+
+
+tf.keras.utils.get_custom_objects()["ProfileHMMTransitioner"] = ProfileHMMTransitioner
