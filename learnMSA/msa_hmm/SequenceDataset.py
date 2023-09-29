@@ -139,8 +139,9 @@ class AlignedDataset(SequenceDataset):
     Args:
         See SequenceDataset.
     """
-    def __init__(self, filename=None, fmt="fasta", aligned_sequences=None, indexed=False, threads=None):
+    def __init__(self, filename=None, fmt="fasta", aligned_sequences=None, indexed=False, threads=None, single_seq_ok=False):
         super().__init__(filename, fmt, aligned_sequences, indexed, threads)
+        self.single_seq_ok = single_seq_ok
         self.validate_dataset()
         self.msa_matrix = np.zeros((self.num_seq, len(self.get_record(0))), dtype=np.int16)
         for i in range(self.num_seq):
@@ -157,7 +158,7 @@ class AlignedDataset(SequenceDataset):
 
 
     def validate_dataset(self):
-        super().validate_dataset(single_seq_ok=False, empty_seq_id_ok=False, dublicate_seq_id_ok=False)
+        super().validate_dataset(single_seq_ok=self.single_seq_ok, empty_seq_id_ok=False, dublicate_seq_id_ok=False)
         record_lens = np.array([len(self.get_record(i)) for i in range(self.num_seq)])
         if np.any(record_lens != record_lens[0]):
             raise ValueError(f"File {self.filename} contains sequences of different lengths.")

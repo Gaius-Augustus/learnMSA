@@ -176,11 +176,18 @@ class EmbeddingEmitter(ProfileHMMEmitter):
                  insertion_init=initializers.EmbeddingEmissionInitializer(),
                  use_shared_embedding_insertions=True,
                  frozen_insertions=True,
-                 use_finetuned_lm=True):
+                 use_finetuned_lm=True,
+                 **kwargs):
+        if "prior" in kwargs:
+            prior = kwargs["prior"]
+            del kwargs["prior"]
+        else:
+            prior = priors.L2EmbeddingRegularizer(L2_match, L2_insert, use_shared_embedding_insertions)
         super(EmbeddingEmitter, self).__init__(emission_init, 
                                                insertion_init,
-                                               priors.L2EmbeddingRegularizer(L2_match, L2_insert, use_shared_embedding_insertions), 
-                                               frozen_insertions=frozen_insertions)
+                                               prior, 
+                                               frozen_insertions=frozen_insertions,
+                                               **kwargs)
         self.lm_name = lm_name
         self.reduced_embedding_dim = reduced_embedding_dim
         self.L2_match = L2_match
@@ -299,7 +306,7 @@ class EmbeddingEmitter(ProfileHMMEmitter):
         return tf.concat([aa_emissions, emb_emissions], -1)
     
     
-    def duplicate(self, model_indices=None):
+    def duplicate(self, model_indices=None, share_kernels=False):
         if model_indices is None:
             model_indices = range(len(self.emission_init))
         sub_emission_init = [tf.constant_initializer(self.emission_kernel[i].numpy()) for i in model_indices]
@@ -315,14 +322,37 @@ class EmbeddingEmitter(ProfileHMMEmitter):
                              use_shared_embedding_insertions=self.use_shared_embedding_insertions,
                              frozen_insertions=self.frozen_insertions,
                              use_finetuned_lm=self.use_finetuned_lm) 
+        if share_kernels:
+            emitter_copy.emission_kernel = self.emission_kernel
+            emitter_copy.insertion_kernel = self.insertion_kernel
+            emitter_copy.temperature = self.temperature
+            emitter_copy.built = True
         return emitter_copy
-        
+
         
     def make_B_amino(self):
         """ A variant of make_B used for plotting the HMM. Can be overridden for more complex emissions. Per default this is equivalent to make_B
         """
         return self.make_B()[:,:,:len(SequenceDataset.alphabet)-1]
 
+    
+    def get_config(self):
+        config = super(EmbeddingEmitter, self).get_config()
+        config.update({
+            "lm_name" : self.lm_name,
+            "reduced_embedding_dim" : self.reduced_embedding_dim,
+            "L2_match" : self.L2_match,
+            "L2_insert" : self.L2_insert,
+            "use_shared_embedding_insertions" : self.use_shared_embedding_insertions,
+            "use_finetuned_lm" : self.use_finetuned_lm
+        })
+        return config
+
+
+    def __repr__(self):
+        return f"EmbeddingEmitter(lm_name={self.lm_name} reduced_embedding_dim={self.reduced_embedding_dim}\n emission_init={self.emission_init[0]},\n insertion_init={self.insertion_init[0]},\n prior={self.prior},\n frozen_insertions={self.frozen_insertions}, )"
+    
+    
 
 
 tf.keras.utils.get_custom_objects()["ProfileHMMEmitter"] = ProfileHMMEmitter

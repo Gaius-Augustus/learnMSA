@@ -221,8 +221,9 @@ class L2EmbeddingRegularizer(AminoAcidPrior):
     def __init__(self, 
                  L2_match, 
                  L2_insert,
-                 use_shared_embedding_insertions):
-        super().__init__()
+                 use_shared_embedding_insertions, 
+                 **kwargs):
+        super(L2EmbeddingRegularizer, self).__init__(**kwargs)
         self.L2_match = L2_match
         self.L2_insert = L2_insert
         self.use_shared_embedding_insertions = use_shared_embedding_insertions
@@ -264,6 +265,14 @@ class L2EmbeddingRegularizer(AminoAcidPrior):
         reg = self.get_reg(B, lengths)
         return prior_aa - reg #the result is maximized, so we have to negate the regularizer
 
+    def get_config(self):
+        config = super(L2EmbeddingRegularizer, self).get_config()
+        config.update({
+             "L2_match" : self.L2_match,
+             "L2_insert" : self.L2_insert,
+             "use_shared_embedding_insertions" : self.use_shared_embedding_insertions
+        })
+        return config
 
 
 tf.keras.utils.get_custom_objects()["AminoAcidPrior"] = AminoAcidPrior
