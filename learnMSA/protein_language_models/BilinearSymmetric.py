@@ -63,6 +63,10 @@ class SymmetricBilinearReduction(tf.keras.layers.Layer):
             else:
                 return scores
             
+    def grow(self, reduced_embeddings):
+        """ Converts from reduced representation back to full dimension. 
+        """
+        return tf.matmul(reduced_embeddings, self.R, transpose_b=True)
 
     def get_config(self):
         return {"reduced_dim": self.reduced_dim, "dropout" : self.dropout}

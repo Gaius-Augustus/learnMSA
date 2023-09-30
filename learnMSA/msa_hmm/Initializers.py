@@ -156,7 +156,7 @@ def make_default_transition_init(MM=1,
     return transition_init_kernel
 
 
-global_emb = np.zeros((32), dtype=np.float32)
+global_emb = np.random.normal(0, 0.001, size=(32)) #np.zeros((32), dtype=np.float32)
 
 class EmbeddingEmissionInitializer(tf.keras.initializers.Initializer):
     """ Initializes the embedding distributions by assigning a AA background distribution to the first 25 positions

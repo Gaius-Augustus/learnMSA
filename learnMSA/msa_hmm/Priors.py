@@ -2,6 +2,8 @@ import os
 import tensorflow as tf
 import learnMSA.msa_hmm.DirichletMixture as dm
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
+from learnMSA.protein_language_models.MultivariateNormalPrior import MultivariateNormalPrior, make_pdf_model
+import learnMSA.protein_language_models.Common as Common
 
 
 class AminoAcidPrior(tf.keras.layers.Layer):
@@ -252,7 +254,7 @@ class L2EmbeddingRegularizer(AminoAcidPrior):
         reg *= length_mask
         return reg
         
-    def __call__(self, B, lengths):
+    def call(self, B, lengths):
         """L2 regularization for each match state.
         Args:
         B: A stack of k emission matrices. Shape: (k, q, s)
@@ -261,7 +263,7 @@ class L2EmbeddingRegularizer(AminoAcidPrior):
         """
         #amino acid prior
         B_amino = B[:,:,:len(SequenceDataset.alphabet)-1]
-        prior_aa = super().__call__(B_amino, lengths)
+        prior_aa = super().call(B_amino, lengths)
         reg = self.get_reg(B, lengths)
         return prior_aa - reg #the result is maximized, so we have to negate the regularizer
 
@@ -275,7 +277,56 @@ class L2EmbeddingRegularizer(AminoAcidPrior):
         return config
 
 
+
+class MvnEmbeddingPrior(AminoAcidPrior):
+    """ A multivariate normal prior for the embedding match states. 
+    """
+    def __init__(self, language_model="esm2", **kwargs):
+        super(MvnEmbeddingPrior, self).__init__(**kwargs)
+        self.language_model = language_model
+
+    def load(self, dtype):
+        super(MvnEmbeddingPrior, self).load(dtype)
+        prior_path = os.path.dirname(__file__)+f"/../protein_language_models/priors/{self.language_model}/checkpoints"
+        self.multivariate_normal_prior = make_pdf_model(Common.dims[self.language_model], precomputed=True)
+        self.multivariate_normal_prior.load_weights(prior_path)
+        self.multivariate_normal_prior.trainable = False
+        
+    def get_prior_value(self, B_emb, lengths):
+        max_model_length = tf.reduce_max(lengths)
+        length_mask = tf.cast(tf.sequence_mask(lengths), B_emb.dtype)
+        # make sure padding is zero
+        B_emb = B_emb[:,1:max_model_length+1]
+        B_emb *= length_mask[...,tf.newaxis]
+        # compute the prior
+        # reduction and handling sequence length is done internally via the zero padding
+        mvn_log_pdf = self.multivariate_normal_prior(B_emb)
+        return mvn_log_pdf
+
+    def call(self, B, lengths):
+        """L2 regularization for each match state.
+        Args:
+        B: A stack of k emission matrices. Shape: (k, q, s)
+        Returns:
+        A tensor with the L2 regularization values. Shape: (k, max_model_length)
+        """
+        #amino acid prior
+        B_amino = B[:,:,:len(SequenceDataset.alphabet)-1]
+        B_emb = B[:,:,len(SequenceDataset.alphabet):-1]
+        prior_aa = super().call(B_amino, lengths)
+        prior_emb = self.get_prior_value(B_emb, lengths)
+        return prior_aa + prior_emb
+
+    def get_config(self):
+        config = super(MvnEmbeddingPrior, self).get_config()
+        config.update({
+             "language_model" : self.language_model
+        })
+        return config
+
+
 tf.keras.utils.get_custom_objects()["AminoAcidPrior"] = AminoAcidPrior
 tf.keras.utils.get_custom_objects()["NullPrior"] = NullPrior
 tf.keras.utils.get_custom_objects()["ProfileHMMTransitionPrior"] = ProfileHMMTransitionPrior
 tf.keras.utils.get_custom_objects()["L2EmbeddingRegularizer"] = L2EmbeddingRegularizer
+tf.keras.utils.get_custom_objects()["MvnEmbeddingPrior"] = MvnEmbeddingPrior

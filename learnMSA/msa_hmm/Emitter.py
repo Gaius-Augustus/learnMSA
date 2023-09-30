@@ -177,12 +177,14 @@ class EmbeddingEmitter(ProfileHMMEmitter):
                  use_shared_embedding_insertions=True,
                  frozen_insertions=True,
                  use_finetuned_lm=True,
+                 apply_prior_to_reduced_embeddings=False,
                  **kwargs):
         if "prior" in kwargs:
             prior = kwargs["prior"]
             del kwargs["prior"]
         else:
-            prior = priors.L2EmbeddingRegularizer(L2_match, L2_insert, use_shared_embedding_insertions)
+            #prior = priors.L2EmbeddingRegularizer(L2_match, L2_insert, use_shared_embedding_insertions)
+            prior = priors.MvnEmbeddingPrior()
         super(EmbeddingEmitter, self).__init__(emission_init, 
                                                insertion_init,
                                                prior, 
@@ -194,6 +196,7 @@ class EmbeddingEmitter(ProfileHMMEmitter):
         self.L2_insert = L2_insert
         self.use_shared_embedding_insertions = use_shared_embedding_insertions
         self.use_finetuned_lm = use_finetuned_lm
+        self.apply_prior_to_reduced_embeddings = apply_prior_to_reduced_embeddings
         # only import contextual when lm features are required
         import learnMSA.protein_language_models as plm
         self.scoring_model = make_scoring_model(plm.common.dims[lm_name], reduced_embedding_dim, dropout=0.0)
@@ -231,7 +234,7 @@ class EmbeddingEmitter(ProfileHMMEmitter):
                                             name="embedding_emission_kernel_"+str(i),
                                             trainable=not self.frozen_insertions)
                                         for i,length in enumerate(self.length)]
-        self.temperature = self.add_weight(shape=(len(self.emission_init)), initializer=tf.constant_initializer(0), name="temperature")
+        self.temperature = None#self.add_weight(shape=(len(self.emission_init)), initializer=tf.constant_initializer(0), name="temperature")
         self.built = True
         
         
@@ -336,6 +339,18 @@ class EmbeddingEmitter(ProfileHMMEmitter):
         return self.make_B()[:,:,:len(SequenceDataset.alphabet)-1]
 
     
+    def get_prior_log_density(self):
+        if self.apply_prior_to_reduced_embeddings:
+            return self.prior(self.make_B(), self.length)
+        else:
+            B = self.make_B()
+            B_emb = B[:,:,len(SequenceDataset.alphabet):-1]
+            # project the embeddings to the language model dimension
+            B_emb_proj = self.scoring_model.layers[-1].grow(B_emb)
+            B_full = tf.concat([B[:,:,:len(SequenceDataset.alphabet)], B_emb_proj, B[:,:,-1:]], axis=-1)
+            return self.prior(B_full, self.length)
+
+    
     def get_config(self):
         config = super(EmbeddingEmitter, self).get_config()
         config.update({
@@ -344,7 +359,8 @@ class EmbeddingEmitter(ProfileHMMEmitter):
             "L2_match" : self.L2_match,
             "L2_insert" : self.L2_insert,
             "use_shared_embedding_insertions" : self.use_shared_embedding_insertions,
-            "use_finetuned_lm" : self.use_finetuned_lm
+            "use_finetuned_lm" : self.use_finetuned_lm,
+            "apply_prior_to_reduced_embeddings" : self.apply_prior_to_reduced_embeddings
         })
         return config
 
