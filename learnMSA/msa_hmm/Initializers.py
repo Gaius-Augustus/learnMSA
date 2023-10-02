@@ -3,6 +3,9 @@ import numpy as np
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 import learnMSA.msa_hmm.AncProbsLayer as anc_probs
 import learnMSA.msa_hmm.DirichletMixture as dm
+from learnMSA.protein_language_models.MultivariateNormalPrior import make_pdf_model
+from learnMSA.protein_language_models.BilinearSymmetric import make_scoring_model
+import learnMSA.protein_language_models.Common as Common
 import os
 
 class EmissionInitializer(tf.keras.initializers.Initializer):
@@ -156,7 +159,24 @@ def make_default_transition_init(MM=1,
     return transition_init_kernel
 
 
-global_emb = np.random.normal(0, 0.001, size=(32)) #np.zeros((32), dtype=np.float32)
+global_emb_cache = {}
+
+def get_global_emb(lm_name, reduce=False):
+    if lm_name not in global_emb_cache:
+        # load the prior model
+        prior_path = os.path.dirname(__file__)+f"/../protein_language_models/priors/{lm_name}/checkpoints"
+        multivariate_normal_prior = make_pdf_model(Common.dims[lm_name])
+        multivariate_normal_prior.load_weights(prior_path)
+        if reduce:
+            # load the scoring model
+            scoring_model = make_scoring_model(Common.dims[lm_name], 32, dropout=0.0)
+            scoring_model.load_weights(os.path.dirname(__file__)+f"/../protein_language_models/scoring_models_frozen/{lm_name}_32/checkpoints")
+            global_emb = multivariate_normal_prior.layers[5].mu
+            reduced_global_emb = tf.matmul(global_emb[tf.newaxis,:], scoring_model.layers[-1].R)
+            global_emb_cache[lm_name] = tf.squeeze(reduced_global_emb).numpy()
+        else:
+            global_emb_cache[lm_name] = multivariate_normal_prior.layers[5].mu.numpy()
+    return global_emb_cache[lm_name]
 
 class EmbeddingEmissionInitializer(tf.keras.initializers.Initializer):
     """ Initializes the embedding distributions by assigning a AA background distribution to the first 25 positions
@@ -165,9 +185,14 @@ class EmbeddingEmissionInitializer(tf.keras.initializers.Initializer):
 
     def __init__(self,
                  aa_dist=np.log(background_distribution), 
-                 global_emb=global_emb):
+                 global_emb=None,
+                 lm_name="esm2"):
         self.aa_dist = aa_dist
-        self.global_emb = global_emb
+        if global_emb is None:
+            self.global_emb = get_global_emb(lm_name)
+        else:
+            self.global_emb = global_emb
+
 
     def __call__(self, shape, dtype=None, **kwargs):
         assert shape[-1] >= self.aa_dist.size

@@ -7,20 +7,23 @@ class SymmetricBilinearReduction(tf.keras.layers.Layer):
                  reduced_dim, 
                  dropout=0.0, 
                  use_attention_scores=False,
-                 l2=0.0):
+                 l2=0.0, 
+                 trainable=True):
         super(SymmetricBilinearReduction, self).__init__()
         self.reduced_dim = reduced_dim
         self.dropout_prob = dropout
         self.l2 = l2
         self.use_attention_scores = use_attention_scores
+        self.trainable = trainable
 
     def build(self, input_shape):
         self.R = self.add_weight(
             shape=(input_shape[-1], self.reduced_dim),
             initializer="random_normal",
             regularizer=tf.keras.regularizers.L2(self.l2),
+            trainable=self.trainable,
             name="R")
-        self.b = self.add_weight(shape=(1), initializer="zeros", name="b")
+        self.b = self.add_weight(shape=(1), initializer="zeros", trainable=self.trainable, name="b")
         self.dropout = tf.keras.layers.Dropout(self.dropout_prob)
         
     def _reduce(self, embeddings, training, softmax_on_reduce_dim=False):
@@ -62,11 +65,6 @@ class SymmetricBilinearReduction(tf.keras.layers.Layer):
                 return tf.nn.softmax(scores)
             else:
                 return scores
-            
-    def grow(self, reduced_embeddings):
-        """ Converts from reduced representation back to full dimension. 
-        """
-        return tf.matmul(reduced_embeddings, self.R, transpose_b=True)
 
     def get_config(self):
         return {"reduced_dim": self.reduced_dim, "dropout" : self.dropout}
@@ -93,13 +91,14 @@ class BackgroundEmbedding(tf.keras.layers.Layer):
         return self.reduction_layer(embedding, self.background_embedding, b_is_reduced=True, training=False)
 
     
-def make_scoring_model(emb_dim, reduced_dim, dropout):
+def make_scoring_model(emb_dim, reduced_dim, dropout, trainable=True):
     emb1 = tf.keras.layers.Input(shape=(None, emb_dim))
     emb2 = tf.keras.layers.Input(shape=(None, emb_dim))
     # outputs are homology probabilities 
     output = SymmetricBilinearReduction(reduced_dim,
                                         dropout, 
-                                        use_attention_scores = True)(emb1, emb2, activate_output=True, softmax_on_reduce_dim=False)
+                                        use_attention_scores = True,
+                                        trainable = trainable)(emb1, emb2, activate_output=True, softmax_on_reduce_dim=False)
     # construct a model and compile for a standard binary classification task
     model = tf.keras.models.Model(inputs=[emb1, emb2], outputs=output)
     return model
