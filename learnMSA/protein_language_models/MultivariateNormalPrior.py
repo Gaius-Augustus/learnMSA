@@ -16,12 +16,14 @@ class MultivariateNormalPrior(tf.keras.layers.Layer):
                 mu_init = "zeros", 
                 scale_kernel_init = "random_normal", 
                 precomputed = False,
+                trainable = True,
                 **kwargs):
         super(MultivariateNormalPrior, self).__init__(**kwargs)
         self.dim = dim
         self.mu_init = mu_init
         self.scale_kernel_init = scale_kernel_init
         self.precomputed = precomputed
+        self.trainable = trainable
         self.constant = self.dim * tf.math.log(2*math.pi)
 
 
@@ -30,7 +32,8 @@ class MultivariateNormalPrior(tf.keras.layers.Layer):
         self.mu = self.add_weight(name="mu", shape=(self.dim,), initializer=self.mu_init)
         self.scale_kernel = self.add_weight(name="scale_kernel", 
                                             shape=(self.dim * (self.dim+1) // 2,), 
-                                            initializer=self.scale_kernel_init)
+                                            initializer=self.scale_kernel_init,
+                                            trainable=self.trainable)
         if self.precomputed:
             self.compute_values()
 
@@ -62,19 +65,20 @@ class MultivariateNormalPrior(tf.keras.layers.Layer):
 
 
 
-def make_pdf_model(lm_dim, precomputed=False):
+def make_pdf_model(lm_dim, precomputed=False, trainable=True, reduce=True):
     embeddings = tf.keras.Input((None, lm_dim))
     # compute log pdf per observation
     stack = tf.reshape(embeddings, (-1, lm_dim))
-    log_pdf = MultivariateNormalPrior(lm_dim, precomputed=precomputed)(stack)
+    log_pdf = MultivariateNormalPrior(lm_dim, precomputed=precomputed, trainable=trainable)(stack)
     log_pdf = tf.reshape(log_pdf, (tf.shape(embeddings)[0], tf.shape(embeddings)[1]))
-    # compute sequence lengths
-    mask = tf.reduce_any(tf.not_equal(embeddings, 0), -1)
-    mask = tf.cast(mask, log_pdf.dtype)
-    seq_lens = tf.reduce_sum(mask, -1)
-    # average per sequence
-    log_pdf = tf.reduce_sum(log_pdf * mask, -1) / tf.maximum(seq_lens, 1.)
-    # average over batch
-    log_pdf = tf.reduce_mean(log_pdf)
+    if reduce:
+        # compute sequence lengths
+        mask = tf.reduce_any(tf.not_equal(embeddings, 0), -1)
+        mask = tf.cast(mask, log_pdf.dtype)
+        seq_lens = tf.reduce_sum(mask, -1)
+        # average per sequence
+        log_pdf = tf.reduce_sum(log_pdf * mask, -1) / tf.maximum(seq_lens, 1.)
+        # average over batch
+        log_pdf = tf.reduce_mean(log_pdf)
     model = tf.keras.Model(inputs=[embeddings], outputs=[log_pdf])
     return model

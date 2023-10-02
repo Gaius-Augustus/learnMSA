@@ -134,7 +134,7 @@ def run_main():
         sequence_weights = None
     if args.use_language_model:
         config["batch_size"] = Configuration.get_adaptive_batch_size_with_language_model
-        config["learning_rate"] = 0.05
+        config["learning_rate"] = 0.01
         config["epochs"] = [10, 4, 20]
         emission_init = [Initializers.EmbeddingEmissionInitializer() for _ in range(config["num_models"])]
         if config["use_shared_embedding_insertions"]:

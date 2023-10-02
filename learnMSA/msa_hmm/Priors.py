@@ -4,6 +4,7 @@ import learnMSA.msa_hmm.DirichletMixture as dm
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 from learnMSA.protein_language_models.MultivariateNormalPrior import MultivariateNormalPrior, make_pdf_model
 import learnMSA.protein_language_models.Common as Common
+from learnMSA.protein_language_models.BilinearSymmetric import make_scoring_model
 
 
 class AminoAcidPrior(tf.keras.layers.Layer):
@@ -288,7 +289,10 @@ class MvnEmbeddingPrior(AminoAcidPrior):
     def load(self, dtype):
         super(MvnEmbeddingPrior, self).load(dtype)
         prior_path = os.path.dirname(__file__)+f"/../protein_language_models/priors/{self.language_model}/checkpoints"
-        self.multivariate_normal_prior = make_pdf_model(Common.dims[self.language_model], precomputed=True)
+        self.multivariate_normal_prior = make_pdf_model(Common.dims[self.language_model], 
+                                                        precomputed=True, 
+                                                        trainable=False,
+                                                        reduce=False)
         self.multivariate_normal_prior.load_weights(prior_path)
         self.multivariate_normal_prior.trainable = False
         
@@ -297,10 +301,10 @@ class MvnEmbeddingPrior(AminoAcidPrior):
         length_mask = tf.cast(tf.sequence_mask(lengths), B_emb.dtype)
         # make sure padding is zero
         B_emb = B_emb[:,1:max_model_length+1]
-        B_emb *= length_mask[...,tf.newaxis]
         # compute the prior
         # reduction and handling sequence length is done internally via the zero padding
         mvn_log_pdf = self.multivariate_normal_prior(B_emb)
+        mvn_log_pdf *= length_mask
         return mvn_log_pdf
 
     def call(self, B, lengths):

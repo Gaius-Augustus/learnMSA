@@ -5,6 +5,7 @@ import os
 import math
 from functools import partial
 from learnMSA.protein_language_models.BilinearSymmetric import make_scoring_model
+import learnMSA.protein_language_models.Common as Common
 from learnMSA.msa_hmm.MsaHmmCell import MsaHmmCell
 from learnMSA.msa_hmm.MsaHmmLayer import MsaHmmLayer
 from learnMSA.msa_hmm.AncProbsLayer import AncProbsLayer
@@ -175,6 +176,7 @@ class EmbeddingBatchGenerator(DefaultBatchGenerator):
             self.embedding_cache = []
             
     def _load_language_model(self, data : SequenceDataset):
+        print(f"Loading language model {self.lm_name}.")
         if self.lm_name == "proteinBERT":
             from learnMSA.protein_language_models import ProteinBERT
             language_model, encoder = ProteinBERT.get_proteinBERT_model_and_encoder(max_len = data.max_len+2)
@@ -197,15 +199,19 @@ class EmbeddingBatchGenerator(DefaultBatchGenerator):
         
     def configure(self, data : SequenceDataset, config):
         super().configure(data, config)
+        if len(self.embedding_cache) > 0:
+            return
         language_model, encoder = self._load_language_model(data)
-        self.scoring_model = make_scoring_model(language_model.dim, self.reduced_embedding_dim, dropout=0.0)
+        self.scoring_model = make_scoring_model(language_model.dim, 
+                                                self.reduced_embedding_dim, 
+                                                dropout=0.0, 
+                                                trainable=False)
         if self.use_finetuned_lm:
             self.scoring_model.load_weights(os.path.dirname(__file__)+f"/../protein_language_models/scoring_models/{self.lm_name}_{self.reduced_embedding_dim}/checkpoints")
         else:
             self.scoring_model.load_weights(os.path.dirname(__file__)+f"/../protein_language_models/scoring_models_frozen/{self.lm_name}_{self.reduced_embedding_dim}/checkpoints")
         self.scoring_model.layers[-1].trainable = False #don't forget to freeze the scoring model!
         if self.cache_embeddings:
-            if len(self.embedding_cache) == 0:
                 self.batch_size = config["batch_size"]([0], data.max_len) if callable(config["batch_size"]) else config["batch_size"]
                 if self.lm_name == "esm2s":
                     self.batch_size //= 2
