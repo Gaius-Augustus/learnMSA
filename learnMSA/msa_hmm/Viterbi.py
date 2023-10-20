@@ -72,7 +72,8 @@ def viterbi_backtracking(hmm_cell, gamma):
     L = tf.shape(gamma)[2]
     #tf.function-compatible accumulation of results in a dynamically unrolled loop using TensorArray
     state_seqs_max_lik = tf.TensorArray(q.dtype, size=L)
-    for i in tf.range(L-1, -1, -1):
+    state_seqs_max_lik = state_seqs_max_lik.write(L-1, q)
+    for i in tf.range(L-2, -1, -1):
         q = viterbi_backtracking_step(q, gamma[:,:,i], hmm_cell)
         state_seqs_max_lik = state_seqs_max_lik.write(i, q)
     state_seqs_max_lik = tf.transpose(state_seqs_max_lik.stack(), [1,2,0,3])
