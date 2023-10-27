@@ -1,7 +1,7 @@
 import os
 import numpy as np
 import sys
-sys.path.append('../../')
+sys.path.insert(1, "../..")
 import learnMSA.msa_hmm.SequenceDataset as SequenceDataset
 import learnMSA.protein_language_models.Common as Common
 import pandas as pd
@@ -95,6 +95,15 @@ def _get_features_labels(fasta, rand, max_len, force_segment_start=None):
     return seq, pos_to_col, (crop_start, crop_end)
 
 
+def _get_column_occupancies(fasta : SequenceDataset.AlignedDataset):
+    """ 
+    Returns a boolean mask indicating which columns of the alignment are match columns.
+    """
+    cols, counts = np.unique(fasta.column_map, return_counts=True)
+    column_occupancies = counts[np.argsort(cols)] / fasta.num_seq
+    return column_occupancies
+
+
 def _make_batch(batch_clans, rand_family, rand_seq, max_len, fasta_dict, clan_sizes, clan_families):
     batch_families = np.floor(rand_family * clan_sizes[batch_clans]).astype(batch_clans.dtype)
     seq1, seq2, labels = [], [], []
@@ -154,6 +163,36 @@ def _sample_unsupervised_batch(clans, batch_size, max_len, fasta_dict, clan_size
     return _make_unsupervised_batch(batch_clans, rand_family, rand_seq, max_len, fasta_dict, clan_sizes, clan_families)
 
 
+def _make_column_prior_batch(batch_clans, rand_family, rand_seq, max_len, fasta_dict, clan_sizes, clan_families):
+    batch_families = np.floor(rand_family * clan_sizes[batch_clans]).astype(batch_clans.dtype)
+    seq, crop, match_masks = [], [], []
+    for c,f,r in zip(batch_clans, batch_families, rand_seq):
+        f_name = clan_families[c][f]
+        fasta = fasta_dict[f_name]
+        s, cols, cr = _get_features_labels(fasta, r, max_len)
+        column_occupancies = _get_column_occupancies(fasta)
+        match_mask = (column_occupancies > 0.5)[cols].astype(np.float32)
+        seq.append(s)
+        crop.append(cr)
+        match_masks.append(match_mask)
+    return seq, crop, match_masks
+
+
+def _sample_column_prior_batch(clans, batch_size, max_len, fasta_dict, clan_sizes, clan_families):
+    """ Generates a batch of training examples where one example is generated as:
+        1. Sample a random clan
+        2. Sample a random family from this clan
+        3. Sample a random sequence from this family
+        4. Compute a mask indicating which sequence positions relate to match state columns.
+    Returns:
+        sequences (b, L), match_positions (b, L)
+    """
+    batch_clans = np.random.choice(clans, size=batch_size)
+    rand_family = np.random.rand(batch_size) #sample from [0,1] first as the family sizes differ
+    rand_seq = np.random.rand(batch_size) #sample from [0,1] again as the sequence numbers per family differ
+    return _make_column_prior_batch(batch_clans, rand_family, rand_seq, max_len, fasta_dict, clan_sizes, clan_families)
+
+
 def _get_maxlen(seqs):
     return max(len(s) for s in seqs)
 
@@ -172,23 +211,51 @@ def _tokenize_unsupervised(encoder : Common.InputEncoder, seq, crop):
     return encoder(seq, crop)
 
 
+def _tokenize_column_prior(encoder : Common.InputEncoder, seq, crop, match_mask_list):
+    input = encoder(seq, crop)
+    # match mask is a list of sequences with different length
+    # combine them in a padded tensor
+    match_mask = np.zeros((len(match_mask_list), max(mm.size for mm in match_mask_list)), dtype=np.float32)
+    for i,mm in enumerate(match_mask_list):
+        match_mask[i, :mm.size] = mm
+    return input, match_mask
+
+
+def prepare_unshuffled_pairs(clans, fasta_dict, clan_families):
+    num_pairs_per_family = [fasta_dict[f[0]].num_seq ** 2 for f in clan_families]
+    batch_clans = np.repeat(clans, num_pairs_per_family)
+    batch_families = np.zeros_like(batch_clans)
+    batch_seqs = []
+    for f in clan_families:
+        n = fasta_dict[f[0]].num_seq
+        s = np.zeros((n**2, 2))
+        s[:,0] = np.repeat(np.arange(n, dtype=np.float32) / n, n)
+        s[:,1] = np.tile(np.arange(n, dtype=np.float32) / n, n)
+        batch_seqs.append(s)
+    batch_seqs = np.concatenate(batch_seqs, axis=0)
+    return batch_clans, batch_families, batch_seqs, num_pairs_per_family
+
+
+def prepare_unshuffled_single(clans, fasta_dict, clan_families):
+    num_seqs_per_family = [fasta_dict[f[0]].num_seq for f in clan_families]
+    batch_clans = np.repeat(clans, num_seqs_per_family)
+    batch_families = np.zeros_like(batch_clans)
+    batch_seqs = []
+    for f in clan_families:
+        n = fasta_dict[f[0]].num_seq
+        s = np.arange(n, dtype=np.float32) / n
+        batch_seqs.append(s)
+    batch_seqs = np.concatenate(batch_seqs, axis=0)
+    return batch_clans, batch_families, batch_seqs, num_seqs_per_family
+
+
 def make_dataset(encoder : Common.InputEncoder, clans, batch_size, max_len, fasta_dict, clan_sizes, clan_families, shuffled=True):
     if shuffled:
         def _gen_inputs():
             while True:
                 yield _tokenize(encoder, *_sample_batch(clans, batch_size, max_len, fasta_dict, clan_sizes, clan_families))
     else: #currently only if clan size == 1 for all clans
-        num_pairs_per_family = [fasta_dict[f[0]].num_seq ** 2 for f in clan_families]
-        batch_clans = np.repeat(clans, num_pairs_per_family)
-        batch_families = np.zeros_like(batch_clans)
-        batch_seqs = []
-        for f in clan_families:
-            n = fasta_dict[f[0]].num_seq
-            s = np.zeros((n**2, 2))
-            s[:,0] = np.repeat(np.arange(n, dtype=np.float32) / n, n)
-            s[:,1] = np.tile(np.arange(n, dtype=np.float32) / n, n)
-            batch_seqs.append(s)
-        batch_seqs = np.concatenate(batch_seqs, axis=0)
+        batch_clans, batch_families, batch_seqs, num_pairs_per_family = prepare_unshuffled_pairs(clans, fasta_dict, clan_families)
         def _gen_inputs():
             for i in range(sum(num_pairs_per_family)):
                 yield _tokenize(encoder, *_make_batch(batch_clans[i*batch_size : (i+1)*batch_size], 
@@ -216,7 +283,35 @@ def make_unsupervised_dataset(encoder : Common.InputEncoder, clans, batch_size, 
     return ds
 
 
-def make_homfam_dataset(encoder : Common.InputEncoder, batch_size, homfam_path="../data/homfam/refs/", ext=".ref"):
+def make_column_prior_dataset(encoder : Common.InputEncoder, clans, batch_size, max_len, fasta_dict, clan_sizes, clan_families, shuffled=True):
+    if shuffled:
+        def _gen_inputs():
+            while True:
+                yield _tokenize_column_prior(encoder, *_sample_column_prior_batch(clans, batch_size, max_len, fasta_dict, clan_sizes, clan_families))
+    else: #currently only if clan size == 1 for all clans
+        batch_clans, batch_families, batch_seqs, num_seqs_per_family = prepare_unshuffled_single(clans, fasta_dict, clan_families)
+        def _gen_inputs():
+            for i in range(sum(num_seqs_per_family)):
+                yield _tokenize_column_prior(encoder, *_make_column_prior_batch(batch_clans[i*batch_size : (i+1)*batch_size], 
+                                                                                   batch_families[i*batch_size : (i+1)*batch_size], 
+                                                                                   batch_seqs[i*batch_size : (i+1)*batch_size], 
+                                                                                   max_len, 
+                                                                                   fasta_dict, 
+                                                                                   clan_sizes, 
+                                                                                   clan_families))
+    ds = tf.data.Dataset.from_generator(_gen_inputs, output_signature = ((encoder.get_signature()), tf.TensorSpec(shape=(None, None), dtype=tf.float32)))
+    ds = ds.prefetch(tf.data.AUTOTUNE)
+    if shuffled:
+        return ds
+    else:
+        return ds, sum(num_seqs_per_family)//batch_size+1
+
+
+def make_homfam_dataset(encoder : Common.InputEncoder, 
+                        batch_size, 
+                        homfam_path="../data/homfam/refs/", 
+                        ext=".ref",
+                        for_prior=False):
     fasta_dict = {}
     clan_families = []
     for file in os.listdir(homfam_path):
@@ -228,4 +323,19 @@ def make_homfam_dataset(encoder : Common.InputEncoder, batch_size, homfam_path="
     assert len(fasta_dict) == 94
     clans = np.arange(94)
     clan_sizes = np.ones(94)
-    return make_dataset(encoder, clans, batch_size, max([f.num_seq for f in fasta_dict.values()]), fasta_dict, clan_sizes, clan_families, shuffled=False)
+    if for_prior:
+        return make_column_prior_dataset(encoder, clans, batch_size, max([f.num_seq for f in fasta_dict.values()]), fasta_dict, clan_sizes, clan_families, shuffled=False)
+    else:
+        return make_dataset(encoder, clans, batch_size, max([f.num_seq for f in fasta_dict.values()]), fasta_dict, clan_sizes, clan_families, shuffled=False)
+
+
+def make_random_data(emb_dim, batch_size, steps=100, loc=0., scale=0.6):
+    # the default deviation 0.6 is roughly the same deviation that real embeddings have
+    def _gen_random_inputs():
+        for i in range(steps):
+            random_emb = np.random.normal(loc=loc, scale=scale, size=(batch_size, 100, emb_dim)).astype(np.float32)
+            match_mask = np.ones_like(random_emb[...,0])
+            yield random_emb, match_mask
+    ds = tf.data.Dataset.from_generator(_gen_random_inputs, output_signature = (tf.TensorSpec(shape=(None, None, emb_dim), dtype=tf.float32), tf.TensorSpec(shape=(None, None), dtype=tf.float32)))
+    ds = ds.prefetch(tf.data.AUTOTUNE)
+    return ds

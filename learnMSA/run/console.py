@@ -100,21 +100,26 @@ def run_main():
 
         print("Found tensorflow version", tf.__version__)
     
-    config = Configuration.make_default(args.num_model)
+    import learnMSA.protein_language_models.Common as Common
+    scoring_model_config = Common.ScoringModelConfig(dim=32, activation="sigmoid")
+    config = Configuration.make_default(args.num_model, 
+                                        use_language_model=args.use_language_model, 
+                                        scoring_model_config=scoring_model_config)
     
-    config["batch_size"] = args.batch_size if args.batch_size > 0 else Configuration.get_adaptive_batch_size
+    if args.batch_size > 0:
+        config["batch_size"] = args.batch_size
     config["num_models"] = args.num_model
     config["max_surgery_runs"] = args.max_surgery_runs
     config["length_init_quantile"] = args.length_init_quantile
     config["surgery_quantile"] = args.surgery_quantile
     config["min_surgery_seqs"] = args.min_surgery_seqs
     config["len_mul"] = args.len_mul
-    config["learning_rate"] = args.learning_rate
-    config["epochs"] = args.epochs
+    if not args.use_language_model:
+        config["learning_rate"] = args.learning_rate
+        config["epochs"] = args.epochs
     config["surgery_del"] = args.surgery_del
     config["surgery_ins"] = args.surgery_ins
     config["model_criterion"] = args.model_criterion
-    config["use_language_model"] = args.use_language_model
     transitioners = config["transitioner"] if hasattr(config["transitioner"], '__iter__') else [config["transitioner"]]
     for trans in transitioners:
         trans.prior.alpha_flank = args.alpha_flank
@@ -133,25 +138,10 @@ def run_main():
     else:
         sequence_weights = None
     if args.use_language_model:
-        config["batch_size"] = Configuration.get_adaptive_batch_size_with_language_model
-        config["learning_rate"] = 0.01
-        config["epochs"] = [10, 4, 20]
-        emission_init = [Initializers.EmbeddingEmissionInitializer() for _ in range(config["num_models"])]
-        if config["use_shared_embedding_insertions"]:
-            insertion_init = [Initializers.EmbeddingEmissionInitializer() for _ in range(config["num_models"])]
-        else:
-            insertion_init = [Initializers.make_default_insertion_init() for _ in range(config["num_models"])]
-        config["emitter"] = Emitter.EmbeddingEmitter(config["lm_name"], 
-                                             config["reduced_embedding_dim"],
-                                             config["embedding_l2_match"], 
-                                             config["embedding_l2_insert"], 
-                                             emission_init=emission_init, 
-                                             insertion_init=insertion_init,
-                                             use_shared_embedding_insertions=config["use_shared_embedding_insertions"],
-                                             frozen_insertions=config["frozen_insertions"],
-                                             use_finetuned_lm=config["use_finetuned_lm"])
-        model_gen = Training.embedding_model_generator     
-        batch_gen = Training.EmbeddingBatchGenerator(config["lm_name"], config["reduced_embedding_dim"], use_finetuned_lm=config["use_finetuned_lm"])   
+        # we have to define a special model- and batch generator if using a language model
+        # because the emission probabilities are computed differently and the LM requires specific inputs
+        model_gen = Training.make_generic_embedding_model_generator(config["scoring_model_config"].dim)
+        batch_gen = Training.EmbeddingBatchGenerator(config["scoring_model_config"])
     else:
         model_gen = None
         batch_gen = None

@@ -222,16 +222,16 @@ class L2EmbeddingRegularizer(AminoAcidPrior):
     """ A simple L2 regularizer for the embedding match states
     """
     def __init__(self, 
-                 L2_match, 
-                 L2_insert,
-                 use_shared_embedding_insertions, 
+                 L2_match=10.0, 
+                 L2_insert=0.,
+                 use_shared_embedding_insertions=True, 
                  **kwargs):
         super(L2EmbeddingRegularizer, self).__init__(**kwargs)
         self.L2_match = L2_match
         self.L2_insert = L2_insert
         self.use_shared_embedding_insertions = use_shared_embedding_insertions
         
-    def get_reg(self, B, lengths):
+    def get_l2_loss(self, B, lengths):
         max_model_length = tf.reduce_max(lengths)
         length_mask = tf.cast(tf.sequence_mask(lengths), B.dtype)
         #square all parameters
@@ -265,8 +265,8 @@ class L2EmbeddingRegularizer(AminoAcidPrior):
         #amino acid prior
         B_amino = B[:,:,:len(SequenceDataset.alphabet)-1]
         prior_aa = super().call(B_amino, lengths)
-        reg = self.get_reg(B, lengths)
-        return prior_aa - reg #the result is maximized, so we have to negate the regularizer
+        l2_loss = self.get_l2_loss(B, lengths)
+        return prior_aa - l2_loss #the result is maximized, so we have to negate the regularizer
 
     def get_config(self):
         config = super(L2EmbeddingRegularizer, self).get_config()
@@ -279,23 +279,36 @@ class L2EmbeddingRegularizer(AminoAcidPrior):
 
 
 
-class MvnEmbeddingPrior(AminoAcidPrior):
+class MvnEmbeddingPrior(L2EmbeddingRegularizer):
     """ A multivariate normal prior for the embedding match states. 
     """
-    def __init__(self, language_model="esm2", **kwargs):
+    def __init__(self, 
+                 scoring_model_config : Common.ScoringModelConfig,
+                 num_components=Common.PRIOR_DEFAULT_COMPONENTS, 
+                 use_l2=False,
+                 **kwargs):
         super(MvnEmbeddingPrior, self).__init__(**kwargs)
-        self.language_model = language_model
+        self.scoring_model_config = scoring_model_config
+        self.num_components = num_components
+        self.use_l2 = use_l2
+
 
     def load(self, dtype):
-        super(MvnEmbeddingPrior, self).load(dtype)
-        prior_path = os.path.dirname(__file__)+f"/../protein_language_models/priors/{self.language_model}/checkpoints"
-        self.multivariate_normal_prior = make_pdf_model(Common.dims[self.language_model], 
+        super(MvnEmbeddingPrior, self).load(dtype) 
+        prior_path = Common.get_prior_path(self.scoring_model_config, self.num_components)
+        prior_path = os.path.dirname(__file__)+f"/../protein_language_models/"+prior_path
+        print("Loading prior ", prior_path)
+        self.multivariate_normal_prior = make_pdf_model(self.scoring_model_config.dim, 
+                                                        components=self.num_components,
                                                         precomputed=True, 
                                                         trainable=False,
-                                                        reduce=False)
+                                                        aggregate_result=False)
         self.multivariate_normal_prior.load_weights(prior_path)
-        self.multivariate_normal_prior.trainable = False
+        self.multivariate_normal_layer = self.multivariate_normal_prior.layers[5]
+        self.multivariate_normal_layer.trainable = False
+        self.multivariate_normal_layer.compute_values()
         
+
     def get_prior_value(self, B_emb, lengths):
         max_model_length = tf.reduce_max(lengths)
         length_mask = tf.cast(tf.sequence_mask(lengths), B_emb.dtype)
@@ -306,6 +319,7 @@ class MvnEmbeddingPrior(AminoAcidPrior):
         mvn_log_pdf = self.multivariate_normal_prior(B_emb)
         mvn_log_pdf *= length_mask
         return mvn_log_pdf
+
 
     def call(self, B, lengths):
         """L2 regularization for each match state.
@@ -319,12 +333,19 @@ class MvnEmbeddingPrior(AminoAcidPrior):
         B_emb = B[:,:,len(SequenceDataset.alphabet):-1]
         prior_aa = super().call(B_amino, lengths)
         prior_emb = self.get_prior_value(B_emb, lengths)
-        return prior_aa + prior_emb
+        if self.use_l2:
+            l2_loss = self.get_l2_loss(B_emb, lengths)
+            return prior_aa + prior_emb - l2_loss #the result is maximized, so we have to negate the regularizer
+        else:
+            return prior_aa + prior_emb
+
 
     def get_config(self):
         config = super(MvnEmbeddingPrior, self).get_config()
         config.update({
-             "language_model" : self.language_model
+             "scoring_model_config" : self.scoring_model_config,
+            "num_components" : self.num_components,
+            "use_l2" : self.use_l2
         })
         return config
 

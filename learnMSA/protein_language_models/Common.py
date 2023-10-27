@@ -2,6 +2,54 @@ import tensorflow as tf
 import numpy as np
 
 
+
+PRIOR_PATH = "new_priors"
+SCORING_MODEL_PATH = "new_scoring_models_frozen"
+PRIOR_DEFAULT_COMPONENTS = 100
+
+class ScoringModelConfig():
+    def __init__(self, 
+                 lm_name="esm2",
+                 dim=64,
+                 activation="softmax",
+                 suffix=""):
+        self.lm_name = lm_name
+        self.dim = dim
+        self.activation = activation
+        self.suffix = suffix
+
+    def __repr__(self):
+        return f"ScoringModelConfig(lm_name={self.lm_name}, dim={self.dim}, activation={self.activation}, suffix={self.suffix})"
+
+
+
+def get_scoring_model_path(config : ScoringModelConfig):
+    return f"{SCORING_MODEL_PATH}/{config.lm_name}_{config.dim}_{config.activation}{config.suffix}/checkpoints"
+
+
+def get_prior_path(config : ScoringModelConfig, components):
+    return f"{PRIOR_PATH}/{config.lm_name}_{config.dim}_reduced_mix{components}_{config.activation}{config.suffix}/checkpoints"
+
+
+## Constructs and loads a language model with contextual imports.
+def get_language_model(name, max_len=512, trainable=False):
+    if name == "proteinBERT":
+        import learnMSA.protein_language_models.ProteinBERT as ProteinBERT
+        language_model, encoder = ProteinBERT.get_proteinBERT_model_and_encoder(max_len = max_len+2, trainable=trainable)
+    elif name == "esm2":
+        import learnMSA.protein_language_models.ESM2 as ESM2
+        language_model, encoder = ESM2.ESM2LanguageModel(trainable=trainable), ESM2.ESM2InputEncoder()
+    elif name == "esm2s":
+        import learnMSA.protein_language_models.ESM2 as ESM2
+        language_model, encoder = ESM2.ESM2LanguageModel(trainable=trainable, small=True), ESM2.ESM2InputEncoder(small=True)
+    elif name == "protT5":
+        import learnMSA.protein_language_models.ProtT5 as ProtT5
+        language_model, encoder = ProtT5.ProtT5LanguageModel(trainable=trainable), ProtT5.ProtT5InputEncoder()
+    else:
+        raise ValueError(f"Language model {name} not supported.")
+    return language_model, encoder
+
+
 class LanguageModel(tf.keras.layers.Layer):
     """ Base class for language models that generate residual-level embeddings of the input sequences.
     """

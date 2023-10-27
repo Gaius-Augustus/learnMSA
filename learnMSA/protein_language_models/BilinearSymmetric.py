@@ -1,4 +1,5 @@
 import tensorflow as tf
+import learnMSA.protein_language_models.Common as common
 
 
 class SymmetricBilinearReduction(tf.keras.layers.Layer):
@@ -6,15 +7,15 @@ class SymmetricBilinearReduction(tf.keras.layers.Layer):
     def __init__(self, 
                  reduced_dim, 
                  dropout=0.0, 
-                 use_attention_scores=False,
                  l2=0.0, 
-                 trainable=True):
+                 trainable=True,
+                 activation=tf.nn.softmax):
         super(SymmetricBilinearReduction, self).__init__()
         self.reduced_dim = reduced_dim
         self.dropout_prob = dropout
         self.l2 = l2
-        self.use_attention_scores = use_attention_scores
         self.trainable = trainable
+        self.activation = activation
 
     def build(self, input_shape):
         self.R = self.add_weight(
@@ -26,15 +27,12 @@ class SymmetricBilinearReduction(tf.keras.layers.Layer):
         self.b = self.add_weight(shape=(1), initializer="zeros", trainable=self.trainable, name="b")
         self.dropout = tf.keras.layers.Dropout(self.dropout_prob)
         
-    def _reduce(self, embeddings, training, softmax_on_reduce_dim=False):
+    def _reduce(self, embeddings, training):
         embeddings = self.dropout(embeddings, training=training)
         reduced_emb = tf.matmul(embeddings, self.R) #(..., reduced_dim)
-        if softmax_on_reduce_dim:
-            return tf.nn.softmax(reduced_emb)
-        else:
-            return reduced_emb
+        return reduced_emb
         
-    def call(self, embeddings_a, embeddings_b, a_is_reduced=False, b_is_reduced=False, training=None, activate_output=True, softmax_on_reduce_dim=False, use_bias=True):
+    def call(self, embeddings_a, embeddings_b, a_is_reduced=False, b_is_reduced=False, training=None, activate_output=True, use_bias=True):
         """ Computes the probability that two embeddings are homolog.
         Args:
             embeddings_a: A 2D-tensor of shape (..., k1, embedding_dim).
@@ -42,29 +40,21 @@ class SymmetricBilinearReduction(tf.keras.layers.Layer):
             a_is_reduced: Indicates whether the first embedding is already of reduced dimension.
             b_is_reduced: Indicates whether the first embedding is already of reduced dimension.
         Returns:
-            Probabilities of shape (..., k1, k2).
-            In case of use_attention_scores the last dimension will sum to 1 over all non-padding positions in embeddings_b.
-            Otherwise the output will contain independent probabilities (sigmoid activation) for all pairs.
+            Activated dot-product scores for all pairs of embeddings of shape (..., k1, k2). Unactivated if activate_output is False.
         """
-        reduced_emb_a = embeddings_a if a_is_reduced else self._reduce(embeddings_a, training, softmax_on_reduce_dim)
-        reduced_emb_b = embeddings_b if b_is_reduced else self._reduce(embeddings_b, training, softmax_on_reduce_dim)
+        reduced_emb_a = embeddings_a if a_is_reduced else self._reduce(embeddings_a, training)
+        reduced_emb_b = embeddings_b if b_is_reduced else self._reduce(embeddings_b, training)
         scores = tf.matmul(reduced_emb_a, reduced_emb_b, transpose_b=True) 
         if use_bias:
             scores += self.b
-        if not self.use_attention_scores:
-            if activate_output:
-                return tf.math.sigmoid(scores) 
-            else:
-                return scores
+        #make non-padding positions not contribute to the attention distribution
+        mask = tf.reduce_all(embeddings_b == 0, axis=-1)
+        mask = tf.expand_dims(mask, -2)
+        scores -= 1e9 * tf.cast(mask, embeddings_b.dtype)
+        if activate_output:
+            return self.activation(scores)
         else:
-            #make non-padding positions not contribute to the attention distribution
-            mask = tf.reduce_all(embeddings_b == 0, axis=-1)
-            mask = tf.expand_dims(mask, -2)
-            scores -= 1e9 * tf.cast(mask, embeddings_b.dtype)
-            if activate_output:
-                return tf.nn.softmax(scores)
-            else:
-                return scores
+            return scores
 
     def get_config(self):
         return {"reduced_dim": self.reduced_dim, "dropout" : self.dropout}
@@ -91,14 +81,21 @@ class BackgroundEmbedding(tf.keras.layers.Layer):
         return self.reduction_layer(embedding, self.background_embedding, b_is_reduced=True, training=False)
 
     
-def make_scoring_model(emb_dim, reduced_dim, dropout, trainable=True):
-    emb1 = tf.keras.layers.Input(shape=(None, emb_dim))
-    emb2 = tf.keras.layers.Input(shape=(None, emb_dim))
+def make_scoring_model(config : common.ScoringModelConfig, dropout=0.0, trainable=False):
+    # string mapping to allowed functions for conveniece
+    if config.activation == "softmax":
+        act = tf.nn.softmax
+    elif config.activation == "sigmoid":
+        act = tf.math.sigmoid
+    else:
+        act = config.activation
+    emb1 = tf.keras.layers.Input(shape=(None, common.dims[config.lm_name]))
+    emb2 = tf.keras.layers.Input(shape=(None, common.dims[config.lm_name]))
     # outputs are homology probabilities 
-    output = SymmetricBilinearReduction(reduced_dim,
+    output = SymmetricBilinearReduction(config.dim,
                                         dropout, 
-                                        use_attention_scores = True,
-                                        trainable = trainable)(emb1, emb2, activate_output=True, softmax_on_reduce_dim=False)
+                                        trainable=trainable, 
+                                        activation=act)(emb1, emb2, activate_output=True)
     # construct a model and compile for a standard binary classification task
     model = tf.keras.models.Model(inputs=[emb1, emb2], outputs=output)
     return model

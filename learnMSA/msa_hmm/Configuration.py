@@ -4,6 +4,8 @@ import tensorflow as tf
 import learnMSA.msa_hmm.Emitter as emit
 import learnMSA.msa_hmm.Transitioner as trans
 import learnMSA.msa_hmm.Initializers as initializers
+import learnMSA.msa_hmm.Priors as priors
+import learnMSA.protein_language_models.Common as plm_common
 
 
 def as_str(config, items_per_line=1, prefix="", sep=""):
@@ -57,27 +59,51 @@ def get_adaptive_batch_size_with_language_model(model_lengths, max_seq_len):
 
 #the configuration can be changed by experienced users
 #proper command line support for these parameters will be added in the future
-def make_default(default_num_models = 5):
-    default = {
-
-        "num_models" : default_num_models,
-        "transitioner" : trans.ProfileHMMTransitioner([initializers.make_default_transition_init() 
-                                                                         for _ in range(default_num_models)],
-                                                      [initializers.make_default_flank_init() 
-                                                                         for _ in range(default_num_models)]),
-        "emitter" : emit.ProfileHMMEmitter([initializers.make_default_emission_init()
+def make_default(default_num_models=5, 
+                 use_language_model=False, 
+                 allow_user_keys_in_config=False,
+                 use_l2=False,
+                 scoring_model_config=plm_common.ScoringModelConfig(),
+                 num_prior_components=plm_common.PRIOR_DEFAULT_COMPONENTS,
+                 frozen_insertions=True):
+    if use_language_model:
+        
+        emission_init = [initializers.EmbeddingEmissionInitializer(scoring_model_config=scoring_model_config,
+                                                                    num_prior_components=num_prior_components) 
+                                                                        for _ in range(default_num_models)]
+        insertion_init = [initializers.EmbeddingEmissionInitializer(scoring_model_config=scoring_model_config,
+                                                                    num_prior_components=num_prior_components)  
+                                                                        for _ in range(default_num_models)]
+        prior = priors.MvnEmbeddingPrior(scoring_model_config, num_prior_components, use_l2=use_l2)
+        emitter = emit.EmbeddingEmitter(scoring_model_config, 
+                                        emission_init=emission_init, 
+                                        insertion_init=insertion_init,
+                                        prior=prior,
+                                        frozen_insertions=frozen_insertions)
+    else:
+        emitter = emit.ProfileHMMEmitter([initializers.make_default_emission_init()
                                                                          for _ in range(default_num_models)],
                                            [initializers.make_default_insertion_init()
-                                                                         for _ in range(default_num_models)]),
+                                                                         for _ in range(default_num_models)])
+
+    transitioner = trans.ProfileHMMTransitioner([initializers.make_default_transition_init() 
+                                                                        for _ in range(default_num_models)],
+                                                    [initializers.make_default_flank_init() 
+                                                                        for _ in range(default_num_models)])
+                                                                        
+    default = {
+        "num_models" : default_num_models,
+        "transitioner" : transitioner,
+        "emitter" : emitter,
         "max_surgery_runs" : 4,
         "length_init_quantile" : 0.5,
         "surgery_quantile" : 0.5,
         "min_surgery_seqs" : 1e5,
         "len_mul" : 0.8,
-        "batch_size" : get_adaptive_batch_size,
+        "batch_size" : get_adaptive_batch_size_with_language_model if use_language_model else get_adaptive_batch_size,
+        "learning_rate" : 0.05 if use_language_model else 0.1,
+        "epochs" : [10, 4, 20] if use_language_model else [10, 2, 10],
         "crop_long_seqs" : math.inf,
-        "learning_rate" : 0.1,
-        "epochs" : [10, 2, 10],
         "use_prior" : True,
         "dirichlet_mix_comp_count" : 1,
         "use_anc_probs" : True,
@@ -94,17 +120,19 @@ def make_default(default_num_models = 5):
         "model_criterion" : "AIC", #AIC is slightly better than loglik on average over multiple benchmarks
         "encoder_weight_extractor" : None,
         "experimental_evolve_upper_half" : False,
-        "embedding_l2_match" : 16,
-        "embedding_l2_insert" : 0,
-        "use_shared_embedding_insertions" : True,
-        "frozen_insertions" : True,
-        "lm_name" : "esm2",
-        "reduced_embedding_dim" : 32,
-        "use_finetuned_lm" : False,
-        "cluster_seq_id" : 0.9,
-        "use_language_model" : False,
-        "allow_user_keys_in_config" : False
+        "cluster_seq_id" : 0.5 if use_language_model else 0.9,
+        "use_language_model" : use_language_model,
+        "frozen_insertions" : frozen_insertions,
+        "allow_user_keys_in_config" : allow_user_keys_in_config
     }
+    if use_language_model:
+        default.update({
+            "scoring_model_config" : scoring_model_config,
+            "mvn_prior_components" : num_prior_components,
+            "embedding_l2_match" : 16,
+            "embedding_l2_insert" : 0,
+            "use_l2" : use_l2
+        })
     return default
 
 def _make_assert_text(message, current_value):
@@ -120,7 +148,11 @@ def assert_config(config):
     assert config["len_mul"] >= 0., \
         _make_assert_text("The multiplier must be greater than zero.", config["surgery_quantile"])
     assert "num_models" in config
-    default = make_default(config["num_models"])
+    default = make_default(config["num_models"], 
+                            use_language_model=config["use_language_model"],
+                            use_l2=config["use_l2"],
+                            scoring_model_config=config["scoring_model_config"],
+                            num_prior_components=config["mvn_prior_components"])
     for key in default:
         assert key in config, f"User configuration is missing key {key}."
     if not config["allow_user_keys_in_config"]:
