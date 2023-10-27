@@ -13,6 +13,7 @@ tf.get_logger().setLevel('WARNING')
 from learnMSA.msa_hmm import Align, Emitter, Transitioner, Initializers, MsaHmmCell, MsaHmmLayer, Training, Configuration, Viterbi, AncProbsLayer, Priors, DirichletMixture
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset, AlignedDataset
 from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
+from learnMSA.protein_language_models import DataPipeline
 import itertools
 import shutil
 from test import RefModels as ref
@@ -1619,14 +1620,22 @@ class TestLanguageModelExtension(unittest.TestCase):
         B[0, 1:lengths[0]+1, 25:] = 3.
         B[1, :2*lengths[1]+2, 25:] = 5.
         B[1, 1:lengths[1]+1, 25:] = 4.
-        r1 = reg_shared.get_reg(B, lengths)
-        r2 = reg_non_shared.get_reg(B, lengths)
+        r1 = reg_shared.get_l2_loss(B, lengths)
+        r2 = reg_non_shared.get_l2_loss(B, lengths)
         self.assertTrue( all(r1[0,:-1] == 75 * 9 + 75 * 4) )
         self.assertTrue( r1[0,-1] == 0 )
         self.assertTrue( all(r1[1,:-1] == 75 * 16 + 75 * 25) )
         self.assertTrue( all(r2[0,:-1] == 75 * 9 + 7 * 75 * 4 / 5) )
         self.assertTrue( r2[0,-1] == 0 )
         self.assertTrue( all(r2[1,:-1] == 75 * 16 + 8 * 75 * 25 / 6) )
+
+
+class TestEmbeddingPretrainingDatapipeline(unittest.TestCase):
+
+    def test_column_occupancies(self):
+        fasta = AlignedDataset("test/data/felix_msa.fa")
+        column_occupancies = DataPipeline._get_column_occupancies(fasta)
+        np.testing.assert_almost_equal(column_occupancies, [1./3, 2./3, 2./3, 1, 1, 2./3, 2./3, 1.])
             
             
 # class TestScoringModel(unittest.TestCase):

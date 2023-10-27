@@ -149,78 +149,63 @@ class DefaultBatchGenerator():
         
         
 class EmbeddingBatchGenerator(DefaultBatchGenerator):
-    # only import contextual when lm features are required
-
     """ Computes batches of input sequences along with static embeddings.
         cache_embeddings: If true, all embeddings will be computed once when configuring the generator and kept in memory. Otherwise they are loaded on the fly.
     """
     def __init__(self, 
-                 lm_name,
-                 reduced_embedding_dim=32,
+                 scoring_model_config : Common.ScoringModelConfig,
                  cache_embeddings=True, 
-                 use_finetuned_lm=True,
                  shuffle=True):
         super().__init__(shuffle=shuffle)
-        self.lm_name = lm_name
-        self.reduced_embedding_dim = reduced_embedding_dim
+        self.scoring_model_config = scoring_model_config
         self.cache_embeddings = cache_embeddings
-        self.use_finetuned_lm = use_finetuned_lm
         if self.cache_embeddings:
             self.embedding_cache = []
-            
-    def _load_language_model(self, data : SequenceDataset):
-        print(f"Loading language model {self.lm_name}.")
-        if self.lm_name == "proteinBERT":
-            from learnMSA.protein_language_models import ProteinBERT
-            language_model, encoder = ProteinBERT.get_proteinBERT_model_and_encoder(max_len = data.max_len+2)
-        elif self.lm_name == "esm2":
-            from learnMSA.protein_language_models import ESM2
-            language_model, encoder = ESM2.ESM2LanguageModel(), ESM2.ESM2InputEncoder()
-        elif self.lm_name == "protT5":
-            from learnMSA.protein_language_models import ProtT5
-            language_model, encoder = ProtT5.ProtT5LanguageModel(), ProtT5.ProtT5InputEncoder()
-        if self.use_finetuned_lm:
-            language_model.model.load_weights(os.path.dirname(__file__)+f"finetuned_models/{self.lm_name}_{self.reduced_embedding_dim}/checkpoints")
-        return language_model, encoder
+
     
     def _compute_reduced_embeddings(self, seqs, language_model, encoder):
         lm_inputs = encoder(seqs, np.repeat([[False, False]], len(seqs), axis=0))
         emb = language_model(lm_inputs)
-        bilinear_symmetric_layer = self.scoring_model.layers[-1]
-        reduced_emb = bilinear_symmetric_layer._reduce(emb, training=False, softmax_on_reduce_dim=False)
+        reduced_emb = self.scoring_layer._reduce(emb, training=False)
         return reduced_emb
         
+
     def configure(self, data : SequenceDataset, config):
         super().configure(data, config)
+
+        # nothing to do if embeddings are already computed
         if len(self.embedding_cache) > 0:
             return
-        language_model, encoder = self._load_language_model(data)
-        self.scoring_model = make_scoring_model(language_model.dim, 
-                                                self.reduced_embedding_dim, 
-                                                dropout=0.0, 
-                                                trainable=False)
-        if self.use_finetuned_lm:
-            self.scoring_model.load_weights(os.path.dirname(__file__)+f"/../protein_language_models/scoring_models/{self.lm_name}_{self.reduced_embedding_dim}/checkpoints")
-        else:
-            self.scoring_model.load_weights(os.path.dirname(__file__)+f"/../protein_language_models/scoring_models_frozen/{self.lm_name}_{self.reduced_embedding_dim}/checkpoints")
-        self.scoring_model.layers[-1].trainable = False #don't forget to freeze the scoring model!
+
+        # load the language model and the scoring model
+        # initialize the weights correctly and make sure they are not trainable
+        language_model, encoder = Common.get_language_model(self.scoring_model_config.lm_name, 
+                                                            max_len = data.max_len+2, trainable=False)
+        self.scoring_model = make_scoring_model(self.scoring_model_config, dropout=0.0, trainable=False)    
+        scoring_model_path = Common.get_scoring_model_path(self.scoring_model_config)
+        self.scoring_model.load_weights(os.path.dirname(__file__)+f"/../protein_language_models/"+scoring_model_path)
+        self.scoring_layer = self.scoring_model.layers[-1]
+        self.scoring_layer.trainable = False #don't forget to freeze the scoring model!
         if self.cache_embeddings:
-                self.batch_size = config["batch_size"]([0], data.max_len) if callable(config["batch_size"]) else config["batch_size"]
-                if self.lm_name == "esm2s":
-                    self.batch_size //= 2
-                if self.lm_name == "protT5":
-                    self.batch_size //= 4
-                if self.lm_name == "esm2":
-                    self.batch_size //= 4
-                print("Computing all embeddings (this may take a while).")
-                for i in range(0, data.num_seq, self.batch_size):
-                    seq_batch = [data.get_standardized_seq(j) for j in range(i, min(i+self.batch_size, data.num_seq))]      
-                    emb = self._compute_reduced_embeddings(seq_batch, language_model, encoder).numpy() #move to cpu 
-                    for j in range(emb.shape[0]):
-                        self.embedding_cache.append(emb[j, :data.seq_lens[i+j]])
-                # once we have cached the (lower dimensional) embeddings do a cleanup
-                tf.keras.backend.clear_session()
-                gc.collect()
+            if callable(config["batch_size"]):
+                self.batch_size = config["batch_size"]([0], data.max_len)
+            else: 
+                self.batch_size = config["batch_size"]
+            if self.scoring_model_config.lm_name == "esm2s":
+                self.batch_size //= 2
+            if self.scoring_model_config.lm_name == "protT5":
+                self.batch_size //= 4
+            if self.scoring_model_config.lm_name == "esm2":
+                self.batch_size //= 4
+            print("Computing all embeddings (this may take a while).")
+            for i in range(0, data.num_seq, self.batch_size):
+                seq_batch = [data.get_standardized_seq(j) for j in range(i, min(i+self.batch_size, data.num_seq))]      
+                emb = self._compute_reduced_embeddings(seq_batch, language_model, encoder).numpy() #move to cpu 
+                for j in range(emb.shape[0]):
+                    self.embedding_cache.append(emb[j, :data.seq_lens[i+j]])
+            # once we have cached the (lower dimensional) embeddings do a cleanup
+            tf.keras.backend.clear_session()
+            gc.collect()
         else:
             self.language_model, self.encoder = language_model, encoder
                 
@@ -361,34 +346,34 @@ def fit_model(model_generator,
     return model, history
 
 
-def generic_embedding_model_generator(encoder_layers,
-                                      msa_hmm_layer):
-    """A generic model generator function. The model inputs are sequences of shape (b, num_model, L) 
-        and sequence indices of shape (b, num_model).
-    Args:
-        encoder_layers: A list of layers with compatible inputs and outputs and the last output 
-                        is compatible with msa_hmm_layer. 
-        msa_hmm_layer: An instance of MsaHmmLayer.
-    """
-    num_models = msa_hmm_layer.cell.num_models
-    sequences = tf.keras.Input(shape=(None,None), name="sequences", dtype=tf.uint8)
-    indices = tf.keras.Input(shape=(None,), name="indices", dtype=tf.int64)
-    embeddings = tf.keras.Input(shape=(None,None,33), name="embeddings", dtype=tf.float32)
-    #in the input pipeline, we need the batch dimension to come first to make multi GPU work 
-    #we transpose here, because all learnMSA layers require the model dimension to come first
-    transposed_sequences = tf.transpose(sequences, [1,0,2])
-    transposed_indices = tf.transpose(indices)
-    transposed_embeddings = tf.transpose(embeddings, [1,0,2,3])
-    forward_seq = transposed_sequences
-    for layer in encoder_layers:
-        forward_seq = layer(forward_seq, transposed_indices)
-    concat_seq = tf.concat([forward_seq, transposed_embeddings], -1)
-    loglik = msa_hmm_layer(concat_seq, transposed_indices)
-    #transpose back to make model.predict work correctly
-    loglik = tf.transpose(loglik)
-    model = tf.keras.Model(inputs=[sequences, indices, embeddings], 
-                        outputs=[tf.keras.layers.Lambda(lambda x: x, name="loglik")(loglik)])
-    return model
-
-
-embedding_model_generator = partial(default_model_generator, generic_gen=generic_embedding_model_generator)
+def make_generic_embedding_model_generator(dim):
+    def generic_embedding_model_generator(encoder_layers,
+                                        msa_hmm_layer):
+        """A generic model generator function. The model inputs are sequences of shape (b, num_model, L) 
+            and sequence indices of shape (b, num_model).
+        Args:
+            dim: The dimension of the embeddings.
+            encoder_layers: A list of layers with compatible inputs and outputs and the last output 
+                            is compatible with msa_hmm_layer. 
+            msa_hmm_layer: An instance of MsaHmmLayer.
+        """
+        num_models = msa_hmm_layer.cell.num_models
+        sequences = tf.keras.Input(shape=(None,None), name="sequences", dtype=tf.uint8)
+        indices = tf.keras.Input(shape=(None,), name="indices", dtype=tf.int64)
+        embeddings = tf.keras.Input(shape=(None,None,dim+1), name="embeddings", dtype=tf.float32)
+        #in the input pipeline, we need the batch dimension to come first to make multi GPU work 
+        #we transpose here, because all learnMSA layers require the model dimension to come first
+        transposed_sequences = tf.transpose(sequences, [1,0,2])
+        transposed_indices = tf.transpose(indices)
+        transposed_embeddings = tf.transpose(embeddings, [1,0,2,3])
+        forward_seq = transposed_sequences
+        for layer in encoder_layers:
+            forward_seq = layer(forward_seq, transposed_indices)
+        concat_seq = tf.concat([forward_seq, transposed_embeddings], -1)
+        loglik = msa_hmm_layer(concat_seq, transposed_indices)
+        #transpose back to make model.predict work correctly
+        loglik = tf.transpose(loglik)
+        model = tf.keras.Model(inputs=[sequences, indices, embeddings], 
+                            outputs=[tf.keras.layers.Lambda(lambda x: x, name="loglik")(loglik)])
+        return model
+    return partial(default_model_generator, generic_gen=generic_embedding_model_generator)

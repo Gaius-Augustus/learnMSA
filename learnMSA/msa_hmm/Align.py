@@ -580,7 +580,7 @@ def compute_sequence_weights(fasta_filename, directory, cluster_seq_id=0.5):
                     if pos != -1:
                         ids[i] = ids[i][pos+1:]
             sequence_weights = np.array(clustering.loc[ids].weight, dtype=np.float32)
-
+            
         return sequence_weights
 
 

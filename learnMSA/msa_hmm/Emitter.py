@@ -166,101 +166,62 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
     
     
 #have a single emitter that handles both AA inputs and embeddings
-#need a proper implementation of a RNN with nested inputs later
 class EmbeddingEmitter(ProfileHMMEmitter):
     def __init__(self, 
-                 lm_name,
-                 reduced_embedding_dim,
-                 L2_match,
-                 L2_insert,
-                 emission_init=initializers.EmbeddingEmissionInitializer(), 
-                 insertion_init=initializers.EmbeddingEmissionInitializer(),
-                 use_shared_embedding_insertions=True,
-                 frozen_insertions=True,
-                 use_finetuned_lm=True,
+                 scoring_model_config : Common.ScoringModelConfig,
+                 emission_init=None, 
+                 insertion_init=None,
+                 prior : priors.MvnEmbeddingPrior = None,
                  **kwargs):
-        if "prior" in kwargs:
-            prior = kwargs["prior"]
-            del kwargs["prior"]
-        else:
-            #prior = priors.L2EmbeddingRegularizer(L2_match, L2_insert, use_shared_embedding_insertions)
-            prior = priors.MvnEmbeddingPrior()
+
+        self.scoring_model_config = scoring_model_config
+
+        if prior is None:
+            prior = priors.MvnEmbeddingPrior(scoring_model_config)
+
+        if emission_init is None:
+            emission_init = initializers.EmbeddingEmissionInitializer(scoring_model_config=scoring_model_config, 
+                                                                        num_prior_components=prior.num_components)
+        if insertion_init is None:
+            insertion_init = initializers.EmbeddingEmissionInitializer(scoring_model_config=scoring_model_config, 
+                                                                        num_prior_components=prior.num_components)
+                                                             
         super(EmbeddingEmitter, self).__init__(emission_init, 
                                                insertion_init,
                                                prior, 
-                                               frozen_insertions=frozen_insertions,
                                                **kwargs)
-        self.lm_name = lm_name
-        self.reduced_embedding_dim = reduced_embedding_dim
-        self.L2_match = L2_match
-        self.L2_insert = L2_insert
-        self.use_shared_embedding_insertions = use_shared_embedding_insertions
-        self.use_finetuned_lm = use_finetuned_lm
-        # only import contextual when lm features are required
-        import learnMSA.protein_language_models as plm
-        self.scoring_model = make_scoring_model(plm.common.dims[lm_name], 
-                                                reduced_embedding_dim, 
-                                                dropout=0.0, 
-                                                trainable=False)
-        if use_finetuned_lm:
-            self.scoring_model.load_weights(os.path.dirname(__file__)+f"/../protein_language_models/scoring_models/{lm_name}_{reduced_embedding_dim}/checkpoints")
-        else:
-            self.scoring_model.load_weights(os.path.dirname(__file__)+f"/../protein_language_models/scoring_models_frozen/{lm_name}_{reduced_embedding_dim}/checkpoints")
-        self.scoring_model.layers[-1].trainable = False #don't forget to freeze the scoring model!
         
-    def build(self, input_shape):
-        s = len(SequenceDataset.alphabet)-1 + Common.dims[self.lm_name]
-        if self.use_shared_embedding_insertions:
-            #the default emitter would construct an emission matrix matching the last input dimension
-            #in this case the last input dimension is the full embedding depth whereas the emission matrix
-            #should be constructed for the reduced dim as defined in the bilinear symmetric layer
-            shape = (input_shape[0], s + 1)
-            super().build(shape)
-        else:
-            #todo: this is a hacky solutions
-            #do it clean by rewriting ProfileHMMEmitter
-            self.emission_kernel = [self.add_weight(
-                                            shape=[length, s], 
-                                            initializer=init, 
-                                            name="emission_kernel_"+str(i))
-                                        for i,(length, init) in enumerate(zip(self.length, self.emission_init))]
-            self.insertion_kernel = [ self.add_weight(
-                                    shape=[len(SequenceDataset.alphabet)-1],
-                                    initializer=init,
-                                    name="insertion_kernel_"+str(i),
-                                    trainable=not self.frozen_insertions) 
-                                        for i,init in enumerate(self.insertion_init)]
-            self.embedding_insertion_kernel = [self.add_weight(
-                                            shape=[length+2, self.reduced_embedding_dim], 
-                                            initializer="zeros", 
-                                            name="embedding_emission_kernel_"+str(i),
-                                            trainable=not self.frozen_insertions)
-                                        for i,length in enumerate(self.length)]
-        self.temperature = self.add_weight(shape=(len(self.emission_init)), initializer=tf.constant_initializer(0.), name="temperature")
-        self.built = True
+        # create and load the underlying scoring model
+        self.scoring_model = make_scoring_model(self.scoring_model_config, dropout=0.0, trainable=False)
+        scoring_model_path = Common.get_scoring_model_path(self.scoring_model_config)
+        print("Loading scoring model ", scoring_model_path)
+        self.scoring_model.load_weights(os.path.dirname(__file__)+f"/../protein_language_models/"+scoring_model_path)
+        self.bilinear_symmetric_layer = self.scoring_model.layers[-1]
+        self.bilinear_symmetric_layer.trainable = False 
         
 
-    def recurrent_init(self):
-        """ Automatically called before each recurrent run. Should be used for setups that
-            are only required once per application of the recurrent layer.
-        """
-        super(EmbeddingEmitter, self).recurrent_init()
-        self.emb_B = self.scoring_model.layers[-1]._reduce(self.B[..., len(SequenceDataset.alphabet):-1], training=False)
-        self.emb_B = tf.concat([self.emb_B, self.B[..., -1:]], axis=-1)
+    def build(self, input_shape):
+        s = len(SequenceDataset.alphabet)-1 + self.scoring_model_config.dim
+        shape = (input_shape[0], s + 1)
+        super().build(shape)
+        self.temperature = self.add_weight(shape=(len(self.emission_init)), initializer=tf.constant_initializer(0.), name="temperature")
+        self.built = True
         
         
     def compute_emission_probs(self, states, inputs, emit_shape, terminal_padding, temperature=None):
         #compute emission probabilities
-        emb_emission_probs = self.scoring_model.layers[-1](states[..., :-1], inputs[..., :-1], 
-                                                           a_is_reduced=True, b_is_reduced=True, 
+        emb_emission_probs = self.bilinear_symmetric_layer(states[..., :-1], inputs[..., :-1], 
+                                                           a_is_reduced=True, 
+                                                           b_is_reduced=True, 
                                                            training=False, 
                                                            activate_output=False,
                                                            use_bias=True) 
         emb_emission_probs = tf.transpose(emb_emission_probs, [0, 2, 1])
         emb_emission_probs = tf.reshape(emb_emission_probs, emit_shape) # (k, b*l, q) -> (k, b, l, q)
-        emb_emission_probs = tf.nn.softmax(emb_emission_probs)
+        emb_emission_probs = self.bilinear_symmetric_layer.activation(emb_emission_probs)+ 1e-10
         #optional annealing
         if temperature is not None:
+            #use query sequence lengths L_i here? i.e. temperatur.shape = (1,batch,1,1) with temperature[0,i,0,0] = 1 / L_i
             emb_emission_probs = tf.math.pow(emb_emission_probs, tf.math.sigmoid(temperature[:, tf.newaxis, tf.newaxis, tf.newaxis]))
         #padding/terminal states
         emb_emission_probs *= 1-terminal_padding # set positions with softmax(0, ..., 0) to 0
@@ -290,9 +251,9 @@ class EmbeddingEmitter(ProfileHMMEmitter):
         
         #compute embedding emission probs
         emb_inputs = inputs[..., len(SequenceDataset.alphabet):]
-        #emb_B = self.B[..., len(SequenceDataset.alphabet):]
+        emb_B = self.B[..., len(SequenceDataset.alphabet):]
         #embedding scores that sum to 1 over all valid input sequence positions
-        emb_emission_probs = self.compute_emission_probs(self.emb_B, emb_inputs, emit_shape, terminal_padding, self.temperature) 
+        emb_emission_probs = self.compute_emission_probs(emb_B, emb_inputs, emit_shape, terminal_padding, self.temperature)
         emission_probs = aa_emission_probs * emb_emission_probs
         return emission_probs
     
@@ -305,15 +266,10 @@ class EmbeddingEmitter(ProfileHMMEmitter):
         """ Construct the emission matrix the same way as usual but leave away the softmax.
         """
         s = emb_em.shape[-1]
-        if self.use_shared_embedding_insertions:
-            emb_ins = self.insertion_kernel[i][len(SequenceDataset.alphabet)-1:]
-            emb_em = tf.concat([tf.expand_dims(emb_ins, 0), 
-                               emb_em, 
-                               tf.stack([emb_ins]*(self.length[i]+1))] , axis=0)
-        else:
-            emb_em = tf.concat([self.embedding_insertion_kernel[i][:1], 
-                               emb_em, 
-                               self.embedding_insertion_kernel[i][1:]] , axis=0)
+        emb_ins = self.insertion_kernel[i][len(SequenceDataset.alphabet)-1:]
+        emb_em = tf.concat([tf.expand_dims(emb_ins, 0), 
+                            emb_em, 
+                            tf.stack([emb_ins]*(self.length[i]+1))] , axis=0)
         emb_em = tf.concat([emb_em, tf.zeros_like(emb_em[:,:1])], axis=-1) 
         end_state_emission = tf.one_hot([s], s+1, dtype=emb_em.dtype) 
         emb_emissions = tf.concat([emb_em, end_state_emission], axis=0)
@@ -327,15 +283,12 @@ class EmbeddingEmitter(ProfileHMMEmitter):
         sub_insertion_init = [tf.constant_initializer(self.insertion_kernel[i].numpy()) for i in model_indices]
         #todo: this does not dublicate embedding insertion kernels which is probably ok
         emitter_copy = EmbeddingEmitter(
-                             lm_name = self.lm_name,
-                             reduced_embedding_dim = self.reduced_embedding_dim,
-                             L2_match = self.L2_match,
-                             L2_insert = self.L2_insert,
-                             emission_init = sub_emission_init,
-                             insertion_init = sub_insertion_init,
-                             use_shared_embedding_insertions=self.use_shared_embedding_insertions,
-                             frozen_insertions=self.frozen_insertions,
-                             use_finetuned_lm=self.use_finetuned_lm) 
+                                scoring_model_config = self.scoring_model_config,  
+                                emission_init = sub_emission_init,
+                                insertion_init = sub_insertion_init,
+                                prior = self.prior,
+                                frozen_insertions = self.frozen_insertions,
+                                dtype = self.dtype) 
         if share_kernels:
             emitter_copy.emission_kernel = self.emission_kernel
             emitter_copy.insertion_kernel = self.insertion_kernel
@@ -352,19 +305,13 @@ class EmbeddingEmitter(ProfileHMMEmitter):
     
     def get_config(self):
         config = super(EmbeddingEmitter, self).get_config()
-        config.update({
-            "lm_name" : self.lm_name,
-            "reduced_embedding_dim" : self.reduced_embedding_dim,
-            "L2_match" : self.L2_match,
-            "L2_insert" : self.L2_insert,
-            "use_shared_embedding_insertions" : self.use_shared_embedding_insertions,
-            "use_finetuned_lm" : self.use_finetuned_lm
-        })
+        config.update({"scoring_model_config" : self.scoring_model_config})
         return config
 
 
     def __repr__(self):
-        return f"EmbeddingEmitter(lm_name={self.lm_name} reduced_embedding_dim={self.reduced_embedding_dim}\n emission_init={self.emission_init[0]},\n insertion_init={self.insertion_init[0]},\n prior={self.prior},\n frozen_insertions={self.frozen_insertions}, )"
+        parent = super(EmbeddingEmitter, self).__repr__()
+        return f"EmbeddingEmitter(scoring_model_config = {self.scoring_model_config}, {parent})"
     
     
 
