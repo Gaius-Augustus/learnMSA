@@ -5,6 +5,17 @@ from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 import time
 
 
+
+def save_log(x, log_zero_val=-1e3):
+    """ Computes element-wise logarithm with output_i=log_zero_val where x_i=0.
+    """
+    epsilon = tf.constant(np.finfo(np.float32).tiny)
+    log_x = tf.math.log(tf.maximum(x, epsilon))
+    zero_mask = tf.cast(tf.equal(x, 0), dtype=log_x.dtype)
+    log_x = (1-zero_mask) * log_x + zero_mask * log_zero_val
+    return log_x
+
+
 def viterbi_step(gamma_prev, emission_probs_i, hmm_cell):
     """ Computes one Viterbi dynamic programming step.
     Args:
@@ -16,7 +27,7 @@ def viterbi_step(gamma_prev, emission_probs_i, hmm_cell):
     #very very inefficient!?
     a = tf.expand_dims(hmm_cell.log_A_dense, 1) + tf.expand_dims(gamma_prev, -1)
     a = tf.reduce_max(a, axis=-2)
-    b = tf.math.log(emission_probs_i + epsilon)
+    b = save_log(emission_probs_i)
     gamma_next = a + b
     return gamma_next
 
@@ -33,7 +44,7 @@ def viterbi_dyn_prog(sequences, hmm_cell):
     init = tf.transpose(hmm_cell.init_dist, (1,0,2)) #(num_models, 1, q)
     emission_probs = hmm_cell.emission_probs(sequences)
     b0 = emission_probs[:,:,0]
-    gamma_val = tf.math.log(init+epsilon) + tf.math.log(b0+epsilon)
+    gamma_val = save_log(init) + save_log(b0)
     gamma_val = tf.cast(gamma_val, dtype=hmm_cell.dtype) 
     L = tf.shape(sequences)[-2]
     #tf.function-compatible accumulation of results in a dynamically unrolled loop using TensorArray
