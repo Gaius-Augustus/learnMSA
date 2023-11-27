@@ -161,13 +161,16 @@ def make_default_transition_init(MM=1,
 global_emb_cache = {}
 
 def get_global_emb(scoring_model_config : Common.ScoringModelConfig, num_prior_components):
-    prior_weight_path = Common.get_prior_path(scoring_model_config, num_prior_components)
-    if prior_weight_path not in global_emb_cache:
-        # load the prior model
-        multivariate_normal_prior = make_pdf_model(scoring_model_config.dim, num_prior_components, trainable=False)
-        multivariate_normal_prior.load_weights(os.path.dirname(__file__)+f"/../protein_language_models/"+prior_weight_path)
-        global_emb_cache[prior_weight_path] = multivariate_normal_prior.layers[5].mean().numpy()
-    return global_emb_cache[prior_weight_path]
+    if num_prior_components == 0:
+        return np.zeros(scoring_model_config.dim)
+    else:
+        prior_weight_path = Common.get_prior_path(scoring_model_config, num_prior_components)
+        if prior_weight_path not in global_emb_cache:
+            # load the prior model
+            multivariate_normal_prior = make_pdf_model(scoring_model_config.dim, num_prior_components, trainable=False)
+            multivariate_normal_prior.load_weights(os.path.dirname(__file__)+f"/../protein_language_models/"+prior_weight_path)
+            global_emb_cache[prior_weight_path] = multivariate_normal_prior.layers[5].mean().numpy()
+        return global_emb_cache[prior_weight_path]
 
 
 class EmbeddingEmissionInitializer(tf.keras.initializers.Initializer):
@@ -187,10 +190,15 @@ class EmbeddingEmissionInitializer(tf.keras.initializers.Initializer):
 
     def __call__(self, shape, dtype=None, **kwargs):
         assert shape[-1] >= self.aa_dist.size
+        emb_dim = self.global_emb.shape[-1]
+        assert (shape[-1] - self.aa_dist.size) % emb_dim == 0
+        num_repeats = tf.cast((shape[-1] - self.aa_dist.size) / emb_dim, tf.int32)
         aa_dist = tf.cast(self.aa_dist, dtype)
         global_emb = tf.cast(self.global_emb, dtype)
-        aa_init = tf.reshape(tf.tile(aa_dist, tf.cast(tf.math.reduce_prod(shape[:-1], keepdims=True), tf.int32)), list(shape[:-1])+[self.aa_dist.size])
-        emb_init = tf.reshape(tf.tile(global_emb, tf.cast(tf.math.reduce_prod(shape[:-1], keepdims=True), tf.int32)), list(shape[:-1])+[shape[-1]-self.aa_dist.size])
+        aa_init = tf.reshape(tf.tile(aa_dist, tf.cast(tf.math.reduce_prod(shape[:-1], keepdims=True), tf.int32)), 
+                                list(shape[:-1])+[self.aa_dist.size])
+        emb_init = tf.reshape(tf.tile(global_emb, tf.cast(tf.math.reduce_prod(shape[:-1], keepdims=True), tf.int32)*num_repeats), 
+                                list(shape[:-1])+[emb_dim * num_repeats])
         return tf.concat([aa_init, emb_init], axis=-1)
     
     def __repr__(self):

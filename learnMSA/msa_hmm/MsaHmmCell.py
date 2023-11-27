@@ -74,7 +74,7 @@ class MsaHmmCell(tf.keras.layers.Layer):
         return self.transitioner.make_initial_distribution()
         
     
-    def emission_probs(self, inputs):
+    def emission_probs(self, inputs, training=False):
         """ Computes the probabilities of emission per state for the given observation. Multiple emitters
             are multiplied.
         Args:
@@ -82,7 +82,7 @@ class MsaHmmCell(tf.keras.layers.Layer):
         """
         em_probs = self.emitter[0](inputs)
         for em in self.emitter[1:]:
-            em_probs *= em(inputs)
+            em_probs *= em(inputs, training)
         return em_probs
 
     

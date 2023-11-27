@@ -62,7 +62,7 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         num_model, b, seq_len, s = tf.unstack(tf.shape(inputs))
         initial_state = self.cell.get_initial_state(batch_size=b)
         #reshape to 3D inputs for RNN (cell will reshape back in each step)
-        emission_probs = self.cell.emission_probs(inputs)
+        emission_probs = self.cell.emission_probs(inputs, training)
         emission_probs = tf.reshape(emission_probs, (num_model*b, seq_len, self.cell.max_num_states))
         #do one initialization step
         #this way, tf will compile two versions of the cell call, one with init=True and one without
@@ -76,7 +76,7 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         return forward, loglik
     
     
-    def backward_recursion(self, inputs):
+    def backward_recursion(self, inputs, training=False):
         """ Computes the backward recursion for multiple models where each model
             receives a batch of sequences as input.
         Args:
@@ -87,7 +87,7 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         self.reverse_cell.recurrent_init()
         num_model, b, seq_len, s = tf.unstack(tf.shape(inputs))
         initial_state = self.reverse_cell.get_initial_state(batch_size=b)
-        emission_probs = self.reverse_cell.emission_probs(inputs)
+        emission_probs = self.reverse_cell.emission_probs(inputs, training)
         emission_probs = tf.reshape(emission_probs, (num_model*b, seq_len, self.cell.max_num_states))
         #note that for backward, we can ignore the initial step like we did it in
         #forward, because we assume that all inputs have terminal tokens
@@ -109,7 +109,7 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         self.reverse_cell.recurrent_init()
         initial_state = self.cell.get_initial_state(batch_size=b)
         rev_initial_state = self.reverse_cell.get_initial_state(batch_size=b)
-        emission_probs = self.cell.emission_probs(inputs)
+        emission_probs = self.cell.emission_probs(inputs, training)
         emission_probs = tf.reshape(emission_probs, (num_model*b, seq_len, self.cell.max_num_states))
         #forward has to handle the first observation separately
         forward_1, step_1_state = self.cell(emission_probs[:,0], initial_state, training, init=True)
