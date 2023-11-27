@@ -334,9 +334,30 @@ def fit_model(model_generator,
                            batch_generator, 
                            batch_size,
                            shuffle=True)
+
     termiante_on_nan = tf.keras.callbacks.TerminateOnNaN()
     early_stopping = tf.keras.callbacks.EarlyStopping("loss", patience=1)
     callbacks = [termiante_on_nan, early_stopping]
+
+    if config["use_language_model"]:
+        msa_hmm_layer = None
+        for i, layer in enumerate(model.layers[1:]):
+            if layer.name.startswith("msa_hmm_layer"):
+                msa_hmm_layer = layer
+                break
+        assert msa_hmm_layer is not None, "Can not find a MsaHmmLayer in the specified model."
+
+        class CustomCallback(tf.keras.callbacks.Callback):
+
+            def on_train_begin(self, logs=None):
+                msa_hmm_layer.cell.emitter[0].step_counter.assign(0.)
+                msa_hmm_layer.reverse_cell.emitter[0].step_counter.assign(0.)
+
+            def on_train_batch_end(self, batch, logs=None):
+                msa_hmm_layer.cell.emitter[0].step_counter.assign_add(1.)
+                msa_hmm_layer.reverse_cell.emitter[0].step_counter.assign_add(1.)
+        callbacks.append(CustomCallback())
+
     history = model.fit(dataset, 
                         epochs=epochs,
                         steps_per_epoch=steps,

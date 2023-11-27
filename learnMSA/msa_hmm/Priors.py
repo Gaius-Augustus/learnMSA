@@ -316,7 +316,12 @@ class MvnEmbeddingPrior(L2EmbeddingRegularizer):
         B_emb = B_emb[:,1:max_model_length+1]
         # compute the prior
         # reduction and handling sequence length is done internally via the zero padding
+        num_models, num_states, dim  = tf.unstack(tf.shape(B_emb))
+        repeats = tf.cast(dim / self.multivariate_normal_layer.dim, tf.int32)
+        B_emb = tf.reshape(B_emb, (num_models, num_states*repeats, self.multivariate_normal_layer.dim))
         mvn_log_pdf = self.multivariate_normal_prior(B_emb)
+        mvn_log_pdf = tf.reshape(mvn_log_pdf, (num_models, num_states, repeats))
+        mvn_log_pdf = tf.reduce_sum(mvn_log_pdf, -1)
         mvn_log_pdf *= length_mask
         return mvn_log_pdf
 
@@ -334,7 +339,7 @@ class MvnEmbeddingPrior(L2EmbeddingRegularizer):
         prior_aa = super().call(B_amino, lengths)
         prior_emb = self.get_prior_value(B_emb, lengths)
         if self.use_l2:
-            l2_loss = self.get_l2_loss(B_emb, lengths)
+            l2_loss = self.get_l2_loss(B, lengths)
             return prior_aa + prior_emb - l2_loss #the result is maximized, so we have to negate the regularizer
         else:
             return prior_aa + prior_emb

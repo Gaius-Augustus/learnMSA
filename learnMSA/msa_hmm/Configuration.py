@@ -52,7 +52,11 @@ def make_default(default_num_models=5,
                  use_l2=False,
                  scoring_model_config=plm_common.ScoringModelConfig(),
                  num_prior_components=plm_common.PRIOR_DEFAULT_COMPONENTS,
-                 frozen_insertions=True):
+                 frozen_insertions=True,
+                 L2_match=10.,
+                 L2_insert=0.,
+                 temperature_mode="trainable",
+                 conditionally_independent=True):
     if use_language_model:
         
         emission_init = [initializers.EmbeddingEmissionInitializer(scoring_model_config=scoring_model_config,
@@ -61,12 +65,17 @@ def make_default(default_num_models=5,
         insertion_init = [initializers.EmbeddingEmissionInitializer(scoring_model_config=scoring_model_config,
                                                                     num_prior_components=num_prior_components)  
                                                                         for _ in range(default_num_models)]
-        prior = priors.MvnEmbeddingPrior(scoring_model_config, num_prior_components, use_l2=use_l2)
+        if num_prior_components == 0:
+            prior = priors.L2EmbeddingRegularizer(L2_match=L2_match, L2_insert=L2_insert)
+        else:
+            prior = priors.MvnEmbeddingPrior(scoring_model_config, num_prior_components, use_l2=use_l2, L2_match=L2_match, L2_insert=L2_insert)
         emitter = emit.EmbeddingEmitter(scoring_model_config, 
                                         emission_init=emission_init, 
                                         insertion_init=insertion_init,
                                         prior=prior,
-                                        frozen_insertions=frozen_insertions)
+                                        frozen_insertions=frozen_insertions,
+                                        temperature_mode=emit.TemperatureMode.from_string(temperature_mode),
+                                        conditionally_independent=conditionally_independent)
     else:
         emitter = emit.ProfileHMMEmitter([initializers.make_default_emission_init()
                                                                          for _ in range(default_num_models)],
@@ -115,9 +124,11 @@ def make_default(default_num_models=5,
         default.update({
             "scoring_model_config" : scoring_model_config,
             "mvn_prior_components" : num_prior_components,
-            "embedding_l2_match" : 16,
-            "embedding_l2_insert" : 0,
-            "use_l2" : use_l2
+            "use_l2" : use_l2,
+            "L2_match" : L2_match,
+            "L2_insert" : L2_insert,
+            "temperature_mode" : temperature_mode,
+            "conditionally_independent" : conditionally_independent
         })
     return default
 
@@ -134,11 +145,7 @@ def assert_config(config):
     assert config["len_mul"] >= 0., \
         _make_assert_text("The multiplier must be greater than zero.", config["surgery_quantile"])
     assert "num_models" in config
-    default = make_default(config["num_models"], 
-                            use_language_model=config["use_language_model"],
-                            use_l2=config["use_l2"],
-                            scoring_model_config=config["scoring_model_config"],
-                            num_prior_components=config["mvn_prior_components"])
+    default = make_default(config["num_models"], use_language_model=config["use_language_model"])
     for key in default:
         assert key in config, f"User configuration is missing key {key}."
     if not config["allow_user_keys_in_config"]:

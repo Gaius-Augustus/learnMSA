@@ -42,7 +42,7 @@ def viterbi_dyn_prog(sequences, hmm_cell):
     """
     epsilon = tf.constant(np.finfo(np.float32).tiny)
     init = tf.transpose(hmm_cell.init_dist, (1,0,2)) #(num_models, 1, q)
-    emission_probs = hmm_cell.emission_probs(sequences)
+    emission_probs = hmm_cell.emission_probs(sequences, training=False)
     b0 = emission_probs[:,:,0]
     gamma_val = save_log(init) + save_log(b0)
     gamma_val = tf.cast(gamma_val, dtype=hmm_cell.dtype) 
