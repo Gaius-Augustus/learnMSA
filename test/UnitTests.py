@@ -6,6 +6,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 import unittest
 import numpy as np
 import tensorflow as tf
+import tensorflow_probability as tfp
 #revert back to default and set the logger level individually per test case
 #globally omitting all warnings for the entire test suite should be avoided
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' 
@@ -13,7 +14,7 @@ tf.get_logger().setLevel('WARNING')
 from learnMSA.msa_hmm import Align, Emitter, Transitioner, Initializers, MsaHmmCell, MsaHmmLayer, Training, Configuration, Viterbi, AncProbsLayer, Priors, DirichletMixture
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset, AlignedDataset
 from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
-from learnMSA.protein_language_models import DataPipeline
+from learnMSA.protein_language_models import Common, DataPipeline, TrainingUtil, MvnMixture
 import itertools
 import shutil
 from test import RefModels as ref
@@ -1603,6 +1604,53 @@ class TestModelToFile(unittest.TestCase):
             msa_str_from_deserialized_model = deserialized_am.to_string(model_index = 0)
             tf.get_logger().setLevel('WARNING')
             self.assertEqual(msa_str, msa_str_from_deserialized_model)
+
+
+
+class TestMvnMixture(unittest.TestCase):
+
+    def test_mvn_single_diag_only(self):
+        np.random.seed(77)
+        mu = np.array([1., 2, 3, 4, 5], dtype=np.float32)
+        d = mu.size
+        scale_diag = np.array([.1, .5, 1, 2, 3], dtype=np.float32)
+        scale = np.diag(scale_diag)
+        inputs = np.random.multivariate_normal(mu, scale, size=100).astype(np.float32)
+        # compute a reference assuming that tfp uses a correct implementation
+        ref_dist = tfp.distributions.MultivariateNormalDiag(loc=mu, scale_diag=scale_diag)
+        ref_log_pdf = ref_dist.log_prob(inputs)
+        # reshape to match the expected shapes
+        mu = np.reshape(mu, (1,1,1,d))
+        scale_diag = np.reshape(scale_diag, (1,1,1,d))
+        inputs = np.expand_dims(inputs, 0)
+        # compute the log_prob using the custom implementation
+        kernel = MvnMixture.make_kernel(mu, scale_diag)
+        dist = MvnMixture.MvnMixture(dim = d, kernel = kernel, diag_only = True)
+        log_pdf = dist.log_pdf(inputs)
+        # compare the results
+        np.testing.assert_almost_equal(log_pdf[0,:,0].numpy(), ref_log_pdf.numpy(), decimal=5)
+
+    def test_mvn_single_full(self):
+        np.random.seed(1000)
+        mu = np.array([1., 2, 3, 4, 5], dtype=np.float32)
+        d = mu.size
+        scale = np.random.rand(d,d).astype(np.float32)
+        #make triangular lower
+        scale = np.tril(scale)
+        inputs = np.random.multivariate_normal(mu, scale, size=100).astype(np.float32)
+        # compute a reference assuming that tfp uses a correct implementation
+        ref_dist = tfp.distributions.MultivariateNormalTriL(loc=mu, scale_tril=scale)
+        ref_log_pdf = ref_dist.log_prob(inputs)
+        # reshape to match the expected shapes
+        mu = np.reshape(mu, (1,1,1,d))
+        scale = np.reshape(scale, (1,1,1,d,d))
+        inputs = np.expand_dims(inputs, 0)
+        # compute the log_prob using the custom implementation
+        kernel = MvnMixture.make_kernel(mu, scale)
+        dist = MvnMixture.MvnMixture(dim = d, kernel = kernel, diag_only = False)
+        log_pdf = dist.log_pdf(inputs)
+        # compare the results
+        np.testing.assert_almost_equal(log_pdf[0,:,0].numpy(), ref_log_pdf.numpy(), decimal=2)
         
 
 class TestLanguageModelExtension(unittest.TestCase):
@@ -1636,6 +1684,71 @@ class TestEmbeddingPretrainingDatapipeline(unittest.TestCase):
         fasta = AlignedDataset("test/data/felix_msa.fa")
         column_occupancies = DataPipeline._get_column_occupancies(fasta)
         np.testing.assert_almost_equal(column_occupancies, [1./3, 2./3, 2./3, 1, 1, 2./3, 2./3, 1.])
+
+
+class TestPretrainingUtilities(unittest.TestCase):
+
+    def __init__(self, *args, **kwargs):
+        super(TestPretrainingUtilities, self).__init__(*args, **kwargs)
+        self.y_true = np.array([[[1., 0, 0, 0, 0],
+                            [0, 1, 0, 0, 0],
+                            [0, 0, 0, 1, 0],
+                            [0, 0, 0, 0, 0]],
+                            [[1, 0, 0, 0, 0],
+                             [0, 1, 0, 0, 0],
+                             [0, 0, 1, 0, 0],
+                             [0, 0, 0, 1, 0]]])
+        self.y_pred = np.array([[[0.6, 0.4, 0, 0, 0],
+                            [0, 0.6, 0.4, 0, 0],
+                            [0, 0, 0, 1, 0],
+                            [0, 0, 0, 0, 0]],
+                            [[0.6, 0.4, 0, 0, 0],
+                             [0, 0.6, 0.4, 0, 0],
+                             [0, 0, 0.6, 0.4, 0],
+                             [0, 0, 0, 1, 0]]])
+
+    def test_make_masked_categorical(self):
+        y_true_masked, y_pred_masked, norm_masked = TrainingUtil.make_masked_categorical(self.y_true, self.y_pred)
+        np.testing.assert_almost_equal(y_true_masked, [[1., 0, 0, 0, 0],
+                                                        [0, 1, 0, 0, 0],
+                                                        [0, 0, 0, 1, 0],
+                                                        [1, 0, 0, 0, 0],
+                                                        [0, 1, 0, 0, 0],
+                                                        [0, 0, 1, 0, 0],
+                                                        [0, 0, 0, 1, 0]])
+        np.testing.assert_almost_equal(y_pred_masked, [[0.6, 0.4, 0, 0, 0],
+                                                        [0, 0.6, 0.4, 0, 0],
+                                                        [0, 0, 0, 1, 0],
+                                                        [0.6, 0.4, 0, 0, 0],
+                                                        [0, 0.6, 0.4, 0, 0],
+                                                        [0, 0, 0.6, 0.4, 0],
+                                                        [0, 0, 0, 1, 0]])
+        np.testing.assert_almost_equal(norm_masked, [3., 3, 3, 4, 4, 4, 4])
+
+    def test_make_masked_binary(self):
+        y_true_masked, y_pred_masked, norm_masked = TrainingUtil.make_masked_binary(self.y_true, self.y_pred)
+        np.testing.assert_almost_equal(y_true_masked, [[1.], [0], [0], [0], [1], [0], [0], [0], [1], 
+                                                       [1], [0], [0], [0], [0], [1], [0], [0], 
+                                                       [0], [0], [1], [0], [0], [0], [0], [1]])
+        np.testing.assert_almost_equal(y_pred_masked, [[0.6], [0.4], [0], [0], [0.6], [0], [0], [0], [1],
+                                                         [0.6], [0.4], [0], [0], [0], [0.6], [0.4], [0], 
+                                                         [0], [0], [0.6], [0.4], [0], [0], [0], [1]])
+        np.testing.assert_almost_equal(norm_masked, [9.]*9 + [16.]*16)
+
+    def test_masked_loss_categorical(self):
+        loss = TrainingUtil.make_masked_func(tf.keras.losses.categorical_crossentropy, categorical=True, name="cee")
+        loss_value = loss(self.y_true, self.y_pred)
+        np.testing.assert_almost_equal(loss_value, -(2*np.log(0.6)/3 + 3*np.log(0.6) / 4) / 2)
+
+    def test_masked_acc_categorical(self):
+        acc = TrainingUtil.make_masked_func(tf.keras.metrics.categorical_accuracy, categorical=True, name="acc")
+        acc_value = acc(self.y_true, self.y_pred)
+        np.testing.assert_almost_equal(acc_value, 1.)
+
+    def test_masked_loss_binary(self):
+        loss = TrainingUtil.make_masked_func(tf.keras.losses.binary_crossentropy, categorical=False, name="bce")
+        loss_value = loss(self.y_true, self.y_pred)
+        np.testing.assert_almost_equal(loss_value, -(3*np.log(0.6) / 9 + 6*np.log(0.6)/16)/2)
             
             
 # class TestScoringModel(unittest.TestCase):
