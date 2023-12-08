@@ -99,6 +99,7 @@ class MsaHmmCell(tf.keras.layers.Layer):
             R = self.transitioner(old_scaled_forward)
         scaled_forward = tf.multiply(E, R, name="scaled_forward")
         S = tf.reduce_sum(scaled_forward, axis=-1, keepdims=True)
+        S += self.epsilon
         loglik = old_loglik + tf.math.log(S) 
         scaled_forward /= S 
         loglik = tf.reshape(loglik, (-1, 1))
