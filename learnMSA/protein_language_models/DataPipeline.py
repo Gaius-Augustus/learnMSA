@@ -26,6 +26,9 @@ def get_clan_data(drop_overlap = True #remove families that have at least one se
     clans_df.drop([2,3,4], axis=1, inplace=True)
     clans_df.rename(columns={1 : "clan"}, inplace=True)
 
+    print(f"{len(clans_df)} families in total")
+    print(f"{clans_df.clan.unique().size} clans in total")
+
     np.random.seed(77)
 
     #load all fasta files (takes a while)
@@ -62,7 +65,9 @@ def get_clan_data(drop_overlap = True #remove families that have at least one se
 
     #unique_clans defines the unique order of clans for batch sampling
     unique_clans = clans_df.clan.unique()
-    print(f"{unique_clans.size} clans in total")
+    print(f"{len(clans_df)} families after dropping")
+    print(f"{unique_clans.size} clans after dropping")
+    print(f"{sum(f.num_seq for f in fasta_files)} sequences")
 
     fasta_dict = {get_family(f.filename) : f for f in fasta_files}
 
@@ -309,7 +314,7 @@ def make_column_prior_dataset(encoder : Common.InputEncoder, clans, batch_size, 
 
 def make_homfam_dataset(encoder : Common.InputEncoder, 
                         batch_size, 
-                        homfam_path="../data/homfam/refs/", 
+                        homfam_path, 
                         ext=".ref",
                         for_prior=False):
     fasta_dict = {}
@@ -330,7 +335,6 @@ def make_homfam_dataset(encoder : Common.InputEncoder,
 
 
 def make_random_data(emb_dim, batch_size, steps=100, loc=0., scale=0.6):
-    # the default deviation 0.6 is roughly the same deviation that real embeddings have
     def _gen_random_inputs():
         for i in range(steps):
             random_emb = np.random.normal(loc=loc, scale=scale, size=(batch_size, 100, emb_dim)).astype(np.float32)

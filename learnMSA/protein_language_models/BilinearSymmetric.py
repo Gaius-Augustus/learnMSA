@@ -7,29 +7,32 @@ class SymmetricBilinearReduction(tf.keras.layers.Layer):
     def __init__(self, 
                  reduced_dim, 
                  dropout=0.0, 
-                 l2=0.0, 
                  trainable=True,
-                 activation=tf.nn.softmax):
+                 activation=tf.nn.softmax,
+                 scaled=True):
         super(SymmetricBilinearReduction, self).__init__()
         self.reduced_dim = reduced_dim
         self.dropout_prob = dropout
-        self.l2 = l2
         self.trainable = trainable
         self.activation = activation
+        self.scaled = scaled
 
     def build(self, input_shape):
+        self.L2 = 0 #0.001 / (self.reduced_dim * input_shape[-1])
         self.R = self.add_weight(
             shape=(input_shape[-1], self.reduced_dim),
             initializer="random_normal",
-            regularizer=tf.keras.regularizers.L2(self.l2),
+            regularizer=tf.keras.regularizers.L2(self.L2),
             trainable=self.trainable,
             name="R")
-        self.b = self.add_weight(shape=(1), initializer="zeros", trainable=self.trainable, name="b")
+        self.b = self.add_weight(shape=(1), initializer=tf.constant_initializer(-3), trainable=self.trainable, name="b")
         self.dropout = tf.keras.layers.Dropout(self.dropout_prob)
         
     def _reduce(self, embeddings, training):
         embeddings = self.dropout(embeddings, training=training)
         reduced_emb = tf.matmul(embeddings, self.R) #(..., reduced_dim)
+        if self.scaled: #scores should have rougly variance 1
+            reduced_emb /= tf.math.sqrt(tf.cast(tf.shape(self.R)[0], reduced_emb.dtype))
         return reduced_emb
         
     def call(self, embeddings_a, embeddings_b, a_is_reduced=False, b_is_reduced=False, training=None, activate_output=True, use_bias=True):
@@ -45,6 +48,10 @@ class SymmetricBilinearReduction(tf.keras.layers.Layer):
         reduced_emb_a = embeddings_a if a_is_reduced else self._reduce(embeddings_a, training)
         reduced_emb_b = embeddings_b if b_is_reduced else self._reduce(embeddings_b, training)
         scores = tf.matmul(reduced_emb_a, reduced_emb_b, transpose_b=True) 
+        if self.scaled: 
+            #scores should have rougly variance 1
+            #assuming that a neuron in the reduced embeddings also have roughly variance 1, since we scaled them
+            scores /= tf.math.sqrt(tf.cast(self.reduced_dim, scores.dtype))
         if use_bias:
             scores += self.b
         #make non-padding positions not contribute to the attention distribution
@@ -95,7 +102,8 @@ def make_scoring_model(config : common.ScoringModelConfig, dropout=0.0, trainabl
     output = SymmetricBilinearReduction(config.dim,
                                         dropout, 
                                         trainable=trainable, 
-                                        activation=act)(emb1, emb2, activate_output=True)
+                                        activation=act,
+                                        scaled=config.scaled)(emb1, emb2, activate_output=True)
     # construct a model and compile for a standard binary classification task
     model = tf.keras.models.Model(inputs=[emb1, emb2], outputs=output)
     return model

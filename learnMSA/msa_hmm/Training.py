@@ -380,16 +380,16 @@ def fit_model(model_generator,
                 break
         assert msa_hmm_layer is not None, "Can not find a MsaHmmLayer in the specified model."
 
-        class CustomCallback(tf.keras.callbacks.Callback):
+        # class CustomCallback(tf.keras.callbacks.Callback):
 
-            def on_train_begin(self, logs=None):
-                msa_hmm_layer.cell.emitter[0].step_counter.assign(0.)
-                msa_hmm_layer.reverse_cell.emitter[0].step_counter.assign(0.)
+        #     # def on_train_begin(self, logs=None):
+        #     #     msa_hmm_layer.cell.emitter[0].step_counter.assign(0.)
+        #     #     msa_hmm_layer.reverse_cell.emitter[0].step_counter.assign(0.)
 
-            def on_train_batch_end(self, batch, logs=None):
-                msa_hmm_layer.cell.emitter[0].step_counter.assign_add(1.)
-                msa_hmm_layer.reverse_cell.emitter[0].step_counter.assign_add(1.)
-        callbacks.append(CustomCallback())
+        #     def on_train_batch_end(self, batch, logs=None):
+        #         msa_hmm_layer.cell.emitter[0].step_counter.assign_add(1.)
+        #         msa_hmm_layer.reverse_cell.emitter[0].step_counter.assign_add(1.)
+        # callbacks.append(CustomCallback())
 
     history = model.fit(dataset, 
                         epochs=epochs,

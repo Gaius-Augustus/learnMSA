@@ -99,7 +99,7 @@ def plot_hmm(am,
     B = hmm_cell.emitter[0].make_B_amino().numpy()[model_index]
     node_labels = {}
     for i in range(length):
-        sort = np.argsort(-B[i+1, :25])
+        sort = np.argsort(-B[i+1, :23])
         label = str(i+1)+"\n"
         for j in range(num_aa):
             label += am.data.alphabet[sort[j]] + " (" + "%.2f" % B[i+1, sort[j]] + ")\n"
