@@ -159,6 +159,8 @@ class MsaHmmCell(tf.keras.layers.Layer):
         """
         reverse_cell = self.duplicate(shared_kernels=True)
         reverse_cell.reverse_direction()
+        reverse_cell.built = True
+        reverse_cell.recurrent_init()
         return reverse_cell
 
 
