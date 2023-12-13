@@ -5,6 +5,7 @@ import learnMSA.msa_hmm.Transitioner as trans
 import learnMSA.msa_hmm.Initializers as initializers
 import learnMSA.msa_hmm.Priors as priors
 import learnMSA.protein_language_models.Common as plm_common
+from learnMSA.protein_language_models.MvnEmitter import MvnEmitter, AminoAcidPlusMvnEmissionInitializer, make_joint_prior
 
 
 def as_str(config, items_per_line=1, prefix="", sep=""):
@@ -30,14 +31,17 @@ def get_adaptive_batch_size(model_lengths, max_seq_len):
         return 32*num_devices
     
 def get_adaptive_batch_size_with_language_model(model_lengths, max_seq_len):
-    num_gpu = len([x.name for x in tf.config.list_logical_devices() if x.device_type == 'GPU']) 
-    num_devices = num_gpu + int(num_gpu==0) #account for the CPU-only case 
+    if False: #LM support is currently limited to single GPU
+        num_gpu = len([x.name for x in tf.config.list_logical_devices() if x.device_type == 'GPU']) 
+        num_devices = num_gpu + int(num_gpu==0) #account for the CPU-only case 
+    else:
+        num_devices = 1
     model_length = max(model_lengths)
     if max_seq_len < 200 and model_length < 180:
         return 200*num_devices
     elif max_seq_len < 520 and model_length < 230:
         return 100*num_devices
-    elif max_seq_len < 700 and model_length < 420:
+    elif max_seq_len < 700 and model_length < 400:
         return 50*num_devices
     elif max_seq_len < 850 and model_length < 550:
         return 25*num_devices
@@ -56,26 +60,43 @@ def make_default(default_num_models=5,
                  L2_match=10.,
                  L2_insert=0.,
                  temperature_mode="trainable",
-                 conditionally_independent=True):
+                 conditionally_independent=True,
+                 V2_emitter=True,
+                 V2_full_covariance=False,
+                 V2_temperature=100.):
     if use_language_model:
-        
-        emission_init = [initializers.EmbeddingEmissionInitializer(scoring_model_config=scoring_model_config,
-                                                                    num_prior_components=num_prior_components) 
-                                                                        for _ in range(default_num_models)]
-        insertion_init = [initializers.EmbeddingEmissionInitializer(scoring_model_config=scoring_model_config,
-                                                                    num_prior_components=num_prior_components)  
-                                                                        for _ in range(default_num_models)]
-        if num_prior_components == 0:
-            prior = priors.L2EmbeddingRegularizer(L2_match=L2_match, L2_insert=L2_insert)
+        if V2_emitter:
+            emission_init = [AminoAcidPlusMvnEmissionInitializer(scoring_model_config=scoring_model_config,
+                                                                        num_prior_components=num_prior_components) 
+                                                                            for _ in range(default_num_models)]
+            insertion_init = [AminoAcidPlusMvnEmissionInitializer(scoring_model_config=scoring_model_config,
+                                                                        num_prior_components=num_prior_components)  
+                                                                            for _ in range(default_num_models)]
+            emitter = MvnEmitter(scoring_model_config, 
+                                emission_init=emission_init, 
+                                insertion_init=insertion_init,
+                                num_prior_components=num_prior_components,
+                                full_covariance=V2_full_covariance,
+                                temperature=V2_temperature,
+                                frozen_insertions=frozen_insertions)
         else:
-            prior = priors.MvnEmbeddingPrior(scoring_model_config, num_prior_components, use_l2=use_l2, L2_match=L2_match, L2_insert=L2_insert)
-        emitter = emit.EmbeddingEmitter(scoring_model_config, 
-                                        emission_init=emission_init, 
-                                        insertion_init=insertion_init,
-                                        prior=prior,
-                                        frozen_insertions=frozen_insertions,
-                                        temperature_mode=emit.TemperatureMode.from_string(temperature_mode),
-                                        conditionally_independent=conditionally_independent)
+            emission_init = [initializers.EmbeddingEmissionInitializer(scoring_model_config=scoring_model_config,
+                                                                        num_prior_components=num_prior_components) 
+                                                                            for _ in range(default_num_models)]
+            insertion_init = [initializers.EmbeddingEmissionInitializer(scoring_model_config=scoring_model_config,
+                                                                        num_prior_components=num_prior_components)  
+                                                                            for _ in range(default_num_models)]
+            #if num_prior_components == 0:
+            prior = priors.L2Regularizer(L2_match=L2_match, L2_insert=L2_insert)
+            # else:
+            #     prior = priors.MvnEmbeddingPrior(scoring_model_config, num_prior_components, use_l2=use_l2, L2_match=L2_match, L2_insert=L2_insert)
+            emitter = emit.EmbeddingEmitter(scoring_model_config, 
+                                            emission_init=emission_init, 
+                                            insertion_init=insertion_init,
+                                            prior=prior,
+                                            frozen_insertions=frozen_insertions,
+                                            temperature_mode=emit.TemperatureMode.from_string(temperature_mode),
+                                            conditionally_independent=conditionally_independent)
     else:
         emitter = emit.ProfileHMMEmitter([initializers.make_default_emission_init()
                                                                          for _ in range(default_num_models)],
@@ -128,7 +149,10 @@ def make_default(default_num_models=5,
             "L2_match" : L2_match,
             "L2_insert" : L2_insert,
             "temperature_mode" : temperature_mode,
-            "conditionally_independent" : conditionally_independent
+            "conditionally_independent" : conditionally_independent,
+            "V2_emitter" : V2_emitter,
+            "V2_full_covariance" : V2_full_covariance,
+            "V2_temperature" : V2_temperature
         })
     return default
 
@@ -145,7 +169,13 @@ def assert_config(config):
     assert config["len_mul"] >= 0., \
         _make_assert_text("The multiplier must be greater than zero.", config["surgery_quantile"])
     assert "num_models" in config
-    default = make_default(config["num_models"], use_language_model=config["use_language_model"])
+    if config["use_language_model"]:
+        default = make_default(config["num_models"], 
+                                scoring_model_config=config["scoring_model_config"],
+                                num_prior_components=config["mvn_prior_components"],
+                                use_language_model=True)
+    else:
+        default = make_default(config["num_models"], use_language_model=False)
     for key in default:
         assert key in config, f"User configuration is missing key {key}."
     if not config["allow_user_keys_in_config"]:

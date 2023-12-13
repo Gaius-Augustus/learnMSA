@@ -2,7 +2,7 @@ import os
 import tensorflow as tf
 import learnMSA.msa_hmm.DirichletMixture as dm
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
-from learnMSA.protein_language_models.MultivariateNormalPrior import MultivariateNormalPrior, make_pdf_model
+#from learnMSA.protein_language_models.MultivariateNormalPrior import MultivariateNormalPrior, make_pdf_model
 import learnMSA.protein_language_models.Common as Common
 from learnMSA.protein_language_models.BilinearSymmetric import make_scoring_model
 
@@ -49,17 +49,122 @@ class AminoAcidPrior(tf.keras.layers.Layer):
     
     def get_config(self):
         config = super(AminoAcidPrior, self).get_config()
-        cell_config = {
-             "comp_count" : self.comp_count,
-             "epsilon" : self.epsilon
-        }
-        config.update(cell_config)
+        config.update({
+                    "comp_count" : self.comp_count,
+                    "epsilon" : self.epsilon
+                    })
         return config
     
     def __repr__(self):
         return f"AminoAcidPrior(comp_count={self.comp_count})"
 
     
+
+class L2Regularizer(tf.keras.layers.Layer):
+    """ A simple L2 regularizer for insertion and match state parameters.
+    """
+    def __init__(self, 
+                 L2_match=10.0, 
+                 L2_insert=0.,
+                 use_shared_embedding_insertions=True, 
+                 **kwargs):
+        super(L2Regularizer, self).__init__(**kwargs)
+        self.L2_match = L2_match
+        self.L2_insert = L2_insert
+        self.use_shared_embedding_insertions = use_shared_embedding_insertions
+        
+    def load(self, dtype):
+        pass
+
+    def get_l2_loss(self, B, lengths):
+        max_model_length = tf.reduce_max(lengths)
+        length_mask = tf.cast(tf.sequence_mask(lengths), B.dtype)
+        #square all parameters
+        B_sq = tf.math.square(B[...,len(SequenceDataset.alphabet)-1:-1])
+        #reduce the embedding dimension
+        B_sq = tf.reduce_sum(B_sq, -1)
+        #regularization per match is just the sum of the respective squares 
+        #(we will deal with non-match states in the end)
+        reg_emb = B_sq[:,1:max_model_length+1]
+        #depending on how we implemented insertions, we add a different insertion term to all matches
+        if self.use_shared_embedding_insertions:
+            #all insertions are the same, just use the first one 
+            reg_ins = B_sq[:,:1]
+        else:
+            #insertions differ, use their average
+            B_sq_just_matches = reg_emb * length_mask
+            B_sq_just_inserts = tf.reduce_sum(B_sq, axis=1, keepdims=True) - tf.reduce_sum(B_sq_just_matches, axis=1, keepdims=True)
+            reg_ins = B_sq_just_inserts / tf.expand_dims(tf.cast(lengths, B.dtype), -1)
+        reg = self.L2_match * reg_emb + self.L2_insert * reg_ins
+        #zero padding for non match states
+        reg *= length_mask
+        return reg
+        
+    def call(self, B, lengths):
+        """L2 regularization for each match state.
+        Args:
+        B: A stack of k emission matrices. Shape: (k, q, s)
+        Returns:
+        A tensor with the L2 regularization values. Shape: (k, max_model_length)
+        """
+        #amino acid prior
+        l2_loss = self.get_l2_loss(B, lengths)
+        return - l2_loss # prior values are assumed to be maximized
+
+    def get_config(self):
+        config = super(L2Regularizer, self).get_config()
+        config.update({
+             "L2_match" : self.L2_match,
+             "L2_insert" : self.L2_insert,
+             "use_shared_embedding_insertions" : self.use_shared_embedding_insertions
+        })
+        return config
+
+
+
+class JointEmissionPrior(tf.keras.layers.Layer):
+    """ Prior over a joint distribution defined by a kernel split. Prior values are added.
+        Args: 
+            priors: A list of prior objects that will be used for each part of the kernel.
+            kernel_split: A list of integers that define the split of the kernel into parts.
+                        Should have length one less than the number of priors.
+    """
+    def __init__(self, priors, kernel_split, **kwargs):
+        super(JointEmissionPrior, self).__init__(**kwargs)
+        self.priors = priors
+        self.kernel_split = kernel_split
+        assert len(self.priors) > 2, "Joint emission requires at least 2 priors."
+        assert len(self.priors) == len(self.kernel_split) + 1, "Number of priors must be one more than the number of kernel splits."
+
+    def load(self, dtype):
+        for prior in self.priors:
+            prior.load(dtype)
+        
+    def call(self, B, lengths):
+        """Computes log pdf values for each match state.
+        Args:
+        B: A stack of k emission matrices. Shape: (k, q, s)
+        Returns:
+            Shape: (k, q)
+        """
+        log_joint_pdf = self.priors[0](B[..., :self.kernel_split[0]], lengths)
+        for i in range(1, len(self.priors)):
+            split_left = self.kernel_split[i-1]
+            split_right = self.kernel_split[i] if i < len(self.kernel_split) else None
+            log_joint_pdf += self.priors[i](B[..., split_left : split_right], lengths)
+        return log_joint_pdf
+    
+    def get_config(self):
+        config = super(JointEmissionPrior, self).get_config()
+        config.update({
+                    "priors" : self.priors,
+                    "kernel_split" : self.kernel_split
+                    })
+        return config
+    
+    def __repr__(self):
+        return f"JointEmissionPrior(" + ", ".join([str(p) for p in self.priors]) + ")"
+
     
 class NullPrior(tf.keras.layers.Layer):
     """NullObject if no prior should be used.
@@ -67,10 +172,10 @@ class NullPrior(tf.keras.layers.Layer):
     def load(self, dtype):
         pass
     
-    def call(self, B):
+    def call(self, B, lengths):
         k = tf.shape(B)[0]
-        model_length = int((tf.shape(B)[1]-2)/2)
-        return tf.zeros((k, model_length), dtype=B.dtype)
+        max_model_length = tf.reduce_max(lengths)
+        return tf.zeros((k, max_model_length), dtype=B.dtype)
     
     def __repr__(self):
         return f"NullPrior()"
@@ -218,145 +323,86 @@ class ProfileHMMTransitionPrior(tf.keras.layers.Layer):
     
 
 
-class L2EmbeddingRegularizer(AminoAcidPrior):
-    """ A simple L2 regularizer for the embedding match states
-    """
-    def __init__(self, 
-                 L2_match=10.0, 
-                 L2_insert=0.,
-                 use_shared_embedding_insertions=True, 
-                 **kwargs):
-        super(L2EmbeddingRegularizer, self).__init__(**kwargs)
-        self.L2_match = L2_match
-        self.L2_insert = L2_insert
-        self.use_shared_embedding_insertions = use_shared_embedding_insertions
-        
-    def get_l2_loss(self, B, lengths):
-        max_model_length = tf.reduce_max(lengths)
-        length_mask = tf.cast(tf.sequence_mask(lengths), B.dtype)
-        #square all parameters
-        B_emb_sq = tf.math.square(B[...,len(SequenceDataset.alphabet)-1:-1])
-        #reduce the embedding dimension
-        B_emb_sq = tf.reduce_sum(B_emb_sq, -1)
-        #regularization per match is just the sum of the respective squares 
-        #(we will deal with non-match states in the end)
-        reg_emb = B_emb_sq[:,1:max_model_length+1]
-        #depending on how we implemented insertions, we add a different insertion term to all matches
-        if self.use_shared_embedding_insertions:
-            #all insertions are the same, just use the first one 
-            reg_ins = B_emb_sq[:,:1]
-        else:
-            #insertions differ, use their average
-            B_emb_sq_just_matches = reg_emb * length_mask
-            B_emb_sq_just_inserts = tf.reduce_sum(B_emb_sq, axis=1, keepdims=True) - tf.reduce_sum(B_emb_sq_just_matches, axis=1, keepdims=True)
-            reg_ins = B_emb_sq_just_inserts / tf.expand_dims(tf.cast(lengths, B.dtype), -1)
-        reg = self.L2_match * reg_emb + self.L2_insert * reg_ins
-        #zero padding for non match states
-        reg *= length_mask
-        return reg
-        
-    def call(self, B, lengths):
-        """L2 regularization for each match state.
-        Args:
-        B: A stack of k emission matrices. Shape: (k, q, s)
-        Returns:
-        A tensor with the L2 regularization values. Shape: (k, max_model_length)
-        """
-        #amino acid prior
-        B_amino = B[:,:,:len(SequenceDataset.alphabet)-1]
-        prior_aa = super().call(B_amino, lengths)
-        l2_loss = self.get_l2_loss(B, lengths)
-        return prior_aa - l2_loss #the result is maximized, so we have to negate the regularizer
-
-    def get_config(self):
-        config = super(L2EmbeddingRegularizer, self).get_config()
-        config.update({
-             "L2_match" : self.L2_match,
-             "L2_insert" : self.L2_insert,
-             "use_shared_embedding_insertions" : self.use_shared_embedding_insertions
-        })
-        return config
+# class MvnEmbeddingPrior(L2EmbeddingRegularizer):
+#     """ A multivariate normal prior for the embedding match states. 
+#     """
+#     def __init__(self, 
+#                  scoring_model_config : Common.ScoringModelConfig,
+#                  num_components=Common.PRIOR_DEFAULT_COMPONENTS, 
+#                  use_l2=False,
+#                  **kwargs):
+#         super(MvnEmbeddingPrior, self).__init__(**kwargs)
+#         self.scoring_model_config = scoring_model_config
+#         self.num_components = num_components
+#         self.use_l2 = use_l2
 
 
-
-class MvnEmbeddingPrior(L2EmbeddingRegularizer):
-    """ A multivariate normal prior for the embedding match states. 
-    """
-    def __init__(self, 
-                 scoring_model_config : Common.ScoringModelConfig,
-                 num_components=Common.PRIOR_DEFAULT_COMPONENTS, 
-                 use_l2=False,
-                 **kwargs):
-        super(MvnEmbeddingPrior, self).__init__(**kwargs)
-        self.scoring_model_config = scoring_model_config
-        self.num_components = num_components
-        self.use_l2 = use_l2
-
-
-    def load(self, dtype):
-        super(MvnEmbeddingPrior, self).load(dtype) 
-        prior_path = Common.get_prior_path(self.scoring_model_config, self.num_components)
-        prior_path = os.path.dirname(__file__)+f"/../protein_language_models/"+prior_path
-        print("Loading prior ", prior_path)
-        self.multivariate_normal_prior = make_pdf_model(self.scoring_model_config.dim, 
-                                                        components=self.num_components,
-                                                        precomputed=True, 
-                                                        trainable=False,
-                                                        aggregate_result=False)
-        self.multivariate_normal_prior.load_weights(prior_path)
-        self.multivariate_normal_layer = self.multivariate_normal_prior.layers[5]
-        self.multivariate_normal_layer.trainable = False
-        self.multivariate_normal_layer.compute_values()
+#     def load(self, dtype):
+#         super(MvnEmbeddingPrior, self).load(dtype) 
+#         prior_path = Common.get_prior_path(self.scoring_model_config, self.num_components)
+#         prior_path = os.path.dirname(__file__)+f"/../protein_language_models/"+prior_path
+#         print("Loading prior ", prior_path)
+#         self.multivariate_normal_prior = make_pdf_model(self.scoring_model_config.dim, 
+#                                                         components=self.num_components,
+#                                                         precomputed=True, 
+#                                                         trainable=False,
+#                                                         aggregate_result=False)
+#         self.multivariate_normal_prior.load_weights(prior_path)
+#         self.multivariate_normal_layer = self.multivariate_normal_prior.layers[5]
+#         self.multivariate_normal_layer.trainable = False
+#         self.multivariate_normal_layer.compute_values()
         
 
-    def get_prior_value(self, B_emb, lengths):
-        max_model_length = tf.reduce_max(lengths)
-        length_mask = tf.cast(tf.sequence_mask(lengths), B_emb.dtype)
-        # make sure padding is zero
-        B_emb = B_emb[:,1:max_model_length+1]
-        # compute the prior
-        # reduction and handling sequence length is done internally via the zero padding
-        num_models, num_states, dim  = tf.unstack(tf.shape(B_emb))
-        repeats = tf.cast(dim / self.multivariate_normal_layer.dim, tf.int32)
-        B_emb = tf.reshape(B_emb, (num_models, num_states*repeats, self.multivariate_normal_layer.dim))
-        mvn_log_pdf = self.multivariate_normal_prior(B_emb)
-        mvn_log_pdf = tf.reshape(mvn_log_pdf, (num_models, num_states, repeats))
-        mvn_log_pdf = tf.reduce_sum(mvn_log_pdf, -1)
-        mvn_log_pdf *= length_mask
-        return mvn_log_pdf
+#     def get_prior_value(self, B_emb, lengths):
+#         max_model_length = tf.reduce_max(lengths)
+#         length_mask = tf.cast(tf.sequence_mask(lengths), B_emb.dtype)
+#         # make sure padding is zero
+#         B_emb = B_emb[:,1:max_model_length+1]
+#         # compute the prior
+#         # reduction and handling sequence length is done internally via the zero padding
+#         num_models, num_states, dim  = tf.unstack(tf.shape(B_emb))
+#         repeats = tf.cast(dim / self.multivariate_normal_layer.dim, tf.int32)
+#         B_emb = tf.reshape(B_emb, (num_models, num_states*repeats, self.multivariate_normal_layer.dim))
+#         mvn_log_pdf = self.multivariate_normal_prior(B_emb)
+#         mvn_log_pdf = tf.reshape(mvn_log_pdf, (num_models, num_states, repeats))
+#         mvn_log_pdf = tf.reduce_sum(mvn_log_pdf, -1)
+#         mvn_log_pdf *= length_mask
+#         return mvn_log_pdf
 
 
-    def call(self, B, lengths):
-        """L2 regularization for each match state.
-        Args:
-        B: A stack of k emission matrices. Shape: (k, q, s)
-        Returns:
-        A tensor with the L2 regularization values. Shape: (k, max_model_length)
-        """
-        #amino acid prior
-        B_amino = B[:,:,:len(SequenceDataset.alphabet)-1]
-        B_emb = B[:,:,len(SequenceDataset.alphabet):-1]
-        prior_aa = super().call(B_amino, lengths)
-        prior_emb = self.get_prior_value(B_emb, lengths)
-        if self.use_l2:
-            l2_loss = self.get_l2_loss(B, lengths)
-            return prior_aa + prior_emb - l2_loss #the result is maximized, so we have to negate the regularizer
-        else:
-            return prior_aa + prior_emb
+#     def call(self, B, lengths):
+#         """L2 regularization for each match state.
+#         Args:
+#         B: A stack of k emission matrices. Shape: (k, q, s)
+#         Returns:
+#         A tensor with the L2 regularization values. Shape: (k, max_model_length)
+#         """
+#         #amino acid prior
+#         B_amino = B[:,:,:len(SequenceDataset.alphabet)-1]
+#         B_emb = B[:,:,len(SequenceDataset.alphabet):len(SequenceDataset.alphabet)+self.scoring_model_config.dim]
+#         prior_aa = super().call(B_amino, lengths)
+#         prior_emb = self.get_prior_value(B_emb, lengths)
+#         if self.use_l2:
+#             l2_loss = self.get_l2_loss(B, lengths)
+#             return prior_aa + prior_emb - l2_loss #the result is maximized, so we have to negate the regularizer
+#         else:
+#             return prior_aa + prior_emb
 
 
-    def get_config(self):
-        config = super(MvnEmbeddingPrior, self).get_config()
-        config.update({
-             "scoring_model_config" : self.scoring_model_config,
-            "num_components" : self.num_components,
-            "use_l2" : self.use_l2
-        })
-        return config
+#     def get_config(self):
+#         config = super(MvnEmbeddingPrior, self).get_config()
+#         config.update({
+#              "scoring_model_config" : self.scoring_model_config,
+#             "num_components" : self.num_components,
+#             "use_l2" : self.use_l2
+#         })
+#         return config
 
 
 tf.keras.utils.get_custom_objects()["AminoAcidPrior"] = AminoAcidPrior
+tf.keras.utils.get_custom_objects()["L2Regularizer"] = L2Regularizer
+tf.keras.utils.get_custom_objects()["JointEmissionPrior"] = JointEmissionPrior
 tf.keras.utils.get_custom_objects()["NullPrior"] = NullPrior
 tf.keras.utils.get_custom_objects()["ProfileHMMTransitionPrior"] = ProfileHMMTransitionPrior
-tf.keras.utils.get_custom_objects()["L2EmbeddingRegularizer"] = L2EmbeddingRegularizer
-tf.keras.utils.get_custom_objects()["MvnEmbeddingPrior"] = MvnEmbeddingPrior
+# tf.keras.utils.get_custom_objects()["L2EmbeddingRegularizer"] = L2EmbeddingRegularizer
+# tf.keras.utils.get_custom_objects()["MvnEmbeddingPrior"] = MvnEmbeddingPrior

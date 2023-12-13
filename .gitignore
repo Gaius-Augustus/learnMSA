@@ -5,6 +5,8 @@ test/data/egf.out.fasta
 learnMSA/protein_language_models/esm2/
 learnMSA/protein_language_models/protT5_model/
 learnMSA/protein_language_models/proteinBERT_model/
+learnMSA/protein_language_models/proteinBERT_model/*prior*
+learnMSA/protein_language_models/proteinBERT_model/*scoring_model*
 build/
 dist/
 clustering/

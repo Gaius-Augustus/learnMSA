@@ -3,7 +3,7 @@ import numpy as np
 
 
 
-PRIOR_PATH = "new_priors"
+PRIOR_PATH = "priors_V2"
 SCORING_MODEL_PATH = "new_scoring_models_frozen"
 PRIOR_DEFAULT_COMPONENTS = 100
 
@@ -12,10 +12,14 @@ class ScoringModelConfig():
                  lm_name="esm2",
                  dim=64,
                  activation="softmax",
+                 use_aa=False,
+                 scaled=True,
                  suffix=""):
         self.lm_name = lm_name
         self.dim = dim
         self.activation = activation
+        self.use_aa = use_aa
+        self.scaled = scaled
         self.suffix = suffix
 
     def __repr__(self):
