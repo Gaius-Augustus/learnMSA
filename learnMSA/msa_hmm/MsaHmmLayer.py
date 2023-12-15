@@ -73,7 +73,7 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         forward = tf.concat([forward_1[:,tf.newaxis], forward], axis=1)
         forward = tf.reshape(forward, (num_model, b, seq_len, -1))
         loglik = tf.reshape(loglik, (num_model, b))
-        return forward, loglik
+        return forward[...,:-1] + forward[..., -1:], loglik
     
     
     def backward_recursion(self, inputs, training=False):
@@ -94,7 +94,7 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         backward, _, _ = self.rnn_backward(emission_probs, initial_state=initial_state)
         backward = tf.reshape(backward, (num_model, b, seq_len, -1))
         backward = tf.reverse(backward, [-2])
-        return backward
+        return backward[...,:-1] + backward[..., -1:]
     
     
     def state_posterior_log_probs(self, inputs, training=False):
@@ -120,7 +120,7 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         posterior = tf.concat([(forward_1 + backward_last)[:,tf.newaxis], posterior], axis=1)
         posterior = tf.reshape(posterior, (num_model, b, seq_len, -1))
         loglik = tf.reshape(states[1], (num_model, b))
-        posterior -= loglik[:,:,tf.newaxis,tf.newaxis]
+        posterior = posterior[...,:-1] + (posterior[..., -1:] - loglik[:,:,tf.newaxis,tf.newaxis]) #the braces are numerically important!
         return posterior
     
     

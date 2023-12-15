@@ -38,7 +38,7 @@ class MsaHmmCell(tf.keras.layers.Layer):
         self.max_num_states = max(self.num_states)
         self.state_size = (tf.TensorShape([self.max_num_states]), tf.TensorShape([1]))
         self.output_size = tf.TensorShape([self.max_num_states])
-        self.epsilon = tf.constant(1e-32, self.dtype)
+        self.epsilon = tf.constant(1e-16, self.dtype)
         self.reverse = False
         self.dim = dim
         self.transitioner.cell_init(self)
@@ -80,7 +80,7 @@ class MsaHmmCell(tf.keras.layers.Layer):
         Args:
             inputs: A batch of sequence positions.
         """
-        em_probs = self.emitter[0](inputs)
+        em_probs = self.emitter[0](inputs, training)
         for em in self.emitter[1:]:
             em_probs *= em(inputs, training)
         return em_probs
@@ -97,19 +97,23 @@ class MsaHmmCell(tf.keras.layers.Layer):
             R = old_scaled_forward
         else:
             R = self.transitioner(old_scaled_forward)
+        E = tf.maximum(E, self.epsilon)
+        R = tf.maximum(R, self.epsilon)
         scaled_forward = tf.multiply(E, R, name="scaled_forward")
         S = tf.reduce_sum(scaled_forward, axis=-1, keepdims=True)
-        S += self.epsilon
         loglik = old_loglik + tf.math.log(S) 
         scaled_forward /= S 
         loglik = tf.reshape(loglik, (-1, 1))
         scaled_forward = tf.reshape(scaled_forward, (-1, self.max_num_states))
         new_state = [scaled_forward, loglik]
         if self.reverse:
-            output = tf.math.log(R + self.epsilon) + old_loglik
+            output = tf.math.log(R) 
             output = tf.reshape(output, (-1, self.max_num_states))
+            old_loglik = tf.reshape(old_loglik, (-1, 1))
+            output = tf.concat([output, old_loglik], axis=-1) 
         else:
-            output = tf.math.log(scaled_forward + self.epsilon) + loglik
+            output = tf.math.log(scaled_forward) 
+            output = tf.concat([output, loglik], axis=-1)
         return output, new_state
 
     
