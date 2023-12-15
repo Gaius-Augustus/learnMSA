@@ -212,7 +212,7 @@ class TestMsaHmmCell(unittest.TestCase):
                 init = False
                 ref_forward = self.ref_alpha[i][j]
                 ref_scaled_forward = self.ref_scaled_alpha[i][j]
-                np.testing.assert_almost_equal(np.exp(log_forward)[0], ref_forward, decimal=4)
+                np.testing.assert_almost_equal(np.exp(log_forward[...,:-1] + log_forward[...,-1:])[0], ref_forward, decimal=4)
                 np.testing.assert_almost_equal(scaled_forward[0], ref_scaled_forward, decimal=4)
             np.testing.assert_almost_equal(np.exp(loglik), self.ref_lik[i], decimal=4)
                 
@@ -231,7 +231,7 @@ class TestMsaHmmCell(unittest.TestCase):
                 q = hmm_cell.num_states[i]
                 ref_forward = self.ref_alpha[i][j]
                 ref_scaled_forward = self.ref_scaled_alpha[i][j]
-                np.testing.assert_almost_equal(np.exp(log_forward)[i,:q], ref_forward, decimal=4)
+                np.testing.assert_almost_equal(np.exp(log_forward[...,:-1] + log_forward[...,-1:])[i,:q], ref_forward, decimal=4)
                 np.testing.assert_almost_equal(scaled_forward[i,:q], ref_scaled_forward, decimal=4)
         for i in range(2):
             np.testing.assert_almost_equal(np.exp(loglik[i]), self.ref_lik[i], decimal=4)
@@ -1657,8 +1657,8 @@ class TestLanguageModelExtension(unittest.TestCase):
     
     def test_regularizer(self):
         # test the regularizer
-        reg_shared = Priors.L2EmbeddingRegularizer(1, 1, True)
-        reg_non_shared = Priors.L2EmbeddingRegularizer(1, 1, False)
+        reg_shared = Priors.L2Regularizer(1, 1, True)
+        reg_non_shared = Priors.L2Regularizer(1, 1, False)
         reg_shared.load("float32")
         reg_non_shared.load("float32")
         #just test the embedding part
