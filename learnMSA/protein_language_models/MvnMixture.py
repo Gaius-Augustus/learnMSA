@@ -186,4 +186,4 @@ class MvnMixture():
         if self.num_components == 1:
             return log_pdf_components[...,0]
         else:
-            return tf.math.reduce_logsumexp(log_pdf_components + self.mixture_coeff_kernel[:,tf.newaxis], -1)
+            return tf.math.reduce_logsumexp(log_pdf_components + tf.math.log(self.mixture_coefficients()[:,tf.newaxis]), -1)
