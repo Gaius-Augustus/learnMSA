@@ -118,9 +118,10 @@ class MvnMixture():
         if not self.precomputed or self.scale is None:
             if self.diag_only:
                 scale_diag = self.diag_bijector(self.kernel[..., self.dim:])
+                scale_diag += 1e-8
                 scale = scale_diag if return_scale_diag else tf.eye(self.dim, batch_shape=tf.shape(scale_diag)[:-1]) * scale_diag[..., tf.newaxis]
                 if return_inverse:
-                    pinv = 1. / (scale_diag + 1e-10)
+                    pinv = 1. / scale_diag
             else:
                 scale_kernel = self.kernel[..., self.dim:]
                 scale = self.scale_tril(scale_kernel)
@@ -187,3 +188,8 @@ class MvnMixture():
             return log_pdf_components[...,0]
         else:
             return tf.math.reduce_logsumexp(log_pdf_components + tf.math.log(self.mixture_coefficients()[:,tf.newaxis]), -1)
+
+    def get_regularization_L2_loss(self):
+        """Computes the L2 loss of the variance kernels, preventing too small and too large variances.
+        """
+        return tf.reduce_mean(tf.reduce_sum(tf.math.square(self.kernel[..., self.dim:]), axis=-1))
