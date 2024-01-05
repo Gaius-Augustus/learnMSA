@@ -3,7 +3,7 @@ import numpy as np
 
 
 
-PRIOR_PATH = "priors_V2"
+PRIOR_PATH = "priors_V3"
 SCORING_MODEL_PATH = "new_scoring_models_frozen"
 PRIOR_DEFAULT_COMPONENTS = 100
 

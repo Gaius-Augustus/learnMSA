@@ -33,6 +33,7 @@ class MvnEmitter(ProfileHMMEmitter):
                  diag_init_var = 1,
                  full_covariance = False,
                  temperature = 10.,
+                 regularize_variances = True,
                  **kwargs):
 
         self.scoring_model_config = scoring_model_config
@@ -58,6 +59,7 @@ class MvnEmitter(ProfileHMMEmitter):
         self.diag_init_var = diag_init_var
         self.full_covariance = full_covariance
         self.temperature = temperature
+        self.regularize_variances = regularize_variances
         self.num_aa = len(SequenceDataset.alphabet)-1
 
 
@@ -111,7 +113,7 @@ class MvnEmitter(ProfileHMMEmitter):
         log_pdf = tf.concat([log_pdf, rest], axis=-1)
 
         # compute density to the power of 1/temperature 
-        pdf = tf.exp(log_pdf/self.temperature)
+        pdf = tf.exp(log_pdf/(self.temperature * self.scoring_model_config.dim))
         pdf += 1e-20 #protect against underflow
 
         #padding/terminal states
@@ -124,16 +126,19 @@ class MvnEmitter(ProfileHMMEmitter):
         return pdf 
         
         
-    def call(self, inputs, training=False):
+    def call(self, inputs, end_hints=None, training=False):
         """ 
         Args: 
             inputs: Shape (num_models, batch, seq_len, d) 
+            end_hints: A tensor of shape (num_models, batch_size, 2, num_states) that contains the correct state for the left and right ends of each chunk.
         Returns:
             Shape (num_models, batch, seq_len, num_states)
         """
         aa_emission_probs = super().call(inputs[..., :self.num_aa+1], training=training)
         emb_emission_probs = self.compute_embedding_emission_probs(inputs[..., self.num_aa+1:], training=training)
         emission_probs = aa_emission_probs * emb_emission_probs 
+        if self.regularize_variances:
+            self.add_loss(0.01 * self.mvn_mixture.get_regularization_L2_loss())
         return emission_probs
     
     
