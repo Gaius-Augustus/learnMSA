@@ -1,6 +1,7 @@
 import math
 import numpy as np
 import tensorflow as tf
+from functools import partial
 import learnMSA.msa_hmm.Emitter as emit
 import learnMSA.msa_hmm.Transitioner as trans
 import learnMSA.msa_hmm.Initializers as initializers
@@ -38,17 +39,14 @@ def get_adaptive_batch_size(model_lengths, max_seq_len):
         return 2*num_devices
     
 def get_adaptive_batch_size_with_language_model(model_lengths, max_seq_len):
-    if False: #LM support is currently limited to single GPU
-        num_gpu = len([x.name for x in tf.config.list_logical_devices() if x.device_type == 'GPU']) 
-        num_devices = num_gpu + int(num_gpu==0) #account for the CPU-only case 
-    else:
-        num_devices = 1
+    num_gpu = len([x.name for x in tf.config.list_logical_devices() if x.device_type == 'GPU']) 
+    num_devices = num_gpu + int(num_gpu==0) #account for the CPU-only case 
     model_length = max(model_lengths)
     if max_seq_len < 200 and model_length < 180:
         return 200*num_devices
     elif max_seq_len < 520 and model_length < 230:
         return 100*num_devices
-    elif max_seq_len < 700 and model_length < 400:
+    elif max_seq_len < 700 and model_length < 420:
         return 50*num_devices
     elif max_seq_len < 850 and model_length < 550:
         return 25*num_devices
@@ -120,7 +118,10 @@ def make_default(default_num_models=5,
                                                                         for _ in range(default_num_models)],
                                                     [initializers.make_default_flank_init() 
                                                                         for _ in range(default_num_models)])
-                                                                        
+    if use_language_model:                                                                    
+        batch_callback = partial(get_adaptive_batch_size_with_language_model, embedding_dim=scoring_model_config.dim)  
+    else:
+        batch_callback = get_adaptive_batch_size                                                                  
     default = {
         "num_models" : default_num_models,
         "transitioner" : transitioner,
@@ -130,7 +131,7 @@ def make_default(default_num_models=5,
         "surgery_quantile" : 0.5,
         "min_surgery_seqs" : 1e5,
         "len_mul" : 0.8,
-        "batch_size" : get_adaptive_batch_size_with_language_model if use_language_model else get_adaptive_batch_size,
+        "batch_size" : batch_callback,
         "learning_rate" : 0.05 if use_language_model else 0.1,
         "epochs" : [10, 4, 20] if use_language_model else [10, 2, 10],
         "crop_long_seqs" : math.inf,

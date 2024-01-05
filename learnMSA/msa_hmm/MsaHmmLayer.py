@@ -48,11 +48,12 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         built = True
         
         
-    def forward_recursion(self, inputs, training=False):
+    def forward_recursion(self, inputs, end_hints=None, training=False):
         """ Computes the forward recursion for multiple models where each model
             receives a batch of sequences as input.
         Args:
             inputs: Sequences. Shape: (num_model, b, seq_len, s)
+            end_hints: A tensor of shape (..., 2, num_states) that contains the correct state for the left and right ends of each chunk.
         Returns:
             forward variables: Shape: (num_model, b, seq_len, q)
             log-likelihoods: Shape: (num_model, b)
@@ -62,7 +63,7 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         num_model, b, seq_len, s = tf.unstack(tf.shape(inputs))
         initial_state = self.cell.get_initial_state(batch_size=b)
         #reshape to 3D inputs for RNN (cell will reshape back in each step)
-        emission_probs = self.cell.emission_probs(inputs, training)
+        emission_probs = self.cell.emission_probs(inputs, end_hints=end_hints, training=training)
         emission_probs = tf.reshape(emission_probs, (num_model*b, seq_len, self.cell.max_num_states))
         #do one initialization step
         #this way, tf will compile two versions of the cell call, one with init=True and one without
@@ -76,18 +77,19 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         return forward[...,:-1] + forward[..., -1:], loglik
     
     
-    def backward_recursion(self, inputs, training=False):
+    def backward_recursion(self, inputs, end_hints=None, training=False):
         """ Computes the backward recursion for multiple models where each model
             receives a batch of sequences as input.
         Args:
             inputs: Sequences. Shape: (num_model, b, seq_len, s)
+            end_hints: A tensor of shape (..., 2, num_states) that contains the correct state for the left and right ends of each chunk.
         Returns:
             backward variables: Shape: (num_model, b, seq_len, q)
         """
         self.reverse_cell.recurrent_init()
         num_model, b, seq_len, s = tf.unstack(tf.shape(inputs))
         initial_state = self.reverse_cell.get_initial_state(batch_size=b)
-        emission_probs = self.reverse_cell.emission_probs(inputs, training)
+        emission_probs = self.reverse_cell.emission_probs(inputs, end_hints=end_hints, training=training)
         emission_probs = tf.reshape(emission_probs, (num_model*b, seq_len, self.cell.max_num_states))
         #note that for backward, we can ignore the initial step like we did it in
         #forward, because we assume that all inputs have terminal tokens
@@ -97,10 +99,11 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         return backward[...,:-1] + backward[..., -1:]
     
     
-    def state_posterior_log_probs(self, inputs, training=False):
+    def state_posterior_log_probs(self, inputs, end_hints=None, training=False):
         """ Computes the log-probability of state q at position i given inputs.
         Args:
             inputs: Sequences. Shape: (num_model, b, seq_len, s)
+            end_hints: A tensor of shape (..., 2, num_states) that contains the correct state for the left and right ends of each chunk.
         Returns:
             state posterior probbabilities: Shape: (num_model, b, seq_len, q)
         """
@@ -109,7 +112,7 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         self.reverse_cell.recurrent_init()
         initial_state = self.cell.get_initial_state(batch_size=b)
         rev_initial_state = self.reverse_cell.get_initial_state(batch_size=b)
-        emission_probs = self.cell.emission_probs(inputs, training)
+        emission_probs = self.cell.emission_probs(inputs, end_hints=end_hints, training=training)
         emission_probs = tf.reshape(emission_probs, (num_model*b, seq_len, self.cell.max_num_states))
         #forward has to handle the first observation separately
         forward_1, step_1_state = self.cell(emission_probs[:,0], initial_state, training, init=True)
