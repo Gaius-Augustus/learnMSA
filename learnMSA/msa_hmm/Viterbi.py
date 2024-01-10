@@ -33,17 +33,18 @@ def viterbi_step(gamma_prev, emission_probs_i, hmm_cell):
     return gamma_next
 
 
-def viterbi_dyn_prog(sequences, hmm_cell):
+def viterbi_dyn_prog(sequences, hmm_cell, end_hints=None):
     """ Logarithmic (underflow safe) viterbi capable of decoding many sequences in parallel on the GPU.
     Args:
         sequences: Tensor. Shape (num_models, b, L, s).
         hmm_cell: HMM cell with the models under which decoding should happen.
+        end_hints: A optional tensor of shape (..., 2, num_states) that contains the correct state for the left and right ends of each chunk.
     Returns:
         Viterbi values (gamma) per model. Shape (num_model, b, L, q)
     """
     epsilon = tf.constant(np.finfo(np.float32).tiny)
     init = tf.transpose(hmm_cell.init_dist, (1,0,2)) #(num_models, 1, q)
-    emission_probs = hmm_cell.emission_probs(sequences, training=False)
+    emission_probs = hmm_cell.emission_probs(sequences, end_hints=end_hints, training=False)
     b0 = emission_probs[:,:,0]
     gamma_val = save_log(init) + save_log(b0)
     gamma_val = tf.cast(gamma_val, dtype=hmm_cell.dtype) 
@@ -93,7 +94,7 @@ def viterbi_backtracking(hmm_cell, gamma):
     return state_seqs_max_lik
 
 
-def viterbi(sequences, hmm_cell):
+def viterbi(sequences, hmm_cell, end_hints=None):
     """ Computes the most likely sequence of hidden states given unaligned sequences and a number of models.
         The implementation is logarithmic (underflow safe) and capable of decoding many sequences in parallel 
         on the GPU.
@@ -107,7 +108,7 @@ def viterbi(sequences, hmm_cell):
         sequences = tf.one_hot(sequences, hmm_cell.dim, dtype=hmm_cell.dtype)
     else:
         sequences = tf.cast(sequences, hmm_cell.dtype)
-    gamma = viterbi_dyn_prog(sequences, hmm_cell)
+    gamma = viterbi_dyn_prog(sequences, hmm_cell, end_hints=end_hints)
     return viterbi_backtracking(hmm_cell, gamma)
 
 
