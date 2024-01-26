@@ -126,7 +126,9 @@ def get_state_seqs_max_lik(data : SequenceDataset,
     ds = train.make_dataset(sorted_indices[:,0], 
                             batch_generator, 
                             batch_size,
-                            shuffle=False)
+                            shuffle=False,
+                            bucket_by_seq_length=True,
+                            model_lengths=hmm_cell.length)
     seq_len = data.seq_lens[sorted_indices[-1,0]]+1
     #initialize with terminal states
     state_seqs_max_lik = np.zeros((hmm_cell.num_models, indices.size, seq_len), 

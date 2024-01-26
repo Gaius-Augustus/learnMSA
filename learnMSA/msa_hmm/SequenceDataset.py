@@ -1,5 +1,6 @@
 import numpy as np
 import copy
+import math
 from Bio import SeqIO, SeqRecord
 import re
 from functools import partial
@@ -72,15 +73,18 @@ class SequenceDataset:
         return self.record_dict[self.seq_ids[i]]
 
 
-    def get_standardized_seq(self, i):
-        return str(self.get_record(i).seq).replace('-', '').replace('.', '').upper()
-
-
     def get_alphabet_no_gap(self):
         return type(self).alphabet[:-1]
 
 
-    def get_encoded_seq(self, i, remove_gaps=True, gap_symbols="-.", ignore_symbols="", replace_with_x = "BZJ", validate_alphabet=True, dtype=np.int16):
+    def get_encoded_seq(self, i, 
+                        remove_gaps=True, 
+                        gap_symbols="-.", 
+                        ignore_symbols="", 
+                        replace_with_x = "BZJ", 
+                        crop_to_length=math.inf,
+                        validate_alphabet=True, 
+                        dtype=np.int16):
         seq_str = str(self.get_record(i).upper().seq)
         # replace non-standard aminoacids with X
         for aa in replace_with_x:
@@ -99,7 +103,12 @@ class SequenceDataset:
         if validate_alphabet:
             if bool(re.compile(rf"[^{type(self).alphabet}]").search(seq_str)):
                 raise ValueError(f"Found unknown character(s) in sequence {self.seq_ids[i]}. Allowed alphabet: {type(self).alphabet}.")
-        return np.array([type(self).alphabet.index(aa) for aa in seq_str], dtype=dtype)
+        seq = np.array([type(self).alphabet.index(aa) for aa in seq_str], dtype=dtype)
+        if seq.shape[0] > crop_to_length:
+            #crop randomly
+            start = np.random.randint(0, seq.shape[0] - crop_to_length + 1)
+            seq = seq[start:start+crop_to_length]
+        return seq
      
         
     def validate_dataset(self, single_seq_ok=False, empty_seq_id_ok=False, dublicate_seq_id_ok=False):

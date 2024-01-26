@@ -71,7 +71,7 @@ def fit_and_align(data : SequenceDataset,
     # 2 staged main loop: Fits model parameters with GD and optimized model architecture with surgery
     for i in range(config["max_surgery_runs"]):
         if callable(config["batch_size"]):
-            batch_size = config["batch_size"](model_lengths, data.max_len)
+            batch_size = config["batch_size"](model_lengths, min(data.max_len, config["crop_long_seqs"]))
         else:
             batch_size = config["batch_size"]
         #set the batch size to something smaller than the dataset size even though

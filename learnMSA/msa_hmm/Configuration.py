@@ -1,3 +1,4 @@
+import math
 import numpy as np
 import tensorflow as tf
 import learnMSA.msa_hmm.Emitter as emit
@@ -24,8 +25,14 @@ def get_adaptive_batch_size(model_lengths, max_seq_len):
         return 128*num_devices
     elif max_seq_len < 850 and model_length < 550:
         return 64*num_devices
-    else:
+    elif max_seq_len < 1200 and model_length < 700:
         return 32*num_devices
+    elif max_seq_len < 2000 and model_length < 1000:
+        return 8*num_devices
+    elif max_seq_len < 4000 and model_length < 1500:
+        return 4*num_devices
+    else:
+        return 2*num_devices
     
 def get_adaptive_batch_size_with_language_model(model_lengths, max_seq_len):
     num_gpu = len([x.name for x in tf.config.list_logical_devices() if x.device_type == 'GPU']) 
@@ -39,8 +46,14 @@ def get_adaptive_batch_size_with_language_model(model_lengths, max_seq_len):
         return 50*num_devices
     elif max_seq_len < 850 and model_length < 550:
         return 25*num_devices
+    elif max_seq_len < 1200 and model_length < 700:
+        return 10*num_devices
+    elif max_seq_len < 2000 and model_length < 1000:
+        return 5*num_devices
+    elif max_seq_len < 4000 and model_length < 1500:
+        return 2*num_devices
     else:
-        return 12*num_devices
+        return 1*num_devices
 
 #the configuration can be changed by experienced users
 #proper command line support for these parameters will be added in the future
@@ -62,6 +75,7 @@ def make_default(default_num_models = 5):
         "min_surgery_seqs" : 1e5,
         "len_mul" : 0.8,
         "batch_size" : get_adaptive_batch_size,
+        "crop_long_seqs" : math.inf,
         "learning_rate" : 0.1,
         "epochs" : [10, 2, 10],
         "use_prior" : True,

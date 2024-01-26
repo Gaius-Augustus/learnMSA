@@ -2,6 +2,7 @@ import tensorflow as tf
 import numpy as np
 import gc
 import os
+import math
 from functools import partial
 from learnMSA.protein_language_models.BilinearSymmetric import make_scoring_model
 from learnMSA.msa_hmm.MsaHmmCell import MsaHmmCell
@@ -102,7 +103,10 @@ def default_model_generator(num_seq,
 
 
 class DefaultBatchGenerator():
-    def __init__(self, return_only_sequences=False, shuffle=True, alphabet_size=len(SequenceDataset.alphabet)-1):
+    def __init__(self, 
+                return_only_sequences=False, 
+                shuffle=True, 
+                alphabet_size=len(SequenceDataset.alphabet)-1):
         #generate a unique permutation of the sequence indices for each model to train
         self.return_only_sequences = return_only_sequences
         self.alphabet_size = alphabet_size
@@ -111,7 +115,9 @@ class DefaultBatchGenerator():
         
     def configure(self, data : SequenceDataset, config):
         self.data = data
-        self.num_models = config["num_models"]
+        self.config = config
+        self.num_models = config["num_models"] if "num_models" in config else 1
+        self.crop_long_seqs = config["crop_long_seqs"] if "crop_long_seqs" in config else math.inf
         self.permutations = [np.arange(data.num_seq) for _ in range(self.num_models)]
         for p in self.permutations:
             np.random.shuffle(p)
@@ -126,11 +132,12 @@ class DefaultBatchGenerator():
         else:
             permutated_indices = np.stack([indices]*self.num_models, axis=1)
         max_len = np.max(self.data.seq_lens[permutated_indices])
+        max_len = min(max_len, self.crop_long_seqs)
         batch = np.zeros((indices.shape[0], self.num_models, max_len+1), dtype=np.uint8) 
         batch += self.alphabet_size #initialize with terminal symbols
         for i,perm_ind in enumerate(permutated_indices):
             for k,j in enumerate(perm_ind):
-                batch[i, k, :self.data.seq_lens[j]] = self.data.get_encoded_seq(j)
+                batch[i, k, :min(self.data.seq_lens[j], self.crop_long_seqs)] = self.data.get_encoded_seq(j, crop_to_length=self.crop_long_seqs)
         if self.return_only_sequences:
             return batch
         else:
@@ -263,20 +270,31 @@ class EmbeddingBatchGenerator(DefaultBatchGenerator):
           
 # batch_generator is a callable object that maps a vector of sequence indices to
 # inputs compatible with the model
-def make_dataset(indices, batch_generator, batch_size=512, shuffle=True):   
+def make_dataset(indices, batch_generator, batch_size=512, shuffle=True, bucket_by_seq_length=False, model_lengths=[0]):   
     batch_generator.shuffle = shuffle
     ds = tf.data.Dataset.from_tensor_slices(indices)
-    if shuffle:
-        ds = ds.shuffle(indices.size, reshuffle_each_iteration=True)
-        ds = ds.repeat()
-    ds = ds.batch(batch_size)
-    ds = ds.map(lambda i: tf.numpy_function(func=batch_generator,
-                inp=[i], Tout=batch_generator.get_out_types()),
+    ds_len = tf.data.Dataset.from_tensor_slices(batch_generator.data.seq_lens[indices].astype(np.int32))
+    ds = tf.data.Dataset.zip((ds, ds_len))
+    if bucket_by_seq_length:
+        adaptive_batch = batch_generator.config["batch_size"]
+        if not callable(adaptive_batch):
+            raise ValueError("""Batch generator must be configured with a configuration that support adaptive batch size callsback,
+                                if bucket_by_seq_length is True.""")
+        bucket_boundaries = [200, 520, 700, 850, 1200, 2000, 4000, math.inf]
+        bucket_batch_sizes = [adaptive_batch(model_lengths, b) for b in bucket_boundaries]
+        ds = ds.bucket_by_sequence_length(
+                                element_length_func=lambda _,L: L,
+                                bucket_boundaries=bucket_boundaries[:-1],
+                                bucket_batch_sizes=bucket_batch_sizes)
+    else:
+        if shuffle:
+            ds = ds.shuffle(indices.size, reshuffle_each_iteration=True)
+            ds = ds.repeat()
+        ds = ds.batch(batch_size)
+    ds = ds.map(lambda i,_: tf.numpy_function(func=batch_generator, inp=[i], Tout=batch_generator.get_out_types()),
                 # no parallel processing if using an indexed dataset
                 num_parallel_calls=None if batch_generator.data.indexed else tf.data.AUTOTUNE,
                 deterministic=True)
-    ds_y = tf.data.Dataset.from_tensor_slices(tf.zeros(1)).batch(batch_size).repeat()
-    ds = tf.data.Dataset.zip((ds, ds_y))
     if not batch_generator.data.indexed:
         ds = ds.prefetch(2) #preprocessings and training steps in parallel
     # get rid of a warning, see https://github.com/tensorflow/tensorflow/issues/42146
@@ -284,6 +302,7 @@ def make_dataset(indices, batch_generator, batch_size=512, shuffle=True):
     options = tf.data.Options()
     options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.DATA
     ds = ds.with_options(options)
+    ds = tf.data.Dataset.zip((ds, tf.data.Dataset.from_tensor_slices(tf.zeros(1))))
     return ds
     
 
