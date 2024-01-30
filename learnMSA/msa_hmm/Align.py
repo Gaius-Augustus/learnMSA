@@ -3,6 +3,7 @@ import numpy as np
 import time
 import os
 import sys
+import math
 from pathlib import Path
 import subprocess
 from shutil import which
@@ -213,12 +214,15 @@ def get_state_expectations(data : SequenceDataset,
     num_indices = indices.shape[0]
     sorted_indices = np.array([[i,j] for l,i,j in sorted(zip(data.seq_lens[indices], indices, range(num_indices)))])
     msa_hmm_layer.cell.recurrent_init()
+    cell = msa_hmm_layer.cell
+    old_crop_long_seqs = batch_generator.crop_long_seqs
+    batch_generator.crop_long_seqs = math.inf #do not crop sequences
     ds = train.make_dataset(sorted_indices[:,0], 
                             batch_generator, 
                             batch_size,
-                            shuffle=False)
-    
-    cell = msa_hmm_layer.cell
+                            shuffle=False,
+                            bucket_by_seq_length=True,
+                            model_lengths=cell.length)
     
     @tf.function(input_signature=[[tf.TensorSpec(x.shape, dtype=x.dtype) for x in encoder.inputs]])
     def batch_posterior_state_probs(inputs):
@@ -233,14 +237,14 @@ def get_state_expectations(data : SequenceDataset,
     
     if reduce:
         posterior_probs = tf.zeros((cell.num_models, cell.max_num_states), cell.dtype) 
-        for inputs, _ in ds:
+        for (*inputs, _), _ in ds:
             posterior_probs += batch_posterior_state_probs(inputs)
-        return posterior_probs.numpy()
     else:
         posterior_probs = np.zeros((cell.num_models, num_indices, cell.max_num_states), cell.dtype) 
-        for i, (inputs, _) in enumerate(ds):
-            posterior_probs[:,i*batch_size : (i+1)*batch_size] = batch_posterior_state_probs(inputs)
-        return posterior_probs
+        for (*inputs, batch_indices), _ in ds:
+            posterior_probs[:,batch_indices] = batch_posterior_state_probs(inputs)
+    batch_generator.crop_long_seqs = old_crop_long_seqs       
+    return posterior_probs
     
         
 def get_discard_or_expand_positions(am, 

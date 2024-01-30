@@ -57,7 +57,9 @@ def run_main():
     parser.add_argument("--indexed_data", dest="indexed_data", action='store_true', help="Don't load all data into memory at once at the cost of training time.")
     
     parser.add_argument("--unaligned_insertions", dest="unaligned_insertions", action='store_true', help="Insertions will be left unaligned.")
-    parser.add_argument("--crop_long_seqs", dest="crop_long_seqs", type=float,  default=math.inf, help="During training, sequences longer than the given value will be cropped randomly. Increases training speed and reduces memory usage, but might produce inaccurate results if too much of the sequences is cropped.")
+    parser.add_argument("--crop", dest="crop", type=str,  default="auto", help="""During training, sequences longer than the given value will be cropped randomly. 
+    Reduces training runtime and memory usage, but might produce inaccurate results if too much of the sequences is cropped. The output alignment will not be cropped. 
+    Can be set to auto in which case sequences longer than 3 times the average length are cropped. Can be set to disable. (default: %(default)s)""")
     
     parser.add_argument("--sequence_weights", dest="sequence_weights", action='store_true', help="Uses mmseqs2 to rapidly cluster the sequences and compute sequence weights before the MSA. (default: %(default)s)")
     parser.add_argument("--cluster_dir", dest="cluster_dir", type=str, default="tmp", help="Directory where the sequence clustering is stored. (default: %(default)s)")
@@ -113,7 +115,6 @@ def run_main():
     config["surgery_ins"] = args.surgery_ins
     config["model_criterion"] = args.model_criterion
     config["use_language_model"] = args.use_language_model
-    config["crop_long_seqs"] = args.crop_long_seqs
     transitioners = config["transitioner"] if hasattr(config["transitioner"], '__iter__') else [config["transitioner"]]
     for trans in transitioners:
         trans.prior.alpha_flank = args.alpha_flank
@@ -157,6 +158,12 @@ def run_main():
     try:
         with SequenceDataset(args.input_file, "fasta", indexed=args.indexed_data) as data:
             data.validate_dataset()
+            if args.crop == "disable":
+                config["crop_long_seqs"] = math.inf
+            elif args.crop == "auto":
+                config["crop_long_seqs"] = int(np.ceil(3 * np.mean(data.seq_lens)))
+            else:
+                config["crop_long_seqs"] = int(args.crop)
             _ = Align.run_learnMSA(data,
                                     out_filename = args.output_file,
                                     config = config, 
@@ -167,7 +174,7 @@ def run_main():
                                     verbose = not args.silent)
     except ValueError as e:
         raise SystemExit(e) 
-            
+
             
 if __name__ == '__main__':
     run_main()

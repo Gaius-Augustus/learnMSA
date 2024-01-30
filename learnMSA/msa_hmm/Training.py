@@ -145,7 +145,7 @@ class DefaultBatchGenerator():
     
     def get_out_types(self):
         if self.return_only_sequences:
-            return (tf.uint8)
+            return (tf.uint8, )
         else:
             return (tf.uint8, tf.int64) 
         
@@ -263,7 +263,7 @@ class EmbeddingBatchGenerator(DefaultBatchGenerator):
     
     def get_out_types(self):
         if self.return_only_sequences:
-            return (tf.uint8)
+            return (tf.uint8, )
         else:
             return (tf.uint8, tf.int64, tf.float32)  
     
@@ -271,11 +271,13 @@ class EmbeddingBatchGenerator(DefaultBatchGenerator):
 # batch_generator is a callable object that maps a vector of sequence indices to
 # inputs compatible with the model
 def make_dataset(indices, batch_generator, batch_size=512, shuffle=True, bucket_by_seq_length=False, model_lengths=[0]):   
+    shuffle = shuffle and not bucket_by_seq_length
     batch_generator.shuffle = shuffle
     ds = tf.data.Dataset.from_tensor_slices(indices)
-    ds_len = tf.data.Dataset.from_tensor_slices(batch_generator.data.seq_lens[indices].astype(np.int32))
-    ds = tf.data.Dataset.zip((ds, ds_len))
     if bucket_by_seq_length:
+        ds_len = tf.data.Dataset.from_tensor_slices(batch_generator.data.seq_lens[indices].astype(np.int32))
+        ds_ind =  tf.data.Dataset.from_tensor_slices(np.arange(indices.size))
+        ds = tf.data.Dataset.zip((ds, ds_len, ds_ind))
         adaptive_batch = batch_generator.config["batch_size"]
         if not callable(adaptive_batch):
             raise ValueError("""Batch generator must be configured with a configuration that support adaptive batch size callsback,
@@ -283,15 +285,22 @@ def make_dataset(indices, batch_generator, batch_size=512, shuffle=True, bucket_
         bucket_boundaries = [200, 520, 700, 850, 1200, 2000, 4000, math.inf]
         bucket_batch_sizes = [adaptive_batch(model_lengths, b) for b in bucket_boundaries]
         ds = ds.bucket_by_sequence_length(
-                                element_length_func=lambda _,L: L,
+                                element_length_func=lambda i,L,j: L,
                                 bucket_boundaries=bucket_boundaries[:-1],
                                 bucket_batch_sizes=bucket_batch_sizes)
+
+        batch_func_out_types = batch_generator.get_out_types() + (tf.int64,)
+        func = (lambda i,j: (batch_generator(i), j)) if len(batch_func_out_types) == 2 else lambda i,j: (*batch_generator(i), j)
+        batch_func = lambda i,_,j: tf.numpy_function(func=func, inp=[i,j], Tout=batch_func_out_types)
     else:
         if shuffle:
             ds = ds.shuffle(indices.size, reshuffle_each_iteration=True)
             ds = ds.repeat()
         ds = ds.batch(batch_size)
-    ds = ds.map(lambda i,_: tf.numpy_function(func=batch_generator, inp=[i], Tout=batch_generator.get_out_types()),
+
+        batch_func = lambda i: tf.numpy_function(func=batch_generator, inp=[i], Tout=batch_generator.get_out_types())
+
+    ds = ds.map(batch_func,
                 # no parallel processing if using an indexed dataset
                 num_parallel_calls=None if batch_generator.data.indexed else tf.data.AUTOTUNE,
                 deterministic=True)
@@ -302,7 +311,7 @@ def make_dataset(indices, batch_generator, batch_size=512, shuffle=True, bucket_
     options = tf.data.Options()
     options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.DATA
     ds = ds.with_options(options)
-    ds = tf.data.Dataset.zip((ds, tf.data.Dataset.from_tensor_slices(tf.zeros(1))))
+    ds = tf.data.Dataset.zip((ds, tf.data.Dataset.from_tensor_slices(tf.zeros(1)).repeat()))
     return ds
     
 
@@ -328,6 +337,11 @@ def fit_model(model_generator,
             print("Using sequence weights ", sequence_weights, ".")
         else:
             print("Don't use sequence weights.")
+        if batch_generator.crop_long_seqs < math.inf:
+            num_cropped = np.sum(data.seq_lens[indices] > batch_generator.crop_long_seqs)
+            if num_cropped > 0:
+                print(f"""{num_cropped} sequences are longer than {batch_generator.crop_long_seqs} and will be cropped for training.""")
+                print("To disable cropping, use --crop disable. To change the cropping limit to X, use --crop X.")
     def make_and_compile():
         model = model_generator(num_seq=data.num_seq,
                                 effective_num_seq=indices.shape[0],

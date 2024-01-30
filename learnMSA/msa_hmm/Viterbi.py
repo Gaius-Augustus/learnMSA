@@ -3,6 +3,7 @@ import numpy as np
 import learnMSA.msa_hmm.Training as train
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 import time
+import math
 
 
 def viterbi_step(gamma_prev, emission_probs_i, hmm_cell):
@@ -120,16 +121,16 @@ def get_state_seqs_max_lik(data : SequenceDataset,
     num_gpu = len([x.name for x in tf.config.list_logical_devices() if x.device_type == 'GPU']) 
     num_devices = num_gpu + int(num_gpu==0) #account for the CPU-only case 
     batch_size = int(batch_size / num_devices)
-    #compute an optimized order for decoding that sorts sequences of equal length into the same batch
-    sorted_indices = np.array([[i,j] for l,i,j in sorted(zip(data.seq_lens[indices], indices, range(indices.size)))])
     hmm_cell.recurrent_init()
-    ds = train.make_dataset(sorted_indices[:,0], 
+    old_crop_long_seqs = batch_generator.crop_long_seqs
+    batch_generator.crop_long_seqs = math.inf #do not crop sequences
+    ds = train.make_dataset(indices, 
                             batch_generator, 
                             batch_size,
                             shuffle=False,
                             bucket_by_seq_length=True,
                             model_lengths=hmm_cell.length)
-    seq_len = data.seq_lens[sorted_indices[-1,0]]+1
+    seq_len = np.amax(data.seq_lens[indices]+1)
     #initialize with terminal states
     state_seqs_max_lik = np.zeros((hmm_cell.num_models, indices.size, seq_len), 
                                   dtype=np.uint16) 
@@ -154,15 +155,15 @@ def get_state_seqs_max_lik(data : SequenceDataset,
     
     for i,q in enumerate(hmm_cell.num_states):
         state_seqs_max_lik[i] = q-1 #terminal state
-    i = 0     
-    for inputs, _ in ds:
+    for (*inputs, batch_indices), _ in ds:
         if hasattr(batch_generator, "return_only_sequences") and batch_generator.return_only_sequences:
-            state_seqs_max_lik_batch = call_viterbi_single(inputs).numpy()
+            state_seqs_max_lik_batch = call_viterbi_single(inputs[0]).numpy()
         else:
             state_seqs_max_lik_batch = call_viterbi(inputs).numpy()
         _,b,l = state_seqs_max_lik_batch.shape
-        state_seqs_max_lik[:, i:i+b, :l] = state_seqs_max_lik_batch
-        i += b 
-    #reorder back to the original order 
-    state_seqs_max_lik = state_seqs_max_lik[:,np.argsort(sorted_indices[:,1])]
+        state_seqs_max_lik[:, batch_indices, :l] = state_seqs_max_lik_batch
+
+    # revert batch generator state
+    batch_generator.crop_long_seqs = old_crop_long_seqs
+
     return state_seqs_max_lik
