@@ -198,12 +198,8 @@ class EmbeddingBatchGenerator(DefaultBatchGenerator):
                 self.batch_size = config["batch_size"]([0], data.max_len)
             else: 
                 self.batch_size = config["batch_size"]
-            if self.scoring_model_config.lm_name == "esm2s":
-                self.batch_size //= 2
-            if self.scoring_model_config.lm_name == "protT5":
-                self.batch_size //= 4
             if self.scoring_model_config.lm_name == "esm2":
-                self.batch_size //= 4
+                self.batch_size //= 2
             print("Computing all embeddings (this may take a while).")
             for i in range(0, data.num_seq, self.batch_size):
                 seq_batch = [data.get_standardized_seq(j) for j in range(i, min(i+self.batch_size, data.num_seq))]      

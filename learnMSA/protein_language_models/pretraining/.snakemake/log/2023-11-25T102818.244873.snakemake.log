@@ -1,0 +1,39 @@
+Building DAG of jobs...
+Using shell: /usr/bin/bash
+Provided cluster nodes: 12
+Provided resources: msa_load=24, learnMSA_load=12
+Job stats:
+job                    count    min threads    max threads
+-------------------  -------  -------------  -------------
+all                        1              1              1
+train_scoring_model        1              4              4
+total                      2              1              4
+
+Select jobs to execute...
+
+[Sat Nov 25 10:28:30 2023]
+rule train_scoring_model:
+    output: outputs/protT5_32_sigmoid.out
+    jobid: 12
+    reason: Missing output files: outputs/protT5_32_sigmoid.out
+    wildcards: lm=protT5, dimension=32, activation=sigmoid
+    threads: 4
+    resources: mem_mb=100000, mem_mib=95368, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=vision, gpu=1, runtime=4320
+
+Submitted job 12 with external jobid '2276559'.
+[Sat Nov 25 21:26:52 2023]
+Finished job 12.
+1 of 2 steps (50%) done
+Select jobs to execute...
+
+[Sat Nov 25 21:26:52 2023]
+localrule all:
+    input: outputs/esm2_16_softmax.out, outputs/esm2_16_sigmoid.out, outputs/esm2_32_softmax.out, outputs/esm2_32_sigmoid.out, outputs/esm2_64_softmax.out, outputs/esm2_64_sigmoid.out, outputs/esm2_128_softmax.out, outputs/esm2_128_sigmoid.out, outputs/protT5_16_softmax.out, outputs/protT5_16_sigmoid.out, outputs/protT5_32_softmax.out, outputs/protT5_32_sigmoid.out, outputs/protT5_64_softmax.out, outputs/protT5_64_sigmoid.out, outputs/protT5_128_softmax.out, outputs/protT5_128_sigmoid.out, outputs/proteinBERT_16_softmax.out, outputs/proteinBERT_16_sigmoid.out, outputs/proteinBERT_32_softmax.out, outputs/proteinBERT_32_sigmoid.out, outputs/proteinBERT_64_softmax.out, outputs/proteinBERT_64_sigmoid.out, outputs/proteinBERT_128_softmax.out, outputs/proteinBERT_128_sigmoid.out
+    jobid: 0
+    reason: Input files updated by another job: outputs/protT5_32_sigmoid.out
+    resources: mem_mb=10000, mem_mib=9537, disk_mb=1000, disk_mib=954, tmpdir=/tmp, partition=pinky, gpu=0
+
+[Sat Nov 25 21:26:52 2023]
+Finished job 0.
+2 of 2 steps (100%) done
+Complete log: .snakemake/log/2023-11-25T102818.244873.snakemake.log

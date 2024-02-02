@@ -1,0 +1,1 @@
+{"loss": [49.28791046142578, 43.35127639770508, 42.42216491699219, 41.90642166137695], "lm": "proteinBERT", "lr": 0.01, "batch": 64, "max_protein_len": 512, "reduced_dim": 128, "components": 32, "activation": "softmax", "suffix": ""}

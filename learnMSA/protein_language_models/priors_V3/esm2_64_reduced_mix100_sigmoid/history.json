@@ -1,0 +1,1 @@
+{"loss": [3.5255420207977295, -2.2595131397247314, -2.642425537109375, -2.5480098724365234], "lm": "esm2", "lr": 0.01, "batch": 64, "max_protein_len": 512, "reduced_dim": 64, "components": 100, "activation": "sigmoid", "suffix": ""}

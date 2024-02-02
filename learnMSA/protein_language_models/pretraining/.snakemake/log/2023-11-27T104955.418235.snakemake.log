@@ -1,0 +1,159 @@
+Building DAG of jobs...
+Using shell: /usr/bin/bash
+Provided cluster nodes: 12
+Provided resources: msa_load=24, learnMSA_load=12
+Job stats:
+job                   count    min threads    max threads
+------------------  -------  -------------  -------------
+all                       1              1              1
+concat_prior_tests        1              1              1
+test_prior               96              4              4
+total                    98              1              4
+
+Select jobs to execute...
+
+[Mon Nov 27 10:49:58 2023]
+rule test_prior:
+    input: train_prior_outputs/esm2_64_sigmoid_32.out
+    output: results/test_prior_rows/esm2_64_sigmoid_32
+    jobid: 96
+    reason: Missing output files: results/test_prior_rows/esm2_64_sigmoid_32
+    wildcards: lm=esm2, dimension=64, activation=sigmoid, num_components=32
+    threads: 4
+    resources: mem_mb=32000, mem_mib=30518, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=vision, gpu=1, runtime=60
+
+Submitted job 96 with external jobid '2324381'.
+
+[Mon Nov 27 10:50:06 2023]
+rule test_prior:
+    input: train_prior_outputs/esm2_64_sigmoid_100.out
+    output: results/test_prior_rows/esm2_64_sigmoid_100
+    jobid: 98
+    reason: Missing output files: results/test_prior_rows/esm2_64_sigmoid_100
+    wildcards: lm=esm2, dimension=64, activation=sigmoid, num_components=100
+    threads: 4
+    resources: mem_mb=32000, mem_mib=30518, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=vision, gpu=1, runtime=60
+
+Submitted job 98 with external jobid '2324382'.
+
+[Mon Nov 27 10:50:06 2023]
+rule test_prior:
+    input: train_prior_outputs/esm2_128_softmax_1.out
+    output: results/test_prior_rows/esm2_128_softmax_1
+    jobid: 100
+    reason: Missing output files: results/test_prior_rows/esm2_128_softmax_1
+    wildcards: lm=esm2, dimension=128, activation=softmax, num_components=1
+    threads: 4
+    resources: mem_mb=32000, mem_mib=30518, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=vision, gpu=1, runtime=60
+
+Submitted job 100 with external jobid '2324383'.
+
+[Mon Nov 27 10:50:06 2023]
+rule test_prior:
+    input: train_prior_outputs/esm2_128_softmax_10.out
+    output: results/test_prior_rows/esm2_128_softmax_10
+    jobid: 102
+    reason: Missing output files: results/test_prior_rows/esm2_128_softmax_10
+    wildcards: lm=esm2, dimension=128, activation=softmax, num_components=10
+    threads: 4
+    resources: mem_mb=32000, mem_mib=30518, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=vision, gpu=1, runtime=60
+
+Submitted job 102 with external jobid '2324384'.
+
+[Mon Nov 27 10:50:06 2023]
+rule test_prior:
+    input: train_prior_outputs/esm2_128_softmax_32.out
+    output: results/test_prior_rows/esm2_128_softmax_32
+    jobid: 104
+    reason: Missing output files: results/test_prior_rows/esm2_128_softmax_32
+    wildcards: lm=esm2, dimension=128, activation=softmax, num_components=32
+    threads: 4
+    resources: mem_mb=32000, mem_mib=30518, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=vision, gpu=1, runtime=60
+
+Submitted job 104 with external jobid '2324385'.
+
+[Mon Nov 27 10:50:06 2023]
+rule test_prior:
+    input: train_prior_outputs/esm2_128_softmax_100.out
+    output: results/test_prior_rows/esm2_128_softmax_100
+    jobid: 106
+    reason: Missing output files: results/test_prior_rows/esm2_128_softmax_100
+    wildcards: lm=esm2, dimension=128, activation=softmax, num_components=100
+    threads: 4
+    resources: mem_mb=32000, mem_mib=30518, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=vision, gpu=1, runtime=60
+
+Submitted job 106 with external jobid '2324386'.
+
+[Mon Nov 27 10:50:06 2023]
+rule test_prior:
+    input: train_prior_outputs/esm2_128_sigmoid_1.out
+    output: results/test_prior_rows/esm2_128_sigmoid_1
+    jobid: 108
+    reason: Missing output files: results/test_prior_rows/esm2_128_sigmoid_1
+    wildcards: lm=esm2, dimension=128, activation=sigmoid, num_components=1
+    threads: 4
+    resources: mem_mb=32000, mem_mib=30518, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=vision, gpu=1, runtime=60
+
+Submitted job 108 with external jobid '2324387'.
+
+[Mon Nov 27 10:50:06 2023]
+rule test_prior:
+    input: train_prior_outputs/esm2_128_sigmoid_10.out
+    output: results/test_prior_rows/esm2_128_sigmoid_10
+    jobid: 110
+    reason: Missing output files: results/test_prior_rows/esm2_128_sigmoid_10
+    wildcards: lm=esm2, dimension=128, activation=sigmoid, num_components=10
+    threads: 4
+    resources: mem_mb=32000, mem_mib=30518, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=vision, gpu=1, runtime=60
+
+Submitted job 110 with external jobid '2324388'.
+
+[Mon Nov 27 10:50:07 2023]
+rule test_prior:
+    input: train_prior_outputs/esm2_128_sigmoid_32.out
+    output: results/test_prior_rows/esm2_128_sigmoid_32
+    jobid: 112
+    reason: Missing output files: results/test_prior_rows/esm2_128_sigmoid_32
+    wildcards: lm=esm2, dimension=128, activation=sigmoid, num_components=32
+    threads: 4
+    resources: mem_mb=32000, mem_mib=30518, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=vision, gpu=1, runtime=60
+
+Submitted job 112 with external jobid '2324389'.
+
+[Mon Nov 27 10:50:07 2023]
+rule test_prior:
+    input: train_prior_outputs/esm2_128_sigmoid_100.out
+    output: results/test_prior_rows/esm2_128_sigmoid_100
+    jobid: 114
+    reason: Missing output files: results/test_prior_rows/esm2_128_sigmoid_100
+    wildcards: lm=esm2, dimension=128, activation=sigmoid, num_components=100
+    threads: 4
+    resources: mem_mb=32000, mem_mib=30518, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=vision, gpu=1, runtime=60
+
+Submitted job 114 with external jobid '2324390'.
+
+[Mon Nov 27 10:50:07 2023]
+rule test_prior:
+    input: train_prior_outputs/esm2_64_softmax_32.out
+    output: results/test_prior_rows/esm2_64_softmax_32
+    jobid: 88
+    reason: Missing output files: results/test_prior_rows/esm2_64_softmax_32
+    wildcards: lm=esm2, dimension=64, activation=softmax, num_components=32
+    threads: 4
+    resources: mem_mb=32000, mem_mib=30518, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=vision, gpu=1, runtime=60
+
+Submitted job 88 with external jobid '2324391'.
+
+[Mon Nov 27 10:50:07 2023]
+rule test_prior:
+    input: train_prior_outputs/esm2_64_softmax_100.out
+    output: results/test_prior_rows/esm2_64_softmax_100
+    jobid: 90
+    reason: Missing output files: results/test_prior_rows/esm2_64_softmax_100
+    wildcards: lm=esm2, dimension=64, activation=softmax, num_components=100
+    threads: 4
+    resources: mem_mb=32000, mem_mib=30518, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=vision, gpu=1, runtime=60
+
+Submitted job 90 with external jobid '2324392'.
+Terminating processes on user request, this might take some time.
+Complete log: .snakemake/log/2023-11-27T104955.418235.snakemake.log

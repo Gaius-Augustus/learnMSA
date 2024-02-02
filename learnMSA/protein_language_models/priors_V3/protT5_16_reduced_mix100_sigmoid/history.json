@@ -1,0 +1,1 @@
+{"loss": [14.09963321685791, 13.819049835205078, 13.80937671661377, 13.815460205078125], "lm": "protT5", "lr": 0.01, "batch": 64, "max_protein_len": 512, "reduced_dim": 16, "components": 100, "activation": "sigmoid", "suffix": ""}

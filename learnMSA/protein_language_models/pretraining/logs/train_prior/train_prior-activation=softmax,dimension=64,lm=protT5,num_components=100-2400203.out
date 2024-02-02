@@ -1,0 +1,29 @@
+Building DAG of jobs...
+Using shell: /usr/bin/bash
+Provided cores: 4
+Rules claiming more threads will be scaled down.
+Provided resources: mem_mb=100000, mem_mib=95368, disk_mb=1000, disk_mib=954, gpu=1
+Select jobs to execute...
+
+[Thu Dec 14 07:07:03 2023]
+rule train_prior:
+    input: train_scoring_model_outputs/protT5_64_softmax.out
+    output: train_prior_outputs/protT5_64_softmax_100.out
+    jobid: 0
+    reason: Missing output files: train_prior_outputs/protT5_64_softmax_100.out
+    wildcards: lm=protT5, dimension=64, activation=softmax, num_components=100
+    threads: 4
+    resources: mem_mb=100000, mem_mib=95368, disk_mb=1000, disk_mib=954, tmpdir=/tmp, partition=vision, gpu=1, runtime=2880
+
+
+        cd .. && python3 PretrainMvnPrior.py --lm protT5 --reduced_dim 64             --activation softmax --components 100 --unscaled > train_scoring_models/train_prior_outputs/protT5_64_softmax_100.out
+        
+2023-12-14 07:07:03.431829: I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following CPU instructions in performance-critical operations:  SSE4.1 SSE4.2 AVX AVX2 FMA
+To enable them in other operations, rebuild TensorFlow with the appropriate compiler flags.
+2023-12-14 07:07:43.778263: I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following CPU instructions in performance-critical operations:  SSE4.1 SSE4.2 AVX AVX2 FMA
+To enable them in other operations, rebuild TensorFlow with the appropriate compiler flags.
+2023-12-14 07:07:44.442138: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1616] Created device /job:localhost/replica:0/task:0/device:GPU:0 with 78968 MB memory:  -> device: 0, name: NVIDIA A100-SXM4-80GB, pci bus id: 0000:81:00.0, compute capability: 8.0
+2023-12-14 07:08:29.765573: I tensorflow/stream_executor/cuda/cuda_blas.cc:1614] TensorFloat-32 will be used for the matrix multiplication. This will only be logged once.
+[Thu Dec 14 09:27:53 2023]
+Finished job 0.
+1 of 1 steps (100%) done

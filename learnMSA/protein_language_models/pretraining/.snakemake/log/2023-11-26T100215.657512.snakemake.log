@@ -1,0 +1,178 @@
+Building DAG of jobs...
+Using shell: /usr/bin/bash
+Provided cluster nodes: 12
+Provided resources: msa_load=24, learnMSA_load=12
+Job stats:
+job                      count    min threads    max threads
+---------------------  -------  -------------  -------------
+all                          1              1              1
+concat_results_scores        2              1              1
+total                        3              1              1
+
+Select jobs to execute...
+
+[Sun Nov 26 10:02:16 2023]
+rule concat_results_scores:
+    input: results/rows/esm2_16_softmax, results/rows/esm2_32_softmax, results/rows/esm2_64_softmax, results/rows/esm2_128_softmax, results/rows/protT5_16_softmax, results/rows/protT5_32_softmax, results/rows/protT5_64_softmax, results/rows/protT5_128_softmax, results/rows/proteinBERT_16_softmax, results/rows/proteinBERT_32_softmax, results/rows/proteinBERT_64_softmax, results/rows/proteinBERT_128_softmax
+    output: results/softmax.tbl
+    jobid: 1
+    reason: Missing output files: results/softmax.tbl; Code has changed since last execution
+    wildcards: activation=softmax
+    resources: mem_mb=1000, mem_mib=954, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=batch,snowball,pinky, gpu=0
+
+Submitted job 1 with external jobid '2278155'.
+
+[Sun Nov 26 10:02:17 2023]
+rule concat_results_scores:
+    input: results/rows/esm2_16_sigmoid, results/rows/esm2_32_sigmoid, results/rows/esm2_64_sigmoid, results/rows/esm2_128_sigmoid, results/rows/protT5_16_sigmoid, results/rows/protT5_32_sigmoid, results/rows/protT5_64_sigmoid, results/rows/protT5_128_sigmoid, results/rows/proteinBERT_16_sigmoid, results/rows/proteinBERT_32_sigmoid, results/rows/proteinBERT_64_sigmoid, results/rows/proteinBERT_128_sigmoid
+    output: results/sigmoid.tbl
+    jobid: 14
+    reason: Missing output files: results/sigmoid.tbl; Code has changed since last execution
+    wildcards: activation=sigmoid
+    resources: mem_mb=1000, mem_mib=954, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=batch,snowball,pinky, gpu=0
+
+Submitted job 14 with external jobid '2278156'.
+[Sun Nov 26 10:02:26 2023]
+Error in rule concat_results_scores:
+    jobid: 1
+    input: results/rows/esm2_16_softmax, results/rows/esm2_32_softmax, results/rows/esm2_64_softmax, results/rows/esm2_128_softmax, results/rows/protT5_16_softmax, results/rows/protT5_32_softmax, results/rows/protT5_64_softmax, results/rows/protT5_128_softmax, results/rows/proteinBERT_16_softmax, results/rows/proteinBERT_32_softmax, results/rows/proteinBERT_64_softmax, results/rows/proteinBERT_128_softmax
+    output: results/softmax.tbl
+    cluster_jobid: 2278155
+
+Error executing rule concat_results_scores on cluster (jobid: 1, external: 2278155, jobscript: /home/beckerf/tmp_work/learnMSA/learnMSA/protein_language_models/train_scoring_models/.snakemake/tmp.9kpnhqr7/snakejob.concat_results_scores.1.sh). For error details see the cluster log and the log files of the involved rule(s).
+Trying to restart job 1.
+Select jobs to execute...
+
+[Sun Nov 26 10:02:26 2023]
+rule concat_results_scores:
+    input: results/rows/esm2_16_softmax, results/rows/esm2_32_softmax, results/rows/esm2_64_softmax, results/rows/esm2_128_softmax, results/rows/protT5_16_softmax, results/rows/protT5_32_softmax, results/rows/protT5_64_softmax, results/rows/protT5_128_softmax, results/rows/proteinBERT_16_softmax, results/rows/proteinBERT_32_softmax, results/rows/proteinBERT_64_softmax, results/rows/proteinBERT_128_softmax
+    output: results/softmax.tbl
+    jobid: 1
+    reason: Missing output files: results/softmax.tbl; Code has changed since last execution
+    wildcards: activation=softmax
+    resources: mem_mb=1000, mem_mib=954, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=batch,snowball,pinky, gpu=0
+
+Submitted job 1 with external jobid '2278157'.
+[Sun Nov 26 10:02:27 2023]
+Error in rule concat_results_scores:
+    jobid: 14
+    input: results/rows/esm2_16_sigmoid, results/rows/esm2_32_sigmoid, results/rows/esm2_64_sigmoid, results/rows/esm2_128_sigmoid, results/rows/protT5_16_sigmoid, results/rows/protT5_32_sigmoid, results/rows/protT5_64_sigmoid, results/rows/protT5_128_sigmoid, results/rows/proteinBERT_16_sigmoid, results/rows/proteinBERT_32_sigmoid, results/rows/proteinBERT_64_sigmoid, results/rows/proteinBERT_128_sigmoid
+    output: results/sigmoid.tbl
+    cluster_jobid: 2278156
+
+Error executing rule concat_results_scores on cluster (jobid: 14, external: 2278156, jobscript: /home/beckerf/tmp_work/learnMSA/learnMSA/protein_language_models/train_scoring_models/.snakemake/tmp.9kpnhqr7/snakejob.concat_results_scores.14.sh). For error details see the cluster log and the log files of the involved rule(s).
+Trying to restart job 14.
+Select jobs to execute...
+
+[Sun Nov 26 10:02:27 2023]
+rule concat_results_scores:
+    input: results/rows/esm2_16_sigmoid, results/rows/esm2_32_sigmoid, results/rows/esm2_64_sigmoid, results/rows/esm2_128_sigmoid, results/rows/protT5_16_sigmoid, results/rows/protT5_32_sigmoid, results/rows/protT5_64_sigmoid, results/rows/protT5_128_sigmoid, results/rows/proteinBERT_16_sigmoid, results/rows/proteinBERT_32_sigmoid, results/rows/proteinBERT_64_sigmoid, results/rows/proteinBERT_128_sigmoid
+    output: results/sigmoid.tbl
+    jobid: 14
+    reason: Missing output files: results/sigmoid.tbl; Code has changed since last execution
+    wildcards: activation=sigmoid
+    resources: mem_mb=1000, mem_mib=954, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=batch,snowball,pinky, gpu=0
+
+Submitted job 14 with external jobid '2278158'.
+[Sun Nov 26 10:02:37 2023]
+Error in rule concat_results_scores:
+    jobid: 1
+    input: results/rows/esm2_16_softmax, results/rows/esm2_32_softmax, results/rows/esm2_64_softmax, results/rows/esm2_128_softmax, results/rows/protT5_16_softmax, results/rows/protT5_32_softmax, results/rows/protT5_64_softmax, results/rows/protT5_128_softmax, results/rows/proteinBERT_16_softmax, results/rows/proteinBERT_32_softmax, results/rows/proteinBERT_64_softmax, results/rows/proteinBERT_128_softmax
+    output: results/softmax.tbl
+    cluster_jobid: 2278157
+
+Error executing rule concat_results_scores on cluster (jobid: 1, external: 2278157, jobscript: /home/beckerf/tmp_work/learnMSA/learnMSA/protein_language_models/train_scoring_models/.snakemake/tmp.9kpnhqr7/snakejob.concat_results_scores.1.sh). For error details see the cluster log and the log files of the involved rule(s).
+Trying to restart job 1.
+Select jobs to execute...
+
+[Sun Nov 26 10:02:37 2023]
+rule concat_results_scores:
+    input: results/rows/esm2_16_softmax, results/rows/esm2_32_softmax, results/rows/esm2_64_softmax, results/rows/esm2_128_softmax, results/rows/protT5_16_softmax, results/rows/protT5_32_softmax, results/rows/protT5_64_softmax, results/rows/protT5_128_softmax, results/rows/proteinBERT_16_softmax, results/rows/proteinBERT_32_softmax, results/rows/proteinBERT_64_softmax, results/rows/proteinBERT_128_softmax
+    output: results/softmax.tbl
+    jobid: 1
+    reason: Missing output files: results/softmax.tbl; Code has changed since last execution
+    wildcards: activation=softmax
+    resources: mem_mb=1000, mem_mib=954, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=batch,snowball,pinky, gpu=0
+
+Submitted job 1 with external jobid '2278159'.
+[Sun Nov 26 10:02:38 2023]
+Error in rule concat_results_scores:
+    jobid: 14
+    input: results/rows/esm2_16_sigmoid, results/rows/esm2_32_sigmoid, results/rows/esm2_64_sigmoid, results/rows/esm2_128_sigmoid, results/rows/protT5_16_sigmoid, results/rows/protT5_32_sigmoid, results/rows/protT5_64_sigmoid, results/rows/protT5_128_sigmoid, results/rows/proteinBERT_16_sigmoid, results/rows/proteinBERT_32_sigmoid, results/rows/proteinBERT_64_sigmoid, results/rows/proteinBERT_128_sigmoid
+    output: results/sigmoid.tbl
+    cluster_jobid: 2278158
+
+Error executing rule concat_results_scores on cluster (jobid: 14, external: 2278158, jobscript: /home/beckerf/tmp_work/learnMSA/learnMSA/protein_language_models/train_scoring_models/.snakemake/tmp.9kpnhqr7/snakejob.concat_results_scores.14.sh). For error details see the cluster log and the log files of the involved rule(s).
+Trying to restart job 14.
+Select jobs to execute...
+
+[Sun Nov 26 10:02:38 2023]
+rule concat_results_scores:
+    input: results/rows/esm2_16_sigmoid, results/rows/esm2_32_sigmoid, results/rows/esm2_64_sigmoid, results/rows/esm2_128_sigmoid, results/rows/protT5_16_sigmoid, results/rows/protT5_32_sigmoid, results/rows/protT5_64_sigmoid, results/rows/protT5_128_sigmoid, results/rows/proteinBERT_16_sigmoid, results/rows/proteinBERT_32_sigmoid, results/rows/proteinBERT_64_sigmoid, results/rows/proteinBERT_128_sigmoid
+    output: results/sigmoid.tbl
+    jobid: 14
+    reason: Missing output files: results/sigmoid.tbl; Code has changed since last execution
+    wildcards: activation=sigmoid
+    resources: mem_mb=1000, mem_mib=954, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=batch,snowball,pinky, gpu=0
+
+Submitted job 14 with external jobid '2278160'.
+[Sun Nov 26 10:02:48 2023]
+Error in rule concat_results_scores:
+    jobid: 1
+    input: results/rows/esm2_16_softmax, results/rows/esm2_32_softmax, results/rows/esm2_64_softmax, results/rows/esm2_128_softmax, results/rows/protT5_16_softmax, results/rows/protT5_32_softmax, results/rows/protT5_64_softmax, results/rows/protT5_128_softmax, results/rows/proteinBERT_16_softmax, results/rows/proteinBERT_32_softmax, results/rows/proteinBERT_64_softmax, results/rows/proteinBERT_128_softmax
+    output: results/softmax.tbl
+    cluster_jobid: 2278159
+
+Error executing rule concat_results_scores on cluster (jobid: 1, external: 2278159, jobscript: /home/beckerf/tmp_work/learnMSA/learnMSA/protein_language_models/train_scoring_models/.snakemake/tmp.9kpnhqr7/snakejob.concat_results_scores.1.sh). For error details see the cluster log and the log files of the involved rule(s).
+Trying to restart job 1.
+Select jobs to execute...
+
+[Sun Nov 26 10:02:48 2023]
+rule concat_results_scores:
+    input: results/rows/esm2_16_softmax, results/rows/esm2_32_softmax, results/rows/esm2_64_softmax, results/rows/esm2_128_softmax, results/rows/protT5_16_softmax, results/rows/protT5_32_softmax, results/rows/protT5_64_softmax, results/rows/protT5_128_softmax, results/rows/proteinBERT_16_softmax, results/rows/proteinBERT_32_softmax, results/rows/proteinBERT_64_softmax, results/rows/proteinBERT_128_softmax
+    output: results/softmax.tbl
+    jobid: 1
+    reason: Missing output files: results/softmax.tbl; Code has changed since last execution
+    wildcards: activation=softmax
+    resources: mem_mb=1000, mem_mib=954, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=batch,snowball,pinky, gpu=0
+
+Submitted job 1 with external jobid '2278161'.
+[Sun Nov 26 10:02:49 2023]
+Error in rule concat_results_scores:
+    jobid: 14
+    input: results/rows/esm2_16_sigmoid, results/rows/esm2_32_sigmoid, results/rows/esm2_64_sigmoid, results/rows/esm2_128_sigmoid, results/rows/protT5_16_sigmoid, results/rows/protT5_32_sigmoid, results/rows/protT5_64_sigmoid, results/rows/protT5_128_sigmoid, results/rows/proteinBERT_16_sigmoid, results/rows/proteinBERT_32_sigmoid, results/rows/proteinBERT_64_sigmoid, results/rows/proteinBERT_128_sigmoid
+    output: results/sigmoid.tbl
+    cluster_jobid: 2278160
+
+Error executing rule concat_results_scores on cluster (jobid: 14, external: 2278160, jobscript: /home/beckerf/tmp_work/learnMSA/learnMSA/protein_language_models/train_scoring_models/.snakemake/tmp.9kpnhqr7/snakejob.concat_results_scores.14.sh). For error details see the cluster log and the log files of the involved rule(s).
+Trying to restart job 14.
+Select jobs to execute...
+
+[Sun Nov 26 10:02:49 2023]
+rule concat_results_scores:
+    input: results/rows/esm2_16_sigmoid, results/rows/esm2_32_sigmoid, results/rows/esm2_64_sigmoid, results/rows/esm2_128_sigmoid, results/rows/protT5_16_sigmoid, results/rows/protT5_32_sigmoid, results/rows/protT5_64_sigmoid, results/rows/protT5_128_sigmoid, results/rows/proteinBERT_16_sigmoid, results/rows/proteinBERT_32_sigmoid, results/rows/proteinBERT_64_sigmoid, results/rows/proteinBERT_128_sigmoid
+    output: results/sigmoid.tbl
+    jobid: 14
+    reason: Missing output files: results/sigmoid.tbl; Code has changed since last execution
+    wildcards: activation=sigmoid
+    resources: mem_mb=1000, mem_mib=954, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=batch,snowball,pinky, gpu=0
+
+Submitted job 14 with external jobid '2278162'.
+[Sun Nov 26 10:02:59 2023]
+Error in rule concat_results_scores:
+    jobid: 1
+    input: results/rows/esm2_16_softmax, results/rows/esm2_32_softmax, results/rows/esm2_64_softmax, results/rows/esm2_128_softmax, results/rows/protT5_16_softmax, results/rows/protT5_32_softmax, results/rows/protT5_64_softmax, results/rows/protT5_128_softmax, results/rows/proteinBERT_16_softmax, results/rows/proteinBERT_32_softmax, results/rows/proteinBERT_64_softmax, results/rows/proteinBERT_128_softmax
+    output: results/softmax.tbl
+    cluster_jobid: 2278161
+
+Error executing rule concat_results_scores on cluster (jobid: 1, external: 2278161, jobscript: /home/beckerf/tmp_work/learnMSA/learnMSA/protein_language_models/train_scoring_models/.snakemake/tmp.9kpnhqr7/snakejob.concat_results_scores.1.sh). For error details see the cluster log and the log files of the involved rule(s).
+[Sun Nov 26 10:03:00 2023]
+Error in rule concat_results_scores:
+    jobid: 14
+    input: results/rows/esm2_16_sigmoid, results/rows/esm2_32_sigmoid, results/rows/esm2_64_sigmoid, results/rows/esm2_128_sigmoid, results/rows/protT5_16_sigmoid, results/rows/protT5_32_sigmoid, results/rows/protT5_64_sigmoid, results/rows/protT5_128_sigmoid, results/rows/proteinBERT_16_sigmoid, results/rows/proteinBERT_32_sigmoid, results/rows/proteinBERT_64_sigmoid, results/rows/proteinBERT_128_sigmoid
+    output: results/sigmoid.tbl
+    cluster_jobid: 2278162
+
+Error executing rule concat_results_scores on cluster (jobid: 14, external: 2278162, jobscript: /home/beckerf/tmp_work/learnMSA/learnMSA/protein_language_models/train_scoring_models/.snakemake/tmp.9kpnhqr7/snakejob.concat_results_scores.14.sh). For error details see the cluster log and the log files of the involved rule(s).
+Exiting because a job execution failed. Look above for error message
+Complete log: .snakemake/log/2023-11-26T100215.657512.snakemake.log

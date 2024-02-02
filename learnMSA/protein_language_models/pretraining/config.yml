@@ -1,0 +1,4 @@
+language_models : ["esm2", "protT5", "proteinBERT"]
+dimensions : [16, 32, 64, 128]
+activation : ["softmax", "sigmoid"] 
+num_components : [1,10,32,100]

@@ -1,0 +1,38 @@
+Building DAG of jobs...
+Using shell: /usr/bin/bash
+Provided cores: 4
+Rules claiming more threads will be scaled down.
+Provided resources: mem_mb=100000, mem_mib=95368, disk_mb=1000, disk_mib=954, gpu=1
+Select jobs to execute...
+
+[Fri Dec 15 21:34:21 2023]
+rule train_prior:
+    input: train_scoring_model_outputs/proteinBERT_128_sigmoid.out
+    output: train_prior_outputs/proteinBERT_128_sigmoid_32.out
+    jobid: 0
+    reason: Missing output files: train_prior_outputs/proteinBERT_128_sigmoid_32.out
+    wildcards: lm=proteinBERT, dimension=128, activation=sigmoid, num_components=32
+    threads: 4
+    resources: mem_mb=100000, mem_mib=95368, disk_mb=1000, disk_mib=954, tmpdir=/tmp, partition=vision, gpu=1, runtime=2880
+
+
+        cd .. && python3 PretrainMvnPrior.py --lm proteinBERT --reduced_dim 128             --activation sigmoid --components 32 --unscaled > train_scoring_models/train_prior_outputs/proteinBERT_128_sigmoid_32.out
+        
+2023-12-15 21:34:21.572197: I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following CPU instructions in performance-critical operations:  SSE4.1 SSE4.2 AVX AVX2 FMA
+To enable them in other operations, rebuild TensorFlow with the appropriate compiler flags.
+2023-12-15 21:34:37.330797: I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following CPU instructions in performance-critical operations:  SSE4.1 SSE4.2 AVX AVX2 FMA
+To enable them in other operations, rebuild TensorFlow with the appropriate compiler flags.
+2023-12-15 21:34:37.965343: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1616] Created device /job:localhost/replica:0/task:0/device:GPU:0 with 78968 MB memory:  -> device: 0, name: NVIDIA A100-SXM4-80GB, pci bus id: 0000:81:00.0, compute capability: 8.0
+2023-12-15 21:41:43.390421: I tensorflow/stream_executor/cuda/cuda_blas.cc:1614] TensorFloat-32 will be used for the matrix multiplication. This will only be logged once.
+2023-12-15 21:41:43.514847: I tensorflow/stream_executor/cuda/cuda_dnn.cc:384] Loaded cuDNN version 8800
+2023-12-15 21:41:44.066315: I tensorflow/core/platform/default/subprocess.cc:304] Start cannot spawn child process: No such file or directory
+2023-12-15 21:41:44.066899: I tensorflow/core/platform/default/subprocess.cc:304] Start cannot spawn child process: No such file or directory
+2023-12-15 21:41:44.066915: W tensorflow/stream_executor/gpu/asm_compiler.cc:80] Couldn't get ptxas version string: INTERNAL: Couldn't invoke ptxas --version
+2023-12-15 21:41:44.067625: I tensorflow/core/platform/default/subprocess.cc:304] Start cannot spawn child process: No such file or directory
+2023-12-15 21:41:44.067685: W tensorflow/stream_executor/gpu/redzone_allocator.cc:314] INTERNAL: Failed to launch ptxas
+Relying on driver to perform ptx compilation. 
+Modify $PATH to customize ptxas location.
+This message will be only logged once.
+[Fri Dec 15 21:43:59 2023]
+Finished job 0.
+1 of 1 steps (100%) done
