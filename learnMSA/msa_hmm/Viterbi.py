@@ -17,6 +17,17 @@ def save_log(x, log_zero_val=-1e3):
     return log_x
 
 
+
+def save_log(x, log_zero_val=-1e3):
+    """ Computes element-wise logarithm with output_i=log_zero_val where x_i=0.
+    """
+    epsilon = tf.constant(np.finfo(np.float32).tiny)
+    log_x = tf.math.log(tf.maximum(x, epsilon))
+    zero_mask = tf.cast(tf.equal(x, 0), dtype=log_x.dtype)
+    log_x = (1-zero_mask) * log_x + zero_mask * log_zero_val
+    return log_x
+
+
 def viterbi_step(gamma_prev, emission_probs_i, hmm_cell):
     """ Computes one Viterbi dynamic programming step.
     Args:
