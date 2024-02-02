@@ -1,0 +1,115 @@
+Building DAG of jobs...
+Using shell: /usr/bin/bash
+Provided cores: 2
+Rules claiming more threads will be scaled down.
+Provided resources: mem_mb=1000, mem_mib=954, disk_mb=1000, disk_mib=954, gpu=0
+Select jobs to execute...
+
+[Sat Dec 16 04:08:36 2023]
+rule concat_prior_tests:
+    input: results/test_prior_rows/esm2_16_softmax_1, results/test_prior_rows/esm2_16_softmax_10, results/test_prior_rows/esm2_16_softmax_32, results/test_prior_rows/esm2_16_softmax_100, results/test_prior_rows/esm2_16_sigmoid_1, results/test_prior_rows/esm2_16_sigmoid_10, results/test_prior_rows/esm2_16_sigmoid_32, results/test_prior_rows/esm2_16_sigmoid_100, results/test_prior_rows/esm2_32_softmax_1, results/test_prior_rows/esm2_32_softmax_10, results/test_prior_rows/esm2_32_softmax_32, results/test_prior_rows/esm2_32_softmax_100, results/test_prior_rows/esm2_32_sigmoid_1, results/test_prior_rows/esm2_32_sigmoid_10, results/test_prior_rows/esm2_32_sigmoid_32, results/test_prior_rows/esm2_32_sigmoid_100, results/test_prior_rows/esm2_64_softmax_1, results/test_prior_rows/esm2_64_softmax_10, results/test_prior_rows/esm2_64_softmax_32, results/test_prior_rows/esm2_64_softmax_100, results/test_prior_rows/esm2_64_sigmoid_1, results/test_prior_rows/esm2_64_sigmoid_10, results/test_prior_rows/esm2_64_sigmoid_32, results/test_prior_rows/esm2_64_sigmoid_100, results/test_prior_rows/esm2_128_softmax_1, results/test_prior_rows/esm2_128_softmax_10, results/test_prior_rows/esm2_128_softmax_32, results/test_prior_rows/esm2_128_softmax_100, results/test_prior_rows/esm2_128_sigmoid_1, results/test_prior_rows/esm2_128_sigmoid_10, results/test_prior_rows/esm2_128_sigmoid_32, results/test_prior_rows/esm2_128_sigmoid_100, results/test_prior_rows/protT5_16_softmax_1, results/test_prior_rows/protT5_16_softmax_10, results/test_prior_rows/protT5_16_softmax_32, results/test_prior_rows/protT5_16_softmax_100, results/test_prior_rows/protT5_16_sigmoid_1, results/test_prior_rows/protT5_16_sigmoid_10, results/test_prior_rows/protT5_16_sigmoid_32, results/test_prior_rows/protT5_16_sigmoid_100, results/test_prior_rows/protT5_32_softmax_1, results/test_prior_rows/protT5_32_softmax_10, results/test_prior_rows/protT5_32_softmax_32, results/test_prior_rows/protT5_32_softmax_100, results/test_prior_rows/protT5_32_sigmoid_1, results/test_prior_rows/protT5_32_sigmoid_10, results/test_prior_rows/protT5_32_sigmoid_32, results/test_prior_rows/protT5_32_sigmoid_100, results/test_prior_rows/protT5_64_softmax_1, results/test_prior_rows/protT5_64_softmax_10, results/test_prior_rows/protT5_64_softmax_32, results/test_prior_rows/protT5_64_softmax_100, results/test_prior_rows/protT5_64_sigmoid_1, results/test_prior_rows/protT5_64_sigmoid_10, results/test_prior_rows/protT5_64_sigmoid_32, results/test_prior_rows/protT5_64_sigmoid_100, results/test_prior_rows/protT5_128_softmax_1, results/test_prior_rows/protT5_128_softmax_10, results/test_prior_rows/protT5_128_softmax_32, results/test_prior_rows/protT5_128_softmax_100, results/test_prior_rows/protT5_128_sigmoid_1, results/test_prior_rows/protT5_128_sigmoid_10, results/test_prior_rows/protT5_128_sigmoid_32, results/test_prior_rows/protT5_128_sigmoid_100, results/test_prior_rows/proteinBERT_16_softmax_1, results/test_prior_rows/proteinBERT_16_softmax_10, results/test_prior_rows/proteinBERT_16_softmax_32, results/test_prior_rows/proteinBERT_16_softmax_100, results/test_prior_rows/proteinBERT_16_sigmoid_1, results/test_prior_rows/proteinBERT_16_sigmoid_10, results/test_prior_rows/proteinBERT_16_sigmoid_32, results/test_prior_rows/proteinBERT_16_sigmoid_100, results/test_prior_rows/proteinBERT_32_softmax_1, results/test_prior_rows/proteinBERT_32_softmax_10, results/test_prior_rows/proteinBERT_32_softmax_32, results/test_prior_rows/proteinBERT_32_softmax_100, results/test_prior_rows/proteinBERT_32_sigmoid_1, results/test_prior_rows/proteinBERT_32_sigmoid_10, results/test_prior_rows/proteinBERT_32_sigmoid_32, results/test_prior_rows/proteinBERT_32_sigmoid_100, results/test_prior_rows/proteinBERT_64_softmax_1, results/test_prior_rows/proteinBERT_64_softmax_10, results/test_prior_rows/proteinBERT_64_softmax_32, results/test_prior_rows/proteinBERT_64_softmax_100, results/test_prior_rows/proteinBERT_64_sigmoid_1, results/test_prior_rows/proteinBERT_64_sigmoid_10, results/test_prior_rows/proteinBERT_64_sigmoid_32, results/test_prior_rows/proteinBERT_64_sigmoid_100, results/test_prior_rows/proteinBERT_128_softmax_1, results/test_prior_rows/proteinBERT_128_softmax_10, results/test_prior_rows/proteinBERT_128_softmax_32, results/test_prior_rows/proteinBERT_128_softmax_100, results/test_prior_rows/proteinBERT_128_sigmoid_1, results/test_prior_rows/proteinBERT_128_sigmoid_10, results/test_prior_rows/proteinBERT_128_sigmoid_32, results/test_prior_rows/proteinBERT_128_sigmoid_100
+    output: results/test_prior.tbl
+    jobid: 0
+    reason: Missing output files: results/test_prior.tbl
+    resources: mem_mb=1000, mem_mib=954, disk_mb=1000, disk_mib=954, tmpdir=/tmp, partition=batch,snowball,pinky, gpu=0
+
+echo -n  > results/test_prior.tbl
+echo esm2';'16';'softmax';'1';'$(cat results/test_prior_rows/esm2_16_softmax_1) >> results/test_prior.tbl
+echo esm2';'16';'softmax';'10';'$(cat results/test_prior_rows/esm2_16_softmax_10) >> results/test_prior.tbl
+echo esm2';'16';'softmax';'32';'$(cat results/test_prior_rows/esm2_16_softmax_32) >> results/test_prior.tbl
+echo esm2';'16';'softmax';'100';'$(cat results/test_prior_rows/esm2_16_softmax_100) >> results/test_prior.tbl
+echo esm2';'16';'sigmoid';'1';'$(cat results/test_prior_rows/esm2_16_sigmoid_1) >> results/test_prior.tbl
+echo esm2';'16';'sigmoid';'10';'$(cat results/test_prior_rows/esm2_16_sigmoid_10) >> results/test_prior.tbl
+echo esm2';'16';'sigmoid';'32';'$(cat results/test_prior_rows/esm2_16_sigmoid_32) >> results/test_prior.tbl
+echo esm2';'16';'sigmoid';'100';'$(cat results/test_prior_rows/esm2_16_sigmoid_100) >> results/test_prior.tbl
+echo esm2';'32';'softmax';'1';'$(cat results/test_prior_rows/esm2_32_softmax_1) >> results/test_prior.tbl
+echo esm2';'32';'softmax';'10';'$(cat results/test_prior_rows/esm2_32_softmax_10) >> results/test_prior.tbl
+echo esm2';'32';'softmax';'32';'$(cat results/test_prior_rows/esm2_32_softmax_32) >> results/test_prior.tbl
+echo esm2';'32';'softmax';'100';'$(cat results/test_prior_rows/esm2_32_softmax_100) >> results/test_prior.tbl
+echo esm2';'32';'sigmoid';'1';'$(cat results/test_prior_rows/esm2_32_sigmoid_1) >> results/test_prior.tbl
+echo esm2';'32';'sigmoid';'10';'$(cat results/test_prior_rows/esm2_32_sigmoid_10) >> results/test_prior.tbl
+echo esm2';'32';'sigmoid';'32';'$(cat results/test_prior_rows/esm2_32_sigmoid_32) >> results/test_prior.tbl
+echo esm2';'32';'sigmoid';'100';'$(cat results/test_prior_rows/esm2_32_sigmoid_100) >> results/test_prior.tbl
+echo esm2';'64';'softmax';'1';'$(cat results/test_prior_rows/esm2_64_softmax_1) >> results/test_prior.tbl
+echo esm2';'64';'softmax';'10';'$(cat results/test_prior_rows/esm2_64_softmax_10) >> results/test_prior.tbl
+echo esm2';'64';'softmax';'32';'$(cat results/test_prior_rows/esm2_64_softmax_32) >> results/test_prior.tbl
+echo esm2';'64';'softmax';'100';'$(cat results/test_prior_rows/esm2_64_softmax_100) >> results/test_prior.tbl
+echo esm2';'64';'sigmoid';'1';'$(cat results/test_prior_rows/esm2_64_sigmoid_1) >> results/test_prior.tbl
+echo esm2';'64';'sigmoid';'10';'$(cat results/test_prior_rows/esm2_64_sigmoid_10) >> results/test_prior.tbl
+echo esm2';'64';'sigmoid';'32';'$(cat results/test_prior_rows/esm2_64_sigmoid_32) >> results/test_prior.tbl
+echo esm2';'64';'sigmoid';'100';'$(cat results/test_prior_rows/esm2_64_sigmoid_100) >> results/test_prior.tbl
+echo esm2';'128';'softmax';'1';'$(cat results/test_prior_rows/esm2_128_softmax_1) >> results/test_prior.tbl
+echo esm2';'128';'softmax';'10';'$(cat results/test_prior_rows/esm2_128_softmax_10) >> results/test_prior.tbl
+echo esm2';'128';'softmax';'32';'$(cat results/test_prior_rows/esm2_128_softmax_32) >> results/test_prior.tbl
+echo esm2';'128';'softmax';'100';'$(cat results/test_prior_rows/esm2_128_softmax_100) >> results/test_prior.tbl
+echo esm2';'128';'sigmoid';'1';'$(cat results/test_prior_rows/esm2_128_sigmoid_1) >> results/test_prior.tbl
+echo esm2';'128';'sigmoid';'10';'$(cat results/test_prior_rows/esm2_128_sigmoid_10) >> results/test_prior.tbl
+echo esm2';'128';'sigmoid';'32';'$(cat results/test_prior_rows/esm2_128_sigmoid_32) >> results/test_prior.tbl
+echo esm2';'128';'sigmoid';'100';'$(cat results/test_prior_rows/esm2_128_sigmoid_100) >> results/test_prior.tbl
+echo protT5';'16';'softmax';'1';'$(cat results/test_prior_rows/protT5_16_softmax_1) >> results/test_prior.tbl
+echo protT5';'16';'softmax';'10';'$(cat results/test_prior_rows/protT5_16_softmax_10) >> results/test_prior.tbl
+echo protT5';'16';'softmax';'32';'$(cat results/test_prior_rows/protT5_16_softmax_32) >> results/test_prior.tbl
+echo protT5';'16';'softmax';'100';'$(cat results/test_prior_rows/protT5_16_softmax_100) >> results/test_prior.tbl
+echo protT5';'16';'sigmoid';'1';'$(cat results/test_prior_rows/protT5_16_sigmoid_1) >> results/test_prior.tbl
+echo protT5';'16';'sigmoid';'10';'$(cat results/test_prior_rows/protT5_16_sigmoid_10) >> results/test_prior.tbl
+echo protT5';'16';'sigmoid';'32';'$(cat results/test_prior_rows/protT5_16_sigmoid_32) >> results/test_prior.tbl
+echo protT5';'16';'sigmoid';'100';'$(cat results/test_prior_rows/protT5_16_sigmoid_100) >> results/test_prior.tbl
+echo protT5';'32';'softmax';'1';'$(cat results/test_prior_rows/protT5_32_softmax_1) >> results/test_prior.tbl
+echo protT5';'32';'softmax';'10';'$(cat results/test_prior_rows/protT5_32_softmax_10) >> results/test_prior.tbl
+echo protT5';'32';'softmax';'32';'$(cat results/test_prior_rows/protT5_32_softmax_32) >> results/test_prior.tbl
+echo protT5';'32';'softmax';'100';'$(cat results/test_prior_rows/protT5_32_softmax_100) >> results/test_prior.tbl
+echo protT5';'32';'sigmoid';'1';'$(cat results/test_prior_rows/protT5_32_sigmoid_1) >> results/test_prior.tbl
+echo protT5';'32';'sigmoid';'10';'$(cat results/test_prior_rows/protT5_32_sigmoid_10) >> results/test_prior.tbl
+echo protT5';'32';'sigmoid';'32';'$(cat results/test_prior_rows/protT5_32_sigmoid_32) >> results/test_prior.tbl
+echo protT5';'32';'sigmoid';'100';'$(cat results/test_prior_rows/protT5_32_sigmoid_100) >> results/test_prior.tbl
+echo protT5';'64';'softmax';'1';'$(cat results/test_prior_rows/protT5_64_softmax_1) >> results/test_prior.tbl
+echo protT5';'64';'softmax';'10';'$(cat results/test_prior_rows/protT5_64_softmax_10) >> results/test_prior.tbl
+echo protT5';'64';'softmax';'32';'$(cat results/test_prior_rows/protT5_64_softmax_32) >> results/test_prior.tbl
+echo protT5';'64';'softmax';'100';'$(cat results/test_prior_rows/protT5_64_softmax_100) >> results/test_prior.tbl
+echo protT5';'64';'sigmoid';'1';'$(cat results/test_prior_rows/protT5_64_sigmoid_1) >> results/test_prior.tbl
+echo protT5';'64';'sigmoid';'10';'$(cat results/test_prior_rows/protT5_64_sigmoid_10) >> results/test_prior.tbl
+echo protT5';'64';'sigmoid';'32';'$(cat results/test_prior_rows/protT5_64_sigmoid_32) >> results/test_prior.tbl
+echo protT5';'64';'sigmoid';'100';'$(cat results/test_prior_rows/protT5_64_sigmoid_100) >> results/test_prior.tbl
+echo protT5';'128';'softmax';'1';'$(cat results/test_prior_rows/protT5_128_softmax_1) >> results/test_prior.tbl
+echo protT5';'128';'softmax';'10';'$(cat results/test_prior_rows/protT5_128_softmax_10) >> results/test_prior.tbl
+echo protT5';'128';'softmax';'32';'$(cat results/test_prior_rows/protT5_128_softmax_32) >> results/test_prior.tbl
+echo protT5';'128';'softmax';'100';'$(cat results/test_prior_rows/protT5_128_softmax_100) >> results/test_prior.tbl
+echo protT5';'128';'sigmoid';'1';'$(cat results/test_prior_rows/protT5_128_sigmoid_1) >> results/test_prior.tbl
+echo protT5';'128';'sigmoid';'10';'$(cat results/test_prior_rows/protT5_128_sigmoid_10) >> results/test_prior.tbl
+echo protT5';'128';'sigmoid';'32';'$(cat results/test_prior_rows/protT5_128_sigmoid_32) >> results/test_prior.tbl
+echo protT5';'128';'sigmoid';'100';'$(cat results/test_prior_rows/protT5_128_sigmoid_100) >> results/test_prior.tbl
+echo proteinBERT';'16';'softmax';'1';'$(cat results/test_prior_rows/proteinBERT_16_softmax_1) >> results/test_prior.tbl
+echo proteinBERT';'16';'softmax';'10';'$(cat results/test_prior_rows/proteinBERT_16_softmax_10) >> results/test_prior.tbl
+echo proteinBERT';'16';'softmax';'32';'$(cat results/test_prior_rows/proteinBERT_16_softmax_32) >> results/test_prior.tbl
+echo proteinBERT';'16';'softmax';'100';'$(cat results/test_prior_rows/proteinBERT_16_softmax_100) >> results/test_prior.tbl
+echo proteinBERT';'16';'sigmoid';'1';'$(cat results/test_prior_rows/proteinBERT_16_sigmoid_1) >> results/test_prior.tbl
+echo proteinBERT';'16';'sigmoid';'10';'$(cat results/test_prior_rows/proteinBERT_16_sigmoid_10) >> results/test_prior.tbl
+echo proteinBERT';'16';'sigmoid';'32';'$(cat results/test_prior_rows/proteinBERT_16_sigmoid_32) >> results/test_prior.tbl
+echo proteinBERT';'16';'sigmoid';'100';'$(cat results/test_prior_rows/proteinBERT_16_sigmoid_100) >> results/test_prior.tbl
+echo proteinBERT';'32';'softmax';'1';'$(cat results/test_prior_rows/proteinBERT_32_softmax_1) >> results/test_prior.tbl
+echo proteinBERT';'32';'softmax';'10';'$(cat results/test_prior_rows/proteinBERT_32_softmax_10) >> results/test_prior.tbl
+echo proteinBERT';'32';'softmax';'32';'$(cat results/test_prior_rows/proteinBERT_32_softmax_32) >> results/test_prior.tbl
+echo proteinBERT';'32';'softmax';'100';'$(cat results/test_prior_rows/proteinBERT_32_softmax_100) >> results/test_prior.tbl
+echo proteinBERT';'32';'sigmoid';'1';'$(cat results/test_prior_rows/proteinBERT_32_sigmoid_1) >> results/test_prior.tbl
+echo proteinBERT';'32';'sigmoid';'10';'$(cat results/test_prior_rows/proteinBERT_32_sigmoid_10) >> results/test_prior.tbl
+echo proteinBERT';'32';'sigmoid';'32';'$(cat results/test_prior_rows/proteinBERT_32_sigmoid_32) >> results/test_prior.tbl
+echo proteinBERT';'32';'sigmoid';'100';'$(cat results/test_prior_rows/proteinBERT_32_sigmoid_100) >> results/test_prior.tbl
+echo proteinBERT';'64';'softmax';'1';'$(cat results/test_prior_rows/proteinBERT_64_softmax_1) >> results/test_prior.tbl
+echo proteinBERT';'64';'softmax';'10';'$(cat results/test_prior_rows/proteinBERT_64_softmax_10) >> results/test_prior.tbl
+echo proteinBERT';'64';'softmax';'32';'$(cat results/test_prior_rows/proteinBERT_64_softmax_32) >> results/test_prior.tbl
+echo proteinBERT';'64';'softmax';'100';'$(cat results/test_prior_rows/proteinBERT_64_softmax_100) >> results/test_prior.tbl
+echo proteinBERT';'64';'sigmoid';'1';'$(cat results/test_prior_rows/proteinBERT_64_sigmoid_1) >> results/test_prior.tbl
+echo proteinBERT';'64';'sigmoid';'10';'$(cat results/test_prior_rows/proteinBERT_64_sigmoid_10) >> results/test_prior.tbl
+echo proteinBERT';'64';'sigmoid';'32';'$(cat results/test_prior_rows/proteinBERT_64_sigmoid_32) >> results/test_prior.tbl
+echo proteinBERT';'64';'sigmoid';'100';'$(cat results/test_prior_rows/proteinBERT_64_sigmoid_100) >> results/test_prior.tbl
+echo proteinBERT';'128';'softmax';'1';'$(cat results/test_prior_rows/proteinBERT_128_softmax_1) >> results/test_prior.tbl
+echo proteinBERT';'128';'softmax';'10';'$(cat results/test_prior_rows/proteinBERT_128_softmax_10) >> results/test_prior.tbl
+echo proteinBERT';'128';'softmax';'32';'$(cat results/test_prior_rows/proteinBERT_128_softmax_32) >> results/test_prior.tbl
+echo proteinBERT';'128';'softmax';'100';'$(cat results/test_prior_rows/proteinBERT_128_softmax_100) >> results/test_prior.tbl
+echo proteinBERT';'128';'sigmoid';'1';'$(cat results/test_prior_rows/proteinBERT_128_sigmoid_1) >> results/test_prior.tbl
+echo proteinBERT';'128';'sigmoid';'10';'$(cat results/test_prior_rows/proteinBERT_128_sigmoid_10) >> results/test_prior.tbl
+echo proteinBERT';'128';'sigmoid';'32';'$(cat results/test_prior_rows/proteinBERT_128_sigmoid_32) >> results/test_prior.tbl
+echo proteinBERT';'128';'sigmoid';'100';'$(cat results/test_prior_rows/proteinBERT_128_sigmoid_100) >> results/test_prior.tbl
+[Sat Dec 16 04:08:37 2023]
+Finished job 0.
+1 of 1 steps (100%) done

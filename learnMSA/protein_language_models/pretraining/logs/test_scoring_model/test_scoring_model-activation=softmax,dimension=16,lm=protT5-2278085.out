@@ -1,0 +1,22 @@
+Building DAG of jobs...
+Using shell: /usr/bin/bash
+Provided cores: 4
+Rules claiming more threads will be scaled down.
+Provided resources: mem_mb=100000, mem_mib=95368, disk_mb=1000, disk_mib=954, gpu=1
+Select jobs to execute...
+
+[Sun Nov 26 08:29:27 2023]
+rule test_scoring_model:
+    output: results/rows/protT5_16_softmax
+    jobid: 0
+    reason: Missing output files: results/rows/protT5_16_softmax
+    wildcards: lm=protT5, dimension=16, activation=softmax
+    threads: 4
+    resources: mem_mb=100000, mem_mib=95368, disk_mb=1000, disk_mib=954, tmpdir=/tmp, partition=vision, gpu=1, runtime=1440
+
+
+        cd .. && python3 TestScoringModel.py --lm protT5 --dim 16             --activation softmax > train_scoring_models/results/rows/protT5_16_softmax
+        
+[Sun Nov 26 08:36:10 2023]
+Finished job 0.
+1 of 1 steps (100%) done

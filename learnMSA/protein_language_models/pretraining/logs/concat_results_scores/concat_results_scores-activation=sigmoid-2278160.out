@@ -1,0 +1,35 @@
+Building DAG of jobs...
+Using shell: /usr/bin/bash
+Provided cores: 2
+Rules claiming more threads will be scaled down.
+Provided resources: mem_mb=1000, mem_mib=954, disk_mb=1000, disk_mib=954, gpu=0
+Select jobs to execute...
+
+[Sun Nov 26 10:02:40 2023]
+rule concat_results_scores:
+    input: results/rows/esm2_16_sigmoid, results/rows/esm2_32_sigmoid, results/rows/esm2_64_sigmoid, results/rows/esm2_128_sigmoid, results/rows/protT5_16_sigmoid, results/rows/protT5_32_sigmoid, results/rows/protT5_64_sigmoid, results/rows/protT5_128_sigmoid, results/rows/proteinBERT_16_sigmoid, results/rows/proteinBERT_32_sigmoid, results/rows/proteinBERT_64_sigmoid, results/rows/proteinBERT_128_sigmoid
+    output: results/sigmoid.tbl
+    jobid: 0
+    reason: Missing output files: results/sigmoid.tbl
+    wildcards: activation=sigmoid
+    resources: mem_mb=1000, mem_mib=954, disk_mb=1000, disk_mib=954, tmpdir=/tmp, partition=batch,snowball,pinky, gpu=0
+
+echo -n  > results/sigmoid.tbl
+echo esm2;16;sigmoid;$(cat results/rows/esm2_16_sigmoid) >> results/sigmoid.tbl
+esm2
+/usr/bin/bash: line 1: 16: command not found
+[Sun Nov 26 10:02:40 2023]
+Error in rule concat_results_scores:
+    jobid: 0
+    input: results/rows/esm2_16_sigmoid, results/rows/esm2_32_sigmoid, results/rows/esm2_64_sigmoid, results/rows/esm2_128_sigmoid, results/rows/protT5_16_sigmoid, results/rows/protT5_32_sigmoid, results/rows/protT5_64_sigmoid, results/rows/protT5_128_sigmoid, results/rows/proteinBERT_16_sigmoid, results/rows/proteinBERT_32_sigmoid, results/rows/proteinBERT_64_sigmoid, results/rows/proteinBERT_128_sigmoid
+    output: results/sigmoid.tbl
+
+RuleException:
+CalledProcessError in file /home/beckerf/tmp_work/learnMSA/learnMSA/protein_language_models/train_scoring_models/Snakefile, line 54:
+Command 'set -euo pipefail;  echo esm2;16;sigmoid;$(cat results/rows/esm2_16_sigmoid) >> results/sigmoid.tbl' returned non-zero exit status 127.
+  File "/home/beckerf/tmp_work/learnMSA/learnMSA/protein_language_models/train_scoring_models/Snakefile", line 54, in __rule_concat_results_scores
+  File "/home/beckerf/mambaforge/envs/snakeMSA/lib/python3.10/concurrent/futures/thread.py", line 58, in run
+Removing output files of failed job concat_results_scores since they might be corrupted:
+results/sigmoid.tbl
+Shutting down, this might take some time.
+Exiting because a job execution failed. Look above for error message

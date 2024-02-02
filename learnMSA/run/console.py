@@ -56,6 +56,7 @@ def run_main():
     parser.add_argument("--indexed_data", dest="indexed_data", action='store_true', help="Don't load all data into memory at once at the cost of training time.")
     
     parser.add_argument("--unaligned_insertions", dest="unaligned_insertions", action='store_true', help="Insertions will be left unaligned.")
+    parser.add_argument("--frozen_insertions", dest="frozen_insertions", action='store_true', help="Insertions will be frozen during training.")
     
     parser.add_argument("--sequence_weights", dest="sequence_weights", action='store_true', help="Uses mmseqs2 to rapidly cluster the sequences and compute sequence weights before the MSA. (default: %(default)s)")
     parser.add_argument("--cluster_dir", dest="cluster_dir", type=str, default="tmp", help="Directory where the sequence clustering is stored. (default: %(default)s)")
@@ -68,7 +69,22 @@ def run_main():
     parser.add_argument("--alpha_global_compl", dest="alpha_global_compl", type=float, default=1, help=argparse.SUPPRESS)
     
     parser.add_argument("--use_language_model", dest="use_language_model", action='store_true', help="Uses a large protein lanague model to generate per-token embeddings that guide the MSA step. (default: %(default)s)")
+    parser.add_argument("--language_model", dest="language_model", type=str, default="esm2", help="Name of the language model to use. (default: %(default)s)")
+    parser.add_argument("--scoring_model_dim", dest="scoring_model_dim", type=int, default=32, 
+                        help="Reduced embedding dimension of the scoring model. (default: %(default)s)")
+    parser.add_argument("--scoring_model_activation", dest="scoring_model_activation", type=str, default="softmax", 
+                        help="Activation function of the scoring model. (default: %(default)s)")
+    parser.add_argument("--scoring_model_suffix", dest="scoring_model_suffix", type=str, default="", 
+                        help="Suffix to identify a specific scoring model. (default: %(default)s)")
+    parser.add_argument("--temperature_mode", dest="temperature_mode", type=str, default="trainable", 
+                        help="The annealing scheme used. Possible values are: [trainable, length_norm, warm_to_cold, cold_to_warm, constant, none]. (default: %(default)s)")
+    parser.add_argument("--use_L2", dest="use_L2", action='store_true', help="Uses L2 regularization on the match and insertion state embeddings.")
+    parser.add_argument("--L2_match", dest="L2_match", type=float, default=0.0, help="Strength of the L2 regularization on the match state embedding weights. (default: %(default)s)")
+    parser.add_argument("--L2_insert", dest="L2_insert", type=float, default=1000.0, help="Strength of the L2 regularization on the insertion state embedding weights. (default: %(default)s)")
+    parser.add_argument("--embedding_prior_components", dest="embedding_prior_components", type=int, default=100, help="Number of components of the multivariate normal prior distribution over the embedding weights. (default: %(default)s)")
+    parser.add_argument("--temperature", dest="temperature", type=float, default=3., help="Temperature of the softmax function. (default: %(default)s)")
     
+
     args = parser.parse_args()
     
     if not args.silent:
@@ -96,10 +112,22 @@ def run_main():
         print("Found tensorflow version", tf.__version__)
     
     import learnMSA.protein_language_models.Common as Common
-    scoring_model_config = Common.ScoringModelConfig(dim=32, activation="sigmoid")
-    config = Configuration.make_default(args.num_model, 
+    scoring_model_config = Common.ScoringModelConfig(lm_name=args.language_model,
+                                                    dim=args.scoring_model_dim, 
+                                                    activation=args.scoring_model_activation,
+                                                    suffix=args.scoring_model_suffix,
+                                                    scaled=False)
+    config = Configuration.make_default(args.num_model,
                                         use_language_model=args.use_language_model, 
-                                        scoring_model_config=scoring_model_config)
+                                        scoring_model_config=scoring_model_config,
+                                        use_l2=args.use_L2,
+                                        L2_match=args.L2_match,
+                                        L2_insert=args.L2_insert,
+                                        num_prior_components=args.embedding_prior_components,
+                                        frozen_insertions=args.frozen_insertions,
+                                        temperature_mode=args.temperature_mode,
+                                        V2_emitter=True,
+                                        V2_temperature=args.temperature)
     
     if args.batch_size > 0:
         config["batch_size"] = args.batch_size

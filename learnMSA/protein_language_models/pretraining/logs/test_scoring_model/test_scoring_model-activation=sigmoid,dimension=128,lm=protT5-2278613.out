@@ -1,0 +1,23 @@
+Building DAG of jobs...
+Using shell: /usr/bin/bash
+Provided cores: 4
+Rules claiming more threads will be scaled down.
+Provided resources: mem_mb=100000, mem_mib=95368, disk_mb=1000, disk_mib=954, gpu=1
+Select jobs to execute...
+
+[Sun Nov 26 16:43:39 2023]
+rule test_scoring_model:
+    input: train_scoring_model_outputs/protT5_128_sigmoid.out
+    output: results/rows/protT5_128_sigmoid
+    jobid: 0
+    reason: Missing output files: results/rows/protT5_128_sigmoid
+    wildcards: lm=protT5, dimension=128, activation=sigmoid
+    threads: 4
+    resources: mem_mb=100000, mem_mib=95368, disk_mb=1000, disk_mib=954, tmpdir=/tmp, partition=vision, gpu=1, runtime=1440
+
+
+        cd .. && python3 TestScoringModel.py --lm protT5 --dim 128             --activation sigmoid > train_scoring_models/results/rows/protT5_128_sigmoid
+        
+[Sun Nov 26 16:45:27 2023]
+Finished job 0.
+1 of 1 steps (100%) done

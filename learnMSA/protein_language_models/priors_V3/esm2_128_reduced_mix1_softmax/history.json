@@ -1,0 +1,1 @@
+{"loss": [54.382843017578125, 49.82712173461914, 49.744476318359375, 49.91365051269531], "lm": "esm2", "lr": 0.01, "batch": 64, "max_protein_len": 512, "reduced_dim": 128, "components": 1, "activation": "softmax", "suffix": ""}

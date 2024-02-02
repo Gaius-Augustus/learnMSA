@@ -1,0 +1,32 @@
+Building DAG of jobs...
+Using shell: /usr/bin/bash
+Provided cores: 2
+Rules claiming more threads will be scaled down.
+Provided resources: mem_mb=1000, mem_mib=954, disk_mb=1000, disk_mib=954, gpu=0
+Select jobs to execute...
+
+[Sun Nov 26 10:11:11 2023]
+rule concat_results_scores:
+    input: results/rows/esm2_16_sigmoid, results/rows/esm2_32_sigmoid, results/rows/esm2_64_sigmoid, results/rows/esm2_128_sigmoid, results/rows/protT5_16_sigmoid, results/rows/protT5_32_sigmoid, results/rows/protT5_64_sigmoid, results/rows/protT5_128_sigmoid, results/rows/proteinBERT_16_sigmoid, results/rows/proteinBERT_32_sigmoid, results/rows/proteinBERT_64_sigmoid, results/rows/proteinBERT_128_sigmoid
+    output: results/sigmoid.tbl
+    jobid: 0
+    reason: Missing output files: results/sigmoid.tbl
+    wildcards: activation=sigmoid
+    resources: mem_mb=1000, mem_mib=954, disk_mb=1000, disk_mib=954, tmpdir=/tmp, partition=batch,snowball,pinky, gpu=0
+
+echo -n  > results/sigmoid.tbl
+echo esm2';'16';'sigmoid';'$(cat results/rows/esm2_16_sigmoid) >> results/sigmoid.tbl
+echo esm2';'32';'sigmoid';'$(cat results/rows/esm2_32_sigmoid) >> results/sigmoid.tbl
+echo esm2';'64';'sigmoid';'$(cat results/rows/esm2_64_sigmoid) >> results/sigmoid.tbl
+echo esm2';'128';'sigmoid';'$(cat results/rows/esm2_128_sigmoid) >> results/sigmoid.tbl
+echo protT5';'16';'sigmoid';'$(cat results/rows/protT5_16_sigmoid) >> results/sigmoid.tbl
+echo protT5';'32';'sigmoid';'$(cat results/rows/protT5_32_sigmoid) >> results/sigmoid.tbl
+echo protT5';'64';'sigmoid';'$(cat results/rows/protT5_64_sigmoid) >> results/sigmoid.tbl
+echo protT5';'128';'sigmoid';'$(cat results/rows/protT5_128_sigmoid) >> results/sigmoid.tbl
+echo proteinBERT';'16';'sigmoid';'$(cat results/rows/proteinBERT_16_sigmoid) >> results/sigmoid.tbl
+echo proteinBERT';'32';'sigmoid';'$(cat results/rows/proteinBERT_32_sigmoid) >> results/sigmoid.tbl
+echo proteinBERT';'64';'sigmoid';'$(cat results/rows/proteinBERT_64_sigmoid) >> results/sigmoid.tbl
+echo proteinBERT';'128';'sigmoid';'$(cat results/rows/proteinBERT_128_sigmoid) >> results/sigmoid.tbl
+[Sun Nov 26 10:11:11 2023]
+Finished job 0.
+1 of 1 steps (100%) done

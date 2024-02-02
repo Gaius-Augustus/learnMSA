@@ -1,0 +1,1 @@
+{"loss": [49.49232482910156, 43.64590835571289, 42.783138275146484, 42.35666275024414], "lm": "protT5", "lr": 0.01, "batch": 64, "max_protein_len": 512, "reduced_dim": 128, "components": 100, "activation": "softmax", "suffix": ""}

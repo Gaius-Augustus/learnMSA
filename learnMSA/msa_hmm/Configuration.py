@@ -39,15 +39,15 @@ def get_adaptive_batch_size_with_language_model(model_lengths, max_seq_len, embe
         num_devices = 1
     model_length = max(model_lengths)
     if max_seq_len < 200 and model_length < 180:
-        return (int(np.ceil(5546/embedding_dim)) + 26)*num_devices
+        return int(np.ceil(8192/embedding_dim))*num_devices
     elif max_seq_len < 500 and model_length < 230:
-        return (int(np.ceil(2773/embedding_dim)) + 13)*num_devices
+        return int(np.ceil(4096/embedding_dim))*num_devices
     elif max_seq_len < 700 and model_length < 400:
-        return (int(np.ceil(1386/embedding_dim)) + 6)*num_devices
+        return int(np.ceil(2048/embedding_dim))*num_devices
     elif max_seq_len < 850 and model_length < 550:
-        return (int(np.ceil(693/embedding_dim)) + 3)*num_devices
+        return int(np.ceil(1024/embedding_dim))*num_devices
     else:
-        return (int(np.ceil(346/embedding_dim)) + 1)*num_devices
+        return int(np.ceil(512/embedding_dim))*num_devices
 
 #the configuration can be changed by experienced users
 #proper command line support for these parameters will be added in the future

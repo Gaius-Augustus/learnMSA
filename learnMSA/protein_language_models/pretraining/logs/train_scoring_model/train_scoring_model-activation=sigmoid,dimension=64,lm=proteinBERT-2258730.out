@@ -1,0 +1,32 @@
+Building DAG of jobs...
+Using shell: /usr/bin/bash
+Provided cores: 4
+Rules claiming more threads will be scaled down.
+Provided resources: mem_mb=100000, mem_mib=95368, disk_mb=1000, disk_mib=954, gpu=1
+Select jobs to execute...
+
+[Wed Nov 22 18:40:33 2023]
+rule train_scoring_model:
+    output: outputs/proteinBERT_64_sigmoid.out
+    jobid: 0
+    reason: Missing output files: outputs/proteinBERT_64_sigmoid.out
+    wildcards: lm=proteinBERT, dimension=64, activation=sigmoid
+    threads: 4
+    resources: mem_mb=100000, mem_mib=95368, disk_mb=1000, disk_mib=954, tmpdir=/tmp, partition=vision, gpu=1, runtime=4320
+
+
+        cd .. && python3 PretrainScoringModel.py --lm proteinBERT --dim 64             --activation sigmoid --lr 0.1 > train_scoring_models/outputs/proteinBERT_64_sigmoid.out
+        
+2023-11-22 18:40:33.982102: I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following CPU instructions in performance-critical operations:  SSE4.1 SSE4.2 AVX AVX2 FMA
+To enable them in other operations, rebuild TensorFlow with the appropriate compiler flags.
+2023-11-22 18:40:47.168980: E tensorflow/stream_executor/cuda/cuda_driver.cc:265] failed call to cuInit: CUDA_ERROR_NO_DEVICE: no CUDA-capable device is detected
+2023-11-22 18:40:47.169063: I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:169] retrieving CUDA diagnostic information for host: vision-01
+2023-11-22 18:40:47.169074: I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:176] hostname: vision-01
+2023-11-22 18:40:47.169710: I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:200] libcuda reported version is: 525.147.5
+2023-11-22 18:40:47.169744: I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:204] kernel reported version is: 525.147.5
+2023-11-22 18:40:47.169751: I tensorflow/stream_executor/cuda/cuda_diagnostics.cc:310] kernel version seems to match DSO: 525.147.5
+2023-11-22 18:40:47.260361: I tensorflow/core/platform/cpu_feature_guard.cc:193] This TensorFlow binary is optimized with oneAPI Deep Neural Network Library (oneDNN) to use the following CPU instructions in performance-critical operations:  SSE4.1 SSE4.2 AVX AVX2 FMA
+To enable them in other operations, rebuild TensorFlow with the appropriate compiler flags.
+[Thu Nov 23 05:05:13 2023]
+Finished job 0.
+1 of 1 steps (100%) done

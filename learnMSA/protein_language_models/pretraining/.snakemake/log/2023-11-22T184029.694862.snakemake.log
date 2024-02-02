@@ -1,0 +1,359 @@
+Building DAG of jobs...
+Using shell: /usr/bin/bash
+Provided cluster nodes: 12
+Provided resources: msa_load=24, learnMSA_load=12
+Job stats:
+job                    count    min threads    max threads
+-------------------  -------  -------------  -------------
+all                        1              1              1
+train_scoring_model       24              4              4
+total                     25              1              4
+
+Select jobs to execute...
+
+[Wed Nov 22 18:40:30 2023]
+rule train_scoring_model:
+    output: outputs/proteinBERT_32_sigmoid.out
+    jobid: 20
+    reason: Missing output files: outputs/proteinBERT_32_sigmoid.out; Code has changed since last execution
+    wildcards: lm=proteinBERT, dimension=32, activation=sigmoid
+    threads: 4
+    resources: mem_mb=100000, mem_mib=95368, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=vision, gpu=1, runtime=4320
+
+Submitted job 20 with external jobid '2258728'.
+
+[Wed Nov 22 18:40:32 2023]
+rule train_scoring_model:
+    output: outputs/esm2_64_softmax.out
+    jobid: 5
+    reason: Missing output files: outputs/esm2_64_softmax.out
+    wildcards: lm=esm2, dimension=64, activation=softmax
+    threads: 4
+    resources: mem_mb=100000, mem_mib=95368, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=vision, gpu=1, runtime=4320
+
+Submitted job 5 with external jobid '2258729'.
+
+[Wed Nov 22 18:40:32 2023]
+rule train_scoring_model:
+    output: outputs/proteinBERT_64_sigmoid.out
+    jobid: 22
+    reason: Missing output files: outputs/proteinBERT_64_sigmoid.out; Code has changed since last execution
+    wildcards: lm=proteinBERT, dimension=64, activation=sigmoid
+    threads: 4
+    resources: mem_mb=100000, mem_mib=95368, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=vision, gpu=1, runtime=4320
+
+Submitted job 22 with external jobid '2258730'.
+
+[Wed Nov 22 18:40:32 2023]
+rule train_scoring_model:
+    output: outputs/esm2_128_softmax.out
+    jobid: 7
+    reason: Missing output files: outputs/esm2_128_softmax.out
+    wildcards: lm=esm2, dimension=128, activation=softmax
+    threads: 4
+    resources: mem_mb=100000, mem_mib=95368, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=vision, gpu=1, runtime=4320
+
+Submitted job 7 with external jobid '2258731'.
+
+[Wed Nov 22 18:40:32 2023]
+rule train_scoring_model:
+    output: outputs/protT5_64_softmax.out
+    jobid: 13
+    reason: Missing output files: outputs/protT5_64_softmax.out
+    wildcards: lm=protT5, dimension=64, activation=softmax
+    threads: 4
+    resources: mem_mb=100000, mem_mib=95368, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=vision, gpu=1, runtime=4320
+
+Submitted job 13 with external jobid '2258732'.
+
+[Wed Nov 22 18:40:32 2023]
+rule train_scoring_model:
+    output: outputs/protT5_128_softmax.out
+    jobid: 15
+    reason: Missing output files: outputs/protT5_128_softmax.out
+    wildcards: lm=protT5, dimension=128, activation=softmax
+    threads: 4
+    resources: mem_mb=100000, mem_mib=95368, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=vision, gpu=1, runtime=4320
+
+Submitted job 15 with external jobid '2258733'.
+
+[Wed Nov 22 18:40:32 2023]
+rule train_scoring_model:
+    output: outputs/proteinBERT_64_softmax.out
+    jobid: 21
+    reason: Missing output files: outputs/proteinBERT_64_softmax.out; Code has changed since last execution
+    wildcards: lm=proteinBERT, dimension=64, activation=softmax
+    threads: 4
+    resources: mem_mb=100000, mem_mib=95368, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=vision, gpu=1, runtime=4320
+
+Submitted job 21 with external jobid '2258734'.
+
+[Wed Nov 22 18:40:32 2023]
+rule train_scoring_model:
+    output: outputs/esm2_64_sigmoid.out
+    jobid: 6
+    reason: Missing output files: outputs/esm2_64_sigmoid.out
+    wildcards: lm=esm2, dimension=64, activation=sigmoid
+    threads: 4
+    resources: mem_mb=100000, mem_mib=95368, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=vision, gpu=1, runtime=4320
+
+Submitted job 6 with external jobid '2258735'.
+
+[Wed Nov 22 18:40:32 2023]
+rule train_scoring_model:
+    output: outputs/proteinBERT_128_softmax.out
+    jobid: 23
+    reason: Missing output files: outputs/proteinBERT_128_softmax.out; Code has changed since last execution
+    wildcards: lm=proteinBERT, dimension=128, activation=softmax
+    threads: 4
+    resources: mem_mb=100000, mem_mib=95368, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=vision, gpu=1, runtime=4320
+
+Submitted job 23 with external jobid '2258736'.
+
+[Wed Nov 22 18:40:32 2023]
+rule train_scoring_model:
+    output: outputs/esm2_128_sigmoid.out
+    jobid: 8
+    reason: Missing output files: outputs/esm2_128_sigmoid.out
+    wildcards: lm=esm2, dimension=128, activation=sigmoid
+    threads: 4
+    resources: mem_mb=100000, mem_mib=95368, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=vision, gpu=1, runtime=4320
+
+Submitted job 8 with external jobid '2258737'.
+
+[Wed Nov 22 18:40:32 2023]
+rule train_scoring_model:
+    output: outputs/esm2_16_softmax.out
+    jobid: 1
+    reason: Missing output files: outputs/esm2_16_softmax.out
+    wildcards: lm=esm2, dimension=16, activation=softmax
+    threads: 4
+    resources: mem_mb=100000, mem_mib=95368, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=vision, gpu=1, runtime=4320
+
+Submitted job 1 with external jobid '2258738'.
+
+[Wed Nov 22 18:40:32 2023]
+rule train_scoring_model:
+    output: outputs/protT5_64_sigmoid.out
+    jobid: 14
+    reason: Missing output files: outputs/protT5_64_sigmoid.out
+    wildcards: lm=protT5, dimension=64, activation=sigmoid
+    threads: 4
+    resources: mem_mb=100000, mem_mib=95368, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=vision, gpu=1, runtime=4320
+
+Submitted job 14 with external jobid '2258739'.
+[Wed Nov 22 18:53:17 2023]
+Finished job 20.
+1 of 25 steps (4%) done
+Select jobs to execute...
+
+[Wed Nov 22 18:53:17 2023]
+rule train_scoring_model:
+    output: outputs/proteinBERT_16_sigmoid.out
+    jobid: 18
+    reason: Missing output files: outputs/proteinBERT_16_sigmoid.out; Code has changed since last execution
+    wildcards: lm=proteinBERT, dimension=16, activation=sigmoid
+    threads: 4
+    resources: mem_mb=100000, mem_mib=95368, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=vision, gpu=1, runtime=4320
+
+Submitted job 18 with external jobid '2258937'.
+[Wed Nov 22 18:53:23 2023]
+Finished job 21.
+2 of 25 steps (8%) done
+Select jobs to execute...
+
+[Wed Nov 22 18:53:23 2023]
+rule train_scoring_model:
+    output: outputs/proteinBERT_128_sigmoid.out
+    jobid: 24
+    reason: Missing output files: outputs/proteinBERT_128_sigmoid.out; Code has changed since last execution
+    wildcards: lm=proteinBERT, dimension=128, activation=sigmoid
+    threads: 4
+    resources: mem_mb=100000, mem_mib=95368, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=vision, gpu=1, runtime=4320
+
+Submitted job 24 with external jobid '2258938'.
+[Wed Nov 22 18:53:46 2023]
+Finished job 23.
+3 of 25 steps (12%) done
+Select jobs to execute...
+
+[Wed Nov 22 18:53:46 2023]
+rule train_scoring_model:
+    output: outputs/protT5_16_softmax.out
+    jobid: 9
+    reason: Missing output files: outputs/protT5_16_softmax.out
+    wildcards: lm=protT5, dimension=16, activation=softmax
+    threads: 4
+    resources: mem_mb=100000, mem_mib=95368, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=vision, gpu=1, runtime=4320
+
+Submitted job 9 with external jobid '2258939'.
+[Wed Nov 22 19:05:56 2023]
+Finished job 24.
+4 of 25 steps (16%) done
+Select jobs to execute...
+
+[Wed Nov 22 19:05:56 2023]
+rule train_scoring_model:
+    output: outputs/protT5_32_softmax.out
+    jobid: 11
+    reason: Missing output files: outputs/protT5_32_softmax.out
+    wildcards: lm=protT5, dimension=32, activation=softmax
+    threads: 4
+    resources: mem_mb=100000, mem_mib=95368, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=vision, gpu=1, runtime=4320
+
+Submitted job 11 with external jobid '2258944'.
+[Wed Nov 22 19:06:17 2023]
+Finished job 18.
+5 of 25 steps (20%) done
+Select jobs to execute...
+
+[Wed Nov 22 19:06:17 2023]
+rule train_scoring_model:
+    output: outputs/esm2_16_sigmoid.out
+    jobid: 2
+    reason: Missing output files: outputs/esm2_16_sigmoid.out
+    wildcards: lm=esm2, dimension=16, activation=sigmoid
+    threads: 4
+    resources: mem_mb=100000, mem_mib=95368, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=vision, gpu=1, runtime=4320
+
+Submitted job 2 with external jobid '2258945'.
+[Thu Nov 23 05:05:13 2023]
+Finished job 22.
+6 of 25 steps (24%) done
+Select jobs to execute...
+
+[Thu Nov 23 05:05:13 2023]
+rule train_scoring_model:
+    output: outputs/esm2_32_sigmoid.out
+    jobid: 4
+    reason: Missing output files: outputs/esm2_32_sigmoid.out
+    wildcards: lm=esm2, dimension=32, activation=sigmoid
+    threads: 4
+    resources: mem_mb=100000, mem_mib=95368, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=vision, gpu=1, runtime=4320
+
+Submitted job 4 with external jobid '2259657'.
+[Thu Nov 23 05:25:14 2023]
+Finished job 13.
+7 of 25 steps (28%) done
+Select jobs to execute...
+
+[Thu Nov 23 05:25:14 2023]
+rule train_scoring_model:
+    output: outputs/proteinBERT_16_softmax.out
+    jobid: 17
+    reason: Missing output files: outputs/proteinBERT_16_softmax.out
+    wildcards: lm=proteinBERT, dimension=16, activation=softmax
+    threads: 4
+    resources: mem_mb=100000, mem_mib=95368, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=vision, gpu=1, runtime=4320
+
+Submitted job 17 with external jobid '2259658'.
+[Thu Nov 23 05:25:15 2023]
+Finished job 15.
+8 of 25 steps (32%) done
+Select jobs to execute...
+
+[Thu Nov 23 05:25:15 2023]
+rule train_scoring_model:
+    output: outputs/proteinBERT_32_softmax.out
+    jobid: 19
+    reason: Missing output files: outputs/proteinBERT_32_softmax.out
+    wildcards: lm=proteinBERT, dimension=32, activation=softmax
+    threads: 4
+    resources: mem_mb=100000, mem_mib=95368, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=vision, gpu=1, runtime=4320
+
+Submitted job 19 with external jobid '2259659'.
+[Thu Nov 23 05:27:04 2023]
+Finished job 14.
+9 of 25 steps (36%) done
+Select jobs to execute...
+
+[Thu Nov 23 05:27:04 2023]
+rule train_scoring_model:
+    output: outputs/protT5_16_sigmoid.out
+    jobid: 10
+    reason: Missing output files: outputs/protT5_16_sigmoid.out
+    wildcards: lm=protT5, dimension=16, activation=sigmoid
+    threads: 4
+    resources: mem_mb=100000, mem_mib=95368, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=vision, gpu=1, runtime=4320
+
+Submitted job 10 with external jobid '2259660'.
+[Thu Nov 23 05:38:11 2023]
+Finished job 9.
+10 of 25 steps (40%) done
+Select jobs to execute...
+
+[Thu Nov 23 05:38:11 2023]
+rule train_scoring_model:
+    output: outputs/protT5_32_sigmoid.out
+    jobid: 12
+    reason: Missing output files: outputs/protT5_32_sigmoid.out
+    wildcards: lm=protT5, dimension=32, activation=sigmoid
+    threads: 4
+    resources: mem_mb=100000, mem_mib=95368, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=vision, gpu=1, runtime=4320
+
+Submitted job 12 with external jobid '2259661'.
+[Thu Nov 23 05:38:28 2023]
+Finished job 17.
+11 of 25 steps (44%) done
+Select jobs to execute...
+
+[Thu Nov 23 05:38:28 2023]
+rule train_scoring_model:
+    output: outputs/esm2_32_softmax.out
+    jobid: 3
+    reason: Missing output files: outputs/esm2_32_softmax.out
+    wildcards: lm=esm2, dimension=32, activation=softmax
+    threads: 4
+    resources: mem_mb=100000, mem_mib=95368, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=vision, gpu=1, runtime=4320
+
+Submitted job 3 with external jobid '2259662'.
+[Thu Nov 23 05:38:50 2023]
+Finished job 19.
+12 of 25 steps (48%) done
+Select jobs to execute...
+
+[Thu Nov 23 05:38:50 2023]
+rule train_scoring_model:
+    output: outputs/protT5_128_sigmoid.out
+    jobid: 16
+    reason: Missing output files: outputs/protT5_128_sigmoid.out
+    wildcards: lm=protT5, dimension=128, activation=sigmoid
+    threads: 4
+    resources: mem_mb=100000, mem_mib=95368, disk_mb=1000, disk_mib=954, tmpdir=<TBD>, partition=vision, gpu=1, runtime=4320
+
+Submitted job 16 with external jobid '2259663'.
+[Thu Nov 23 05:50:05 2023]
+Finished job 11.
+13 of 25 steps (52%) done
+[Thu Nov 23 13:48:02 2023]
+Finished job 5.
+14 of 25 steps (56%) done
+[Thu Nov 23 13:51:14 2023]
+Finished job 6.
+15 of 25 steps (60%) done
+[Thu Nov 23 13:55:44 2023]
+Finished job 7.
+16 of 25 steps (64%) done
+[Thu Nov 23 13:57:44 2023]
+Finished job 8.
+17 of 25 steps (68%) done
+[Thu Nov 23 14:03:54 2023]
+Finished job 1.
+18 of 25 steps (72%) done
+[Thu Nov 23 14:20:25 2023]
+Finished job 2.
+19 of 25 steps (76%) done
+[Thu Nov 23 16:13:30 2023]
+Finished job 10.
+20 of 25 steps (80%) done
+[Thu Nov 23 16:49:01 2023]
+Finished job 16.
+21 of 25 steps (84%) done
+[Fri Nov 24 00:19:34 2023]
+Finished job 4.
+22 of 25 steps (88%) done
+[Fri Nov 24 01:21:25 2023]
+Finished job 3.
+23 of 25 steps (92%) done
+Terminating processes on user request, this might take some time.
+Complete log: .snakemake/log/2023-11-22T184029.694862.snakemake.log

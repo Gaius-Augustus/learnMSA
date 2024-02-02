@@ -1,0 +1,1 @@
+{"loss": [19.094955444335938, 18.29293441772461, 18.259395599365234, 18.17801284790039], "lm": "proteinBERT", "lr": 0.01, "batch": 64, "max_protein_len": 512, "reduced_dim": 32, "components": 32, "activation": "sigmoid", "suffix": ""}
