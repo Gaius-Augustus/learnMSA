@@ -1,0 +1,30 @@
+cluster:
+  mkdir -p logs/{rule} &&
+  sbatch
+    --partition={resources.partition}
+    --cpus-per-task={threads}
+    --mem={resources.mem_mb}
+    --gres=gpu:{resources.gpu}
+    --job-name=smk-{rule}-{wildcards}
+    --output=logs/{rule}/{rule}-{wildcards}-%j.out
+    --parsable # Required to pass job IDs to scancel
+cluster-cancel: scancel
+cluster-cancel-nargs: 1000
+default-resources:
+  - partition=pinky
+  - mem_mb=10000
+  - gpu=0
+resources:
+  - msa_load=24
+  - learnMSA_load=16
+restart-times: 3
+max-jobs-per-second: 10
+max-status-checks-per-second: 1
+local-cores: 1
+latency-wait: 60
+jobs: 16
+keep-going: True
+rerun-incomplete: True
+printshellcmds: True
+scheduler: greedy
+use-conda: True
