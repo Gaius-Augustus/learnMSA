@@ -14,7 +14,7 @@ tf.get_logger().setLevel('WARNING')
 from learnMSA.msa_hmm import Align, Emitter, Transitioner, Initializers, MsaHmmCell, MsaHmmLayer, Training, Configuration, Viterbi, AncProbsLayer, Priors, DirichletMixture
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset, AlignedDataset
 from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
-from learnMSA.protein_language_models import Common, DataPipeline, TrainingUtil, MvnMixture
+from learnMSA.protein_language_models import Common, DataPipeline, TrainingUtil, MvnMixture, EmbeddingCache
 import itertools
 import shutil
 from test import RefModels as ref
@@ -1654,6 +1654,31 @@ class TestMvnMixture(unittest.TestCase):
         
 
 class TestLanguageModelExtension(unittest.TestCase):
+
+    def test_embedding_cache(self):
+        seq_lens = np.array([5, 11, 17, 4, 5])
+        dim = 32
+        def compute_emb_func(indices):
+            batch = np.zeros((indices.size, np.amax(seq_lens[indices]), dim), dtype=np.float32)
+            for i,j in enumerate(indices):
+                batch[i, :seq_lens[j]] = (j+1) * np.ones((seq_lens[j], dim), dtype=np.float32)
+            return batch
+        cache = EmbeddingCache.EmbeddingCache(seq_lens, dim, compute_emb_func)
+        num_calls = [0, 0]
+        def batch_size_callback(L):
+            if L > 10:
+                num_calls[0] += 1
+                return 1
+            else:
+                num_calls[1] += 1
+                return 2
+        cache.fill_cache(batch_size_callback)
+        for i in range(len(seq_lens)):
+            emb = cache.get_embedding(i)
+            np.testing.assert_almost_equal(emb, compute_emb_func(np.array([i]))[0])
+        self.assertEqual(num_calls, [2, 2])
+        self.assertEqual(np.sum(cache.cache), np.dot(seq_lens, np.arange(1,len(seq_lens)+1)*dim))
+
     
     def test_regularizer(self):
         # test the regularizer
