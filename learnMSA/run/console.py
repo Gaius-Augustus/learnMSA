@@ -85,7 +85,7 @@ def run_main():
     parser.add_argument("--use_L2", dest="use_L2", action='store_true', help="Uses L2 regularization on the match and insertion state embeddings.")
     parser.add_argument("--L2_match", dest="L2_match", type=float, default=0.0, help="Strength of the L2 regularization on the match state embedding weights. (default: %(default)s)")
     parser.add_argument("--L2_insert", dest="L2_insert", type=float, default=1000.0, help="Strength of the L2 regularization on the insertion state embedding weights. (default: %(default)s)")
-    parser.add_argument("--embedding_prior_components", dest="embedding_prior_components", type=int, default=100, help="Number of components of the multivariate normal prior distribution over the embedding weights. (default: %(default)s)")
+    parser.add_argument("--embedding_prior_components", dest="embedding_prior_components", type=int, default=10, help="Number of components of the multivariate normal prior distribution over the embedding weights. (default: %(default)s)")
     parser.add_argument("--temperature", dest="temperature", type=float, default=3., help="Temperature of the softmax function. (default: %(default)s)")
     
 
@@ -116,6 +116,7 @@ def run_main():
         print("Found tensorflow version", tf.__version__)
     
     import learnMSA.protein_language_models.Common as Common
+    from learnMSA.protein_language_models.EmbeddingBatchGenerator import EmbeddingBatchGenerator, make_generic_embedding_model_generator
     scoring_model_config = Common.ScoringModelConfig(lm_name=args.language_model,
                                                     dim=args.scoring_model_dim, 
                                                     activation=args.scoring_model_activation,
@@ -167,8 +168,8 @@ def run_main():
     if args.use_language_model:
         # we have to define a special model- and batch generator if using a language model
         # because the emission probabilities are computed differently and the LM requires specific inputs
-        model_gen = Training.make_generic_embedding_model_generator(config["scoring_model_config"].dim)
-        batch_gen = Training.EmbeddingBatchGenerator(config["scoring_model_config"])
+        model_gen = make_generic_embedding_model_generator(config["scoring_model_config"].dim)
+        batch_gen = EmbeddingBatchGenerator(config["scoring_model_config"])
     else:
         model_gen = None
         batch_gen = None

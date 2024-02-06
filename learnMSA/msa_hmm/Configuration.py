@@ -38,24 +38,24 @@ def get_adaptive_batch_size(model_lengths, max_seq_len):
     else:
         return 2*num_devices
     
-def get_adaptive_batch_size_with_language_model(model_lengths, max_seq_len):
+def get_adaptive_batch_size_with_language_model(model_lengths, max_seq_len, embedding_dim):
     num_gpu = len([x.name for x in tf.config.list_logical_devices() if x.device_type == 'GPU']) 
     num_devices = num_gpu + int(num_gpu==0) #account for the CPU-only case 
     model_length = max(model_lengths)
     if max_seq_len < 200 and model_length < 180:
-        return 200*num_devices
+        return (20 + 180*32//embedding_dim)*num_devices
     elif max_seq_len < 520 and model_length < 230:
-        return 100*num_devices
+        return (10 + 90*32//embedding_dim)*num_devices
     elif max_seq_len < 700 and model_length < 420:
-        return 50*num_devices
+        return (5 + 45*32//embedding_dim)*num_devices
     elif max_seq_len < 850 and model_length < 550:
-        return 25*num_devices
+        return (3 + 22*32//embedding_dim)*num_devices
     elif max_seq_len < 1200 and model_length < 700:
-        return 10*num_devices
+        return (1 + 9*32//embedding_dim)*num_devices
     elif max_seq_len < 2000 and model_length < 1000:
-        return 5*num_devices
+        return (1 + 4*32//embedding_dim)*num_devices
     elif max_seq_len < 4000 and model_length < 1500:
-        return 2*num_devices
+        return (1 + 32//embedding_dim)*num_devices
     else:
         return 1*num_devices
 

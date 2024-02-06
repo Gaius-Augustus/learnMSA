@@ -1,4 +1,3 @@
-import tensorflow as tf
 import numpy as np
 
 class EmbeddingCache:
@@ -7,33 +6,43 @@ class EmbeddingCache:
     Args:
         seq_lens: An array that contains the lengths of the sequences.
         dim: The dimensionality of the embeddings returned by compute_emb_func.
-        compute_emb_func: A function that computes the embeddings for a batch of sequence indices.
         dtype: The data type of the embeddings.
     """
-    def __init__(self, seq_lens, dim, compute_emb_func, dtype=np.float32):
+    def __init__(self, seq_lens, dim, dtype=np.float32):
         self.seq_lens = seq_lens
         self.dim = dim
-        self.compute_emb_func = compute_emb_func
         self.cum_lens = np.cumsum(seq_lens)
         self.cache = np.zeros((self.cum_lens[-1], dim), dtype=dtype)
         self.cum_lens -= seq_lens #make exclusive cumsum
+        self._filled = False
 
 
-    def fill_cache(self, batch_size_callback):
+    def fill_cache(self, compute_emb_func, batch_size_callback, verbose=True):
         """ Fill the cache with embeddings.
         Args:
+            compute_emb_func: A function that computes the embeddings for a batch of sequence indices.
             batch_size_callback: A function that returns an appropriate batch size for a given sequence length.
         """
         sorted_indices = np.argsort(-self.seq_lens)
         i = 0
-        while i < self.seq_lens.size:
+        last = 0
+        n = self.seq_lens.size
+        while i < n:
             batch_size = batch_size_callback(self.seq_lens[sorted_indices[i]])
             batch_indices = sorted_indices[i:i+batch_size]
-            embeddings = self.compute_emb_func(batch_indices)
+            embeddings = compute_emb_func(batch_indices)
             for j,k in enumerate(batch_indices):
                 start = self.cum_lens[k]
                 self.cache[start:start+self.seq_lens[k]] = embeddings[j, :self.seq_lens[k]]
             i += batch_size
+            if verbose:
+                for k in range(1,11):
+                    if i/n > k/10:
+                        if last < k:
+                            last = k
+                            print(f"{k*10}% done.")
+                            break
+        self._filled = True
 
 
     def get_embedding(self, i):
@@ -45,3 +54,9 @@ class EmbeddingCache:
         """
         start = self.cum_lens[i]
         return self.cache[start:start+self.seq_lens[i]]
+
+
+    def is_filled(self):
+        """ Return True if the fill_cache method has been called and get_embedding can be used, False otherwise.
+        """
+        return self._filled

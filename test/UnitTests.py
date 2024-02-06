@@ -1635,9 +1635,10 @@ class TestMvnMixture(unittest.TestCase):
         mu = np.array([1., 2, 3, 4, 5], dtype=np.float32)
         d = mu.size
         scale = np.random.rand(d,d).astype(np.float32)
+        scale = np.matmul(scale, scale.T)
         #make triangular lower
-        scale = np.tril(scale)
         inputs = np.random.multivariate_normal(mu, scale, size=100).astype(np.float32)
+        scale = np.tril(scale)
         # compute a reference assuming that tfp uses a correct implementation
         ref_dist = tfp.distributions.MultivariateNormalTriL(loc=mu, scale_tril=scale)
         ref_log_pdf = ref_dist.log_prob(inputs)
@@ -1663,7 +1664,7 @@ class TestLanguageModelExtension(unittest.TestCase):
             for i,j in enumerate(indices):
                 batch[i, :seq_lens[j]] = (j+1) * np.ones((seq_lens[j], dim), dtype=np.float32)
             return batch
-        cache = EmbeddingCache.EmbeddingCache(seq_lens, dim, compute_emb_func)
+        cache = EmbeddingCache.EmbeddingCache(seq_lens, dim)
         num_calls = [0, 0]
         def batch_size_callback(L):
             if L > 10:
@@ -1672,7 +1673,9 @@ class TestLanguageModelExtension(unittest.TestCase):
             else:
                 num_calls[1] += 1
                 return 2
-        cache.fill_cache(batch_size_callback)
+        self.assertFalse(cache.is_filled())
+        cache.fill_cache(compute_emb_func, batch_size_callback, verbose=False)
+        self.assertTrue(cache.is_filled())
         for i in range(len(seq_lens)):
             emb = cache.get_embedding(i)
             np.testing.assert_almost_equal(emb, compute_emb_func(np.array([i]))[0])

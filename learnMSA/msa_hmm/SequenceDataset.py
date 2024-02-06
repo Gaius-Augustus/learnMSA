@@ -77,14 +77,11 @@ class SequenceDataset:
         return type(self).alphabet[:-1]
 
 
-    def get_encoded_seq(self, i, 
-                        remove_gaps=True, 
-                        gap_symbols="-.", 
-                        ignore_symbols="", 
-                        replace_with_x = "BZJ", 
-                        crop_to_length=math.inf,
-                        validate_alphabet=True, 
-                        dtype=np.int16):
+    def get_standardized_seq(self, i,
+                            remove_gaps=True, 
+                            gap_symbols="-.", 
+                            ignore_symbols="", 
+                            replace_with_x = ""): 
         seq_str = str(self.get_record(i).upper().seq)
         # replace non-standard aminoacids with X
         for aa in replace_with_x:
@@ -99,6 +96,20 @@ class SequenceDataset:
         # strip other symbols
         for s in ignore_symbols:
             seq_str = seq_str.replace(s, '')
+        return seq_str
+
+
+
+    def get_encoded_seq(self, i, 
+                        remove_gaps=True, 
+                        gap_symbols="-.", 
+                        ignore_symbols="", 
+                        replace_with_x = "BZJ", 
+                        crop_to_length=math.inf,
+                        validate_alphabet=True, 
+                        dtype=np.int16,
+                        return_crop_boundaries=False):
+        seq_str = self.get_standardized_seq(i, remove_gaps, gap_symbols, ignore_symbols, replace_with_x)
         # make sure the sequences do not contain any other symbols
         if validate_alphabet:
             if bool(re.compile(rf"[^{type(self).alphabet}]").search(seq_str)):
@@ -107,8 +118,15 @@ class SequenceDataset:
         if seq.shape[0] > crop_to_length:
             #crop randomly
             start = np.random.randint(0, seq.shape[0] - crop_to_length + 1)
-            seq = seq[start:start+crop_to_length]
-        return seq
+            end = start + crop_to_length
+        else:
+            start = 0
+            end = seq.shape[0]
+        seq = seq[start:end]
+        if return_crop_boundaries:
+            return seq, start, end
+        else:
+            return seq
      
         
     def validate_dataset(self, single_seq_ok=False, empty_seq_id_ok=False, dublicate_seq_id_ok=False):
