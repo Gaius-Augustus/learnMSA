@@ -161,8 +161,9 @@ def run_main():
         try:
             sequence_weights = Align.compute_sequence_weights(args.input_file, args.cluster_dir, config["cluster_seq_id"])
         except Exception as e:
-            print("Error while computing sequence weights. Using uniform weights instead.")
-            sequence_weights = None
+            print("Error while computing sequence weights.")# Using uniform weights instead.")
+            #sequence_weights = None
+            raise SystemExit(e) 
     else:
         sequence_weights = None
     if args.use_language_model:

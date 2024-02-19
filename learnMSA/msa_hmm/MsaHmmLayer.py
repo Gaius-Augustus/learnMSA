@@ -99,11 +99,13 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         return backward[...,:-1] + backward[..., -1:]
     
     
-    def state_posterior_log_probs(self, inputs, end_hints=None, training=False):
+    def state_posterior_log_probs(self, inputs, end_hints=None, training=False, no_loglik=False):
         """ Computes the log-probability of state q at position i given inputs.
         Args:
             inputs: Sequences. Shape: (num_model, b, seq_len, s)
             end_hints: A tensor of shape (..., 2, num_states) that contains the correct state for the left and right ends of each chunk.
+            no_loglik: If true, the loglik is not used in the return value. This can be beneficial for end-to-end training when the
+                        normalizing constant of the posteriors is not important and the activation function is the softmax.
         Returns:
             state posterior probbabilities: Shape: (num_model, b, seq_len, q)
         """
@@ -123,7 +125,10 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         posterior = tf.concat([(forward_1 + backward_last)[:,tf.newaxis], posterior], axis=1)
         posterior = tf.reshape(posterior, (num_model, b, seq_len, -1))
         loglik = tf.reshape(states[1], (num_model, b))
-        posterior = posterior[...,:-1] + (posterior[..., -1:] - loglik[:,:,tf.newaxis,tf.newaxis]) #the braces are numerically important!
+        if no_loglik:
+            posterior = posterior[...,:-1] + posterior[..., -1:] 
+        else:
+            posterior = posterior[...,:-1] + (posterior[..., -1:] - loglik[:,:,tf.newaxis,tf.newaxis]) 
         return posterior
     
     

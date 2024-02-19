@@ -558,15 +558,14 @@ def compute_sequence_weights(fasta_filename, directory, cluster_seq_id=0.5):
                                  "easy-linclust", 
                                  fasta_filename, 
                                  cluster_files,
-                                 "tmp",
+                                 cluster_files+"_tmp",
                                  "--cov-mode", "1",
                                  "--cluster-mode", "2",
                                  "--alignment-mode", "3",
                                  "--kmer-per-seq", "100",
                                  "--min-seq-id", str(cluster_seq_id),
                                  "--remove-tmp-files", "true",
-                                 "-v", "0"
-                                 ])
+                                 ], check=True)
         clustering = pd.read_csv(cluster_files + "_cluster.tsv", sep="\t", names=["representative", "sequence"])
         cluster_counts = clustering.groupby("representative").size().to_frame("cluster_size")
         clustering = clustering.merge(cluster_counts, how="left", on="representative")
