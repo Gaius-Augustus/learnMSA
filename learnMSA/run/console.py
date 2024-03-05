@@ -88,6 +88,10 @@ def run_main():
     parser.add_argument("--embedding_prior_components", dest="embedding_prior_components", type=int, default=10, help="Number of components of the multivariate normal prior distribution over the embedding weights. (default: %(default)s)")
     parser.add_argument("--temperature", dest="temperature", type=float, default=3., help="Temperature of the softmax function. (default: %(default)s)")
     
+    parser.add_argument("--logo", dest="logo", action='store_true', help="Produces a gif that animates the learned sequence logo over training time.")
+    parser.add_argument("--logo_gif", dest="logo_gif", action='store_true', help="Produces a gif that animates the learned sequence logo over training time. Slows down training significantly.")
+    parser.add_argument("--logo_path", dest="logo_path", type=str, default="./logo/", help="Filepath used to store created logos and logo gifs. Directories are created. (default: %(default)s)")
+    
 
     args = parser.parse_args()
     
@@ -98,7 +102,7 @@ def run_main():
     #before importing tensorflow
     if not args.cuda_visible_devices == "default":
         os.environ["CUDA_VISIBLE_DEVICES"] = args.cuda_visible_devices  
-    from ..msa_hmm import Configuration, Initializers, Align, Emitter, Training
+    from ..msa_hmm import Configuration, Initializers, Align, Emitter, Training, Visualize
     from ..msa_hmm.SequenceDataset import SequenceDataset
     import tensorflow as tf
     from tensorflow.python.client import device_lib
@@ -122,7 +126,7 @@ def run_main():
                                                     activation=args.scoring_model_activation,
                                                     suffix=args.scoring_model_suffix,
                                                     scaled=False)
-    config = Configuration.make_default(args.num_model,
+    config = Configuration.make_default(1 if args.logo_gif else args.num_model,
                                         use_language_model=args.use_language_model, 
                                         scoring_model_config=scoring_model_config,
                                         use_l2=args.use_L2,
@@ -136,7 +140,7 @@ def run_main():
     
     if args.batch_size > 0:
         config["batch_size"] = args.batch_size
-    config["num_models"] = args.num_model
+    config["num_models"] = 1 if args.logo_gif else args.num_model
     config["max_surgery_runs"] = args.max_surgery_runs
     config["length_init_quantile"] = args.length_init_quantile
     config["surgery_quantile"] = args.surgery_quantile
@@ -174,6 +178,10 @@ def run_main():
     else:
         model_gen = None
         batch_gen = None
+    if args.logo or args.logo_gif:
+        os.makedirs(args.logo_path, exist_ok = True)
+        if args.logo_gif:
+            os.makedirs(args.logo_path+"/frames/", exist_ok = True)
     try:
         with SequenceDataset(args.input_file, "fasta", indexed=args.indexed_data) as data:
             data.validate_dataset()
@@ -183,17 +191,28 @@ def run_main():
                 config["crop_long_seqs"] = int(np.ceil(3 * np.mean(data.seq_lens)))
             else:
                 config["crop_long_seqs"] = int(args.crop)
-            _ = Align.run_learnMSA(data,
+            if args.logo_gif:
+                def get_initial_model_lengths_logo_gif_mode(data : SequenceDataset, config):
+                    #initial model length
+                    model_length = np.quantile(data.seq_lens, q=config["length_init_quantile"])
+                    model_length = max(3, int(model_length))
+                    return [model_length] 
+            alignment_model = Align.run_learnMSA(data,
                                     out_filename = args.output_file,
                                     config = config, 
                                     model_generator=model_gen,
                                     batch_generator=batch_gen,
                                     align_insertions=not args.unaligned_insertions,
                                     sequence_weights = sequence_weights,
-                                    verbose = not args.silent)
+                                    verbose = not args.silent,
+                                    logo_gif_mode = args.logo_gif,
+                                    logo_dir = args.logo_path,
+                                    initial_model_length_callback = get_initial_model_lengths_logo_gif_mode if args.logo_gif else Align.get_initial_model_lengths)
+            if args.logo:
+                Visualize.plot_and_save_logo(alignment_model, alignment_model.best_model, args.logo_path + "/logo.pdf")
     except ValueError as e:
         raise SystemExit(e) 
-
+ 
             
 if __name__ == '__main__':
     run_main()

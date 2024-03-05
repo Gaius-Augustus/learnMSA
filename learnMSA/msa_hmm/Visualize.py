@@ -1,6 +1,7 @@
 import logomaker
 from matplotlib import pyplot as plt
 from matplotlib.patches import ArrowStyle
+from matplotlib.ticker import FormatStrFormatter
 import networkx as nx
 import pandas as pd
 import numpy as np
@@ -8,6 +9,8 @@ import tensorflow as tf
 from learnMSA import msa_hmm
 import itertools
 import seaborn as sns
+import imageio
+import os
 
 
 def plot_logo(am, model_index, ax):
@@ -42,6 +45,44 @@ def plot_logo(am, model_index, ax):
     # style using Axes methods
     logo.ax.set_ylabel('information content')
     logo.ax.set_xlim([-1, len(information_content_df)])
+    logo.ax.yaxis.set_major_formatter(FormatStrFormatter('%.1f'))
+    
+
+class LogoPlotterCallback(tf.keras.callbacks.Callback):
+    def __init__(self, logo_dir, data, batch_generator, decode_indices, batch_size):
+        import matplotlib.pyplot as plt
+        self.logo_dir = logo_dir
+        self.data = data
+        self.batch_generator = batch_generator
+        self.decode_indices = decode_indices
+        self.batch_size = batch_size
+        self.i = 0
+        self.frame_dir = self.logo_dir+"/frames/"
+    
+    def on_train_batch_end(self, batch, logs=None):
+        am = msa_hmm.AlignmentModel.AlignmentModel(self.data, self.batch_generator, self.decode_indices, batch_size=self.batch_size, model=self.model)
+        fig, ax = plt.subplots(1, 1, figsize=(6, 4))
+        plot_logo(am, 0, ax)
+        plt.savefig(self.frame_dir+f"/{self.i}.png", format="png", bbox_inches="tight")
+        self.i += 1
+        plt.close()
+
+
+def make_logo_gif(frame_dir, gif_filepath):
+    #lexicographic sort would result in wrong order
+    #sort by frame number
+    filenames = [(int(file.split(".")[0]), frame_dir+"/"+file) for file in os.listdir(frame_dir) if file.endswith(".png")]
+    filenames.sort()
+    #simple heuristic to reduce the number of frames, which depends on the number of training steps
+    #we want roughly 100 frames for a nice short and memory friendly gif
+    #also, we want to focus on frames from the first half of the training which have the most variability
+    if len(filenames)//2 > 100:
+        filenames = filenames[:len(filenames)//2: len(filenames)//200]
+    #write the gif
+    with imageio.get_writer(gif_filepath, mode='I') as writer:
+        for _,filename in filenames:
+            image = imageio.imread(filename)
+            writer.append_data(image)
     
     
 def plot_hmm(am, 
@@ -285,10 +326,13 @@ def print_and_plot(am,
         if anc_probs_filename != "":
             plt.savefig(anc_probs_filename, bbox_inches='tight')
     if show_logo:
-        fig, ax = plt.subplots()
-        plot_logo(am, model_index, ax)
-        if logo_filename != "":
-            plt.savefig(logo_filename, bbox_inches='tight')
+        plot_and_save_logo(am, model_index, logo_filename)
+
+def plot_and_save_logo(am, model_index, logo_filename=""):
+    fig, ax = plt.subplots()
+    plot_logo(am, model_index, ax)
+    if logo_filename != "":
+        plt.savefig(logo_filename, bbox_inches='tight')
         
         
 def plot_sequence_length_distribution(filename, fmt="fasta", bins=100, q=0.75):
@@ -303,3 +347,4 @@ def plot_sequence_length_distribution(filename, fmt="fasta", bins=100, q=0.75):
     plt.axvline(x = median, c='orange', ls='-', label = "median")
     plt.axvline(x = q75, c='g', ls='--', label = "q75")
     plt.legend(loc='upper right')
+    

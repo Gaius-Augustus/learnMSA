@@ -219,7 +219,8 @@ def fit_model(model_generator,
               batch_size, 
               epochs,
               sequence_weights=None,
-              verbose=True):
+              verbose=True, 
+              train_callbacks=[]):
     assert_config(config)
     tf.keras.backend.clear_session() #frees occupied memory 
     tf.get_logger().setLevel('ERROR')
@@ -271,7 +272,7 @@ def fit_model(model_generator,
 
     termiante_on_nan = tf.keras.callbacks.TerminateOnNaN()
     early_stopping = tf.keras.callbacks.EarlyStopping("loss", patience=1)
-    callbacks = [termiante_on_nan, early_stopping]
+    callbacks = [termiante_on_nan, early_stopping] + train_callbacks
 
     if config["use_language_model"]:
         msa_hmm_layer = None

@@ -118,6 +118,38 @@ def fit_and_align(data : SequenceDataset,
     return am
 
 
+def fit_and_align_with_logo_gif(data : SequenceDataset, config, initial_model_length_callback, logo_dir):
+    from learnMSA.msa_hmm.Visualize import LogoPlotterCallback, make_logo_gif
+    import matplotlib.pyplot as plt
+    
+    assert_config(config)
+    model_generator, batch_generator = _make_defaults_if_none(None, None)
+    indices = np.arange(data.num_seq)
+    model_lengths = initial_model_length_callback(data, config)
+    if callable(config["batch_size"]):
+        batch_size = config["batch_size"](model_lengths, min(data.max_len, config["crop_long_seqs"]))
+    else:
+        batch_size = config["batch_size"]
+        
+    logo_plotter_callback = LogoPlotterCallback(logo_dir, data, batch_generator, indices, batch_size)
+    print("Running in logo gif mode. A sequence logo will be generated for each training step.")
+    print("This mode is much slower and less accurate (no model surgery and just 1 model) than the default mode")
+    print("and should only be used for vizualization and debugging.")
+    model, history = train.fit_model(model_generator,
+                                      batch_generator,
+                                      data,
+                                      indices,
+                                      model_lengths, 
+                                      config,
+                                      batch_size=batch_size, 
+                                      epochs=config["epochs"][-1],
+                                      verbose=True,
+                                      train_callbacks=[logo_plotter_callback])
+    make_logo_gif(logo_plotter_callback.frame_dir, logo_dir+"/training.gif")
+    am = AlignmentModel(data, batch_generator, indices, batch_size=batch_size, model=model)
+    return am
+
+
 def run_learnMSA(data : SequenceDataset,
                  out_filename,
                  config, 
@@ -130,7 +162,9 @@ def run_learnMSA(data : SequenceDataset,
                  sequence_weights=None,
                  verbose=True, 
                   initial_model_length_callback=get_initial_model_lengths,
-                 select_best_for_comparison=True):
+                 select_best_for_comparison=True,
+                 logo_gif_mode=False,
+                 logo_dir=""):
     """ Wraps fit_and_align and adds file parsing, verbosity, model selection, reference file comparison and an outfile file.
     Args: 
         data: Dataset of sequences. 
@@ -143,6 +177,7 @@ def run_learnMSA(data : SequenceDataset,
         insertion_aligner: Tool to align insertions; "famsa" is installed by default and "clustalo" or "t_coffee" are supported but must be installed manually.
         aligner_threads: Number of threads to use by the aligner.
         verbose: If False, all output messages will be disabled.
+        logo_gif_mode: If true, trains with a special mode that generates a sequence logo per train step.
     Returns:
         An AlignmentModel object.
     """
@@ -153,14 +188,17 @@ def run_learnMSA(data : SequenceDataset,
     subset = np.array([data.seq_ids.index(sid) for sid in subset_ids]) if subset_ids else None
     try:
         t_a = time.time()
-        am = fit_and_align(data, 
-                            config=config,
-                            model_generator=model_generator,
-                            batch_generator=batch_generator,
-                            subset=subset, 
-                            initial_model_length_callback=initial_model_length_callback,
-                            sequence_weights=sequence_weights,
-                            verbose=verbose)
+        if logo_gif_mode:
+            am = fit_and_align_with_logo_gif(data, config, initial_model_length_callback, logo_dir)
+        else:
+            am = fit_and_align(data, 
+                                config=config,
+                                model_generator=model_generator,
+                                batch_generator=batch_generator,
+                                subset=subset, 
+                                initial_model_length_callback=initial_model_length_callback,
+                                sequence_weights=sequence_weights,
+                                verbose=verbose)
         if verbose:
             print("Time for alignment:", "%.4f" % (time.time()-t_a))
     except tf.errors.ResourceExhaustedError as e:
@@ -266,7 +304,7 @@ def get_discard_or_expand_positions(am,
                                     am.indices,
                                     am.batch_size,
                                     am.msa_hmm_layer,
-                                    am.encoder_model)
+                                    am.encoder_model).numpy()
     pos_expand = []
     expansion_lens = []
     pos_discard = []
