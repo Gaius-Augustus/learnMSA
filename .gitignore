@@ -7,6 +7,10 @@ learnMSA/protein_language_models/protT5_model/
 learnMSA/protein_language_models/proteinBERT_model/
 learnMSA/protein_language_models/proteinBERT_model/*prior*
 learnMSA/protein_language_models/proteinBERT_model/*scoring_model*
+learnMSA/protein_language_models/pretraining/*_outputs
+learnMSA/protein_language_models/pretraining/logs
+learnMSA/protein_language_models/pretraining/.snakemake
+learnMSA/protein_language_models/pretraining/results/*rows
 build/
 dist/
 clustering/
