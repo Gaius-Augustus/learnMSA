@@ -25,7 +25,7 @@ def run_main():
                         help="Input sequence file in fasta format.")
     parser.add_argument("-o", "--out_file", dest="output_file", type=str, required=True,
                         help="Filepath for the output alignment.")
-    parser.add_argument("-n", "--num_model", dest="num_model", type=int, default=5,
+    parser.add_argument("-n", "--num_model", dest="num_model", type=int, default=4,
                         help="Number of models trained in parallel. (default: %(default)s)")
     parser.add_argument("-s", "--silent", dest="silent", action='store_true', help="Prevents output to stdout.")
     parser.add_argument("-b", "--batch", dest="batch_size", type=int, default=-1,
@@ -73,10 +73,10 @@ def run_main():
     parser.add_argument("--alpha_global_compl", dest="alpha_global_compl", type=float, default=1, help=argparse.SUPPRESS)
     
     parser.add_argument("--use_language_model", dest="use_language_model", action='store_true', help="Uses a large protein lanague model to generate per-token embeddings that guide the MSA step. (default: %(default)s)")
-    parser.add_argument("--language_model", dest="language_model", type=str, default="esm2", help="Name of the language model to use. (default: %(default)s)")
-    parser.add_argument("--scoring_model_dim", dest="scoring_model_dim", type=int, default=32, 
+    parser.add_argument("--language_model", dest="language_model", type=str, default="protT5", help="Name of the language model to use. (default: %(default)s)")
+    parser.add_argument("--scoring_model_dim", dest="scoring_model_dim", type=int, default=16, 
                         help="Reduced embedding dimension of the scoring model. (default: %(default)s)")
-    parser.add_argument("--scoring_model_activation", dest="scoring_model_activation", type=str, default="softmax", 
+    parser.add_argument("--scoring_model_activation", dest="scoring_model_activation", type=str, default="sigmoid", 
                         help="Activation function of the scoring model. (default: %(default)s)")
     parser.add_argument("--scoring_model_suffix", dest="scoring_model_suffix", type=str, default="", 
                         help="Suffix to identify a specific scoring model. (default: %(default)s)")
@@ -85,7 +85,7 @@ def run_main():
     parser.add_argument("--use_L2", dest="use_L2", action='store_true', help="Uses L2 regularization on the match and insertion state embeddings.")
     parser.add_argument("--L2_match", dest="L2_match", type=float, default=0.0, help="Strength of the L2 regularization on the match state embedding weights. (default: %(default)s)")
     parser.add_argument("--L2_insert", dest="L2_insert", type=float, default=1000.0, help="Strength of the L2 regularization on the insertion state embedding weights. (default: %(default)s)")
-    parser.add_argument("--embedding_prior_components", dest="embedding_prior_components", type=int, default=10, help="Number of components of the multivariate normal prior distribution over the embedding weights. (default: %(default)s)")
+    parser.add_argument("--embedding_prior_components", dest="embedding_prior_components", type=int, default=32, help="Number of components of the multivariate normal prior distribution over the embedding weights. (default: %(default)s)")
     parser.add_argument("--temperature", dest="temperature", type=float, default=3., help="Temperature of the softmax function. (default: %(default)s)")
     
     parser.add_argument("--logo", dest="logo", action='store_true', help="Produces a gif that animates the learned sequence logo over training time.")
@@ -133,7 +133,7 @@ def run_main():
                                         L2_match=args.L2_match,
                                         L2_insert=args.L2_insert,
                                         num_prior_components=args.embedding_prior_components,
-                                        frozen_insertions=args.frozen_insertions,
+                                        frozen_insertions=args.frozen_insertions or args.use_language_model,
                                         temperature_mode=args.temperature_mode,
                                         V2_emitter=True,
                                         V2_temperature=args.temperature)
