@@ -103,7 +103,7 @@ class MsaHmmCell(tf.keras.layers.Layer):
         scaled_forward = tf.multiply(E, R, name="scaled_forward")
         S = tf.reduce_sum(scaled_forward, axis=-1, keepdims=True)
         loglik = old_loglik + tf.math.log(S) 
-        scaled_forward /= S 
+        scaled_forward /= S
         loglik = tf.reshape(loglik, (-1, 1))
         scaled_forward = tf.reshape(scaled_forward, (-1, self.max_num_states))
         new_state = [scaled_forward, loglik]

@@ -1,7 +1,16 @@
 import tensorflow as tf
 import numpy as np
 
+
 class MsaHmmLayer(tf.keras.layers.Layer):
+    """ A layer that computes the log-likelihood and posterior state probabilities for batches of observations
+        under a number of HMMs.
+    Args:
+        cell: HMM cell whose forward recursion is used.
+        num_seqs: The number of sequences in the dataset. If not provided, the prior is not normalized.
+        use_prior: If true, the prior is added to the log-likelihood.
+        sequence_weights: A tensor of shape (num_seqs,) that contains the weight of each sequence.
+    """
     def __init__(self, 
                  cell, 
                  num_seqs=None,
