@@ -2,6 +2,8 @@
 
 # learnMSA: Learning and Aligning large Protein Families
 
+![]([https://github.com/gif](https://github.com/Gaius-Augustus/learnMSA/tree/main/logo/training.gif))
+
 # Introduction
 Multiple sequence alignment formulated as a statistical machine learning problem, where an optimal profile hidden Markov model for a potentially ultra-large family of protein sequences is learned from unaligned sequences and an alignment is decoded. We use a novel, automatically differentiable variant of the forward algorithm to train pHMMs via gradient descent.
 
