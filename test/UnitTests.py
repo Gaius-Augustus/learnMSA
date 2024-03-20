@@ -306,8 +306,52 @@ class TestMsaHmmCell(unittest.TestCase):
         for i in range(2):
             test_copied_cell(hmm_cell.duplicate([i]), [i])
             
+    def test_parallel_forward(self):
+        models = [0,1]
+        n = len(models)
+        hmm_cell, length = self.make_test_cell(models)
+        hmm_layer = MsaHmmLayer.MsaHmmLayer(hmm_cell, use_prior=False)
+        seq = tf.one_hot([[0,1,0,2]], 3)
+        print(seq.shape)
+        seq = np.stack([seq]*n)
+        hmm_layer.build(seq.shape)
+        loglik = hmm_layer(seq)
+        _,_ = hmm_layer.forward_recursion(seq, parallel_factor=1)
+        self.assertEqual(hmm_layer.cell.step_counter.numpy(), 4)
+        log_forward,_ = hmm_layer.forward_recursion(seq, parallel_factor=2)
+        self.assertEqual(hmm_layer.cell.step_counter.numpy(), 2)
+        for i in range(n):
+            q = hmm_cell.num_states[i]
+            np.testing.assert_almost_equal(np.exp(loglik[i]), self.ref_lik[i])
+            np.testing.assert_almost_equal(np.exp(log_forward)[i,0,:,:q], self.ref_alpha[i], decimal=6)
             
+    def test_parallel_backward(self):
+        models = [0,1]
+        n = len(models)
+        hmm_cell, length = self.make_test_cell(models)
+        hmm_layer = MsaHmmLayer.MsaHmmLayer(hmm_cell, use_prior=False)
+        seq = tf.one_hot([[0,1,0,2]], 3)
+        seq = np.stack([seq]*n)
+        hmm_layer.build(seq.shape)
+        log_backward = hmm_layer.backward_recursion(seq, parallel_factor=2)
+        self.assertEqual(hmm_layer.cell.step_counter.numpy(), 2)
+        for i in range(n):
+            q = hmm_cell.num_states[i]
+            np.testing.assert_almost_equal(np.exp(log_backward)[i,0,:,:q], self.ref_beta[i], decimal=6)
         
+    def test_parallel_posterior(self):
+        models = [0,1]
+        n = len(models)
+        hmm_cell, length = self.make_test_cell(models)
+        hmm_layer = MsaHmmLayer.MsaHmmLayer(hmm_cell, use_prior=False)
+        seq = tf.one_hot([[0,1,0,2]], 3)
+        seq = np.stack([seq]*n)
+        hmm_layer.build(seq.shape)
+        state_posterior_log_probs = hmm_layer.state_posterior_log_probs(seq, parallel_factor=2)
+        self.assertEqual(hmm_layer.cell.step_counter.numpy(), 2)
+        for i in range(2):
+            q = hmm_cell.num_states[i]
+            np.testing.assert_almost_equal(np.exp(state_posterior_log_probs[i,0,:,:q]), self.ref_posterior_probs[i], decimal=6)
         
                 
                 
@@ -1777,11 +1821,7 @@ class TestPretrainingUtilities(unittest.TestCase):
         loss = TrainingUtil.make_masked_func(tf.keras.losses.binary_crossentropy, categorical=False, name="bce")
         loss_value = loss(self.y_true, self.y_pred)
         np.testing.assert_almost_equal(loss_value, -(3*np.log(0.6) / 9 + 6*np.log(0.6)/16)/2)
-            
-            
-# class TestScoringModel(unittest.TestCase):
-#     pass
-            
+                   
         
 if __name__ == '__main__':
     unittest.main()

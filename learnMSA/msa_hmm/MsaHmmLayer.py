@@ -57,12 +57,14 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         built = True
         
         
-    def forward_recursion(self, inputs, end_hints=None, training=False):
+    def forward_recursion(self, inputs, end_hints=None, training=False, parallel_factor=1):
         """ Computes the forward recursion for multiple models where each model
             receives a batch of sequences as input.
         Args:
             inputs: Sequences. Shape: (num_model, b, seq_len, s)
             end_hints: A tensor of shape (..., 2, num_states) that contains the correct state for the left and right ends of each chunk.
+            training: If true, the cell is run in training mode.
+            parallel_factor: Increasing this number allows computing likelihoods and posteriors chunk-wise in parallel at the cost of memory usage.
         Returns:
             forward variables: Shape: (num_model, b, seq_len, q)
             log-likelihoods: Shape: (num_model, b)
@@ -74,24 +76,29 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         #reshape to 3D inputs for RNN (cell will reshape back in each step)
         emission_probs = self.cell.emission_probs(inputs, end_hints=end_hints, training=training)
         emission_probs = tf.reshape(emission_probs, (num_model*b, seq_len, self.cell.max_num_states))
-        #do one initialization step
-        #this way, tf will compile two versions of the cell call, one with init=True and one without
-        forward_1, step_1_state = self.cell(emission_probs[:,0], initial_state, training, init=True)
-        #run forward with the output of the first step as initial state
-        forward, _, loglik = self.rnn(emission_probs[:,1:], initial_state=step_1_state, training=training)
-        #prepend the separate first step to the other forward steps
-        forward = tf.concat([forward_1[:,tf.newaxis], forward], axis=1)
-        forward = tf.reshape(forward, (num_model, b, seq_len, -1))
-        loglik = tf.reshape(loglik, (num_model, b))
-        return forward[...,:-1] + forward[..., -1:], loglik
+        if parallel_factor == 1:
+            #do one initialization step
+            #this way, tf will compile two versions of the cell call, one with init=True and one without
+            forward_1, step_1_state = self.cell(emission_probs[:,0], initial_state, training, init=True)
+            #run forward with the output of the first step as initial state
+            forward, _, loglik = self.rnn(emission_probs[:,1:], initial_state=step_1_state, training=training)
+            #prepend the separate first step to the other forward steps
+            forward = tf.concat([forward_1[:,tf.newaxis], forward], axis=1)
+            forward = tf.reshape(forward, (num_model, b, seq_len, -1))
+            loglik = tf.reshape(loglik, (num_model, b))
+            return forward[...,:-1] + forward[..., -1:], loglik
+        else:
+            return 0., 0.
     
     
-    def backward_recursion(self, inputs, end_hints=None, training=False):
+    def backward_recursion(self, inputs, end_hints=None, training=False, parallel_factor=1):
         """ Computes the backward recursion for multiple models where each model
             receives a batch of sequences as input.
         Args:
             inputs: Sequences. Shape: (num_model, b, seq_len, s)
             end_hints: A tensor of shape (..., 2, num_states) that contains the correct state for the left and right ends of each chunk.
+            training: If true, the cell is run in training mode.
+            parallel_factor: Increasing this number allows computing likelihoods and posteriors chunk-wise in parallel at the cost of memory usage.
         Returns:
             backward variables: Shape: (num_model, b, seq_len, q)
         """
@@ -100,21 +107,26 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         initial_state = self.reverse_cell.get_initial_state(batch_size=b)
         emission_probs = self.reverse_cell.emission_probs(inputs, end_hints=end_hints, training=training)
         emission_probs = tf.reshape(emission_probs, (num_model*b, seq_len, self.cell.max_num_states))
-        #note that for backward, we can ignore the initial step like we did it in
-        #forward, because we assume that all inputs have terminal tokens
-        backward, _, _ = self.rnn_backward(emission_probs, initial_state=initial_state)
-        backward = tf.reshape(backward, (num_model, b, seq_len, -1))
-        backward = tf.reverse(backward, [-2])
-        return backward[...,:-1] + backward[..., -1:]
+        if parallel_factor == 1:
+            #note that for backward, we can ignore the initial step like we did it in
+            #forward, because we assume that all inputs have terminal tokens
+            backward, _, _ = self.rnn_backward(emission_probs, initial_state=initial_state)
+            backward = tf.reshape(backward, (num_model, b, seq_len, -1))
+            backward = tf.reverse(backward, [-2])
+            return backward[...,:-1] + backward[..., -1:]
+        else:
+            return 0., 0.
     
     
-    def state_posterior_log_probs(self, inputs, end_hints=None, training=False, no_loglik=False):
+    def state_posterior_log_probs(self, inputs, end_hints=None, training=False, no_loglik=False, parallel_factor=1):
         """ Computes the log-probability of state q at position i given inputs.
         Args:
             inputs: Sequences. Shape: (num_model, b, seq_len, s)
             end_hints: A tensor of shape (..., 2, num_states) that contains the correct state for the left and right ends of each chunk.
+            training: If true, the cell is run in training mode.
             no_loglik: If true, the loglik is not used in the return value. This can be beneficial for end-to-end training when the
                         normalizing constant of the posteriors is not important and the activation function is the softmax.
+            parallel_factor: Increasing this number allows computing likelihoods and posteriors chunk-wise in parallel at the cost of memory usage.
         Returns:
             state posterior probbabilities: Shape: (num_model, b, seq_len, q)
         """
@@ -125,20 +137,23 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         rev_initial_state = self.reverse_cell.get_initial_state(batch_size=b)
         emission_probs = self.cell.emission_probs(inputs, end_hints=end_hints, training=training)
         emission_probs = tf.reshape(emission_probs, (num_model*b, seq_len, self.cell.max_num_states))
-        #forward has to handle the first observation separately
-        forward_1, step_1_state = self.cell(emission_probs[:,0], initial_state, training, init=True)
-        #run forward and backward in parallel
-        posterior, *states = self.bidirectional_rnn(emission_probs[:,1:], initial_state=(*step_1_state, *rev_initial_state), training=training)
-        #because of the bidirectionality, we also have to manually do the last backward step
-        backward_last, _ = self.reverse_cell(emission_probs[:,0], states[2:], training)
-        posterior = tf.concat([(forward_1 + backward_last)[:,tf.newaxis], posterior], axis=1)
-        posterior = tf.reshape(posterior, (num_model, b, seq_len, -1))
-        loglik = tf.reshape(states[1], (num_model, b))
-        if no_loglik:
-            posterior = posterior[...,:-1] + posterior[..., -1:] 
+        if parallel_factor == 1:
+            #forward has to handle the first observation separately
+            forward_1, step_1_state = self.cell(emission_probs[:,0], initial_state, training, init=True)
+            #run forward and backward in parallel
+            posterior, *states = self.bidirectional_rnn(emission_probs[:,1:], initial_state=(*step_1_state, *rev_initial_state), training=training)
+            #because of the bidirectionality, we also have to manually do the last backward step
+            backward_last, _ = self.reverse_cell(emission_probs[:,0], states[2:], training)
+            posterior = tf.concat([(forward_1 + backward_last)[:,tf.newaxis], posterior], axis=1)
+            posterior = tf.reshape(posterior, (num_model, b, seq_len, -1))
+            loglik = tf.reshape(states[1], (num_model, b))
+            if no_loglik:
+                posterior = posterior[...,:-1] + posterior[..., -1:] 
+            else:
+                posterior = posterior[...,:-1] + (posterior[..., -1:] - loglik[:,:,tf.newaxis,tf.newaxis]) 
+            return posterior
         else:
-            posterior = posterior[...,:-1] + (posterior[..., -1:] - loglik[:,:,tf.newaxis,tf.newaxis]) 
-        return posterior
+            return 0.
     
     
     def apply_sequence_weights(self, loglik, indices, aggregate=False):
