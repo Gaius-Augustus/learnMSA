@@ -11,9 +11,9 @@ class MsaHmmCell(tf.keras.layers.Layer):
         Based on https://github.com/mslehre/classify-seqs/blob/main/HMMCell.py.
     Args:
         length: Model length / number of match states or a list of lengths.
+        dim: The number of dimensions of the input sequence.
         emitter: An object or a list of objects following the emitter interface (see MultinomialAminoAcidEmitter).
         transitioner: An object following the transitioner interface (see ProfileHMMTransitioner).
-        dtype: The datatype of the cell.
     """
     def __init__(self,
                  length, 
@@ -37,14 +37,14 @@ class MsaHmmCell(tf.keras.layers.Layer):
                                     for num_states, length in zip(self.num_states, self.length)]
         self.max_num_states = max(self.num_states)
         self.state_size = (tf.TensorShape([self.max_num_states]), tf.TensorShape([1]))
-        self.output_size = tf.TensorShape([self.max_num_states])
+        #self.output_size = tf.TensorShape([self.max_num_states])
         self.epsilon = tf.constant(1e-16, self.dtype)
         self.reverse = False
         self.dim = dim
         self.transitioner.cell_init(self)
         for em in self.emitter:
             em.cell_init(self)
-        self.step_counter = tf.Variable(0, trainable=False, dtype=tf.int32)
+        self.step_counter = tf.Variable(-1, trainable=False, dtype=tf.int32)
             
             
     def build(self, input_shape):
@@ -64,7 +64,7 @@ class MsaHmmCell(tf.keras.layers.Layer):
         self.log_A_dense = self.transitioner.make_log_A()
         self.log_A_dense_t = tf.transpose(self.log_A_dense, [0,2,1])
         self.init_dist = self.make_initial_distribution()
-        self.step_counter.assign(0)
+        self.step_counter.assign(-1)
     
     
     def make_initial_distribution(self):
@@ -94,46 +94,62 @@ class MsaHmmCell(tf.keras.layers.Layer):
         """
         old_scaled_forward, old_loglik = states
         old_scaled_forward = tf.reshape(old_scaled_forward, (self.num_models, -1, self.max_num_states))
-        old_loglik = tf.reshape(old_loglik, (self.num_models, -1, 1))
-        E = tf.reshape(emission_probs, (self.num_models, -1, self.max_num_states))
         if init:
             R = old_scaled_forward
         else:
             R = self.transitioner(old_scaled_forward)
+        E = tf.reshape(emission_probs, (self.num_models, -1, self.max_num_states))
+        #if parallel, allow broadcasting of inputs to forward probs
+        q = tf.shape(R)[1] // tf.shape(E)[1]
+        R = tf.reshape(R, (self.num_models, -1, q, self.max_num_states))
+        E = tf.reshape(E, (self.num_models, -1, 1, self.max_num_states))
+        old_loglik = tf.reshape(old_loglik, (self.num_models, -1, q, 1))
         E = tf.maximum(E, self.epsilon)
         R = tf.maximum(R, self.epsilon)
         scaled_forward = tf.multiply(E, R, name="scaled_forward")
         S = tf.reduce_sum(scaled_forward, axis=-1, keepdims=True)
         loglik = old_loglik + tf.math.log(S) 
         scaled_forward /= S
-        loglik = tf.reshape(loglik, (-1, 1))
-        scaled_forward = tf.reshape(scaled_forward, (-1, self.max_num_states))
+        scaled_forward = tf.reshape(scaled_forward, (-1, q*self.max_num_states))
+        loglik = tf.reshape(loglik, (-1, q))
         new_state = [scaled_forward, loglik]
         if self.reverse:
             output = tf.math.log(R) 
-            output = tf.reshape(output, (-1, self.max_num_states))
-            old_loglik = tf.reshape(old_loglik, (-1, 1))
+            output = tf.reshape(output, (-1, q*self.max_num_states))
+            old_loglik = tf.reshape(old_loglik, (-1, q))
             output = tf.concat([output, old_loglik], axis=-1) 
         else:
             output = tf.math.log(scaled_forward) 
             output = tf.concat([output, loglik], axis=-1)
-        if not init: #leave out one step to get the correct number (tf also counts 1 dry run to compile the cell)
-            self.step_counter.assign_add(1)
+        self.step_counter.assign_add(1)
         return output, new_state
 
     
-    def get_initial_state(self, inputs=None, batch_size=None, dtype=None):
-        if self.reverse:
-            init_dist = tf.ones((self.num_models*batch_size, self.max_num_states), dtype=self.dtype)
+    def get_initial_state(self, inputs=None, batch_size=None, dtype=None, parallel=False):
+        """ Returns the initial recurrent state which is a pair of tensors: the scaled 
+            forward probabilities of shape (num_models*batch, num_states) 
+            and the log likelihood (num_models*batch, 1).
+            The return values can be savely reshaped to (num_models, batch, ...).
+            If parallel, the returned tensors are of hape (num_models*batch, num_states*num_states)
+            and (num_models*batch, num_states).
+        """
+        if not parallel:
+            if self.reverse:
+                init_dist = tf.ones((self.num_models*batch_size, self.max_num_states), dtype=self.dtype)
+            else:
+                init_dist = tf.repeat(self.make_initial_distribution(), repeats=batch_size, axis=0)
+                init_dist = tf.transpose(init_dist, (1,0,2))
+                init_dist = tf.reshape(init_dist, (-1, self.max_num_states))
             loglik = tf.zeros((self.num_models*batch_size, 1), dtype=self.dtype)
-            S = [init_dist, loglik]
+            return [init_dist, loglik]
         else:
-            init_dist = tf.repeat(self.make_initial_distribution(), repeats=batch_size, axis=0)
-            init_dist = tf.transpose(init_dist, (1,0,2))
-            init_dist = tf.reshape(init_dist, (-1, self.max_num_states))
-            loglik = tf.zeros((self.num_models*batch_size, 1), dtype=self.dtype)
-            S = [init_dist, loglik]
-        return S
+            indices = tf.range(self.max_num_states, dtype=tf.int32)
+            indices = tf.tile(indices, [self.num_models*batch_size])
+            init_dist = tf.one_hot(indices, self.max_num_states)
+            init_dist = tf.reshape(init_dist, (self.num_models*batch_size, self.max_num_states*self.max_num_states))
+            loglik = tf.zeros((self.num_models*batch_size, self.max_num_states), dtype=self.dtype)
+            return [init_dist, loglik]
+            
 
     
     def get_prior_log_density(self, add_metrics=False):  

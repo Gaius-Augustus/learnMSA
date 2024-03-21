@@ -247,6 +247,7 @@ class TestMsaHmmCell(unittest.TestCase):
         seq = np.repeat(seq[np.newaxis], len(models), axis=0)
         loglik = hmm_layer(seq)
         log_forward,_ = hmm_layer.forward_recursion(seq)
+        self.assertEqual(hmm_layer.cell.step_counter.numpy(), 4)
         log_backward = hmm_layer.backward_recursion(seq)
         state_posterior_log_probs = hmm_layer.state_posterior_log_probs(seq)
         for i in range(2):
@@ -310,15 +311,12 @@ class TestMsaHmmCell(unittest.TestCase):
         models = [0,1]
         n = len(models)
         hmm_cell, length = self.make_test_cell(models)
-        hmm_layer = MsaHmmLayer.MsaHmmLayer(hmm_cell, use_prior=False)
+        hmm_layer = MsaHmmLayer.MsaHmmLayer(hmm_cell, use_prior=False, parallel_factor=2)
         seq = tf.one_hot([[0,1,0,2]], 3)
-        print(seq.shape)
         seq = np.stack([seq]*n)
         hmm_layer.build(seq.shape)
         loglik = hmm_layer(seq)
-        _,_ = hmm_layer.forward_recursion(seq, parallel_factor=1)
-        self.assertEqual(hmm_layer.cell.step_counter.numpy(), 4)
-        log_forward,_ = hmm_layer.forward_recursion(seq, parallel_factor=2)
+        log_forward,_ = hmm_layer.forward_recursion(seq)
         self.assertEqual(hmm_layer.cell.step_counter.numpy(), 2)
         for i in range(n):
             q = hmm_cell.num_states[i]
@@ -329,12 +327,12 @@ class TestMsaHmmCell(unittest.TestCase):
         models = [0,1]
         n = len(models)
         hmm_cell, length = self.make_test_cell(models)
-        hmm_layer = MsaHmmLayer.MsaHmmLayer(hmm_cell, use_prior=False)
+        hmm_layer = MsaHmmLayer.MsaHmmLayer(hmm_cell, use_prior=False, parallel_factor=2)
         seq = tf.one_hot([[0,1,0,2]], 3)
         seq = np.stack([seq]*n)
         hmm_layer.build(seq.shape)
-        log_backward = hmm_layer.backward_recursion(seq, parallel_factor=2)
-        self.assertEqual(hmm_layer.cell.step_counter.numpy(), 2)
+        log_backward = hmm_layer.backward_recursion(seq)
+        self.assertEqual(hmm_layer.reverse_cell.step_counter.numpy(), 2)
         for i in range(n):
             q = hmm_cell.num_states[i]
             np.testing.assert_almost_equal(np.exp(log_backward)[i,0,:,:q], self.ref_beta[i], decimal=6)
@@ -343,11 +341,11 @@ class TestMsaHmmCell(unittest.TestCase):
         models = [0,1]
         n = len(models)
         hmm_cell, length = self.make_test_cell(models)
-        hmm_layer = MsaHmmLayer.MsaHmmLayer(hmm_cell, use_prior=False)
+        hmm_layer = MsaHmmLayer.MsaHmmLayer(hmm_cell, use_prior=False, parallel_factor=2)
         seq = tf.one_hot([[0,1,0,2]], 3)
         seq = np.stack([seq]*n)
         hmm_layer.build(seq.shape)
-        state_posterior_log_probs = hmm_layer.state_posterior_log_probs(seq, parallel_factor=2)
+        state_posterior_log_probs = hmm_layer.state_posterior_log_probs(seq)
         self.assertEqual(hmm_layer.cell.step_counter.numpy(), 2)
         for i in range(2):
             q = hmm_cell.num_states[i]
