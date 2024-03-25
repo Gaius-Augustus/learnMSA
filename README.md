@@ -80,7 +80,7 @@ Run the notebooks <code>learnMSA_demo.ipynb</code> or <code>learnMSA_with_langua
   
 ## Benchmark:
 
-![alt text](https://github.com/felbecker/snakeMSA/blob/main/plots/SP_TC.png?raw=true)
+![alt text](https://github.com/felbecker/snakeMSA/blob/main/plots/barplots.png?raw=true)
 
 # Publications
 
