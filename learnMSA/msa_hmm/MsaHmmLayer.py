@@ -83,7 +83,6 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         self.cell.recurrent_init()
         num_model, b, seq_len, s = tf.unstack(tf.shape(inputs))
         q = self.cell.max_num_states
-        initial_state = self.cell.get_initial_state(batch_size=b*self.parallel_factor, parallel_factor=self.parallel_factor)
         emission_probs = self.cell.emission_probs(inputs, end_hints=end_hints, training=training)
         #reshape to 3D inputs for RNN (cell will reshape back in each step)
         #if parallel_factor > 1, reshape to equally sized chunks
@@ -91,6 +90,7 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         emission_probs = tf.reshape(emission_probs, (num_model*b*self.parallel_factor, chunk_size, q))
         #do one initialization step
         #this way, tf will compile two versions of the cell call, one with init=True and one without
+        initial_state = self.cell.get_initial_state(batch_size=b*self.parallel_factor, parallel_factor=self.parallel_factor)
         forward_1, step_1_state = self.cell(emission_probs[:,0], initial_state, training, init=True)
         #run forward with the output of the first step as initial state
         forward, _, loglik = self.rnn(emission_probs[:,1:], initial_state=step_1_state, training=training)
@@ -137,37 +137,42 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         self.reverse_cell.recurrent_init()
         num_model, b, seq_len, s = tf.unstack(tf.shape(inputs))
         q = self.cell.max_num_states
-        initial_state = self.reverse_cell.get_initial_state(batch_size=b*self.parallel_factor, parallel_factor=self.parallel_factor)
         emission_probs = self.reverse_cell.emission_probs(inputs, end_hints=end_hints, training=training)
         #reshape to 3D inputs for RNN (cell will reshape back in each step)
         #if parallel_factor > 1, reshape to equally sized chunks
         chunk_size = seq_len // self.parallel_factor
         emission_probs = tf.reshape(emission_probs, (num_model*b*self.parallel_factor, chunk_size, self.cell.max_num_states))
-        #note that for backward, we can ignore the initial step like we did it in forward
-        backward, _, _ = self.rnn_backward(emission_probs, initial_state=initial_state)
+        #do one initialization step
+        #this way, tf will compile two versions of the cell call, one with init=True and one without
+        initial_state = self.reverse_cell.get_initial_state(inputs=emission_probs, batch_size=b*self.parallel_factor, parallel_factor=self.parallel_factor)
+        backward_1, step_1_state = self.reverse_cell(emission_probs[:,-1], initial_state, training, init=True)
+        backward, _, _ = self.rnn_backward(emission_probs[:,:-1], initial_state=step_1_state, training=training)
+        backward = tf.concat([backward_1[:,tf.newaxis], backward], axis=1) 
         if self.parallel_factor == 1:
             backward = tf.reshape(backward, (num_model, b, seq_len, -1))
             backward_scaled = backward[...,:-1]
             backward_scaling_factors = backward[..., -1:]
             backward_result = backward_scaled + backward_scaling_factors
+            backward_result = tf.reverse(backward_result, [-2])
         else:
             backward_scaled = backward[...,:-q]
             backward_scaling_factors = backward[..., -q:]
             backward_scaled = tf.reshape(backward_scaled, (num_model*b, self.parallel_factor, chunk_size, q, -1))
             backward_scaling_factors = tf.reshape(backward_scaling_factors, (num_model*b, self.parallel_factor, chunk_size, q, 1))
             backward_chunks = backward_scaled + backward_scaling_factors #shape: (num_model*b, factor, chunk_size, q (conditional states), q (actual states))
+            backward_chunks = tf.reverse(backward_chunks, [-3])
             #compute the actual backward variables across the chunks via the total probability
-            backward_chunks_last = backward_chunks[:,:,-1]  #(num_model*b, factor, q, q)
+            backward_chunks_last = backward_chunks[:,:,0]  #(num_model*b, factor, q, q)
             backward_chunks_last = tf.reshape(backward_chunks_last, (num_model*b, self.parallel_factor, q*q))
             backward_total, _, _ = self.total_prob_rnn_rev(tf.math.exp(backward_chunks_last)) #(num_model*b, factor, q)
+            backward_total = tf.reverse(backward_total, [1])
             init, _ = self.reverse_cell.get_initial_state(batch_size=b, parallel_factor=1)
             init = tf.math.log(init)
-            T = tf.concat([init[:,tf.newaxis], backward_total[:,:-1]], axis=1)
+            T = tf.concat([backward_total[:,1:], init[:,tf.newaxis]], axis=1)
             T = T[:, :, tf.newaxis, :, tf.newaxis]
             backward_result = backward_chunks + T #shape: (num_model*b, factor, chunk_size, q, q)
             backward_result = tf.reshape(backward_result, (num_model, b, seq_len, q, q))
             backward_result = tf.math.reduce_logsumexp(backward_result, axis=-2)
-        backward_result = tf.reverse(backward_result, [-2])
         return backward_result
     
     
