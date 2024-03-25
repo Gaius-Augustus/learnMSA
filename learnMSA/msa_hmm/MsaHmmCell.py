@@ -98,9 +98,11 @@ class MsaHmmCell(tf.keras.layers.Layer):
             R = old_scaled_forward
         else:
             R = self.transitioner(old_scaled_forward)
+            if self.reverse:
+                print("reverse", R, old_scaled_forward)
         E = tf.reshape(emission_probs, (self.num_models, -1, self.max_num_states))
         #if parallel, allow broadcasting of inputs to forward probs
-        q = tf.shape(R)[1] // tf.shape(E)[1]
+        q = tf.shape(R)[1] // tf.shape(E)[1] #q == 1 if not parallel else q = num_states
         R = tf.reshape(R, (self.num_models, -1, q, self.max_num_states))
         E = tf.reshape(E, (self.num_models, -1, 1, self.max_num_states))
         old_loglik = tf.reshape(old_loglik, (self.num_models, -1, q, 1))
@@ -125,7 +127,7 @@ class MsaHmmCell(tf.keras.layers.Layer):
         return output, new_state
 
     
-    def get_initial_state(self, inputs=None, batch_size=None, dtype=None, parallel=False):
+    def get_initial_state(self, inputs=None, batch_size=None, dtype=None, parallel_factor=1):
         """ Returns the initial recurrent state which is a pair of tensors: the scaled 
             forward probabilities of shape (num_models*batch, num_states) 
             and the log likelihood (num_models*batch, 1).
@@ -133,7 +135,7 @@ class MsaHmmCell(tf.keras.layers.Layer):
             If parallel, the returned tensors are of hape (num_models*batch, num_states*num_states)
             and (num_models*batch, num_states).
         """
-        if not parallel:
+        if parallel_factor == 1:
             if self.reverse:
                 init_dist = tf.ones((self.num_models*batch_size, self.max_num_states), dtype=self.dtype)
             else:
@@ -146,6 +148,13 @@ class MsaHmmCell(tf.keras.layers.Layer):
             indices = tf.range(self.max_num_states, dtype=tf.int32)
             indices = tf.tile(indices, [self.num_models*batch_size])
             init_dist = tf.one_hot(indices, self.max_num_states)
+            init_dist = tf.reshape(init_dist, (self.num_models, batch_size*self.max_num_states, self.max_num_states))
+            init_dist_trans = self.transitioner(init_dist)
+            init_dist_trans = tf.reshape(init_dist_trans, (self.num_models, batch_size//parallel_factor, parallel_factor, self.max_num_states*self.max_num_states))
+            is_first_chunk = np.zeros((self.num_models, batch_size//parallel_factor, parallel_factor, self.max_num_states*self.max_num_states), dtype=np.float32)
+            is_first_chunk[:, :, 0, :] = 1
+            init_dist = tf.reshape(init_dist, (self.num_models, batch_size//parallel_factor, parallel_factor, self.max_num_states*self.max_num_states))
+            init_dist = is_first_chunk * init_dist + (1-is_first_chunk) * init_dist_trans
             init_dist = tf.reshape(init_dist, (self.num_models*batch_size, self.max_num_states*self.max_num_states))
             loglik = tf.zeros((self.num_models*batch_size, self.max_num_states), dtype=self.dtype)
             return [init_dist, loglik]

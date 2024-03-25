@@ -1,5 +1,6 @@
 import tensorflow as tf
 import numpy as np
+from learnMSA.msa_hmm.TotalProbabilityCell import TotalProbabilityCell
 
 
 class MsaHmmLayer(tf.keras.layers.Layer):
@@ -11,6 +12,7 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         use_prior: If true, the prior is added to the log-likelihood.
         sequence_weights: A tensor of shape (num_seqs,) that contains the weight of each sequence.
             parallel_factor: Increasing this number allows computing likelihoods and posteriors chunk-wise in parallel at the cost of memory usage.
+                            The parallel factor has to be a divisor of the sequence length.
     """
     def __init__(self, 
                  cell, 
@@ -58,6 +60,11 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         self.rnn.build(rnn_input_shape)
         self.rnn_backward.build(rnn_input_shape)
         self.bidirectional_rnn.build(rnn_input_shape)
+        if self.parallel_factor > 1:
+            self.total_prob_cell = TotalProbabilityCell(self.cell)
+            self.total_prob_cell_rev = TotalProbabilityCell(self.reverse_cell, reverse=True)
+            self.total_prob_rnn = tf.keras.layers.RNN(self.total_prob_cell, return_sequences=True, return_state=True)
+            self.total_prob_rnn_rev = tf.keras.layers.RNN(self.total_prob_cell_rev, return_sequences=True, return_state=True, go_backwards=True)
         built = True
         
         
@@ -75,19 +82,21 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         #initialize transition- and emission-matricies
         self.cell.recurrent_init()
         num_model, b, seq_len, s = tf.unstack(tf.shape(inputs))
-        initial_state = self.cell.get_initial_state(batch_size=b*self.parallel_factor, parallel=self.parallel_factor>1)
-        #reshape to 3D inputs for RNN (cell will reshape back in each step)
+        q = self.cell.max_num_states
+        initial_state = self.cell.get_initial_state(batch_size=b*self.parallel_factor, parallel_factor=self.parallel_factor)
         emission_probs = self.cell.emission_probs(inputs, end_hints=end_hints, training=training)
-        #reshape to equally sizes chunks according to parallel factor
+        #reshape to 3D inputs for RNN (cell will reshape back in each step)
+        #if parallel_factor > 1, reshape to equally sized chunks
         chunk_size = seq_len // self.parallel_factor
-        emission_probs = tf.reshape(emission_probs, (num_model*b*self.parallel_factor, chunk_size, self.cell.max_num_states))
+        emission_probs = tf.reshape(emission_probs, (num_model*b*self.parallel_factor, chunk_size, q))
         #do one initialization step
         #this way, tf will compile two versions of the cell call, one with init=True and one without
         forward_1, step_1_state = self.cell(emission_probs[:,0], initial_state, training, init=True)
         #run forward with the output of the first step as initial state
         forward, _, loglik = self.rnn(emission_probs[:,1:], initial_state=step_1_state, training=training)
         #prepend the separate first step to the other forward steps
-        forward = tf.concat([forward_1[:,tf.newaxis], forward], axis=1)
+        #shape of forward tensor: (num_model*b*factor, chunk_size, z*q + z) z == 1 iff parallel_factor == 1 else z=q
+        forward = tf.concat([forward_1[:,tf.newaxis], forward], axis=1) 
         if self.parallel_factor == 1:
             forward = tf.reshape(forward, (num_model, b, seq_len, -1))
             forward_scaled =  forward[...,:-1]
@@ -95,17 +104,23 @@ class MsaHmmLayer(tf.keras.layers.Layer):
             forward_result = forward_scaled + forward_scaling_factors
             loglik = tf.reshape(loglik, (num_model, b))
         else:
-            forward_scaled = forward[...,:-self.cell.max_num_states]
-            forward_scaling_factors = forward[..., -self.cell.max_num_states:]
-            forward_scaled = tf.reshape(forward, (num_model, b, seq_len, self.cell.max_num_states, -1))
-            forward_scaling_factors = tf.reshape(forward_scaling_factors, (num_model, b, seq_len, self.cell.max_num_states, 1))
-            forward_result = forward_scaled + forward_scaling_factors
-            loglik = tf.reshape(loglik, (num_model, b, self.parallel_factor, self.cell.max_num_states))
-
-            #wrong!! just to make the tests running for now!
-            forward_result = tf.reduce_sum(forward_result, axis=-2)
-            loglik = tf.reduce_sum(loglik, axis=-2)
-
+            forward_scaled = forward[...,:-q]
+            forward_scaling_factors = forward[..., -q:] 
+            forward_scaled = tf.reshape(forward_scaled, (num_model*b, self.parallel_factor, chunk_size, q, -1))
+            forward_scaling_factors = tf.reshape(forward_scaling_factors, (num_model*b, self.parallel_factor, chunk_size, q, 1))
+            forward_chunks = forward_scaled + forward_scaling_factors #shape: (num_model*b, factor, chunk_size, q (conditional states), q (actual states))
+            #compute the actual forward variables across the chunks via the total probability
+            forward_chunks_last = forward_chunks[:,:,-1]  #(num_model*b, factor, q, q)
+            forward_chunks_last = tf.reshape(forward_chunks_last, (num_model*b, self.parallel_factor, q*q))
+            forward_total, _, loglik = self.total_prob_rnn(tf.math.exp(forward_chunks_last)) #(num_model*b, factor, q)
+            init, _ = self.cell.get_initial_state(batch_size=b, parallel_factor=1)
+            init = tf.math.log(init)
+            T = tf.concat([init[:,tf.newaxis], forward_total[:,:-1]], axis=1)
+            T = T[:, :, tf.newaxis, :, tf.newaxis]
+            forward_result = forward_chunks + T #shape: (num_model*b, factor, chunk_size, q, q)
+            forward_result = tf.reshape(forward_result, (num_model, b, seq_len, q, q))
+            forward_result = tf.math.reduce_logsumexp(forward_result, axis=-2)
+            loglik = tf.reshape(loglik, (num_model, b))
         return forward_result, loglik
     
     
@@ -121,13 +136,14 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         """
         self.reverse_cell.recurrent_init()
         num_model, b, seq_len, s = tf.unstack(tf.shape(inputs))
-        initial_state = self.reverse_cell.get_initial_state(batch_size=b*self.parallel_factor, parallel=self.parallel_factor>1)
+        q = self.cell.max_num_states
+        initial_state = self.reverse_cell.get_initial_state(batch_size=b*self.parallel_factor, parallel_factor=self.parallel_factor)
         emission_probs = self.reverse_cell.emission_probs(inputs, end_hints=end_hints, training=training)
-        #reshape to equally sizes chunks according to parallel factor
+        #reshape to 3D inputs for RNN (cell will reshape back in each step)
+        #if parallel_factor > 1, reshape to equally sized chunks
         chunk_size = seq_len // self.parallel_factor
         emission_probs = tf.reshape(emission_probs, (num_model*b*self.parallel_factor, chunk_size, self.cell.max_num_states))
-        #note that for backward, we can ignore the initial step like we did it in
-        #forward, because we assume that all inputs have terminal tokens
+        #note that for backward, we can ignore the initial step like we did it in forward
         backward, _, _ = self.rnn_backward(emission_probs, initial_state=initial_state)
         if self.parallel_factor == 1:
             backward = tf.reshape(backward, (num_model, b, seq_len, -1))
@@ -135,15 +151,22 @@ class MsaHmmLayer(tf.keras.layers.Layer):
             backward_scaling_factors = backward[..., -1:]
             backward_result = backward_scaled + backward_scaling_factors
         else:
-            backward_scaled = backward[...,:-self.cell.max_num_states]
-            backward_scaling_factors = backward[..., -self.cell.max_num_states:]
-            backward_scaled = tf.reshape(backward, (num_model, b, seq_len, self.cell.max_num_states, -1))
-            backward_scaling_factors = tf.reshape(backward_scaling_factors, (num_model, b, seq_len, self.cell.max_num_states, 1))
-            backward_result = backward_scaled + backward_scaling_factors
-
-            #wrong!! just to make the tests running for now!
-            backward_result = tf.reduce_sum(backward_result, axis=-2)
-
+            backward_scaled = backward[...,:-q]
+            backward_scaling_factors = backward[..., -q:]
+            backward_scaled = tf.reshape(backward_scaled, (num_model*b, self.parallel_factor, chunk_size, q, -1))
+            backward_scaling_factors = tf.reshape(backward_scaling_factors, (num_model*b, self.parallel_factor, chunk_size, q, 1))
+            backward_chunks = backward_scaled + backward_scaling_factors #shape: (num_model*b, factor, chunk_size, q (conditional states), q (actual states))
+            #compute the actual backward variables across the chunks via the total probability
+            backward_chunks_last = backward_chunks[:,:,-1]  #(num_model*b, factor, q, q)
+            backward_chunks_last = tf.reshape(backward_chunks_last, (num_model*b, self.parallel_factor, q*q))
+            backward_total, _, _ = self.total_prob_rnn_rev(tf.math.exp(backward_chunks_last)) #(num_model*b, factor, q)
+            init, _ = self.reverse_cell.get_initial_state(batch_size=b, parallel_factor=1)
+            init = tf.math.log(init)
+            T = tf.concat([init[:,tf.newaxis], backward_total[:,:-1]], axis=1)
+            T = T[:, :, tf.newaxis, :, tf.newaxis]
+            backward_result = backward_chunks + T #shape: (num_model*b, factor, chunk_size, q, q)
+            backward_result = tf.reshape(backward_result, (num_model, b, seq_len, q, q))
+            backward_result = tf.math.reduce_logsumexp(backward_result, axis=-2)
         backward_result = tf.reverse(backward_result, [-2])
         return backward_result
     
@@ -162,8 +185,8 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         num_model, b, seq_len, s = tf.unstack(tf.shape(inputs))
         self.cell.recurrent_init()
         self.reverse_cell.recurrent_init()
-        initial_state = self.cell.get_initial_state(batch_size=b*self.parallel_factor, parallel=self.parallel_factor>1)
-        rev_initial_state = self.reverse_cell.get_initial_state(batch_size=b*self.parallel_factor, parallel=self.parallel_factor>1)
+        initial_state = self.cell.get_initial_state(batch_size=b*self.parallel_factor, parallel_factor=self.parallel_factor)
+        rev_initial_state = self.reverse_cell.get_initial_state(batch_size=b*self.parallel_factor, parallel_factor=self.parallel_factor)
         emission_probs = self.cell.emission_probs(inputs, end_hints=end_hints, training=training)
         #reshape to equally sizes chunks according to parallel factor
         chunk_size = seq_len // self.parallel_factor
