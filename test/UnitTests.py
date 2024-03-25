@@ -145,6 +145,7 @@ class TestMsaHmmCell(unittest.TestCase):
         self.init_ref = [I1, I2]
         self.ref_alpha = [ref.get_ref_forward_A(), ref.get_ref_forward_B()]
         self.ref_beta = [ref.get_ref_backward_A(), ref.get_ref_backward_B()]
+        print("ref beta", self.ref_beta)
         self.ref_lik = [ref.get_ref_lik_A(), ref.get_ref_lik_B()]
         self.ref_scaled_alpha = [ref.get_ref_scaled_forward_A(), ref.get_ref_scaled_forward_B()]
         self.ref_posterior_probs = [ref.get_ref_posterior_probs_A(), ref.get_ref_posterior_probs_B()]
@@ -315,8 +316,7 @@ class TestMsaHmmCell(unittest.TestCase):
         seq = tf.one_hot([[0,1,0,2]], 3)
         seq = np.stack([seq]*n)
         hmm_layer.build(seq.shape)
-        loglik = hmm_layer(seq)
-        log_forward,_ = hmm_layer.forward_recursion(seq)
+        log_forward,loglik = hmm_layer.forward_recursion(seq)
         self.assertEqual(hmm_layer.cell.step_counter.numpy(), 2)
         for i in range(n):
             q = hmm_cell.num_states[i]
@@ -832,6 +832,7 @@ class TestMSAHMM(unittest.TestCase):
                                 0.30000002, 0.         ]])
         for i in range(2):
             actual = np.exp(backward_seqs[0,0,-(i+1)])
+            print("actual", actual)
             r = backward_ref[i] + hmm_cell.epsilon
             np.testing.assert_almost_equal(actual, r, decimal=5)
             
