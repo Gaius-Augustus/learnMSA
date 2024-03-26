@@ -349,10 +349,37 @@ class TestMsaHmmCell(unittest.TestCase):
         for i in range(2):
             q = hmm_cell.num_states[i]
             np.testing.assert_almost_equal(np.exp(state_posterior_log_probs[i,0,:,:q]), self.ref_posterior_probs[i], decimal=6)
+
+    def test_parallel_longer_seq_batch(self):
+        models = [0,1]
+        n = len(models)
+        hmm_cell, length = self.make_test_cell(models)
+        hmm_layer = MsaHmmLayer.MsaHmmLayer(hmm_cell, use_prior=False, parallel_factor=1)
+        hmm_layer_parallel = MsaHmmLayer.MsaHmmLayer(hmm_cell, use_prior=False, parallel_factor=4) 
+        #set sequence length to 16 so that we have 4 chunks of size 4
+        #try one sequence with padding and one without
+        seq = tf.one_hot([[0,1,0,1,1,0,1,0,0,1,0,1,1,0,1,0], [0,1,1,1,0,0,1,1,1,2,2,2,2,2,2,2]], 3)
+        seq = np.stack([seq]*n)
+        hmm_layer.build(seq.shape)
+        hmm_layer_parallel.build(seq.shape)
+        #non parallel
+        log_forward,loglik = hmm_layer.forward_recursion(seq)
+        log_backward = hmm_layer.backward_recursion(seq)
+        state_posterior_log_probs = hmm_layer.state_posterior_log_probs(seq)
+        #parallel 
+        log_forward_parallel,loglik_parallel = hmm_layer_parallel.forward_recursion(seq)
+        log_backward_parallel = hmm_layer_parallel.backward_recursion(seq)
+        state_posterior_log_probs_parallel = hmm_layer_parallel.state_posterior_log_probs(seq)
+        self.assertEqual(hmm_layer.cell.step_counter.numpy(), 4)
+        for i in range(2):
+            q = hmm_cell.num_states[i]
+            np.testing.assert_almost_equal(np.exp(loglik[i]), np.exp(loglik_parallel[i]), decimal=6)
+            np.testing.assert_almost_equal(np.exp(log_forward)[i,0,:,:q], np.exp(log_forward_parallel)[i,0,:,:q], decimal=6)
+            np.testing.assert_almost_equal(np.exp(log_backward)[i,0,:,:q], np.exp(log_backward_parallel)[i,0,:,:q], decimal=6)
+            np.testing.assert_almost_equal(np.exp(state_posterior_log_probs[i,0,:,:q]), np.exp(state_posterior_log_probs_parallel[i,0,:,:q]), decimal=6)
+            
         
                 
-                
-
 def string_to_one_hot(s):
     i = [SequenceDataset.alphabet.index(aa) for aa in s]
     return tf.one_hot(i, len(SequenceDataset.alphabet)-1)

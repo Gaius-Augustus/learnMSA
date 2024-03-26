@@ -147,7 +147,6 @@ class MsaHmmCell(tf.keras.layers.Layer):
             indices = tf.tile(indices, [self.num_models*batch_size])
             init_dist = tf.one_hot(indices, self.max_num_states)
             if self.reverse:
-                assert(inputs is not None, "Need inputs for reverse direction if parallel_factor > 1.")
                 init_dist_chunk = tf.reshape(init_dist, (self.num_models*batch_size, self.max_num_states, self.max_num_states))
                 #inputs shape =  (num_model*b*parallel_factor, chunk_size, q)
                 first_emissions = inputs[:, 0, :]
