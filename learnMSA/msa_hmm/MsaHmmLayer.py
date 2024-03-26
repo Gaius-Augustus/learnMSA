@@ -309,7 +309,7 @@ class MsaHmmLayer(tf.keras.layers.Layer):
              "num_seqs" : self.num_seqs,
              "use_prior" : self.use_prior, 
              "sequence_weights" : self.sequence_weights,
-             "parallel_factor" : parallel_factor
+             "parallel_factor" : self.parallel_factor
         })
         return config
 
