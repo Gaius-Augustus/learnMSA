@@ -36,12 +36,11 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         if self.built:
             return
         # build the cell
-        n = input_shape[-2]*self.cell.max_num_states if self.parallel_factor > 1 else input_shape[-2]
-        self.cell.build((None, n, input_shape[-1]))
+        self.cell.build((None, input_shape[-2], input_shape[-1]))
         # make a variant of the forward cell configured for backward
         self.reverse_cell = self.cell.make_reverse_direction_offspring()
         # build the reverse cell
-        self.reverse_cell.build((None, n, input_shape[-1]))
+        self.reverse_cell.build((None, input_shape[-2], input_shape[-1]))
         #make a forward rnn layer
         self.rnn = tf.keras.layers.RNN(self.cell, 
                                        return_sequences=True, 
@@ -58,7 +57,7 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         # Bidirectional makes a copy rather than taking the original rnn, override the copy
         self.bidirectional_rnn.forward_layer = self.rnn 
         # build the RNN layers with a different input shape
-        rnn_input_shape = (None, n, self.cell.max_num_states)
+        rnn_input_shape = (None, input_shape[-2], self.cell.max_num_states)
         self.rnn.build(rnn_input_shape)
         self.rnn_backward.build(rnn_input_shape)
         self.bidirectional_rnn.build(rnn_input_shape)
@@ -309,7 +308,8 @@ class MsaHmmLayer(tf.keras.layers.Layer):
              "cell" : self.cell,
              "num_seqs" : self.num_seqs,
              "use_prior" : self.use_prior, 
-             "sequence_weights" : self.sequence_weights
+             "sequence_weights" : self.sequence_weights,
+             "parallel_factor" : parallel_factor
         })
         return config
 
