@@ -159,8 +159,11 @@ class MsaHmmCell(tf.keras.layers.Layer):
             init_dist_chunk = tf.reshape(init_dist_chunk, (self.num_models, batch_size*self.max_num_states, self.max_num_states))
             init_dist_trans = self.transitioner(init_dist_chunk) 
             init_dist_trans = tf.reshape(init_dist_trans, (self.num_models, batch_size//parallel_factor, parallel_factor, self.max_num_states*self.max_num_states))
-            is_first_chunk = np.zeros((self.num_models, batch_size//parallel_factor, parallel_factor, self.max_num_states*self.max_num_states), dtype=np.float32)
-            is_first_chunk[:, :, -1 if self.reverse else 0, :] = 1
+            is_first_chunk = tf.zeros((self.num_models, batch_size//parallel_factor, parallel_factor-1, self.max_num_states*self.max_num_states), dtype=self.dtype)
+            if self.reverse:
+                is_first_chunk = tf.concat([is_first_chunk, tf.ones_like(is_first_chunk[...,:1,:])], axis=2)
+            else:       
+                is_first_chunk = tf.concat([tf.ones_like(is_first_chunk[...,:1,:]), is_first_chunk], axis=2)
             init_dist = tf.reshape(init_dist, (self.num_models, batch_size//parallel_factor, parallel_factor, self.max_num_states*self.max_num_states))
             init_dist = is_first_chunk * init_dist + (1-is_first_chunk) * init_dist_trans
             init_dist = tf.reshape(init_dist, (self.num_models*batch_size, self.max_num_states*self.max_num_states))
