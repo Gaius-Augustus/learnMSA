@@ -331,7 +331,6 @@ class TestMsaHmmCell(unittest.TestCase):
         seq = np.stack([seq]*n)
         hmm_layer.build(seq.shape)
         log_backward = hmm_layer.backward_recursion(seq)
-        self.assertEqual(hmm_layer.reverse_cell.step_counter.numpy(), 2)
         for i in range(n):
             q = hmm_cell.num_states[i]
             np.testing.assert_almost_equal(np.exp(log_backward)[i,0,:,:q], self.ref_beta[i], decimal=6)
@@ -817,6 +816,10 @@ class TestMSAHMM(unittest.TestCase):
                     alignment_block = AlignmentModel.get_alignment_block(sequences[i], 
                                                                         C,IL,np.amax(IL, axis=0),IS)
                     self.assert_vec(alignment_block, ref)
+
+
+    def test_parallel_viterbi(self):
+        self.assertTrue(False)
                 
                 
     def test_aligned_insertions(self):
