@@ -29,6 +29,7 @@ class TotalProbabilityCell(tf.keras.layers.Layer):
         old_scaled_forward, old_loglik = states
         conditional_forward = tf.reshape(conditional_forward, (-1, self.cell.max_num_states, self.cell.max_num_states))
         scaled_forward = tf.einsum("bc,bcq->bq", old_scaled_forward, conditional_forward)
+        scaled_forward = tf.maximum(scaled_forward, self.cell.epsilon)
         S = tf.reduce_sum(scaled_forward, axis=-1)
         loglik = old_loglik + tf.math.log(S)
         scaled_forward /= S[:,tf.newaxis]

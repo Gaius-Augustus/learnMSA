@@ -44,7 +44,6 @@ class MsaHmmCell(tf.keras.layers.Layer):
         self.transitioner.cell_init(self)
         for em in self.emitter:
             em.cell_init(self)
-        self.step_counter = tf.Variable(-1, trainable=False, dtype=tf.int32)
             
             
     def build(self, input_shape):
@@ -53,6 +52,8 @@ class MsaHmmCell(tf.keras.layers.Layer):
         for em in self.emitter:
             em.build((None, input_shape[-2], self.dim))
         self.transitioner.build((None, input_shape[-2], self.dim))
+        if not self.reverse:
+            self.step_counter = tf.Variable(-1, trainable=False, name="step_counter", dtype=tf.int32)
         self.built = True
         self.recurrent_init()
 
@@ -64,7 +65,8 @@ class MsaHmmCell(tf.keras.layers.Layer):
         self.log_A_dense = self.transitioner.make_log_A()
         self.log_A_dense_t = tf.transpose(self.log_A_dense, [0,2,1])
         self.init_dist = self.make_initial_distribution()
-        self.step_counter.assign(-1)
+        if not self.reverse:
+            self.step_counter.assign(-1)
     
     
     def make_initial_distribution(self):
@@ -121,7 +123,8 @@ class MsaHmmCell(tf.keras.layers.Layer):
         else:
             output = tf.math.log(scaled_forward) 
             output = tf.concat([output, loglik], axis=-1)
-        self.step_counter.assign_add(1)
+        if not self.reverse:
+            self.step_counter.assign_add(1)
         return output, new_state
 
     

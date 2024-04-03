@@ -125,7 +125,7 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         forward_chunks_last = tf.reshape(forward_chunks_last, (num_model*b, self.parallel_factor, q*q))
         forward_total, _, loglik = self.total_prob_rnn(tf.math.exp(forward_chunks_last)) #(num_model*b, factor, q)
         init, _ = self.cell.get_initial_state(batch_size=b, parallel_factor=1)
-        init = tf.math.log(init)
+        init = tf.math.log(init + self.cell.epsilon)
         T = tf.concat([init[:,tf.newaxis], forward_total[:,:-1]], axis=1)
         T = T[:, :, tf.newaxis, :, tf.newaxis]
         forward_result = forward_chunks + T #shape: (num_model*b, factor, chunk_size, q, q)
@@ -188,7 +188,7 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         backward_total, _, _ = self.total_prob_rnn_rev(tf.math.exp(backward_chunks_last)) #(num_model*b, factor, q)
         backward_total = tf.reverse(backward_total, [1])
         init, _ = self.reverse_cell.get_initial_state(batch_size=b, parallel_factor=1)
-        init = tf.math.log(init)
+        init = tf.math.log(init + self.reverse_cell.epsilon)
         T = tf.concat([backward_total[:,1:], init[:,tf.newaxis]], axis=1)
         T = T[:, :, tf.newaxis, :, tf.newaxis]
         backward_result = backward_chunks + T #shape: (num_model*b, factor, chunk_size, q, q)
@@ -229,7 +229,6 @@ class MsaHmmLayer(tf.keras.layers.Layer):
             #posterior as defined here is never used but required to make the tf autograph work
             posterior, states = tf.zeros(()), forward_step_1_state + backward_step_1_state
             self.cell.step_counter.assign_add(1)
-            self.reverse_cell.step_counter.assign_add(1)
         #because of the bidirectionality, we also have to manually do the last forward and backward step
         forward_last, final_state = self.cell(emission_probs[:,-1], states[:2], training)
         backward_last, _ = self.reverse_cell(emission_probs[:,0], states[2:], training)
