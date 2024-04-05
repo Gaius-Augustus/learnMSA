@@ -7,7 +7,7 @@ import math
 
 
 
-def save_log(x, log_zero_val=-1e3):
+def safe_log(x, log_zero_val=-1e3):
     """ Computes element-wise logarithm with output_i=log_zero_val where x_i=0.
     """
     epsilon = tf.constant(np.finfo(np.float32).tiny)
@@ -17,101 +17,119 @@ def save_log(x, log_zero_val=-1e3):
     return log_x
 
 
-
-def save_log(x, log_zero_val=-1e3):
-    """ Computes element-wise logarithm with output_i=log_zero_val where x_i=0.
-    """
-    epsilon = tf.constant(np.finfo(np.float32).tiny)
-    log_x = tf.math.log(tf.maximum(x, epsilon))
-    zero_mask = tf.cast(tf.equal(x, 0), dtype=log_x.dtype)
-    log_x = (1-zero_mask) * log_x + zero_mask * log_zero_val
-    return log_x
-
-
-def viterbi_step(gamma_prev, emission_probs_i, hmm_cell):
-    """ Computes one Viterbi dynamic programming step.
+@tf.function
+def viterbi_step(gamma_prev, emission_probs_i, transition_matrix=None):
+    """ Computes one Viterbi dynamic programming step. z is a helper dimension for parallelization and not used in the final result.
     Args:
-        gamma_prev: Viterbi values of the previous recursion. Shape (num_models, b, q)
-        emission_probs_i: Emission probabilities of the i-th vertical input slice. Shape (num_models, b, q)
-        hmm_cell: HMM cell with the models under which decoding should happen.
+        gamma_prev: Viterbi values of the previous recursion. Shape (num_models, b, z, q)
+        emission_probs_i: Emission probabilities of the i-th vertical input slice. Shape (num_models, b, q) or (num_models, b, q, q)
+        transition_matrix: Logarithmic transition matricies describing the Markov chain. Shape (num_models, q, q)
+    Returns:
+        Viterbi values of the current recursion (gamma_next). Shape (num_models, b, z, q)
     """
-    epsilon = tf.constant(np.finfo(np.float32).tiny)
-    #very very inefficient!?
-    a = tf.expand_dims(hmm_cell.log_A_dense, 1) + tf.expand_dims(gamma_prev, -1)
-    a = tf.reduce_max(a, axis=-2)
-    b = save_log(emission_probs_i)
-    gamma_next = a + b
+    if transition_matrix is not None:
+        gamma_next = transition_matrix[:,tf.newaxis,tf.newaxis] + tf.expand_dims(gamma_prev, -1)
+        gamma_next = tf.reduce_max(gamma_next, axis=-2)
+    else:
+        gamma_next = gamma_prev
+    if len(tf.shape(emission_probs_i)) == 3:
+        #classic Viterbi step
+        gamma_next += safe_log(emission_probs_i[:,:,tf.newaxis])
+    else:
+        #variant used for parallel Viterbi where (something like) emission probabilities is defined for state pairs
+        gamma_next = tf.expand_dims(gamma_next, -1)
+        print(emission_probs_i.shape, gamma_next.shape)
+        gamma_next += emission_probs_i[:,:,tf.newaxis]
+        gamma_next = tf.reduce_max(gamma_next, axis=-2)
     return gamma_next
 
 
-def viterbi_dyn_prog(sequences, hmm_cell, end_hints=None):
+def viterbi_dyn_prog(emission_probs, init, transition_matrix):
     """ Logarithmic (underflow safe) viterbi capable of decoding many sequences in parallel on the GPU.
+    z is a helper dimension for parallelization and not used in the final result.
     Args:
-        sequences: Tensor. Shape (num_models, b, L, s).
-        hmm_cell: HMM cell with the models under which decoding should happen.
-        end_hints: A optional tensor of shape (..., 2, num_states) that contains the correct state for the left and right ends of each chunk.
+        emission_probs: Tensor. Shape (num_models, b, L, q) or (num_models, b, L, q, q).
+        init: Initial state distribution. Shape (num_models, z, q).
+        transition_matrix: Logarithmic transition matricies describing the Markov chain. Shape (num_models, q, q)
     Returns:
-        Viterbi values (gamma) per model. Shape (num_model, b, L, q)
+        Viterbi values (gamma) per model. Shape (num_models, b, z, L, q)
     """
-    epsilon = tf.constant(np.finfo(np.float32).tiny)
-    init = tf.transpose(hmm_cell.init_dist, (1,0,2)) #(num_models, 1, q)
-    emission_probs = hmm_cell.emission_probs(sequences, end_hints=end_hints, training=False)
+    gamma_val = safe_log(init)[:,tf.newaxis] 
+    gamma_val = tf.cast(gamma_val, dtype=transition_matrix.dtype) 
     b0 = emission_probs[:,:,0]
-    gamma_val = save_log(init) + save_log(b0)
-    gamma_val = tf.cast(gamma_val, dtype=hmm_cell.dtype) 
-    L = tf.shape(sequences)[-2]
+    q = tf.shape(transition_matrix)[-1]
+    if len(tf.shape(emission_probs)) == 4:
+        #classic Viterbi initialization
+        gamma_val += safe_log(b0)[:,:,tf.newaxis]
+    else:
+        #variant used for parallel Viterbi 
+        gamma_val = viterbi_step(gamma_val, b0)
+    L = tf.shape(emission_probs)[2]
     #tf.function-compatible accumulation of results in a dynamically unrolled loop using TensorArray
-    gamma = tf.TensorArray(hmm_cell.dtype, size=L)
+    gamma = tf.TensorArray(transition_matrix.dtype, size=L)
     gamma = gamma.write(0, gamma_val)
     for i in tf.range(1, L):
-        gamma_val = viterbi_step(gamma_val, emission_probs[:,:,i], hmm_cell)
+        gamma_val = viterbi_step(gamma_val, emission_probs[:,:,i], transition_matrix)
         gamma = gamma.write(i, gamma_val) 
-    gamma = tf.transpose(gamma.stack(), [1,2,0,3])
+    gamma = tf.transpose(gamma.stack(), [1,2,3,0,4])
     return gamma
 
 
-def viterbi_backtracking_step(q, gamma_state, hmm_cell):
+@tf.function
+def viterbi_backtracking_step(prev_states, gamma_state, transition_matrix_transposed):
     """ Computes a Viterbi backtracking step in parallel for all models and batch elements.
     Args:
-        q: Previously decoded states. Shape: (num_model, b, 1)
+        prev_states: Previously decoded states. Shape: (num_model, b, 1)
         gamma_state: Viterbi values of the previously decoded states. Shape: (num_model, b, q)
-        hmm_cell: HMM cell with the models under which decoding should happen.
+        transition_matrix_transposed: transposed Logarithmic transition matricies describing the Markov chain. 
+                                        Shape (num_models, q, q) or (num_models, b, q, q)
     """
     #since A is transposed, we gather columns (i.e. all starting states q' when transitioning to q)
-    A_q = tf.gather_nd(hmm_cell.log_A_dense_t, q, batch_dims=1)
-    q = tf.math.argmax(A_q + gamma_state, axis=-1)
-    q = tf.expand_dims(q, -1)
-    return q
+    A_prev_states = tf.gather_nd(transition_matrix_transposed, prev_states, 
+                        batch_dims=2 if len(tf.shape(transition_matrix_transposed))==4 else 1)
+    next_states = tf.math.argmax(A_prev_states + gamma_state, axis=-1)
+    next_states = tf.expand_dims(next_states, -1)
+    return next_states
 
     
-def viterbi_backtracking(hmm_cell, gamma):
+def viterbi_backtracking(gamma, transition_matrix_transposed):
     """ Performs backtracking on Viterbi score tables.
     Args:
-        hmm_cell: HMM cell with the models under which decoding should happen.
         gamma: A Viterbi score table per model and batch element. Shape (num_model, b, L, q)
+        transition_matrix_transposed: transposed Logarithmic transition matricies describing the Markov chain. 
+                                            Shape (num_models, q, q) or (num_models, b, L, q, q) 
+    Returns:
+        State sequences. Shape (num_model, b, L) of type int16
     """
-    q = tf.math.argmax(gamma[:,:,-1], axis=-1)
-    q = tf.expand_dims(q, -1)
+    cur_states = tf.math.argmax(gamma[:,:,-1], axis=-1)
+    cur_states = tf.expand_dims(cur_states, -1)
     L = tf.shape(gamma)[2]
     #tf.function-compatible accumulation of results in a dynamically unrolled loop using TensorArray
-    state_seqs_max_lik = tf.TensorArray(q.dtype, size=L)
-    state_seqs_max_lik = state_seqs_max_lik.write(L-1, q)
+    state_seqs_max_lik = tf.TensorArray(cur_states.dtype, size=L)
+    state_seqs_max_lik = state_seqs_max_lik.write(L-1, cur_states)
     for i in tf.range(L-2, -1, -1):
-        q = viterbi_backtracking_step(q, gamma[:,:,i], hmm_cell)
-        state_seqs_max_lik = state_seqs_max_lik.write(i, q)
+        if len(tf.shape(transition_matrix_transposed)) == 5:
+            cur_states = viterbi_backtracking_step(cur_states, gamma[:,:,i], transition_matrix_transposed[:,:,i])
+        else:
+            cur_states = viterbi_backtracking_step(cur_states, gamma[:,:,i], transition_matrix_transposed)
+        state_seqs_max_lik = state_seqs_max_lik.write(i, cur_states)
     state_seqs_max_lik = tf.transpose(state_seqs_max_lik.stack(), [1,2,0,3])
     state_seqs_max_lik = tf.cast(state_seqs_max_lik, dtype=tf.int16)
     state_seqs_max_lik = state_seqs_max_lik[:,:,:,0]
     return state_seqs_max_lik
 
 
-def viterbi(sequences, hmm_cell, end_hints=None):
+def viterbi(sequences, hmm_cell, end_hints=None, parallel_factor=1, return_variables=False):
     """ Computes the most likely sequence of hidden states given unaligned sequences and a number of models.
         The implementation is logarithmic (underflow safe) and capable of decoding many sequences in parallel 
         on the GPU.
     Args:
         sequences: Input sequences. Shape (num_models, b, L, s) or (num_models, b, L)
         hmm_cell: A HMM cell representing k models used for decoding.
+        end_hints: A optional tensor of shape (..., 2, num_states) that contains the correct state for the left and right ends of each chunk. (experimental)
+        parallel_factor: Increasing this number allows computing likelihoods and posteriors chunk-wise in parallel at the cost of memory usage.
+                        The parallel factor has to be a divisor of the sequence length.
+        return_variables: If True, the function also returns the Viterbi variables (gamma).
     Returns:
         State sequences. Shape (num_models, b, L)
     """
@@ -119,8 +137,46 @@ def viterbi(sequences, hmm_cell, end_hints=None):
         sequences = tf.one_hot(sequences, hmm_cell.dim, dtype=hmm_cell.dtype)
     else:
         sequences = tf.cast(sequences, hmm_cell.dtype)
-    gamma = viterbi_dyn_prog(sequences, hmm_cell, end_hints=end_hints)
-    return viterbi_backtracking(hmm_cell, gamma)
+    #compute all emission probabilities in parallel
+    emission_probs = hmm_cell.emission_probs(sequences, end_hints=end_hints, training=False)
+    num_model, b, seq_len, q = tf.unstack(tf.shape(emission_probs))
+    tf.debugging.assert_equal(seq_len % parallel_factor, 0, 
+        f"The sequence length ({seq_len}) has to be divisible by the parallel factor ({parallel_factor}).")
+    #compute max probabilities of chunks given starting states in parallel
+    chunk_size = seq_len // parallel_factor
+    emission_probs = tf.reshape(emission_probs, (num_model, b*parallel_factor, chunk_size, q))
+    init_dist = tf.transpose(hmm_cell.init_dist, (1,0,2)) #(num_models, 1, q)
+    init = init_dist if parallel_factor == 1 else tf.eye(q, dtype=hmm_cell.dtype)[tf.newaxis] 
+    z = tf.shape(init)[1] #1 if parallel_factor == 1, q otherwise
+    A = hmm_cell.log_A_dense
+    At = hmm_cell.log_A_dense_t
+    print(A.shape)
+    gamma = viterbi_dyn_prog(emission_probs, init, A) 
+    gamma = tf.reshape(gamma, (num_model, b*parallel_factor*z, chunk_size, q))
+
+    # if parallel_factor == 1:
+    #     print("non-parallel gamma\n", gamma[0,0,0,0::5])
+
+
+    viterbi_paths = viterbi_backtracking(gamma, At)
+    if parallel_factor > 1:
+        gamma_last = tf.reshape(gamma[:,:,:,-1], (num_model, b, parallel_factor, q, q))
+        chunk_probs = viterbi_dyn_prog(gamma_last, init_dist, A)[:,:,0] #(num_model, b, parallel_factor, q)
+        transposed_transitions = tf.transpose(gamma_last, (0,1,2,4,3)) + At[:,tf.newaxis,tf.newaxis] 
+        optimal_chunks = viterbi_backtracking(chunk_probs, transposed_transitions) #(num_model, b, parallel_factor)
+        viterbi_paths = tf.reshape(viterbi_paths, (num_model, b, parallel_factor, q, chunk_size))
+        optimal_chunks = tf.cast(optimal_chunks, dtype=tf.int32)
+        optimal_chunks = tf.expand_dims(optimal_chunks, 3)
+
+
+        # print("chunk_probs\n", chunk_probs[0,0])
+        # print("viterbi_paths\n", viterbi_paths[0,0])
+        # print("optimal_chunks\n", optimal_chunks[0,0])
+
+
+        viterbi_paths = tf.gather_nd(viterbi_paths, optimal_chunks, batch_dims=3) #(num_model, b, L)
+        viterbi_paths = tf.reshape(viterbi_paths, (num_model, b, seq_len))
+    return viterbi_paths, gamma if return_variables else viterbi_paths
 
 
 def get_state_seqs_max_lik(data : SequenceDataset,
@@ -129,7 +185,8 @@ def get_state_seqs_max_lik(data : SequenceDataset,
                            batch_size,
                            hmm_cell, 
                            model_ids,
-                           encoder=None):
+                           encoder=None,
+                           parallel_factor=1):
     """ Runs batch-wise viterbi on all sequences in the dataset as specified by indices.
     Args:
         data: The sequence dataset.
@@ -137,7 +194,9 @@ def get_state_seqs_max_lik(data : SequenceDataset,
         indices: Indices that specify which sequences in the dataset should be decoded. 
         batch_size: Specifies how many sequences will be decoded in parallel. 
         hmm_cell: MsaHmmCell object. 
-        encoder: Optional eget_state_seqs_max_likncoder model that is applied to the sequences before Viterbi.
+        encoder: Optional encoder model that is applied to the sequences before Viterbi.
+        parallel_factor: Increasing this number allows computing likelihoods and posteriors chunk-wise in parallel at the cost of memory usage.
+                        The parallel factor has to be a divisor of the sequence length.
     Returns:
         A dense integer representation of the most likely state sequences. Shape: (num_model, num_seq, L)
     """
@@ -164,7 +223,7 @@ def get_state_seqs_max_lik(data : SequenceDataset,
             encoded_seq = encoder(inputs)
             #todo: this can be improved by encoding only for required models, not all
             encoded_seq = tf.gather(encoded_seq, model_ids, axis=0)
-            viterbi_seq = viterbi(encoded_seq, hmm_cell)
+            viterbi_seq = viterbi(encoded_seq, hmm_cell, parallel_factor=parallel_factor)
             return viterbi_seq
     
     @tf.function(input_signature=(tf.TensorSpec(shape=[None, hmm_cell.num_models, None], dtype=tf.uint8),))
@@ -175,7 +234,7 @@ def get_state_seqs_max_lik(data : SequenceDataset,
             seq = encoder(inputs) 
         #todo: this can be improved by encoding only for required models, not all
         seq = tf.gather(seq, model_ids, axis=0)
-        return viterbi(seq, hmm_cell)
+        return viterbi(seq, hmm_cell, parallel_factor=parallel_factor)
     
     for i,q in enumerate(hmm_cell.num_states):
         state_seqs_max_lik[i] = q-1 #terminal state
