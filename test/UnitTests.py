@@ -148,6 +148,7 @@ class TestMsaHmmCell(unittest.TestCase):
         self.ref_lik = [ref.get_ref_lik_A(), ref.get_ref_lik_B()]
         self.ref_scaled_alpha = [ref.get_ref_scaled_forward_A(), ref.get_ref_scaled_forward_B()]
         self.ref_posterior_probs = [ref.get_ref_posterior_probs_A(), ref.get_ref_posterior_probs_B()]
+        self.ref_gamma = [ref.get_ref_viterbi_variables_A(), ref.get_ref_viterbi_variables_B()]
     
     def make_test_cell(self, models):
         if not hasattr(models, '__iter__'):
@@ -377,7 +378,19 @@ class TestMsaHmmCell(unittest.TestCase):
             np.testing.assert_almost_equal(np.exp(log_backward)[i,0,:,:q], np.exp(log_backward_parallel)[i,0,:,:q], decimal=6)
             np.testing.assert_almost_equal(np.exp(state_posterior_log_probs[i,0,:,:q]), np.exp(state_posterior_log_probs_parallel[i,0,:,:q]), decimal=6)
             
-        
+    def test_parallel_viterbi(self):
+        models = [0,1]
+        n = len(models)
+        hmm_cell, length = self.make_test_cell(models)
+        seq = tf.one_hot([[0,1,0,2]], 3)
+        seq = np.stack([seq]*n)
+        _,gamma_1 = Viterbi.viterbi(seq, hmm_cell, parallel_factor=1, return_variables=True)
+        #_,gamma_3 = Viterbi.viterbi(seq, hmm_cell, parallel_factor=2, return_variables=True)
+        for i in range(2):
+            q = hmm_cell.num_states[i]
+            np.testing.assert_almost_equal(np.exp(gamma_1[i,0:,:q]), self.ref_gamma[i], decimal=6)
+
+
                 
 def string_to_one_hot(s):
     i = [SequenceDataset.alphabet.index(aa) for aa in s]
@@ -819,7 +832,57 @@ class TestMSAHMM(unittest.TestCase):
 
 
     def test_parallel_viterbi(self):
-        self.assertTrue(False)
+        length = [5, 3]
+        emission_init = [tf.constant_initializer(string_to_one_hot("FELIX").numpy()*20),
+                         tf.constant_initializer(string_to_one_hot("AHC").numpy()*20)]
+        transition_init = [Initializers.make_default_transition_init(MM = 0, 
+                                                                    MI = 0,
+                                                                    MD = 0,
+                                                                    II = 0,
+                                                                    IM = 0,
+                                                                    DM = 0,
+                                                                    DD = 0,
+                                                                    FC = 0,
+                                                                    FE = 0,
+                                                                    R = 0,
+                                                                    RF = -1, 
+                                                                    T = 0, 
+                                                                    scale = 0)]*2
+        emitter = Emitter.ProfileHMMEmitter(emission_init = emission_init, 
+                                                 insertion_init = [tf.keras.initializers.Zeros()]*2)
+        transitioner = Transitioner.ProfileHMMTransitioner(transition_init = transition_init, 
+                                                            flank_init = [tf.keras.initializers.Zeros()]*2)
+        hmm_cell = MsaHmmCell.MsaHmmCell(length, emitter=emitter, transitioner=transitioner)
+        hmm_cell.build((None, None, len(SequenceDataset.alphabet)))
+        hmm_cell.recurrent_init()
+        with SequenceDataset(os.path.dirname(__file__)+"/data/felix.fa") as data:
+            ref_seqs = np.array([#model 1
+                                [[1,2,3,4,5,12,12,12,12,12,12,12,12,12,12],
+                                [0,0,0,1,2,3,4,5,12,12,12,12,12,12,12],
+                                [1,2,3,4,5,11,11,11,12,12,12,12,12,12,12],
+                                [1,2,3,4,5,10,10,10,1,2,3,4,5,11,12],
+                                [0,2,3,4,11,12,12,12,12,12,12,12,12,12,12],
+                                [1,2,7,7,7,3,4,5,12,12,12,12,12,12,12],
+                                [1,6,6,2,3,8,4,9,9,9,5,12,12,12,12],
+                                [1,2,3,8,8,8,4,5,11,11,11,12,12,12,12]], 
+                                #model 2
+                                [[0,0,0,0,0,8,8,8,8,8,8,8,8,8,8],
+                                [1,2,3,7,7,7,7,7,8,8,8,8,8,8,8],
+                                [0,0,0,0,0,0,1,3,8,8,8,8,8,8,8],
+                                [0,0,0,0,0,1,2,3,6,6,6,6,6,1,8],
+                                [1,4,4,4,2,8,8,8,8,8,8,8,8,8,8],
+                                [0,0,1,2,3,7,7,7,8,8,8,8,8,8,8],
+                                [0,1,2,6,6,1,6,1,2,3,7,8,8,8,8],
+                                [0,0,0,1,2,3,6,6,1,2,3,8,8,8,8]]])
+            sequences = get_all_seqs(data, 2)
+            sequences = np.transpose(sequences, [1,0,2])
+            print("running non parallel viterbi")
+            state_seqs_max_lik_3 = Viterbi.viterbi(sequences, hmm_cell, parallel_factor=1).numpy()
+            print("running parallel viterbi")
+            state_seqs_max_lik_3 = Viterbi.viterbi(sequences, hmm_cell, parallel_factor=3).numpy()
+            #state_seqs_max_lik_5 = Viterbi.viterbi(sequences, hmm_cell, parallel_factor=5).numpy()
+            self.assert_vec(state_seqs_max_lik_3, ref_seqs)
+            #self.assert_vec(state_seqs_max_lik_5, ref_seqs)
                 
                 
     def test_aligned_insertions(self):
