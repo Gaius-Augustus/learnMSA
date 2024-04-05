@@ -149,6 +149,7 @@ class TestMsaHmmCell(unittest.TestCase):
         self.ref_scaled_alpha = [ref.get_ref_scaled_forward_A(), ref.get_ref_scaled_forward_B()]
         self.ref_posterior_probs = [ref.get_ref_posterior_probs_A(), ref.get_ref_posterior_probs_B()]
         self.ref_gamma = [ref.get_ref_viterbi_variables_A(), ref.get_ref_viterbi_variables_B()]
+        self.ref_viterbi_path = [ref.get_ref_viterbi_path_A(), ref.get_ref_viterbi_path_B()]
     
     def make_test_cell(self, models):
         if not hasattr(models, '__iter__'):
@@ -382,13 +383,16 @@ class TestMsaHmmCell(unittest.TestCase):
         models = [0,1]
         n = len(models)
         hmm_cell, length = self.make_test_cell(models)
-        seq = tf.one_hot([[0,1,0,2]], 3)
+        seq = tf.one_hot([[0,1,0,2], [1,0,0,0], [1,1,1,1]], 3)
         seq = np.stack([seq]*n)
-        _,gamma_1 = Viterbi.viterbi(seq, hmm_cell, parallel_factor=1, return_variables=True)
-        #_,gamma_3 = Viterbi.viterbi(seq, hmm_cell, parallel_factor=2, return_variables=True)
+        viterbi_path_1, gamma_1 = Viterbi.viterbi(seq, hmm_cell, parallel_factor=1, return_variables=True)
+        viterbi_path_3, gamma_3 = Viterbi.viterbi(seq, hmm_cell, parallel_factor=2, return_variables=True)
         for i in range(2):
             q = hmm_cell.num_states[i]
-            np.testing.assert_almost_equal(np.exp(gamma_1[i,0:,:q]), self.ref_gamma[i], decimal=6)
+            np.testing.assert_almost_equal(np.exp(gamma_1[i,0,:,:q]), self.ref_gamma[i])
+            np.testing.assert_almost_equal(np.exp(gamma_3[i,0,:,:q]), self.ref_gamma[i][1::2])
+            np.testing.assert_almost_equal(viterbi_path_1[i,0], self.ref_viterbi_path[i])
+            np.testing.assert_almost_equal(viterbi_path_3[i,0], self.ref_viterbi_path[i])
 
 
                 
@@ -876,13 +880,14 @@ class TestMSAHMM(unittest.TestCase):
                                 [0,0,0,1,2,3,6,6,1,2,3,8,8,8,8]]])
             sequences = get_all_seqs(data, 2)
             sequences = np.transpose(sequences, [1,0,2])
-            print("running non parallel viterbi")
-            state_seqs_max_lik_3 = Viterbi.viterbi(sequences, hmm_cell, parallel_factor=1).numpy()
-            print("running parallel viterbi")
-            state_seqs_max_lik_3 = Viterbi.viterbi(sequences, hmm_cell, parallel_factor=3).numpy()
-            #state_seqs_max_lik_5 = Viterbi.viterbi(sequences, hmm_cell, parallel_factor=5).numpy()
-            self.assert_vec(state_seqs_max_lik_3, ref_seqs)
-            #self.assert_vec(state_seqs_max_lik_5, ref_seqs)
+            state_seqs_max_lik_1, gamma_1 = Viterbi.viterbi(sequences, hmm_cell, parallel_factor=1, return_variables=True)
+            #print("A", gamma_1[1,1,::5])
+            state_seqs_max_lik_3, gamma_3 = Viterbi.viterbi(sequences, hmm_cell, parallel_factor=3, return_variables=True)
+            state_seqs_max_lik_5, gamma_5 = Viterbi.viterbi(sequences, hmm_cell, parallel_factor=5, return_variables=True)
+            np.testing.assert_almost_equal(gamma_1[:,:,4::5].numpy(), gamma_3.numpy(), decimal=4)
+            np.testing.assert_almost_equal(gamma_1[:,:,2::3].numpy(), gamma_5.numpy(), decimal=4)
+            self.assert_vec(state_seqs_max_lik_3.numpy(), ref_seqs)
+            self.assert_vec(state_seqs_max_lik_5.numpy(), ref_seqs)
                 
                 
     def test_aligned_insertions(self):
