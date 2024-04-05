@@ -17,7 +17,6 @@ def safe_log(x, log_zero_val=-1e3):
     return log_x
 
 
-@tf.function
 def viterbi_step(gamma_prev, emission_probs_i, transition_matrix=None):
     """ Computes one Viterbi dynamic programming step. z is a helper dimension for parallelization and not used in the final result.
     Args:
@@ -38,7 +37,6 @@ def viterbi_step(gamma_prev, emission_probs_i, transition_matrix=None):
     else:
         #variant used for parallel Viterbi where (something like) emission probabilities is defined for state pairs
         gamma_next = tf.expand_dims(gamma_next, -1)
-        print(emission_probs_i.shape, gamma_next.shape)
         gamma_next += emission_probs_i[:,:,tf.newaxis]
         gamma_next = tf.reduce_max(gamma_next, axis=-2)
     return gamma_next
@@ -75,18 +73,16 @@ def viterbi_dyn_prog(emission_probs, init, transition_matrix):
     return gamma
 
 
-@tf.function
 def viterbi_backtracking_step(prev_states, gamma_state, transition_matrix_transposed):
     """ Computes a Viterbi backtracking step in parallel for all models and batch elements.
     Args:
         prev_states: Previously decoded states. Shape: (num_model, b, 1)
         gamma_state: Viterbi values of the previously decoded states. Shape: (num_model, b, q)
-        transition_matrix_transposed: transposed Logarithmic transition matricies describing the Markov chain. 
-                                        Shape (num_models, q, q) or (num_models, b, q, q)
+        transition_matrix_transposed: Transposed logarithmic transition matricies describing the Markov chain. 
+                                        Shape (num_models, q, q) 
     """
     #since A is transposed, we gather columns (i.e. all starting states q' when transitioning to q)
-    A_prev_states = tf.gather_nd(transition_matrix_transposed, prev_states, 
-                        batch_dims=2 if len(tf.shape(transition_matrix_transposed))==4 else 1)
+    A_prev_states = tf.gather_nd(transition_matrix_transposed, prev_states, batch_dims=1)
     next_states = tf.math.argmax(A_prev_states + gamma_state, axis=-1)
     next_states = tf.expand_dims(next_states, -1)
     return next_states
@@ -96,8 +92,8 @@ def viterbi_backtracking(gamma, transition_matrix_transposed):
     """ Performs backtracking on Viterbi score tables.
     Args:
         gamma: A Viterbi score table per model and batch element. Shape (num_model, b, L, q)
-        transition_matrix_transposed: transposed Logarithmic transition matricies describing the Markov chain. 
-                                            Shape (num_models, q, q) or (num_models, b, L, q, q) 
+        transition_matrix_transposed: Transposed logarithmic transition matricies describing the Markov chain. 
+                                            Shape (num_models, q, q)
     Returns:
         State sequences. Shape (num_model, b, L) of type int16
     """
@@ -108,15 +104,72 @@ def viterbi_backtracking(gamma, transition_matrix_transposed):
     state_seqs_max_lik = tf.TensorArray(cur_states.dtype, size=L)
     state_seqs_max_lik = state_seqs_max_lik.write(L-1, cur_states)
     for i in tf.range(L-2, -1, -1):
-        if len(tf.shape(transition_matrix_transposed)) == 5:
-            cur_states = viterbi_backtracking_step(cur_states, gamma[:,:,i], transition_matrix_transposed[:,:,i])
-        else:
-            cur_states = viterbi_backtracking_step(cur_states, gamma[:,:,i], transition_matrix_transposed)
+        cur_states = viterbi_backtracking_step(cur_states, gamma[:,:,i], transition_matrix_transposed)
         state_seqs_max_lik = state_seqs_max_lik.write(i, cur_states)
     state_seqs_max_lik = tf.transpose(state_seqs_max_lik.stack(), [1,2,0,3])
     state_seqs_max_lik = tf.cast(state_seqs_max_lik, dtype=tf.int16)
     state_seqs_max_lik = state_seqs_max_lik[:,:,:,0]
     return state_seqs_max_lik
+
+
+@tf.function
+def viterbi_chunk_backtracking_step(end_states, gamma_start, transition_matrix_transposed, gamma_end=None, emission_probs_transposed=None):
+    """ Computes a chunk-wise backtracking step used in parallel Viterbi decoding. Given the most likely end state of a chunk,
+        computes the most likely state the chunk started with and the most likely end state of the previous chunk.
+    Args:
+        end_states: Most likely end states of the current chunk. Shape: (num_model, b, 1)
+        gamma_start: Viterbi values at the start of the current chunk. Shape: (num_model, b, q)
+        transition_matrix_transposed: Transposed logarithmic transition matricies describing the Markov chain. 
+                                        Shape (num_models, q, q) 
+        gamma_end: Viterbi values at the end of the previous chunk. Shape: (num_model, b, q)
+        emission_probs_transposed: Pair-wise emission probs used during chunk-wise Viterbi dynamic programming. 
+                                    Shape (num_models, b, q, q).
+    Returns:
+        next_states: Most likely end states of the previous chunk. Shape: (num_model, b, 1) 
+                    (only returned if gamma_end is provided)
+        chunk_start_states: Most likely start states of the current chunk. Shape: (num_model, b)
+    """
+    #since A is transposed, we gather columns (i.e. all starting states q' when transitioning to q)
+    chunk_transition_probs = tf.gather_nd(emission_probs_transposed, end_states, batch_dims=2) #(num_model, b, q)
+    chunk_start_states = tf.math.argmax(chunk_transition_probs + gamma_start, axis=-1)
+    if gamma_end is not None:
+        tf.print(gamma_end[1,1], summarize=-1)
+        tf.print(chunk_start_states[1,1], summarize=-1)
+        next_states = viterbi_backtracking_step(tf.expand_dims(chunk_start_states, -1), gamma_end, transition_matrix_transposed)
+        tf.print(next_states[1,1], summarize=-1)
+        return next_states, chunk_start_states
+    else:
+        return 0, chunk_start_states
+
+    
+def viterbi_chunk_wise_backtracking(gamma_start, gamma_end, transition_matrix_transposed, emission_probs_transposed):
+    """ Performs backtracking on Viterbi score tables.
+    Args:
+        gamma_start: A Viterbi score table at the starting time of a chunk. Shape (num_model, b, num_chunks, q)
+        gamma_end: A Viterbi score table at the end time of a chunk. Shape (num_model, b, num_chunks, q)
+        transition_matrix_transposed: Transposed logarithmic transition matricies describing the Markov chain. 
+                                            Shape (num_models, q, q)
+        emission_probs_transposed: Pair-wise emission probs used during chunk-wise Viterbi dynamic programming. 
+                                    Shape (num_models, b, num_chunks, q, q).
+    Returns:
+        State sequences. Shape (num_model, b, L) of type int16
+    """
+    end_states = tf.math.argmax(gamma_end[:,:,-1], axis=-1)
+    end_states = tf.expand_dims(end_states, -1)
+    num_chunks = tf.shape(gamma_start)[2]
+    #tf.function-compatible accumulation of results in a dynamically unrolled loop using TensorArray
+    optimal_chunks = tf.TensorArray(end_states.dtype, size=num_chunks)
+    for i in tf.range(num_chunks-1, -1, -1):
+        tf.print(i)
+        end_states, chunk_start_states = viterbi_chunk_backtracking_step(end_states, 
+                                                gamma_start[:,:,i], 
+                                                transition_matrix_transposed, 
+                                                gamma_end[:,:,i-1] if i > 0 else None,
+                                                emission_probs_transposed[:,:,i])
+        optimal_chunks = optimal_chunks.write(i, chunk_start_states)
+    optimal_chunks = tf.transpose(optimal_chunks.stack(), [1,2,0])
+    optimal_chunks = tf.cast(optimal_chunks, dtype=tf.int16)
+    return optimal_chunks
 
 
 def viterbi(sequences, hmm_cell, end_hints=None, parallel_factor=1, return_variables=False):
@@ -129,7 +182,9 @@ def viterbi(sequences, hmm_cell, end_hints=None, parallel_factor=1, return_varia
         end_hints: A optional tensor of shape (..., 2, num_states) that contains the correct state for the left and right ends of each chunk. (experimental)
         parallel_factor: Increasing this number allows computing likelihoods and posteriors chunk-wise in parallel at the cost of memory usage.
                         The parallel factor has to be a divisor of the sequence length.
-        return_variables: If True, the function also returns the Viterbi variables (gamma).
+        return_variables: If True, the function also returns the Viterbi variables (gamma). 
+                        If parallel_factor > 1, the variables are returned only for the last chunk positions and are currently
+                        not equivalent to a non-parallel call. Use for debugging only.
     Returns:
         State sequences. Shape (num_models, b, L)
     """
@@ -150,33 +205,33 @@ def viterbi(sequences, hmm_cell, end_hints=None, parallel_factor=1, return_varia
     z = tf.shape(init)[1] #1 if parallel_factor == 1, q otherwise
     A = hmm_cell.log_A_dense
     At = hmm_cell.log_A_dense_t
-    print(A.shape)
     gamma = viterbi_dyn_prog(emission_probs, init, A) 
     gamma = tf.reshape(gamma, (num_model, b*parallel_factor*z, chunk_size, q))
-
-    # if parallel_factor == 1:
-    #     print("non-parallel gamma\n", gamma[0,0,0,0::5])
-
-
     viterbi_paths = viterbi_backtracking(gamma, At)
     if parallel_factor > 1:
-        gamma_last = tf.reshape(gamma[:,:,:,-1], (num_model, b, parallel_factor, q, q))
+        gamma_last = tf.reshape(gamma[:,:,-1], (num_model, b, parallel_factor, q, q))
         chunk_probs = viterbi_dyn_prog(gamma_last, init_dist, A)[:,:,0] #(num_model, b, parallel_factor, q)
-        transposed_transitions = tf.transpose(gamma_last, (0,1,2,4,3)) + At[:,tf.newaxis,tf.newaxis] 
-        optimal_chunks = viterbi_backtracking(chunk_probs, transposed_transitions) #(num_model, b, parallel_factor)
+        variables_out = chunk_probs
+        gamma_start = tf.reshape(chunk_probs[:,:,:-1], (num_model, -1, 1, q))
+        emission_probs = tf.reshape(emission_probs, (num_model, b, parallel_factor, chunk_size, q))
+        chunk_start_probs = viterbi_step(gamma_start, tf.reshape(emission_probs[:,:,1:,0], (num_model, -1, q)), A) 
+        gamma_init = safe_log(init_dist) + safe_log(tf.reshape(emission_probs, (num_model, b, seq_len, q))[:,:,0])
+        gamma_init = gamma_init[:,:,tf.newaxis]
+        chunk_start_probs = tf.reshape(chunk_start_probs, (num_model, b, parallel_factor-1, q))
+        chunk_start_probs = tf.concat([gamma_init, chunk_start_probs], axis=2)
+        optimal_chunks = viterbi_chunk_wise_backtracking(chunk_start_probs, chunk_probs, At, tf.transpose(gamma_last, (0,1,2,4,3))) 
+        print(optimal_chunks[1,1])
         viterbi_paths = tf.reshape(viterbi_paths, (num_model, b, parallel_factor, q, chunk_size))
         optimal_chunks = tf.cast(optimal_chunks, dtype=tf.int32)
         optimal_chunks = tf.expand_dims(optimal_chunks, 3)
-
-
-        # print("chunk_probs\n", chunk_probs[0,0])
-        # print("viterbi_paths\n", viterbi_paths[0,0])
-        # print("optimal_chunks\n", optimal_chunks[0,0])
-
-
         viterbi_paths = tf.gather_nd(viterbi_paths, optimal_chunks, batch_dims=3) #(num_model, b, L)
         viterbi_paths = tf.reshape(viterbi_paths, (num_model, b, seq_len))
-    return viterbi_paths, gamma if return_variables else viterbi_paths
+    else:
+        variables_out = gamma
+    if return_variables:
+        return viterbi_paths, variables_out
+    else:
+        return viterbi_paths
 
 
 def get_state_seqs_max_lik(data : SequenceDataset,
