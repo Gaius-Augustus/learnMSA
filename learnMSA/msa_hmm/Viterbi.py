@@ -207,8 +207,10 @@ def viterbi(sequences, hmm_cell, end_hints=None, parallel_factor=1, return_varia
     At = hmm_cell.log_A_dense_t
     gamma = viterbi_dyn_prog(emission_probs, init, A) 
     gamma = tf.reshape(gamma, (num_model, b*parallel_factor*z, chunk_size, q))
-    viterbi_paths = viterbi_backtracking(gamma, At)
-    if parallel_factor > 1:
+    if parallel_factor == 1:
+        viterbi_paths = viterbi_backtracking(gamma, At)
+        variables_out = gamma
+    else:
         gamma_last = tf.reshape(gamma[:,:,-1], (num_model, b, parallel_factor, q, q))
         chunk_probs = viterbi_dyn_prog(gamma_last, init_dist, A)[:,:,0] #(num_model, b, parallel_factor, q)
         variables_out = chunk_probs
@@ -226,8 +228,6 @@ def viterbi(sequences, hmm_cell, end_hints=None, parallel_factor=1, return_varia
         optimal_chunks = tf.expand_dims(optimal_chunks, 3)
         viterbi_paths = tf.gather_nd(viterbi_paths, optimal_chunks, batch_dims=3) #(num_model, b, L)
         viterbi_paths = tf.reshape(viterbi_paths, (num_model, b, seq_len))
-    else:
-        variables_out = gamma
     if return_variables:
         return viterbi_paths, variables_out
     else:
