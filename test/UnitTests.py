@@ -386,13 +386,14 @@ class TestMsaHmmCell(unittest.TestCase):
         seq = tf.one_hot([[0,1,0,2], [1,0,0,0], [1,1,1,1]], 3)
         seq = np.stack([seq]*n)
         viterbi_path_1, gamma_1 = Viterbi.viterbi(seq, hmm_cell, parallel_factor=1, return_variables=True)
-        viterbi_path_3, gamma_3 = Viterbi.viterbi(seq, hmm_cell, parallel_factor=2, return_variables=True)
+        viterbi_path_2, gamma_2 = Viterbi.viterbi(seq, hmm_cell, parallel_factor=2, return_variables=True)
         for i in range(2):
             q = hmm_cell.num_states[i]
             np.testing.assert_almost_equal(np.exp(gamma_1[i,0,:,:q]), self.ref_gamma[i])
-            np.testing.assert_almost_equal(np.exp(gamma_3[i,0,:,:q]), self.ref_gamma[i][1::2])
+            np.testing.assert_almost_equal(np.exp(gamma_2[i,0,:,0,:q]), self.ref_gamma[i][0::2])
+            np.testing.assert_almost_equal(np.exp(gamma_2[i,0,:,1,:q]), self.ref_gamma[i][1::2])
             np.testing.assert_almost_equal(viterbi_path_1[i,0], self.ref_viterbi_path[i])
-            np.testing.assert_almost_equal(viterbi_path_3[i,0], self.ref_viterbi_path[i])
+            np.testing.assert_almost_equal(viterbi_path_2[i,0], self.ref_viterbi_path[i])
 
 
                 
@@ -884,8 +885,10 @@ class TestMSAHMM(unittest.TestCase):
             #print("A", gamma_1[1,1,::5])
             state_seqs_max_lik_3, gamma_3 = Viterbi.viterbi(sequences, hmm_cell, parallel_factor=3, return_variables=True)
             state_seqs_max_lik_5, gamma_5 = Viterbi.viterbi(sequences, hmm_cell, parallel_factor=5, return_variables=True)
-            np.testing.assert_almost_equal(gamma_1[:,:,4::5].numpy(), gamma_3.numpy(), decimal=4)
-            np.testing.assert_almost_equal(gamma_1[:,:,2::3].numpy(), gamma_5.numpy(), decimal=4)
+            np.testing.assert_almost_equal(gamma_1[:,:,::5].numpy(), gamma_3.numpy()[...,0,:], decimal=4)
+            np.testing.assert_almost_equal(gamma_1[:,:,4::5].numpy(), gamma_3.numpy()[...,1,:], decimal=4)
+            np.testing.assert_almost_equal(gamma_1[:,:,::3].numpy(), gamma_5.numpy()[...,0,:], decimal=4)
+            np.testing.assert_almost_equal(gamma_1[:,:,2::3].numpy(), gamma_5.numpy()[...,1,:], decimal=4)
             self.assert_vec(state_seqs_max_lik_3.numpy(), ref_seqs)
             self.assert_vec(state_seqs_max_lik_5.numpy(), ref_seqs)
                 
