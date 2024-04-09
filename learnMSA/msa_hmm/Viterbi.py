@@ -17,6 +17,7 @@ def safe_log(x, log_zero_val=-1e3):
     return log_x
 
 
+@tf.function
 def viterbi_step(gamma_prev, emission_probs_i, transition_matrix=None):
     """ Computes one Viterbi dynamic programming step. z is a helper dimension for parallelization and not used in the final result.
     Args:
@@ -73,6 +74,7 @@ def viterbi_dyn_prog(emission_probs, init, transition_matrix):
     return gamma
 
 
+@tf.function
 def viterbi_backtracking_step(prev_states, gamma_state, transition_matrix_transposed):
     """ Computes a Viterbi backtracking step in parallel for all models and batch elements.
     Args:
@@ -211,9 +213,18 @@ def viterbi(sequences, hmm_cell, end_hints=None, parallel_factor=1, return_varia
         viterbi_paths = viterbi_backtracking(gamma, At)
         variables_out = gamma
     else:
-        gamma_last = tf.reshape(gamma[:,:,-1], (num_model, b, parallel_factor, q, q))
-        chunk_probs = viterbi_dyn_prog(gamma_last, init_dist, A)[:,:,0] #(num_model, b, parallel_factor, q)
+        gamma_local_chunk_ends = tf.reshape(gamma[:,:,-1], (num_model, b, parallel_factor, q, q))
+        gamma_global_chunk_ends = viterbi_dyn_prog(gamma_local_right, init_dist, A)[:,:,0] #(num_model, b, parallel_factor, q)
+
+        #first pass of backtracking to determine the most likely chunk end states
+        most_likely_chunk_ends = viterbi_backtracking(gamma_global_chunk_ends, At)
+
         variables_out = chunk_probs
+
+        #idea for backtracking: do a first pass that determines the most likely chunk start- and end states
+        #then do a second pass that determines the most piecewise most likely chunk sequences given the correct border states
+
+
         gamma_start = tf.reshape(chunk_probs[:,:,:-1], (num_model, -1, 1, q))
         emission_probs = tf.reshape(emission_probs, (num_model, b, parallel_factor, chunk_size, q))
         chunk_start_probs = viterbi_step(gamma_start, tf.reshape(emission_probs[:,:,1:,0], (num_model, -1, q)), A) 
@@ -222,7 +233,6 @@ def viterbi(sequences, hmm_cell, end_hints=None, parallel_factor=1, return_varia
         chunk_start_probs = tf.reshape(chunk_start_probs, (num_model, b, parallel_factor-1, q))
         chunk_start_probs = tf.concat([gamma_init, chunk_start_probs], axis=2)
         optimal_chunks = viterbi_chunk_wise_backtracking(chunk_start_probs, chunk_probs, At, tf.transpose(gamma_last, (0,1,2,4,3))) 
-        print(optimal_chunks[1,1])
         viterbi_paths = tf.reshape(viterbi_paths, (num_model, b, parallel_factor, q, chunk_size))
         optimal_chunks = tf.cast(optimal_chunks, dtype=tf.int32)
         optimal_chunks = tf.expand_dims(optimal_chunks, 3)
