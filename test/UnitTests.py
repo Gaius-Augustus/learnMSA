@@ -395,6 +395,18 @@ class TestMsaHmmCell(unittest.TestCase):
             np.testing.assert_almost_equal(viterbi_path_1[i,0], self.ref_viterbi_path[i])
             np.testing.assert_almost_equal(viterbi_path_2[i,0], self.ref_viterbi_path[i])
 
+    def test_parallel_viterbi_long(self):
+        models = [0,1]
+        n = len(models)
+        hmm_cell, length = self.make_test_cell(models)
+        np.random.seed(57235782)
+        seq = np.random.randint(2, size=(3, 10000))
+        seq = tf.one_hot(seq, 3)
+        seq = np.stack([seq]*n)
+        viterbi_path_1 = Viterbi.viterbi(seq, hmm_cell, parallel_factor=1)
+        viterbi_path_100 = Viterbi.viterbi(seq, hmm_cell, parallel_factor=100)
+        np.testing.assert_equal(viterbi_path_1.numpy(), viterbi_path_100.numpy())
+
 
                 
 def string_to_one_hot(s):
