@@ -206,7 +206,8 @@ def make_dataset(indices, batch_generator, batch_size=512, shuffle=True, bucket_
     options = tf.data.Options()
     options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.DATA
     ds = ds.with_options(options)
-    ds = tf.data.Dataset.zip((ds, tf.data.Dataset.from_tensor_slices(tf.zeros(1)).repeat()))
+    ds_y = tf.data.Dataset.from_tensor_slices(tf.zeros(1)).batch(batch_size).repeat()
+    ds = tf.data.Dataset.zip((ds, ds_y))
     return ds
     
 
