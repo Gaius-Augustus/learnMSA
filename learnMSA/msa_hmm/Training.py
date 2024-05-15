@@ -7,7 +7,6 @@ from learnMSA.msa_hmm.MsaHmmLayer import MsaHmmLayer
 from learnMSA.msa_hmm.AncProbsLayer import AncProbsLayer
 from learnMSA.msa_hmm.Configuration import assert_config
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
-
         
 
 def generic_model_generator(encoder_layers,
@@ -64,6 +63,7 @@ def make_anc_probs_layer(num_seq, config):
                                     rate_init=config["encoder_initializer"][0],
                                     exchangeability_init=config["encoder_initializer"][1],
                                     trainable_rate_matrices=config["trainable_rate_matrices"],
+                                    trainable_distances=config["trainable_distances"],
                                     per_matrix_rate=config["per_matrix_rate"],
                                      matrix_rate_init=config["encoder_initializer"][3] if len(config["encoder_initializer"]) > 3 else None,
                                      matrix_rate_l2=config["matrix_rate_l2"],

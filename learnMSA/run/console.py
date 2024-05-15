@@ -71,6 +71,9 @@ def run_main():
     parser.add_argument("--alpha_flank_compl", dest="alpha_flank_compl", type=float, default=1, help=argparse.SUPPRESS)
     parser.add_argument("--alpha_single_compl", dest="alpha_single_compl", type=float, default=1, help=argparse.SUPPRESS)
     parser.add_argument("--alpha_global_compl", dest="alpha_global_compl", type=float, default=1, help=argparse.SUPPRESS)
+
+    parser.add_argument("--frozen_distances", dest="frozen_distances", action='store_true', help="Prevents learning evolutionary distances for all sequences.")
+    parser.add_argument("--initial_distance", dest="initial_distance", type=float, default=0.05, help="The initial evolutionary distance for all sequences. (default: %(default)s)")
     
     parser.add_argument("--use_language_model", dest="use_language_model", action='store_true', help="Uses a large protein lanague model to generate per-token embeddings that guide the MSA step. (default: %(default)s)")
     parser.add_argument("--language_model", dest="language_model", type=str, default="protT5", help="Name of the language model to use. (default: %(default)s)")
@@ -104,6 +107,7 @@ def run_main():
         os.environ["CUDA_VISIBLE_DEVICES"] = args.cuda_visible_devices  
     from ..msa_hmm import Configuration, Initializers, Align, Emitter, Training, Visualize
     from ..msa_hmm.SequenceDataset import SequenceDataset
+    from ..msa_hmm.AncProbsLayer import inverse_softplus
     import tensorflow as tf
     from tensorflow.python.client import device_lib
     
@@ -152,6 +156,9 @@ def run_main():
     config["surgery_del"] = args.surgery_del
     config["surgery_ins"] = args.surgery_ins
     config["model_criterion"] = args.model_criterion
+    config["trainable_distances"] = not args.frozen_distances
+    assert args.initial_distance >= 0, "The evolutionary distance must be >= 0."
+    config["encoder_initializer"][0] = Initializers.ConstantInitializer(inverse_softplus(np.array(args.initial_distance) + 1e-8))
     transitioners = config["transitioner"] if hasattr(config["transitioner"], '__iter__') else [config["transitioner"]]
     for trans in transitioners:
         trans.prior.alpha_flank = args.alpha_flank

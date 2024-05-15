@@ -108,6 +108,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
                                 should be used on the initial matrix by the user.
         rate_init: Initializer for the rates.
         trainable_exchangeabilities: Flag that can prevent learning the exchangeabilities.
+        trainable_distances: Flag that can prevent learning the evolutionary times.
         per_matrix_rate: Learns an additional evolutionary time per rate matrix.
         matrix_rate_init: Initializer for the replacement rate per matrix.
         matrix_rate_l2: L2 regularizer strength that penalizes deviation of the parameters from the initial value.
@@ -127,6 +128,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
                  exchangeability_init,
                  rate_init=tf.constant_initializer(-3.),
                  trainable_rate_matrices=True,
+                 trainable_distances=True,
                  per_matrix_rate=False,
                  matrix_rate_init=None,
                  matrix_rate_l2=0.0,
@@ -142,6 +144,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
         self.equilibrium_init = equilibrium_init
         self.exchangeability_init = exchangeability_init
         self.trainable_rate_matrices = trainable_rate_matrices
+        self.trainable_distances = trainable_distances
         self.per_matrix_rate = per_matrix_rate
         self.matrix_rate_init = matrix_rate_init
         self.matrix_rate_l2 = matrix_rate_l2 
@@ -152,7 +155,8 @@ class AncProbsLayer(tf.keras.layers.Layer):
     def build(self, input_shape=None):
         self.tau_kernel = self.add_weight(shape=[self.num_models, self.num_rates], 
                                    name="tau_kernel", 
-                                   initializer=self.rate_init)
+                                   initializer=self.rate_init,
+                                   trainable=self.trainable_distances)
         if self.shared_matrix:
             self.exchangeability_kernel = self.add_weight(shape=[self.num_models, 1, 20, 20],
                                                           name="exchangeability_kernel",
