@@ -272,6 +272,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
              "exchangeability_init" : self.exchangeability_kernel.numpy(),
              "rate_init" : self.tau_kernel.numpy(),
              "trainable_rate_matrices" : self.trainable_rate_matrices,
+            "trainable_distances" : self.trainable_distances,
              "per_matrix_rate" : self.per_matrix_rate,
              "matrix_rate_init" : self.per_matrix_rates_kernel if self.per_matrix_rate else None,
              "matrix_rate_l2" : self.matrix_rate_l2,
