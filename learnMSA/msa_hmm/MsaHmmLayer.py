@@ -123,7 +123,7 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         #compute the actual forward variables across the chunks via the total probability
         forward_chunks_last = forward_chunks[:,:,-1]  #(num_model*b, factor, q, q)
         forward_chunks_last = tf.reshape(forward_chunks_last, (num_model*b, self.parallel_factor, q*q))
-        forward_total, _, loglik = self.total_prob_rnn(tf.math.exp(forward_chunks_last)) #(num_model*b, factor, q)
+        forward_total, _, loglik = self.total_prob_rnn(forward_chunks_last) #(num_model*b, factor, q)
         init, _ = self.cell.get_initial_state(batch_size=b, parallel_factor=1)
         init = tf.math.log(init + self.cell.epsilon)
         T = tf.concat([init[:,tf.newaxis], forward_total[:,:-1]], axis=1)
@@ -185,7 +185,7 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         #compute the actual backward variables across the chunks via the total probability
         backward_chunks_last = backward_chunks[:,:,0]  #(num_model*b, factor, q, q)
         backward_chunks_last = tf.reshape(backward_chunks_last, (num_model*b, self.parallel_factor, q*q))
-        backward_total, _, _ = self.total_prob_rnn_rev(tf.math.exp(backward_chunks_last)) #(num_model*b, factor, q)
+        backward_total, _, _ = self.total_prob_rnn_rev(backward_chunks_last) #(num_model*b, factor, q)
         backward_total = tf.reverse(backward_total, [1])
         init, _ = self.reverse_cell.get_initial_state(batch_size=b, parallel_factor=1)
         init = tf.math.log(init + self.reverse_cell.epsilon)

@@ -54,7 +54,7 @@ def make_msa_hmm_layer(effective_num_seq,
                                 dtype=tf.float32)
     return msa_hmm_layer
 
-def make_anc_probs_layer(num_seq, config):
+def make_anc_probs_layer(num_seq, config, clusters=None):
     assert_config(config)
     anc_probs_layer = AncProbsLayer(config["num_models"],
                                     num_seq,
@@ -69,7 +69,8 @@ def make_anc_probs_layer(num_seq, config):
                                      matrix_rate_l2=config["matrix_rate_l2"],
                                      shared_matrix=config["shared_rate_matrix"],
                                      equilibrium_sample=config["equilibrium_sample"],
-                                     transposed=config["transposed"])
+                                     transposed=config["transposed"],
+                                     clusters=clusters)
     return anc_probs_layer
 
 def default_model_generator(num_seq,
@@ -78,6 +79,7 @@ def default_model_generator(num_seq,
                             config,
                             data : SequenceDataset = None,
                             sequence_weights=None,
+                            clusters=None,
                             alphabet_size=len(SequenceDataset.alphabet)-1,
                             generic_gen=generic_model_generator):
     """A callback that constructs the default learnMSA model. Can be used as a template for custom generators.
@@ -89,6 +91,7 @@ def default_model_generator(num_seq,
         data: The sequence dataset corresponding to this model. Typically but not necessarily equal to the training data of the model. 
               This is part of the model generator callback because the generated model might depends on some sequence information like maximum length.
         sequence_weights: Optional likelihood weights per sequence.
+        clusters: Optional cluster indices for each sequence.
         alphabet_size: Number of symbols without the terminal symbol.
     """
     num_models = config["num_models"]
@@ -96,7 +99,7 @@ def default_model_generator(num_seq,
         (f"The list of given model lengths ({len(model_lengths)}) should"
          + f" match the number of models specified in the configuration({num_models}).")
     msa_hmm_layer = make_msa_hmm_layer(effective_num_seq, model_lengths, config, sequence_weights, alphabet_size)
-    anc_probs_layer = make_anc_probs_layer(num_seq, config)
+    anc_probs_layer = make_anc_probs_layer(num_seq, config, clusters)
     model = generic_gen([anc_probs_layer], msa_hmm_layer)
     return model
 
@@ -220,6 +223,7 @@ def fit_model(model_generator,
               batch_size, 
               epochs,
               sequence_weights=None,
+              clusters=None,
               verbose=True, 
               train_callbacks=[]):
     assert_config(config)
@@ -245,7 +249,8 @@ def fit_model(model_generator,
                                 model_lengths=model_lengths,
                                 config=config,
                                 data=data,
-                                sequence_weights=sequence_weights)
+                                sequence_weights=sequence_weights,
+                                clusters=clusters)
         model.compile(optimizer=optimizer)
         return model
     num_gpu = len([x.name for x in tf.config.list_logical_devices() if x.device_type == 'GPU']) 
