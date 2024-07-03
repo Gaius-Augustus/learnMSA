@@ -18,6 +18,7 @@ from learnMSA.protein_language_models import Common, DataPipeline, TrainingUtil,
 import itertools
 import shutil
 from test import RefModels as ref
+from test import TestSupervisedTraining
 
 class TestDataset(unittest.TestCase):
 
@@ -379,6 +380,11 @@ class TestMsaHmmCell(unittest.TestCase):
             np.testing.assert_almost_equal(np.exp(log_backward)[i,0,:,:q], np.exp(log_backward_parallel)[i,0,:,:q], decimal=6)
             np.testing.assert_almost_equal(np.exp(state_posterior_log_probs[i,0,:,:q]), np.exp(state_posterior_log_probs_parallel[i,0,:,:q]), decimal=6)
             
+    def test_parallel_posterior_casino(self):
+        y1 = TestSupervisedTraining.get_prediction(1).numpy()
+        y2 = TestSupervisedTraining.get_prediction(1).numpy()
+        np.testing.assert_almost_equal(y1, y2)
+
     def test_parallel_viterbi(self):
         models = [0,1]
         n = len(models)
@@ -946,6 +952,24 @@ class TestMSAHMM(unittest.TestCase):
             actual = np.exp(backward_seqs[0,0,-(i+1)])
             r = backward_ref[i] + hmm_cell.epsilon
             np.testing.assert_almost_equal(actual, r, decimal=5)
+            
+            
+    def test_posterior_state_probabilities(self):
+        train_filename = os.path.dirname(__file__)+"/data/egf.fasta"
+        with SequenceDataset(train_filename) as data:
+            hmm_cell = MsaHmmCell.MsaHmmCell(32)
+            hmm_layer = MsaHmmLayer.MsaHmmLayer(hmm_cell, 1)
+            hmm_layer.build((1, None, None, len(SequenceDataset.alphabet)))
+            batch_gen = Training.DefaultBatchGenerator()
+            batch_gen.configure(data, Configuration.make_default(1))
+            indices = tf.range(data.num_seq, dtype=tf.int64)
+            ds = Training.make_dataset(indices, batch_gen, batch_size=data.num_seq, shuffle=False)
+            for x,_ in ds:
+                seq = tf.one_hot(x[0], len(SequenceDataset.alphabet))
+                seq = tf.transpose(seq, [1,0,2,3])
+                p = hmm_layer.state_posterior_log_probs(seq)
+            p = np.exp(p)
+            np.testing.assert_almost_equal(np.sum(p, -1), 1., decimal=4)
             
             
     def test_posterior_state_probabilities(self):
