@@ -289,6 +289,8 @@ class AlignmentModel():
             blocks.append(sep)
         for i in range(data.num_repeats):
             consensus = data.consensus[i]
+            #remove columns consisting only of gaps
+            consensus = consensus[:, np.any(consensus != -1, axis=0)]
             ins_len = data.insertion_lens[i]
             ins_start = data.insertion_start[i]
             alignment_block = self.get_alignment_block(sequences, 

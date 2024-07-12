@@ -207,24 +207,28 @@ class AncProbsLayer(tf.keras.layers.Layer):
     def make_per_matrix_rate(self):
         return tf.math.softplus(self.per_matrix_rates_kernel)
 
-    def call(self, inputs, rate_indices):
+    def call(self, inputs, rate_indices, replace_rare_with_equilibrium=True):
         """ Computes anchestral probabilities of the inputs.
         Args:
             inputs: Input sequences. Shape: (num_model, b, L) or (num_models, b, L, s). The latter format (non index)
                     is only supported for raw amino acid input.
             rate_indices: Indices that map each input sequences to an evolutionary time. Shape: (num_model, b)
+            replace_rate_with_equilibrium: If true, replaces non-standard amino acids with the equilibrium distribution.
         Returns:
             Ancestral probabilities. Shape: (num_model, b, L, num_matrices*s)
         """
         rate_indices = tf.identity(rate_indices) #take care of numpy inputs
         rate_indices.set_shape([self.num_models,None]) #resolves tf 2.12 issues
         input_indices = len(inputs.shape) == 3 
+        def _make_mask(bools):
+            mask = tf.cast(bools, self.dtype)
+            mask = tf.expand_dims(mask, -1)
+            mask = tf.expand_dims(mask, -1)
+            return mask
         if input_indices:
-            mask = inputs < 20
-            only_std_aa_inputs = inputs * tf.cast(mask, inputs.dtype)
-            mask = tf.cast(mask, self.dtype)
-            mask = tf.expand_dims(mask, -1)
-            mask = tf.expand_dims(mask, -1)
+            bool_mask = inputs < 20
+            mask = _make_mask(bool_mask)
+            only_std_aa_inputs = inputs * tf.cast(bool_mask, inputs.dtype)
         else:
             only_std_aa_inputs = inputs
         rate_indices = tf.expand_dims(rate_indices, -1)
@@ -240,16 +244,24 @@ class AncProbsLayer(tf.keras.layers.Layer):
             mut_rates = tau_subset
         reg_tau = tf.reduce_sum(tf.square(self.tau_kernel + 3.))
         self.add_loss(self.matrix_rate_l2 * reg_tau)
+        equilibrium = self.make_p()
         anc_probs = make_anc_probs(only_std_aa_inputs, 
                                    self.make_R(), 
-                                   self.make_p(), 
+                                   equilibrium, 
                                    mut_rates,
                                    self.equilibrium_sample,
                                    self.transposed)
         if input_indices:
             anc_probs *= mask
             anc_probs = tf.pad(anc_probs, [[0,0], [0,0], [0,0], [0,0], [0,len(SequenceDataset.alphabet)-20]])
-            rest = tf.expand_dims(tf.one_hot(inputs, len(SequenceDataset.alphabet)), -2) * (1-mask)
+            if replace_rare_with_equilibrium:
+                rare_mask = _make_mask(tf.math.logical_and(inputs >= 20, inputs < len(SequenceDataset.alphabet)-1)) #do not count padding
+                padding_mask = _make_mask(inputs == len(SequenceDataset.alphabet)-1)
+                equilibrium = tf.concat([equilibrium, tf.zeros_like(equilibrium)[..., :tf.shape(anc_probs)[-1]-20]], -1)
+                rest = (tf.zeros_like(anc_probs) + equilibrium[:,tf.newaxis,tf.newaxis]) * rare_mask
+                rest += tf.expand_dims(tf.one_hot(inputs, len(SequenceDataset.alphabet)), -2) * padding_mask
+            else:
+                rest = tf.expand_dims(tf.one_hot(inputs, len(SequenceDataset.alphabet)), -2) * (1-mask)
             anc_probs += rest
             num_model, b, L = tf.unstack(tf.shape(inputs))
             anc_probs = tf.reshape(anc_probs, (num_model, b, L, self.num_matrices * len(SequenceDataset.alphabet)) )
