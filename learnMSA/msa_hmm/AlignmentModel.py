@@ -206,7 +206,8 @@ class AlignmentModel():
                                                             self.batch_size,
                                                             cell_copy,
                                                             models,
-                                                            self.encoder_model)
+                                                            self.encoder_model,
+                                                            non_homogeneous_mask_func)
         for i,l,max_lik_seqs in zip(models, cell_copy.length, state_seqs_max_lik):
             decoded_data = AlignmentModel.decode(l,max_lik_seqs)
             self.metadata[i] = AlignmentMetaData(*decoded_data)
@@ -642,3 +643,40 @@ class AlignmentModel():
         no_gap = consensus[:,-1] != -1
         block[no_gap,i] = sequences[A[no_gap],consensus[:,-1][no_gap]]
         return block
+
+    
+@tf.function
+def non_homogeneous_mask_func(i, seq_lens, hmm_cell): 
+    """ Let S = S_1 … S_L be the sequence and M_1 … M_Z the match states.
+    In a Viterbi path pi = pi_1 … pi_L prevent transitions such that either 
+    a) (pi_{i-1}, pi_i) = (M_j, E) and L-i <= Z-j or
+    b) (pi_{i-1}, pi_i) = (S, M_j) and i <= j.
+    Returns:
+        A mask of shape (num_models, batch_size, num_states, num_states) indicating allowed transitions.
+    """
+    k = hmm_cell.num_models
+    q = hmm_cell.max_num_states
+    L = 0
+    template = tf.ones((1,q,q), dtype=hmm_cell.dtype)
+    model_masks = []
+    for k,length in enumerate(hmm_cell.length):
+        C = 2 * length
+        R = 2 * length + 1
+        states_left = one_hot_set([L, C], q, hmm_cell.dtype)
+        states_right = one_hot_set([R, C], q, hmm_cell.dtype)
+        allowed_CL_transitions = 1 - one_hot_set(tf.range(i+1, tf.maximum(i+1, length + 1)), q, hmm_cell.dtype)
+        length_mask = tf.cast(tf.sequence_mask(tf.maximum(0, length - seq_lens[k] + i), maxlen=q), hmm_cell.dtype)  
+        allowed_CR_transitions = 1 - tf.roll(length_mask, shift=1, axis=1)
+        mask_left = states_left[...,tf.newaxis] * allowed_CL_transitions[tf.newaxis]
+        mask_left += template * (1 - states_left[:,tf.newaxis])
+        mask_right = states_right[tf.newaxis] * allowed_CR_transitions[...,tf.newaxis]
+        mask_right += template * (1 - states_right[tf.newaxis])
+        mask = mask_left * mask_right 
+        model_masks.append(mask)
+    return tf.stack(model_masks, axis=0)
+
+
+@tf.function
+def one_hot_set(indices, d, dtype):
+    # Returns a vector in {0,1}}^d with a 1 at positions i in indices and 0 elsewhere
+    return tf.reduce_sum(tf.one_hot(indices, d, dtype=dtype), axis=0)

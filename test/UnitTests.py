@@ -13,7 +13,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 tf.get_logger().setLevel('WARNING')
 from learnMSA.msa_hmm import Align, Emitter, Transitioner, Initializers, MsaHmmCell, MsaHmmLayer, Training, Configuration, Viterbi, AncProbsLayer, Priors, DirichletMixture
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset, AlignedDataset
-from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
+from learnMSA.msa_hmm.AlignmentModel import AlignmentModel, non_homogeneous_mask_func
 from learnMSA.protein_language_models import Common, DataPipeline, TrainingUtil, MvnMixture, EmbeddingCache
 import itertools
 import shutil
@@ -42,7 +42,7 @@ class TestDataset(unittest.TestCase):
     def test_encoding(self):
         for ind in [True, False]:
             with SequenceDataset("test/data/felix.fa", "fasta", indexed=ind) as data:
-                np.testing.assert_equal(data.get_encoded_seq(0), [13, 6, 10, 9, 20])
+                np.testing.assert_equal(data.get_encoded_seq(0), [13, 6, 10, 9, 11])
 
             
     def test_ambiguous_amino_acids(self):
@@ -423,7 +423,7 @@ class TestMSAHMM(unittest.TestCase):
             
     def test_viterbi(self):
         length = [5, 3]
-        emission_init = [tf.constant_initializer(string_to_one_hot("FELIX").numpy()*20),
+        emission_init = [tf.constant_initializer(string_to_one_hot("FELIK").numpy()*20),
                          tf.constant_initializer(string_to_one_hot("AHC").numpy()*20)]
         transition_init = [Initializers.make_default_transition_init(MM = 0, 
                                                                     MI = 0,
@@ -577,12 +577,12 @@ class TestMSAHMM(unittest.TestCase):
             E = SequenceDataset.alphabet.index("E")
             L = SequenceDataset.alphabet.index("L")
             I = SequenceDataset.alphabet.index("I")
-            X = SequenceDataset.alphabet.index("X")
+            X = SequenceDataset.alphabet.index("K")
             f = SequenceDataset.alphabet.index("F")+s
             e = SequenceDataset.alphabet.index("E")+s
             l = SequenceDataset.alphabet.index("L")+s
             i = SequenceDataset.alphabet.index("I")+s
-            x = SequenceDataset.alphabet.index("X")+s
+            x = SequenceDataset.alphabet.index("K")+s
             GAP = s-1
             gap = 2*s-1
                 
@@ -1350,7 +1350,7 @@ class TestAlignment(unittest.TestCase):
         fasta_file = SequenceDataset(filename)
         length=5
         config = Configuration.make_default(1)
-        emission_init = string_to_one_hot("FELIX").numpy()*20
+        emission_init = string_to_one_hot("FELIK").numpy()*20
         insert_init= np.squeeze(string_to_one_hot("A") + string_to_one_hot("H") + string_to_one_hot("C"))*20
         config["emitter"] = Emitter.ProfileHMMEmitter(emission_init = tf.constant_initializer(emission_init), 
                                                            insertion_init = tf.constant_initializer(insert_init))
@@ -1380,7 +1380,7 @@ class TestAlignment(unittest.TestCase):
         #create alignment after building model
         sub_am = AlignmentModel(fasta_file, batch_gen, subset, 32, model)
         subalignment_strings = sub_am.to_string(0, add_block_sep=False)
-        ref_subalignment = ["FE...LIX...", "FE...LIXhac", "FEahcLIX..."]
+        ref_subalignment = ["FE...LIK...", "FE...LIKhac", "FEahcLIK..."]
         for s,r in zip(subalignment_strings, ref_subalignment):
             self.assertEqual(s,r)
        
@@ -1407,6 +1407,28 @@ class TestAlignment(unittest.TestCase):
                 sp = pred_msa.SP_score(ref_msa)
                 #based on experience, any half decent hyperparameter choice should yield at least this score
                 self.assertTrue(sp > 0.7)
+
+    def test_non_homogeneous_mask(self):
+        #non_homogeneous_mask_func
+        i = 2
+        seq_lens = tf.constant([[3,5,4]])
+        class HmmCellMock():
+            def __init__(self):
+                self.num_models = 1
+                self.length = [4]
+                self.max_num_states = 11
+                self.dtype = tf.float32
+        mask = non_homogeneous_mask_func(i, seq_lens, HmmCellMock()).numpy()
+        expected_zero_pos = [set([(0,3), (0,4), (1,8), (1,9), (2,8), (2,9), (3,8), (3,9), (8,3), (8,4)]),
+                            set([(0,3), (0,4), (1,8), (1,9), (8,3), (8,4)]),
+                            set([(0,3), (0,4), (1,8), (1,9), (2,8), (2,9), (8,3), (8,4)])]
+        for k in range(3):
+            for u in range(11):
+                for v in range(11):
+                    if (u,v) in expected_zero_pos[k]:
+                        self.assertEqual(mask[0,k,u,v], 0, f"Expected 0 at {u},{v}")
+                    else:
+                        self.assertEqual(mask[0,k,u,v], 1, f"Expected 1 at {u},{v}")
         
         
 class ConsoleTest(unittest.TestCase):
