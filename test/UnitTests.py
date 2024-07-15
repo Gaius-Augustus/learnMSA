@@ -1410,7 +1410,6 @@ class TestAlignment(unittest.TestCase):
 
     def test_non_homogeneous_mask(self):
         #non_homogeneous_mask_func
-        i = 2
         seq_lens = tf.constant([[3,5,4]])
         class HmmCellMock():
             def __init__(self):
@@ -1418,7 +1417,7 @@ class TestAlignment(unittest.TestCase):
                 self.length = [4]
                 self.max_num_states = 11
                 self.dtype = tf.float32
-        mask = non_homogeneous_mask_func(i, seq_lens, HmmCellMock()).numpy()
+        mask = non_homogeneous_mask_func(2, seq_lens, HmmCellMock()).numpy()
         expected_zero_pos = [set([(0,3), (0,4), (1,8), (1,9), (2,8), (2,9), (3,8), (3,9), (8,3), (8,4)]),
                             set([(0,3), (0,4), (1,8), (1,9), (8,3), (8,4)]),
                             set([(0,3), (0,4), (1,8), (1,9), (2,8), (2,9), (8,3), (8,4)])]
@@ -1429,6 +1428,35 @@ class TestAlignment(unittest.TestCase):
                         self.assertEqual(mask[0,k,u,v], 0, f"Expected 0 at {u},{v}")
                     else:
                         self.assertEqual(mask[0,k,u,v], 1, f"Expected 1 at {u},{v}")
+        #starting case is special
+        # mask = non_homogeneous_mask_func(1, seq_lens, HmmCellMock()).numpy()
+        # print(mask)
+        # expected_zero_pos = [set([(0,3), (0,4), (1,8), (1,9), (2,8), (2,9), (3,8), (3,9), (8,3), (8,4)]),
+        #                     set([(0,3), (0,4), (1,8), (1,9), (8,3), (8,4)]),
+        #                     set([(0,3), (0,4), (1,8), (1,9), (2,8), (2,9), (8,3), (8,4)])]
+        # for k in range(3):
+        #     for u in range(11):
+        #         for v in range(11):
+        #             if (u,v) in expected_zero_pos[k]:
+        #                 self.assertEqual(mask[0,k,u,v], 0, f"Expected 0 at {u},{v}")
+        #             else:
+        #                 self.assertEqual(mask[0,k,u,v], 1, f"Expected 1 at {u},{v}")
+        #hitting a sequence end is a special case, always allow transitions out of the last match
+        mask = non_homogeneous_mask_func(4, seq_lens, HmmCellMock()).numpy()
+        expected_zero_pos = [set([(1,8), (1,9), (2,8), (2,9), (3,8), (3,9)]),
+                            set([(1,8), (1,9), (2,8), (2,9), (3,8), (3,9)]),
+                            set([(1,8), (1,9), (2,8), (2,9), (3,8), (3,9)])]
+        for k in range(3):
+            for u in range(11):
+                for v in range(11):
+                    if (u,v) in expected_zero_pos[k]:
+                        self.assertEqual(mask[0,k,u,v], 0, f"Expected 0 at {u},{v}")
+                    else:
+                        self.assertEqual(mask[0,k,u,v], 1, f"Expected 1 at {u},{v}")
+
+        mask = non_homogeneous_mask_func(1, seq_lens, HmmCellMock()).numpy()
+        print(mask)
+
         
         
 class ConsoleTest(unittest.TestCase):
@@ -1554,8 +1582,10 @@ class TestModelToFile(unittest.TestCase):
                                                                                      R=8, 
                                                                                      RF=-2, 
                                                                                      T=-10)
-        custom_flank_init = Initializers.ConstantInitializer(77)
-        custom_emission_init = Initializers.ConstantInitializer(np.random.rand(1, model_len, len(SequenceDataset.alphabet)-1))
+        custom_flank_init = Initializers.ConstantInitializer(2)
+        em_init_np = np.random.rand(1, model_len, len(SequenceDataset.alphabet)-1)
+        em_init_np[:,2:6] = string_to_one_hot("ACGT").numpy()*20.
+        custom_emission_init = Initializers.ConstantInitializer(em_init_np)
         custom_insertion_init = Initializers.ConstantInitializer(np.random.rand(1, len(SequenceDataset.alphabet)-1))
         encoder_initializer = Initializers.make_default_anc_probs_init(1)
         encoder_initializer[0] = Initializers.ConstantInitializer(np.random.rand(1, 2))

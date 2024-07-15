@@ -33,8 +33,7 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
         self.flank_init = [flank_init] if not hasattr(flank_init, '__iter__') else flank_init 
         self.prior = prior
         self.frozen_kernels = frozen_kernels
-        self.epsilon = tf.constant(1e-32, self.dtype)
-        self.approx_log_zero = tf.math.log(self.epsilon)
+        self.approx_log_zero = -1000.
         self.reverse = False
         
     def cell_init(self, cell):

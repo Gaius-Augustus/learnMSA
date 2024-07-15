@@ -64,25 +64,30 @@ def viterbi_dyn_prog(sequences, hmm_cell, end_hints=None, non_homogeneous_mask_f
     return gamma
 
 
-def viterbi_backtracking_step(q, gamma_state, hmm_cell):
+def viterbi_backtracking_step(q, gamma_state, hmm_cell, non_homogeneous_mask=None):
     """ Computes a Viterbi backtracking step in parallel for all models and batch elements.
     Args:
         q: Previously decoded states. Shape: (num_model, b, 1)
         gamma_state: Viterbi values of the previously decoded states. Shape: (num_model, b, q)
         hmm_cell: HMM cell with the models under which decoding should happen.
+        non_homogeneous_mask: Optional mask of shape (num_models, b, q, q) that specifies which transitions are allowed.
     """
     #since A is transposed, we gather columns (i.e. all starting states q' when transitioning to q)
-    A_q = tf.gather_nd(hmm_cell.log_A_dense_t, q, batch_dims=1)
+    if non_homogeneous_mask is None:
+        A_q = tf.gather_nd(hmm_cell.log_A_dense_t, q, batch_dims=1)
+    else:
+        A_q = tf.gather_nd(hmm_cell.log_A_dense_t[:,tf.newaxis] + safe_log(tf.transpose(non_homogeneous_mask, [0,1,3,2])), q, batch_dims=2)
     q = tf.math.argmax(A_q + gamma_state, axis=-1)
     q = tf.expand_dims(q, -1)
     return q
 
     
-def viterbi_backtracking(hmm_cell, gamma):
+def viterbi_backtracking(hmm_cell, gamma, seq_lens, non_homogeneous_mask_func=None):
     """ Performs backtracking on Viterbi score tables.
     Args:
         hmm_cell: HMM cell with the models under which decoding should happen.
         gamma: A Viterbi score table per model and batch element. Shape (num_model, b, L, q)
+        non_homogeneous_mask_func: Optional function that maps a sequence index i to a num_models x q x q mask that specifies which transitions are allowed.
     """
     q = tf.math.argmax(gamma[:,:,-1], axis=-1)
     q = tf.expand_dims(q, -1)
@@ -91,7 +96,7 @@ def viterbi_backtracking(hmm_cell, gamma):
     state_seqs_max_lik = tf.TensorArray(q.dtype, size=L)
     state_seqs_max_lik = state_seqs_max_lik.write(L-1, q)
     for i in tf.range(L-2, -1, -1):
-        q = viterbi_backtracking_step(q, gamma[:,:,i], hmm_cell)
+        q = viterbi_backtracking_step(q, gamma[:,:,i], hmm_cell, non_homogeneous_mask_func(i+1, seq_lens, hmm_cell) if non_homogeneous_mask_func is not None else None)
         state_seqs_max_lik = state_seqs_max_lik.write(i, q)
     state_seqs_max_lik = tf.transpose(state_seqs_max_lik.stack(), [1,2,0,3])
     state_seqs_max_lik = tf.cast(state_seqs_max_lik, dtype=tf.int16)
@@ -117,7 +122,8 @@ def viterbi(sequences, hmm_cell, end_hints=None, non_homogeneous_mask_func=None)
     gamma = viterbi_dyn_prog(sequences, hmm_cell, 
                                 end_hints=end_hints, 
                                 non_homogeneous_mask_func=non_homogeneous_mask_func)
-    return viterbi_backtracking(hmm_cell, gamma)
+    seq_lens = tf.reduce_sum(tf.cast(sequences[..., -1]==0, tf.int32), axis=-1)
+    return viterbi_backtracking(hmm_cell, gamma, seq_lens, non_homogeneous_mask_func=non_homogeneous_mask_func)
 
 
 def get_state_seqs_max_lik(data : SequenceDataset,

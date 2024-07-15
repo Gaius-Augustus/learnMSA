@@ -665,8 +665,12 @@ def non_homogeneous_mask_func(i, seq_lens, hmm_cell):
         states_left = one_hot_set([L, C], q, hmm_cell.dtype)
         states_right = one_hot_set([R, C], q, hmm_cell.dtype)
         allowed_CL_transitions = 1 - one_hot_set(tf.range(i+1, tf.maximum(i+1, length + 1)), q, hmm_cell.dtype)
-        length_mask = tf.cast(tf.sequence_mask(tf.maximum(0, length - seq_lens[k] + i), maxlen=q), hmm_cell.dtype)  
-        allowed_CR_transitions = 1 - tf.roll(length_mask, shift=1, axis=1)
+        number_of_forbidden_match_states = tf.maximum(0, length - seq_lens[k] + i)
+        #always allow transitions out of the last match state
+        number_of_forbidden_match_states = tf.minimum(length-1, number_of_forbidden_match_states)
+        length_mask = 1-tf.cast(tf.sequence_mask(number_of_forbidden_match_states, maxlen=q-1), hmm_cell.dtype)  
+        #allowed_CR_transitions = 1 - tf.roll(length_mask, shift=1, axis=1)
+        allowed_CR_transitions = tf.concat([tf.ones_like(length_mask[:,:1]), length_mask], axis=1)
         mask_left = states_left[...,tf.newaxis] * allowed_CL_transitions[tf.newaxis]
         mask_left += template * (1 - states_left[:,tf.newaxis])
         mask_right = states_right[tf.newaxis] * allowed_CR_transitions[...,tf.newaxis]
