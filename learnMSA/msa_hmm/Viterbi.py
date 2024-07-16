@@ -87,7 +87,7 @@ def viterbi_backtracking(hmm_cell, gamma, seq_lens, non_homogeneous_mask_func=No
     Args:
         hmm_cell: HMM cell with the models under which decoding should happen.
         gamma: A Viterbi score table per model and batch element. Shape (num_model, b, L, q)
-        non_homogeneous_mask_func: Optional function that maps a sequence index i to a num_models x q x q mask that specifies which transitions are allowed.
+        non_homogeneous_mask_func: Optional function that maps a sequence index i to a num_model x batch x q x q mask that specifies which transitions are allowed.
     """
     q = tf.math.argmax(gamma[:,:,-1], axis=-1)
     q = tf.expand_dims(q, -1)
@@ -111,7 +111,7 @@ def viterbi(sequences, hmm_cell, end_hints=None, non_homogeneous_mask_func=None)
     Args:
         sequences: Input sequences. Shape (num_models, b, L, s) or (num_models, b, L)
         hmm_cell: A HMM cell representing k models used for decoding.
-        non_homogeneous_mask_func: Optional function that maps a sequence index i to a num_models x q x q mask that specifies which transitions are allowed.
+        non_homogeneous_mask_func: Optional function that maps a sequence index i to a num_model x batch x q x q mask that specifies which transitions are allowed.
     Returns:
         State sequences. Shape (num_models, b, L)
     """
@@ -142,7 +142,7 @@ def get_state_seqs_max_lik(data : SequenceDataset,
         batch_size: Specifies how many sequences will be decoded in parallel. 
         hmm_cell: MsaHmmCell object. 
         encoder: Optional eget_state_seqs_max_likncoder model that is applied to the sequences before Viterbi.
-        non_homogeneous_mask_func: Optional function that maps a sequence index i to a q x q mask that specifies which transitions are allowed.
+        non_homogeneous_mask_func: Optional function that maps a sequence index i to a num_model x batch x q x q mask that specifies which transitions are allowed.
     Returns:
         A dense integer representation of the most likely state sequences. Shape: (num_model, num_seq, L)
     """

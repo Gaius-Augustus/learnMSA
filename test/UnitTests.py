@@ -13,7 +13,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 tf.get_logger().setLevel('WARNING')
 from learnMSA.msa_hmm import Align, Emitter, Transitioner, Initializers, MsaHmmCell, MsaHmmLayer, Training, Configuration, Viterbi, AncProbsLayer, Priors, DirichletMixture
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset, AlignedDataset
-from learnMSA.msa_hmm.AlignmentModel import AlignmentModel, non_homogeneous_mask_func
+from learnMSA.msa_hmm.AlignmentModel import AlignmentModel, non_homogeneous_mask_func, find_faulty_sequences
 from learnMSA.protein_language_models import Common, DataPipeline, TrainingUtil, MvnMixture, EmbeddingCache
 import itertools
 import shutil
@@ -1418,9 +1418,6 @@ class TestAlignment(unittest.TestCase):
                 self.max_num_states = 11
                 self.dtype = tf.float32
         mask = non_homogeneous_mask_func(2, seq_lens, HmmCellMock()).numpy()
-        # expected_zero_pos = [set([(0,3), (0,4), (1,8), (1,9), (2,8), (2,9), (3,8), (3,9), (8,3), (8,4)]),
-        #                     set([(0,3), (0,4), (1,8), (1,9), (8,3), (8,4)]),
-        #                     set([(0,3), (0,4), (1,8), (1,9), (2,8), (2,9), (8,3), (8,4)])]
         expected_zero_pos = [set([(1,8), (2,8), (3,8), (8,3), (8,4)]),
                             set([(1,8), (8,3), (8,4)]),
                             set([(1,8), (2,8), (8,3), (8,4)])]
@@ -1444,6 +1441,21 @@ class TestAlignment(unittest.TestCase):
                     else:
                         self.assertEqual(mask[0,k,u,v], 1, f"Expected 1 at {u},{v}")
 
+
+    def test_find_faulty_sequences(self):
+        model_length = 4
+        C = 2*model_length
+        T = 2*model_length+2
+        seq_lens = np.array([3,4,4,2,
+                            4,4,4,4,
+                            2,5,5,5,
+                            3])
+        state_seqs_max_lik = np.array([[[1,C,2,T,T], [1,C,2,4,T], [1,2,3,4,T], [1,3,T,T,T], 
+                                        [1,2,C,3,T], [1,2,C,1,T], [1,2,C,4,T], [1,2,C,4,T], 
+                                        [1,C,T,T,T], [1,2,3,C,5], [1,2,3,4,C], [3,C,C,C,1],
+                                        [3,C,1,T,T]]])
+        faulty_sequences = find_faulty_sequences(state_seqs_max_lik, model_length, seq_lens)
+        np.testing.assert_equal(faulty_sequences, [0, 1, 4, 5, 6, 7, 8])
         
         
 class ConsoleTest(unittest.TestCase):

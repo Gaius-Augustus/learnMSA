@@ -192,6 +192,8 @@ class AlignmentModel():
     #eventually, an alignment with explicit gaps can be written 
     #in a memory friendly manner to file
     def _build_alignment(self, models):
+
+        assert len(models) == 1, "Not implemented for multiple models."
         
         if tf.distribute.has_strategy():
             with tf.distribute.get_strategy().scope():
@@ -206,11 +208,27 @@ class AlignmentModel():
                                                             self.batch_size,
                                                             cell_copy,
                                                             models,
-                                                            self.encoder_model,
-                                                            non_homogeneous_mask_func)
+                                                            self.encoder_model)
+        state_seqs_max_lik = self._clean_up_viterbi_seqs(state_seqs_max_lik, models, cell_copy)
         for i,l,max_lik_seqs in zip(models, cell_copy.length, state_seqs_max_lik):
             decoded_data = AlignmentModel.decode(l,max_lik_seqs)
             self.metadata[i] = AlignmentMetaData(*decoded_data)
+
+    def _clean_up_viterbi_seqs(self, state_seqs_max_lik, models, cell_copy):
+        #state_seqs_max_lik has shape (num_model, num_seq, L)
+        faulty_sequences = find_faulty_sequences(state_seqs_max_lik, cell_copy.length[0], self.data.seq_lens[self.indices])
+        if faulty_sequences.size > 0:
+            #repeat Viterbi with a masking that prevents certain transitions that can cause problems
+            fixed_state_seqs = viterbi.get_state_seqs_max_lik(self.data,
+                                                                self.batch_generator,
+                                                                faulty_sequences,
+                                                                self.batch_size,
+                                                                cell_copy,
+                                                                models,
+                                                                self.encoder_model,
+                                                                non_homogeneous_mask_func)
+            state_seqs_max_lik[0,faulty_sequences] = fixed_state_seqs
+        return state_seqs_max_lik
         
     def to_string(self, model_index, batch_size=100000, add_block_sep=True, aligned_insertions : AlignedInsertions = AlignedInsertions()):
         """ Uses one model to decode an alignment and returns the sequences with gaps in a list.
@@ -659,11 +677,7 @@ def non_homogeneous_mask_func(i, seq_lens, hmm_cell):
     template = tf.ones((1,q,q), dtype=hmm_cell.dtype)
     model_masks = []
     for k,length in enumerate(hmm_cell.length):
-        #L = 0
         C = 2 * length
-        #R = 2 * length + 1
-        #states_left = one_hot_set([L, C], q, hmm_cell.dtype)
-        #states_right = one_hot_set([R, C], q, hmm_cell.dtype)
         states_left = one_hot_set([C], q, hmm_cell.dtype)
         states_right = one_hot_set([C], q, hmm_cell.dtype)
         allowed_CL_transitions = 1 - one_hot_set(tf.range(i+1, tf.maximum(i+1, length + 1)), q, hmm_cell.dtype)
@@ -671,7 +685,6 @@ def non_homogeneous_mask_func(i, seq_lens, hmm_cell):
         #always allow transitions out of the last match state
         number_of_forbidden_match_states = tf.minimum(length-1, number_of_forbidden_match_states)
         length_mask = 1-tf.cast(tf.sequence_mask(number_of_forbidden_match_states, maxlen=q-1), hmm_cell.dtype)  
-        #allowed_CR_transitions = 1 - tf.roll(length_mask, shift=1, axis=1)
         allowed_CR_transitions = tf.concat([tf.ones_like(length_mask[:,:1]), length_mask], axis=1)
         mask_left = states_left[...,tf.newaxis] * allowed_CL_transitions[tf.newaxis]
         mask_left += template * (1 - states_left[:,tf.newaxis])
@@ -686,3 +699,22 @@ def non_homogeneous_mask_func(i, seq_lens, hmm_cell):
 def one_hot_set(indices, d, dtype):
     # Returns a vector in {0,1}}^d with a 1 at positions i in indices and 0 elsewhere
     return tf.reduce_sum(tf.one_hot(indices, d, dtype=dtype), axis=0)
+
+
+def find_faulty_sequences(state_seqs_max_lik, model_length, seq_lens):
+    # Returns an array of sequences indices for that Viterbi should be rerun with restrictions
+    C = 2 * model_length
+    C_state = state_seqs_max_lik == C
+    prev_C_state = np.roll(C_state, 1, axis=2)
+    prev_C_state[:,:,0] = False
+    C_state_starts = C_state & ~prev_C_state
+    previous_state = np.roll(state_seqs_max_lik, 1, axis=2)
+    previous_state[:,:,0] = -1
+    previous_is_match = (previous_state > 0) & (previous_state < model_length+1)
+    #there are enough match states to align without repeat
+    remaining_matches = model_length - previous_state
+    remaining_residues = seq_lens[np.newaxis,:,np.newaxis] - np.arange(state_seqs_max_lik.shape[-1])[np.newaxis,np.newaxis,:]
+    enough_matches = remaining_matches >= remaining_residues
+    faulty_sequences = np.any(C_state_starts & previous_is_match & enough_matches, axis=-1)
+    faulty_sequences = np.argwhere(faulty_sequences[0])[:,0]
+    return faulty_sequences
