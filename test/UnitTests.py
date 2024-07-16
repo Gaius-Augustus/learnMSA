@@ -1418,34 +1418,12 @@ class TestAlignment(unittest.TestCase):
                 self.max_num_states = 11
                 self.dtype = tf.float32
         mask = non_homogeneous_mask_func(2, seq_lens, HmmCellMock()).numpy()
-        expected_zero_pos = [set([(0,3), (0,4), (1,8), (1,9), (2,8), (2,9), (3,8), (3,9), (8,3), (8,4)]),
-                            set([(0,3), (0,4), (1,8), (1,9), (8,3), (8,4)]),
-                            set([(0,3), (0,4), (1,8), (1,9), (2,8), (2,9), (8,3), (8,4)])]
-        for k in range(3):
-            for u in range(11):
-                for v in range(11):
-                    if (u,v) in expected_zero_pos[k]:
-                        self.assertEqual(mask[0,k,u,v], 0, f"Expected 0 at {u},{v}")
-                    else:
-                        self.assertEqual(mask[0,k,u,v], 1, f"Expected 1 at {u},{v}")
-        #starting case is special
-        # mask = non_homogeneous_mask_func(1, seq_lens, HmmCellMock()).numpy()
-        # print(mask)
         # expected_zero_pos = [set([(0,3), (0,4), (1,8), (1,9), (2,8), (2,9), (3,8), (3,9), (8,3), (8,4)]),
         #                     set([(0,3), (0,4), (1,8), (1,9), (8,3), (8,4)]),
         #                     set([(0,3), (0,4), (1,8), (1,9), (2,8), (2,9), (8,3), (8,4)])]
-        # for k in range(3):
-        #     for u in range(11):
-        #         for v in range(11):
-        #             if (u,v) in expected_zero_pos[k]:
-        #                 self.assertEqual(mask[0,k,u,v], 0, f"Expected 0 at {u},{v}")
-        #             else:
-        #                 self.assertEqual(mask[0,k,u,v], 1, f"Expected 1 at {u},{v}")
-        #hitting a sequence end is a special case, always allow transitions out of the last match
-        mask = non_homogeneous_mask_func(4, seq_lens, HmmCellMock()).numpy()
-        expected_zero_pos = [set([(1,8), (1,9), (2,8), (2,9), (3,8), (3,9)]),
-                            set([(1,8), (1,9), (2,8), (2,9), (3,8), (3,9)]),
-                            set([(1,8), (1,9), (2,8), (2,9), (3,8), (3,9)])]
+        expected_zero_pos = [set([(1,8), (2,8), (3,8), (8,3), (8,4)]),
+                            set([(1,8), (8,3), (8,4)]),
+                            set([(1,8), (2,8), (8,3), (8,4)])]
         for k in range(3):
             for u in range(11):
                 for v in range(11):
@@ -1453,9 +1431,18 @@ class TestAlignment(unittest.TestCase):
                         self.assertEqual(mask[0,k,u,v], 0, f"Expected 0 at {u},{v}")
                     else:
                         self.assertEqual(mask[0,k,u,v], 1, f"Expected 1 at {u},{v}")
-
-        mask = non_homogeneous_mask_func(1, seq_lens, HmmCellMock()).numpy()
-        print(mask)
+        #hitting a sequence end is a special case, always allow transitions out of the last match
+        mask = non_homogeneous_mask_func(4, seq_lens, HmmCellMock()).numpy()
+        expected_zero_pos = [set([(1,8), (2,8), (3,8)]),
+                            set([(1,8), (2,8), (3,8)]),
+                            set([(1,8), (2,8), (3,8)])]
+        for k in range(3):
+            for u in range(11):
+                for v in range(11):
+                    if (u,v) in expected_zero_pos[k]:
+                        self.assertEqual(mask[0,k,u,v], 0, f"Expected 0 at {u},{v}")
+                    else:
+                        self.assertEqual(mask[0,k,u,v], 1, f"Expected 1 at {u},{v}")
 
         
         

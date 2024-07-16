@@ -656,14 +656,16 @@ def non_homogeneous_mask_func(i, seq_lens, hmm_cell):
     """
     k = hmm_cell.num_models
     q = hmm_cell.max_num_states
-    L = 0
     template = tf.ones((1,q,q), dtype=hmm_cell.dtype)
     model_masks = []
     for k,length in enumerate(hmm_cell.length):
+        #L = 0
         C = 2 * length
-        R = 2 * length + 1
-        states_left = one_hot_set([L, C], q, hmm_cell.dtype)
-        states_right = one_hot_set([R, C], q, hmm_cell.dtype)
+        #R = 2 * length + 1
+        #states_left = one_hot_set([L, C], q, hmm_cell.dtype)
+        #states_right = one_hot_set([R, C], q, hmm_cell.dtype)
+        states_left = one_hot_set([C], q, hmm_cell.dtype)
+        states_right = one_hot_set([C], q, hmm_cell.dtype)
         allowed_CL_transitions = 1 - one_hot_set(tf.range(i+1, tf.maximum(i+1, length + 1)), q, hmm_cell.dtype)
         number_of_forbidden_match_states = tf.maximum(0, length - seq_lens[k] + i)
         #always allow transitions out of the last match state
