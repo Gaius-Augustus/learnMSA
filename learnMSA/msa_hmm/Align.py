@@ -217,6 +217,12 @@ def run_learnMSA(data : SequenceDataset,
         am.to_file(out_filename, am.best_model)
     
     if verbose:
+        if am.fixed_viterbi_seqs.size > 0:
+            max_show_seqs = 5
+            print(f"Fixed {am.fixed_viterbi_seqs.size} Viterbi sequences:")
+            print("\n".join([am.data.seq_ids[i] for i in am.fixed_viterbi_seqs[:max_show_seqs]]))
+            if am.fixed_viterbi_seqs.size > max_show_seqs:
+                print("...")
         print("time for generating output:", "%.4f" % (time.time()-t))
         print("Wrote file", out_filename)
 

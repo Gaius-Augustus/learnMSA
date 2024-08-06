@@ -217,6 +217,7 @@ class AlignmentModel():
     def _clean_up_viterbi_seqs(self, state_seqs_max_lik, models, cell_copy):
         #state_seqs_max_lik has shape (num_model, num_seq, L)
         faulty_sequences = find_faulty_sequences(state_seqs_max_lik, cell_copy.length[0], self.data.seq_lens[self.indices])
+        self.fixed_viterbi_seqs = faulty_sequences
         if faulty_sequences.size > 0:
             #repeat Viterbi with a masking that prevents certain transitions that can cause problems
             fixed_state_seqs = viterbi.get_state_seqs_max_lik(self.data,
@@ -227,7 +228,9 @@ class AlignmentModel():
                                                                 models,
                                                                 self.encoder_model,
                                                                 non_homogeneous_mask_func)
-            state_seqs_max_lik[0,faulty_sequences] = fixed_state_seqs
+            if state_seqs_max_lik.shape[-1] < fixed_state_seqs.shape[-1]:
+                state_seqs_max_like = np.pad(state_seqs_max_lik, ((0,0),(0,0),(0,fixed_state_seqs.shape[-1]-state_seqs_max_lik.shape[-1])), constant_values=2*cell_copy.length[0]+2)
+            state_seqs_max_lik[0,faulty_sequences,:fixed_state_seqs.shape[-1]] = fixed_state_seqs[0]
         return state_seqs_max_lik
         
     def to_string(self, model_index, batch_size=100000, add_block_sep=True, aligned_insertions : AlignedInsertions = AlignedInsertions()):
