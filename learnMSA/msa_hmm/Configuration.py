@@ -8,7 +8,8 @@ import learnMSA.msa_hmm.Initializers as initializers
 import learnMSA.msa_hmm.Priors as priors
 import learnMSA.protein_language_models.Common as plm_common
 from learnMSA.protein_language_models.MvnEmitter import MvnEmitter, AminoAcidPlusMvnEmissionInitializer, make_joint_prior
-
+import subprocess as sp
+import os
 
 def as_str(config, items_per_line=1, prefix="", sep=""):
     return "\n"+prefix+"{" + sep.join(("\n"+prefix)*(i%items_per_line==0) + key + " : " + str(val) for i,(key,val) in enumerate(config.items())) + "\n"+prefix+"}"
@@ -17,47 +18,53 @@ def as_str(config, items_per_line=1, prefix="", sep=""):
 #longer models and sequences require much more memory
 #we limit the batch size based on the longest model to train
 #the adpative batch size scales automatically with the number of GPUs
-def get_adaptive_batch_size(model_lengths, max_seq_len):
+def get_adaptive_batch_size(model_lengths, max_seq_len, small_gpu):
     num_gpu = len([x.name for x in tf.config.list_logical_devices() if x.device_type == 'GPU']) 
     num_devices = num_gpu + int(num_gpu==0) #account for the CPU-only case 
     model_length = max(model_lengths)
     if max_seq_len < 200 and model_length < 180:
-        return 512*num_devices
+        batch_size = 512*num_devices
     elif max_seq_len < 520 and model_length < 230:
-        return 256*num_devices
+        batch_size = 256*num_devices
     elif max_seq_len < 700 and model_length < 420:
-        return 128*num_devices
+        batch_size = 128*num_devices
     elif max_seq_len < 850 and model_length < 550:
-        return 64*num_devices
+        batch_size = 64*num_devices
     elif max_seq_len < 1200 and model_length < 700:
-        return 32*num_devices
+        batch_size = 32*num_devices
     elif max_seq_len < 2000 and model_length < 1000:
-        return 8*num_devices
+        batch_size = 8*num_devices
     elif max_seq_len < 4000 and model_length < 1500:
-        return 4*num_devices
+        batch_size = 4*num_devices
     else:
-        return 2*num_devices
+        batch_size = 2*num_devices
+    if small_gpu:
+        batch_size = batch_size//2
+    return batch_size
     
-def get_adaptive_batch_size_with_language_model(model_lengths, max_seq_len, embedding_dim):
+def get_adaptive_batch_size_with_language_model(model_lengths, max_seq_len, embedding_dim, small_gpu):
     num_gpu = len([x.name for x in tf.config.list_logical_devices() if x.device_type == 'GPU']) 
     num_devices = num_gpu + int(num_gpu==0) #account for the CPU-only case 
     model_length = max(model_lengths)
     if max_seq_len < 200 and model_length < 180:
-        return (20 + 180*32//embedding_dim)*num_devices
+        batch_size = (20 + 180*32//embedding_dim)*num_devices
     elif max_seq_len < 520 and model_length < 230:
-        return (10 + 90*32//embedding_dim)*num_devices
+        batch_size = (10 + 90*32//embedding_dim)*num_devices
     elif max_seq_len < 700 and model_length < 420:
-        return (5 + 45*32//embedding_dim)*num_devices
+        batch_size = (5 + 45*32//embedding_dim)*num_devices
     elif max_seq_len < 850 and model_length < 550:
-        return (3 + 22*32//embedding_dim)*num_devices
+        batch_size = (3 + 22*32//embedding_dim)*num_devices
     elif max_seq_len < 1200 and model_length < 700:
-        return (1 + 9*32//embedding_dim)*num_devices
+        batch_size = (1 + 9*32//embedding_dim)*num_devices
     elif max_seq_len < 2000 and model_length < 1000:
-        return (1 + 4*32//embedding_dim)*num_devices
+        batch_size = (1 + 4*32//embedding_dim)*num_devices
     elif max_seq_len < 4000 and model_length < 1500:
-        return (1 + 32//embedding_dim)*num_devices
+        batch_size = (1 + 32//embedding_dim)*num_devices
     else:
-        return 1*num_devices
+        batch_size = 1*num_devices
+    if small_gpu:
+        batch_size = batch_size//2
+    return batch_size
 
 #the configuration can be changed by experienced users
 #proper command line support for these parameters will be added in the future
@@ -118,10 +125,13 @@ def make_default(default_num_models=5,
                                                                         for _ in range(default_num_models)],
                                                     [initializers.make_default_flank_init() 
                                                                         for _ in range(default_num_models)])
+    #automaticall scale to a memory friendly version, if the GPU has less than 32GB                                                                    
+    gpu_mem = get_gpu_memory()
+    small_gpu = gpu_mem[0] < 32000 if len(gpu_mem) > 0 else False
     if use_language_model:                                                                    
-        batch_callback = partial(get_adaptive_batch_size_with_language_model, embedding_dim=scoring_model_config.dim)  
+        batch_callback = partial(get_adaptive_batch_size_with_language_model, embedding_dim=scoring_model_config.dim, small_gpu=small_gpu)  
     else:
-        batch_callback = get_adaptive_batch_size                                                                  
+        batch_callback = partial(get_adaptive_batch_size, small_gpu=small_gpu)                                                                  
     default = {
         "num_models" : default_num_models,
         "transitioner" : transitioner,
@@ -196,3 +206,10 @@ def assert_config(config):
     if not config["allow_user_keys_in_config"]:
         for key in config:
             assert key in default, f"Unrecognized key {key} in user configuration."
+
+            
+def get_gpu_memory():
+    command = "nvidia-smi --query-gpu=memory.total --format=csv"
+    memory_free_info = sp.check_output(command.split()).decode('ascii').split('\n')[:-1][1:]
+    memory_free_values = [int(x.split()[0]) for i, x in enumerate(memory_free_info)]
+    return memory_free_values

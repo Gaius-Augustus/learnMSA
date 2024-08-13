@@ -57,7 +57,7 @@ class EmbeddingBatchGenerator(DefaultBatchGenerator):
         if self.cache_embeddings:
             self.cache = EmbeddingCache(self.data.seq_lens, self.scoring_model_config.dim)
             compute_emb_func = partial(self._compute_reduced_embeddings, language_model=language_model, encoder=encoder)
-            batch_size_callback = lambda L: max(1, config["batch_size"]([0], L)//2) if callable(config["batch_size"]) else lambda L: max(1, config["batch_size"]//2)
+            batch_size_callback = (lambda L: max(1, config["batch_size"]([0], L)//2)) if callable(config["batch_size"]) else (lambda L: max(1, config["batch_size"]//2))
             print("Computing all embeddings (this may take a while).")
             self.cache.fill_cache(compute_emb_func, batch_size_callback, verbose=verbose)
             # once we have cached the embeddings do a cleanup to erase the LM from memory
