@@ -18,6 +18,7 @@ from learnMSA.protein_language_models import Common, DataPipeline, TrainingUtil,
 import itertools
 import shutil
 from test import RefModels as ref
+from test import TestSupervisedTraining
 
 class TestDataset(unittest.TestCase):
 
@@ -148,6 +149,8 @@ class TestMsaHmmCell(unittest.TestCase):
         self.ref_lik = [ref.get_ref_lik_A(), ref.get_ref_lik_B()]
         self.ref_scaled_alpha = [ref.get_ref_scaled_forward_A(), ref.get_ref_scaled_forward_B()]
         self.ref_posterior_probs = [ref.get_ref_posterior_probs_A(), ref.get_ref_posterior_probs_B()]
+        self.ref_gamma = [ref.get_ref_viterbi_variables_A(), ref.get_ref_viterbi_variables_B()]
+        self.ref_viterbi_path = [ref.get_ref_viterbi_path_A(), ref.get_ref_viterbi_path_B()]
     
     def make_test_cell(self, models):
         if not hasattr(models, '__iter__'):
@@ -247,6 +250,7 @@ class TestMsaHmmCell(unittest.TestCase):
         seq = np.repeat(seq[np.newaxis], len(models), axis=0)
         loglik = hmm_layer(seq)
         log_forward,_ = hmm_layer.forward_recursion(seq)
+        self.assertEqual(hmm_layer.cell.step_counter.numpy(), 4)
         log_backward = hmm_layer.backward_recursion(seq)
         state_posterior_log_probs = hmm_layer.state_posterior_log_probs(seq)
         for i in range(2):
@@ -306,12 +310,113 @@ class TestMsaHmmCell(unittest.TestCase):
         for i in range(2):
             test_copied_cell(hmm_cell.duplicate([i]), [i])
             
+    def test_parallel_forward(self):
+        models = [0,1]
+        n = len(models)
+        hmm_cell, length = self.make_test_cell(models)
+        hmm_layer = MsaHmmLayer.MsaHmmLayer(hmm_cell, use_prior=False, parallel_factor=2)
+        seq = tf.one_hot([[0,1,0,2]], 3)
+        seq = np.stack([seq]*n)
+        hmm_layer.build(seq.shape)
+        log_forward,loglik = hmm_layer.forward_recursion(seq)
+        self.assertEqual(hmm_layer.cell.step_counter.numpy(), 2)
+        for i in range(n):
+            q = hmm_cell.num_states[i]
+            np.testing.assert_almost_equal(np.exp(loglik[i]), self.ref_lik[i])
+            np.testing.assert_almost_equal(np.exp(log_forward)[i,0,:,:q], self.ref_alpha[i], decimal=6)
             
+    def test_parallel_backward(self):
+        models = [0,1]
+        n = len(models)
+        hmm_cell, length = self.make_test_cell(models)
+        hmm_layer = MsaHmmLayer.MsaHmmLayer(hmm_cell, use_prior=False, parallel_factor=2)
+        seq = tf.one_hot([[0,1,0,2]], 3)
+        seq = np.stack([seq]*n)
+        hmm_layer.build(seq.shape)
+        log_backward = hmm_layer.backward_recursion(seq)
+        for i in range(n):
+            q = hmm_cell.num_states[i]
+            np.testing.assert_almost_equal(np.exp(log_backward)[i,0,:,:q], self.ref_beta[i], decimal=6)
         
-        
-                
-                
+    def test_parallel_posterior(self):
+        models = [0,1]
+        n = len(models)
+        hmm_cell, length = self.make_test_cell(models)
+        hmm_layer = MsaHmmLayer.MsaHmmLayer(hmm_cell, use_prior=False, parallel_factor=2)
+        seq = tf.one_hot([[0,1,0,2]], 3)
+        seq = np.stack([seq]*n)
+        hmm_layer.build(seq.shape)
+        state_posterior_log_probs = hmm_layer.state_posterior_log_probs(seq)
+        self.assertEqual(hmm_layer.cell.step_counter.numpy(), 2)
+        for i in range(2):
+            q = hmm_cell.num_states[i]
+            np.testing.assert_almost_equal(np.exp(state_posterior_log_probs[i,0,:,:q]), self.ref_posterior_probs[i], decimal=6)
 
+    def test_parallel_longer_seq_batch(self):
+        models = [0,1]
+        n = len(models)
+        hmm_cell, length = self.make_test_cell(models)
+        hmm_layer = MsaHmmLayer.MsaHmmLayer(hmm_cell, use_prior=False, parallel_factor=1)
+        hmm_layer_parallel = MsaHmmLayer.MsaHmmLayer(hmm_cell, use_prior=False, parallel_factor=4) 
+        #set sequence length to 16 so that we have 4 chunks of size 4
+        #try one sequence with padding and one without
+        seq = tf.one_hot([[0,1,0,1,1,0,1,0,0,1,0,1,1,0,1,0], [0,1,1,1,0,0,1,1,1,2,2,2,2,2,2,2]], 3)
+        seq = np.stack([seq]*n)
+        hmm_layer.build(seq.shape)
+        hmm_layer_parallel.build(seq.shape)
+        #non parallel
+        log_forward,loglik = hmm_layer.forward_recursion(seq)
+        log_backward = hmm_layer.backward_recursion(seq)
+        state_posterior_log_probs = hmm_layer.state_posterior_log_probs(seq)
+        #parallel 
+        log_forward_parallel,loglik_parallel = hmm_layer_parallel.forward_recursion(seq)
+        log_backward_parallel = hmm_layer_parallel.backward_recursion(seq)
+        state_posterior_log_probs_parallel = hmm_layer_parallel.state_posterior_log_probs(seq)
+        self.assertEqual(hmm_layer.cell.step_counter.numpy(), 4)
+        for i in range(2):
+            q = hmm_cell.num_states[i]
+            np.testing.assert_almost_equal(np.exp(loglik[i]), np.exp(loglik_parallel[i]), decimal=6)
+            np.testing.assert_almost_equal(np.exp(log_forward)[i,0,:,:q], np.exp(log_forward_parallel)[i,0,:,:q], decimal=6)
+            np.testing.assert_almost_equal(np.exp(log_backward)[i,0,:,:q], np.exp(log_backward_parallel)[i,0,:,:q], decimal=6)
+            np.testing.assert_almost_equal(np.exp(state_posterior_log_probs[i,0,:,:q]), np.exp(state_posterior_log_probs_parallel[i,0,:,:q]), decimal=6)
+            
+    def test_parallel_posterior_casino(self):
+        y1 = TestSupervisedTraining.get_prediction(1).numpy()
+        y2 = TestSupervisedTraining.get_prediction(1).numpy()
+        y3 = TestSupervisedTraining.get_prediction(10).numpy()
+        np.testing.assert_almost_equal(y1, y2) #if this fails, check if the batches are non-random
+        np.testing.assert_almost_equal(y2, y3, decimal=4) #if this fails, parallel != non-parallel
+
+    def test_parallel_viterbi(self):
+        models = [0,1]
+        n = len(models)
+        hmm_cell, length = self.make_test_cell(models)
+        seq = tf.one_hot([[0,1,0,2], [1,0,0,0], [1,1,1,1]], 3)
+        seq = np.stack([seq]*n)
+        viterbi_path_1, gamma_1 = Viterbi.viterbi(seq, hmm_cell, parallel_factor=1, return_variables=True)
+        viterbi_path_2, gamma_2 = Viterbi.viterbi(seq, hmm_cell, parallel_factor=2, return_variables=True)
+        for i in range(2):
+            q = hmm_cell.num_states[i]
+            np.testing.assert_almost_equal(np.exp(gamma_1[i,0,:,:q]), self.ref_gamma[i])
+            np.testing.assert_almost_equal(np.exp(gamma_2[i,0,:,0,:q]), self.ref_gamma[i][0::2])
+            np.testing.assert_almost_equal(np.exp(gamma_2[i,0,:,1,:q]), self.ref_gamma[i][1::2])
+            np.testing.assert_almost_equal(viterbi_path_1[i,0], self.ref_viterbi_path[i])
+            np.testing.assert_almost_equal(viterbi_path_2[i,0], self.ref_viterbi_path[i])
+
+    def test_parallel_viterbi_long(self):
+        models = [0,1]
+        n = len(models)
+        hmm_cell, length = self.make_test_cell(models)
+        np.random.seed(57235782)
+        seq = np.random.randint(2, size=(3, 10000))
+        seq = tf.one_hot(seq, 3)
+        seq = np.stack([seq]*n)
+        viterbi_path_1 = Viterbi.viterbi(seq, hmm_cell, parallel_factor=1)
+        viterbi_path_100 = Viterbi.viterbi(seq, hmm_cell, parallel_factor=100)
+        np.testing.assert_equal(viterbi_path_1.numpy(), viterbi_path_100.numpy())
+
+
+                
 def string_to_one_hot(s):
     i = [SequenceDataset.alphabet.index(aa) for aa in s]
     return tf.one_hot(i, len(SequenceDataset.alphabet)-1)
@@ -749,6 +854,63 @@ class TestMSAHMM(unittest.TestCase):
                     alignment_block = AlignmentModel.get_alignment_block(sequences[i], 
                                                                         C,IL,np.amax(IL, axis=0),IS)
                     self.assert_vec(alignment_block, ref)
+
+
+    def test_parallel_viterbi(self):
+        length = [5, 3]
+        emission_init = [tf.constant_initializer(string_to_one_hot("FELIK").numpy()*20),
+                         tf.constant_initializer(string_to_one_hot("AHC").numpy()*20)]
+        transition_init = [Initializers.make_default_transition_init(MM = 0, 
+                                                                    MI = 0,
+                                                                    MD = 0,
+                                                                    II = 0,
+                                                                    IM = 0,
+                                                                    DM = 0,
+                                                                    DD = 0,
+                                                                    FC = 0,
+                                                                    FE = 0,
+                                                                    R = 0,
+                                                                    RF = -1, 
+                                                                    T = 0, 
+                                                                    scale = 0)]*2
+        emitter = Emitter.ProfileHMMEmitter(emission_init = emission_init, 
+                                                 insertion_init = [tf.keras.initializers.Zeros()]*2)
+        transitioner = Transitioner.ProfileHMMTransitioner(transition_init = transition_init, 
+                                                            flank_init = [tf.keras.initializers.Zeros()]*2)
+        hmm_cell = MsaHmmCell.MsaHmmCell(length, emitter=emitter, transitioner=transitioner)
+        hmm_cell.build((None, None, len(SequenceDataset.alphabet)))
+        hmm_cell.recurrent_init()
+        with SequenceDataset(os.path.dirname(__file__)+"/data/felix.fa") as data:
+            ref_seqs = np.array([#model 1
+                                [[1,2,3,4,5,12,12,12,12,12,12,12,12,12,12],
+                                [0,0,0,1,2,3,4,5,12,12,12,12,12,12,12],
+                                [1,2,3,4,5,11,11,11,12,12,12,12,12,12,12],
+                                [1,2,3,4,5,10,10,10,1,2,3,4,5,11,12],
+                                [0,2,3,4,11,12,12,12,12,12,12,12,12,12,12],
+                                [1,2,7,7,7,3,4,5,12,12,12,12,12,12,12],
+                                [1,6,6,2,3,8,4,9,9,9,5,12,12,12,12],
+                                [1,2,3,8,8,8,4,5,11,11,11,12,12,12,12]], 
+                                #model 2
+                                [[0,0,0,0,0,8,8,8,8,8,8,8,8,8,8],
+                                [1,2,3,7,7,7,7,7,8,8,8,8,8,8,8],
+                                [0,0,0,0,0,0,1,3,8,8,8,8,8,8,8],
+                                [0,0,0,0,0,1,2,3,6,6,6,6,6,1,8],
+                                [1,4,4,4,2,8,8,8,8,8,8,8,8,8,8],
+                                [0,0,1,2,3,7,7,7,8,8,8,8,8,8,8],
+                                [0,1,2,6,6,1,6,1,2,3,7,8,8,8,8],
+                                [0,0,0,1,2,3,6,6,1,2,3,8,8,8,8]]])
+            sequences = get_all_seqs(data, 2)
+            sequences = np.transpose(sequences, [1,0,2])
+            state_seqs_max_lik_1, gamma_1 = Viterbi.viterbi(sequences, hmm_cell, parallel_factor=1, return_variables=True)
+            #print("A", gamma_1[1,1,::5])
+            state_seqs_max_lik_3, gamma_3 = Viterbi.viterbi(sequences, hmm_cell, parallel_factor=3, return_variables=True)
+            state_seqs_max_lik_5, gamma_5 = Viterbi.viterbi(sequences, hmm_cell, parallel_factor=5, return_variables=True)
+            np.testing.assert_almost_equal(gamma_1[:,:,::5].numpy(), gamma_3.numpy()[...,0,:], decimal=4)
+            np.testing.assert_almost_equal(gamma_1[:,:,4::5].numpy(), gamma_3.numpy()[...,1,:], decimal=4)
+            np.testing.assert_almost_equal(gamma_1[:,:,::3].numpy(), gamma_5.numpy()[...,0,:], decimal=4)
+            np.testing.assert_almost_equal(gamma_1[:,:,2::3].numpy(), gamma_5.numpy()[...,1,:], decimal=4)
+            self.assert_vec(state_seqs_max_lik_3.numpy(), ref_seqs)
+            self.assert_vec(state_seqs_max_lik_5.numpy(), ref_seqs)
                 
                 
     def test_aligned_insertions(self):
@@ -792,6 +954,24 @@ class TestMSAHMM(unittest.TestCase):
             actual = np.exp(backward_seqs[0,0,-(i+1)])
             r = backward_ref[i] + hmm_cell.epsilon
             np.testing.assert_almost_equal(actual, r, decimal=5)
+            
+            
+    def test_posterior_state_probabilities(self):
+        train_filename = os.path.dirname(__file__)+"/data/egf.fasta"
+        with SequenceDataset(train_filename) as data:
+            hmm_cell = MsaHmmCell.MsaHmmCell(32)
+            hmm_layer = MsaHmmLayer.MsaHmmLayer(hmm_cell, 1)
+            hmm_layer.build((1, None, None, len(SequenceDataset.alphabet)))
+            batch_gen = Training.DefaultBatchGenerator()
+            batch_gen.configure(data, Configuration.make_default(1))
+            indices = tf.range(data.num_seq, dtype=tf.int64)
+            ds = Training.make_dataset(indices, batch_gen, batch_size=data.num_seq, shuffle=False)
+            for x,_ in ds:
+                seq = tf.one_hot(x[0], len(SequenceDataset.alphabet))
+                seq = tf.transpose(seq, [1,0,2,3])
+                p = hmm_layer.state_posterior_log_probs(seq)
+            p = np.exp(p)
+            np.testing.assert_almost_equal(np.sum(p, -1), 1., decimal=4)
             
             
     def test_posterior_state_probabilities(self):
@@ -1828,11 +2008,7 @@ class TestPretrainingUtilities(unittest.TestCase):
         loss = TrainingUtil.make_masked_func(tf.keras.losses.binary_crossentropy, categorical=False, name="bce")
         loss_value = loss(self.y_true, self.y_pred)
         np.testing.assert_almost_equal(loss_value, -(3*np.log(0.6) / 9 + 6*np.log(0.6)/16)/2)
-            
-            
-# class TestScoringModel(unittest.TestCase):
-#     pass
-            
+                   
         
 if __name__ == '__main__':
     unittest.main()

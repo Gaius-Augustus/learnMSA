@@ -71,7 +71,12 @@ def run_main():
     parser.add_argument("--alpha_flank_compl", dest="alpha_flank_compl", type=float, default=1, help=argparse.SUPPRESS)
     parser.add_argument("--alpha_single_compl", dest="alpha_single_compl", type=float, default=1, help=argparse.SUPPRESS)
     parser.add_argument("--alpha_global_compl", dest="alpha_global_compl", type=float, default=1, help=argparse.SUPPRESS)
-    
+
+    parser.add_argument("--frozen_distances", dest="frozen_distances", action='store_true', help="Prevents learning evolutionary distances for all sequences.")
+    parser.add_argument("--initial_distance", dest="initial_distance", type=float, default=0.05, help="The initial evolutionary distance for all sequences. (default: %(default)s)")
+    parser.add_argument("--trainable_rate_matrices", dest="trainable_rate_matrices", action='store_true', help="Prevents learning the amino acid rate matrices of the evolutionary model.")
+    parser.add_argument("--dist_out", dest="dist_out", type=str, default="", help="Optional output file for the learned evolutionary distances.")
+
     parser.add_argument("--use_language_model", dest="use_language_model", action='store_true', help="Uses a large protein lanague model to generate per-token embeddings that guide the MSA step. (default: %(default)s)")
     parser.add_argument("--language_model", dest="language_model", type=str, default="protT5", help="Name of the language model to use. (default: %(default)s)")
     parser.add_argument("--scoring_model_dim", dest="scoring_model_dim", type=int, default=16, 
@@ -104,6 +109,7 @@ def run_main():
         os.environ["CUDA_VISIBLE_DEVICES"] = args.cuda_visible_devices  
     from ..msa_hmm import Configuration, Initializers, Align, Emitter, Training, Visualize
     from ..msa_hmm.SequenceDataset import SequenceDataset
+    from ..msa_hmm.AncProbsLayer import inverse_softplus
     import tensorflow as tf
     from tensorflow.python.client import device_lib
     
@@ -152,6 +158,13 @@ def run_main():
     config["surgery_del"] = args.surgery_del
     config["surgery_ins"] = args.surgery_ins
     config["model_criterion"] = args.model_criterion
+    config["trainable_distances"] = not args.frozen_distances
+    if args.trainable_rate_matrices:
+        config["trainable_rate_matrices"] = True
+        config["equilibrium_sample"] = True
+        config["transposed"] = True
+    assert args.initial_distance >= 0, "The evolutionary distance must be >= 0."
+    config["encoder_initializer"][0] = Initializers.ConstantInitializer(inverse_softplus(np.array(args.initial_distance) + 1e-8))
     transitioners = config["transitioner"] if hasattr(config["transitioner"], '__iter__') else [config["transitioner"]]
     for trans in transitioners:
         trans.prior.alpha_flank = args.alpha_flank
@@ -163,13 +176,12 @@ def run_main():
     if args.sequence_weights:
         os.makedirs(args.cluster_dir, exist_ok = True) 
         try:
-            sequence_weights = Align.compute_sequence_weights(args.input_file, args.cluster_dir, config["cluster_seq_id"])
+            sequence_weights, clusters = Align.compute_sequence_weights(args.input_file, args.cluster_dir, config["cluster_seq_id"], return_clusters=True)
         except Exception as e:
-            print("Error while computing sequence weights.")# Using uniform weights instead.")
-            #sequence_weights = None
+            print("Error while computing sequence weights.")
             raise SystemExit(e) 
     else:
-        sequence_weights = None
+        sequence_weights, clusters = None, None
     if args.use_language_model:
         # we have to define a special model- and batch generator if using a language model
         # because the emission probabilities are computed differently and the LM requires specific inputs
@@ -204,12 +216,28 @@ def run_main():
                                     batch_generator=batch_gen,
                                     align_insertions=not args.unaligned_insertions,
                                     sequence_weights = sequence_weights,
+                                    clusters = clusters,
                                     verbose = not args.silent,
                                     logo_gif_mode = args.logo_gif,
                                     logo_dir = args.logo_path,
                                     initial_model_length_callback = get_initial_model_lengths_logo_gif_mode if args.logo_gif else Align.get_initial_model_lengths)
             if args.logo:
                 Visualize.plot_and_save_logo(alignment_model, alignment_model.best_model, args.logo_path + "/logo.pdf")
+            if args.dist_out:
+                i = [l.name for l in alignment_model.encoder_model.layers].index("anc_probs_layer")
+                anc_probs_layer = alignment_model.encoder_model.layers[i]
+                tau_all = []
+                for (seq, indices),_ in Training.make_dataset(alignment_model.indices, alignment_model.batch_generator, alignment_model.batch_size, shuffle=False):
+                    seq = tf.transpose(seq, [1,0,2])
+                    indices = tf.transpose(indices)
+                    indices.set_shape([alignment_model.num_models,None]) #resolves tf 2.12 issues
+                    indices = tf.expand_dims(indices, axis=-1)
+                    tau = anc_probs_layer.make_tau(seq, indices)[alignment_model.best_model]
+                    tau_all.append(tau.numpy())
+                tau = np.concatenate(tau_all)
+                with open(args.dist_out, "w") as file:
+                    for i,t in zip(alignment_model.data.seq_ids, tau):
+                        file.write(f"{i}\t{t}\n")
     except ValueError as e:
         raise SystemExit(e) 
  

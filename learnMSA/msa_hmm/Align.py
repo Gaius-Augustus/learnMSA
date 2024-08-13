@@ -15,6 +15,11 @@ from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
 from learnMSA.msa_hmm.Configuration import as_str, assert_config
 from learnMSA.msa_hmm.AlignInsertions import make_aligned_insertions
 
+#experimental, only used for ablation studies
+#decreases accuracy slightly!
+USE_VITERBI_SURGERY = False
+if USE_VITERBI_SURGERY:
+    from learnMSA.msa_hmm.Viterbi import get_state_seqs_max_lik
 
 
 def get_initial_model_lengths(data : SequenceDataset, config, random=True):
@@ -53,6 +58,7 @@ def fit_and_align(data : SequenceDataset,
                   subset=None,
                   initial_model_length_callback=get_initial_model_lengths,
                   sequence_weights=None,
+                  clusters=None,
                   verbose=True):
     assert_config(config)
     model_generator, batch_generator = _make_defaults_if_none(model_generator, batch_generator)
@@ -94,6 +100,7 @@ def fit_and_align(data : SequenceDataset,
                                           batch_size=batch_size, 
                                           epochs=epochs_this_iteration,
                                           sequence_weights=sequence_weights,
+                                          clusters=clusters,
                                           verbose=verbose)
         am = AlignmentModel(data, batch_generator, decode_indices, batch_size=batch_size, model=model)
         if last_iteration:
@@ -160,8 +167,9 @@ def run_learnMSA(data : SequenceDataset,
                  insertion_aligner="famsa",
                  aligner_threads=0,
                  sequence_weights=None,
+                 clusters=None,
                  verbose=True, 
-                  initial_model_length_callback=get_initial_model_lengths,
+                 initial_model_length_callback=get_initial_model_lengths,
                  select_best_for_comparison=True,
                  logo_gif_mode=False,
                  logo_dir=""):
@@ -198,6 +206,7 @@ def run_learnMSA(data : SequenceDataset,
                                 subset=subset, 
                                 initial_model_length_callback=initial_model_length_callback,
                                 sequence_weights=sequence_weights,
+                                clusters=clusters,
                                 verbose=verbose)
         if verbose:
             print("Time for alignment:", "%.4f" % (time.time()-t_a))
@@ -305,12 +314,31 @@ def get_discard_or_expand_positions(am,
         expansion_lens: A list of arrays with the expansion lengths.
         pos_discard: A list of arrays with match positions to discard.
     """
-    expected_state = get_state_expectations(am.data,
-                                    am.batch_generator,
-                                    am.indices,
-                                    am.batch_size,
-                                    am.msa_hmm_layer,
-                                    am.encoder_model).numpy()
+    if USE_VITERBI_SURGERY:
+        state_seqs_max_lik = get_state_seqs_max_lik(am.data,
+                                                am.batch_generator,
+                                                am.indices,
+                                                am.batch_size,
+                                                am.msa_hmm_layer.cell,
+                                                list(range(am.num_models)),
+                                                am.encoder_model) #shape (num_model, num_seq, L)
+        #count
+        expected_state = tf.zeros((am.num_models, am.msa_hmm_layer.cell.max_num_states), am.msa_hmm_layer.cell.dtype)
+        for i in range(0, am.indices.shape[0], am.batch_size):
+            state_seqs_max_lik_batch = state_seqs_max_lik[:,i:i+am.batch_size]
+            state_seqs_max_lik_batch = tf.one_hot(state_seqs_max_lik_batch, am.msa_hmm_layer.cell.max_num_states) 
+            at_least_once = tf.cast(tf.reduce_sum(state_seqs_max_lik_batch, axis=-2) > 0, tf.float32)
+            expected_state += tf.reduce_sum(at_least_once, axis=-2)
+        expected_state /= am.indices.shape[0]
+        expected_state = expected_state.numpy()
+    else:
+        # num_models x max_num_states 
+        expected_state = get_state_expectations(am.data,
+                                        am.batch_generator,
+                                        am.indices,
+                                        am.batch_size,
+                                        am.msa_hmm_layer,
+                                        am.encoder_model).numpy()
     pos_expand = []
     expansion_lens = []
     pos_discard = []
@@ -592,7 +620,7 @@ def do_model_surgery(iteration, am : AlignmentModel, config, emission_dummy, tra
 
 
 #computes clustering based sequence weights if mmseqs2 is installed
-def compute_sequence_weights(fasta_filename, directory, cluster_seq_id=0.5):
+def compute_sequence_weights(fasta_filename, directory, cluster_seq_id=0.5, return_clusters=False):
     if which("mmseqs") is None:
         print("mmseqs2 is not installed or not in PATH. Consider installing it with conda install -c bioconda mmseqs2 or disable sequence weighting.")
         sys.exit(1)
@@ -615,6 +643,7 @@ def compute_sequence_weights(fasta_filename, directory, cluster_seq_id=0.5):
         cluster_counts = clustering.groupby("representative").size().to_frame("cluster_size")
         clustering = clustering.merge(cluster_counts, how="left", on="representative")
         clustering["weight"] = 1/clustering["cluster_size"]
+        clustering["cluster_index"] = clustering.groupby("representative").ngroup()
         clustering = clustering.set_index("sequence")
 
         with SequenceDataset(fasta_filename, "fasta") as data:
@@ -628,8 +657,11 @@ def compute_sequence_weights(fasta_filename, directory, cluster_seq_id=0.5):
                     if pos != -1:
                         ids[i] = ids[i][pos+1:]
             sequence_weights = np.array(clustering.loc[ids].weight, dtype=np.float32)
-            
-        return sequence_weights
+        if return_clusters:
+            clusters = np.array(clustering.loc[ids].cluster_index, dtype=np.int32)
+            return sequence_weights, clusters
+        else:
+            return sequence_weights
 
 
 def get_model_scores(am, model_criterion, verbose):

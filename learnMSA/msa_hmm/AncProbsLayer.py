@@ -108,6 +108,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
                                 should be used on the initial matrix by the user.
         rate_init: Initializer for the rates.
         trainable_exchangeabilities: Flag that can prevent learning the exchangeabilities.
+        trainable_distances: Flag that can prevent learning the evolutionary times.
         per_matrix_rate: Learns an additional evolutionary time per rate matrix.
         matrix_rate_init: Initializer for the replacement rate per matrix.
         matrix_rate_l2: L2 regularizer strength that penalizes deviation of the parameters from the initial value.
@@ -116,6 +117,9 @@ class AncProbsLayer(tf.keras.layers.Layer):
         equilibrium_sample: If true, a 2-staged process is assumed where an amino acid is first sampled from 
                         the equilibirium distribution and the ancestral probabilities are computed afterwards.
         transposed: Transposes the probability matrix P = e^tQ. 
+        clusters: An optional vector that assigns each sequence to a cluster. If provided, the evolutionary time
+                    is learned per cluster.
+        use_lstm: Experimental setting that estimates the evolutionary distance of a sequence with an lstm.
         name: Layer name.
     """
 
@@ -127,12 +131,15 @@ class AncProbsLayer(tf.keras.layers.Layer):
                  exchangeability_init,
                  rate_init=tf.constant_initializer(-3.),
                  trainable_rate_matrices=True,
+                 trainable_distances=True,
                  per_matrix_rate=False,
                  matrix_rate_init=None,
                  matrix_rate_l2=0.0,
                  shared_matrix=False,
                  equilibrium_sample=False,
                  transposed=False,
+                 clusters=None,
+                 use_lstm=False,
                  **kwargs):
         super(AncProbsLayer, self).__init__(**kwargs)
         self.num_models = num_models
@@ -142,17 +149,30 @@ class AncProbsLayer(tf.keras.layers.Layer):
         self.equilibrium_init = equilibrium_init
         self.exchangeability_init = exchangeability_init
         self.trainable_rate_matrices = trainable_rate_matrices
+        self.trainable_distances = trainable_distances
         self.per_matrix_rate = per_matrix_rate
         self.matrix_rate_init = matrix_rate_init
         self.matrix_rate_l2 = matrix_rate_l2 
         self.shared_matrix = shared_matrix
         self.equilibrium_sample = equilibrium_sample
         self.transposed = transposed
+        self.clusters = clusters
+        self.num_clusters = np.max(clusters) + 1 if clusters is not None else self.num_rates
+        self.use_lstm = use_lstm
     
     def build(self, input_shape=None):
-        self.tau_kernel = self.add_weight(shape=[self.num_models, self.num_rates], 
-                                   name="tau_kernel", 
-                                   initializer=self.rate_init)
+        if self.use_lstm:
+            self.lstm_dim = 64
+            self.lstm = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(self.lstm_dim, return_sequences=True, zero_output_for_mask=True), merge_mode="sum")
+            self.dense = tf.keras.layers.Dense(1, 
+                                            activation="softplus",
+                                            #kernel_initializer="zeros",
+                                            bias_initializer=self.rate_init)
+        else:
+            self.tau_kernel = self.add_weight(shape=[self.num_models, self.num_clusters], 
+                                    name="tau_kernel", 
+                                    initializer=self.rate_init,
+                                    trainable=self.trainable_distances)
         if self.shared_matrix:
             self.exchangeability_kernel = self.add_weight(shape=[self.num_models, 1, 20, 20],
                                                           name="exchangeability_kernel",
@@ -178,6 +198,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
             self.per_matrix_rates_kernel = self.add_weight(shape=[self.num_models, self.num_matrices], 
                                                       name="per_matrix_rates_kernel",
                                                       initializer=self.matrix_rate_init)
+
        
     def make_R(self, kernel=None):
         if kernel is None:
@@ -198,11 +219,27 @@ class AncProbsLayer(tf.keras.layers.Layer):
         Q = tf.reshape(Q, (self.num_models, self.num_matrices, 20, 20))
         return Q
         
-    def make_tau(self, subset=None):
-        tau = self.tau_kernel
-        if subset is not None:
-            tau = tf.gather_nd(tau, subset, batch_dims=1)
-        return tf.math.softplus(tau)
+    def make_tau(self, inputs=None, subset=None):
+        if self.use_lstm:
+            if len(inputs.shape) == 3:
+                num_model, b, L = tf.unstack(tf.shape(inputs))
+            else:
+                num_model, b, L, _ = tf.unstack(tf.shape(inputs))
+            lstm_input = tf.one_hot(inputs, len(SequenceDataset.alphabet))
+            lstm_input = tf.reshape(lstm_input, (num_model*b, L, len(SequenceDataset.alphabet)))
+            lstm_mask = tf.reshape(inputs < len(SequenceDataset.alphabet)-1, (num_model*b, L))
+            seq_lens = tf.reduce_sum(tf.cast(lstm_mask, lstm_input.dtype), axis=-1, keepdims=True)
+            lstm_output = self.lstm(lstm_input, mask=lstm_mask)
+            lstm_output = tf.reduce_sum(lstm_output, axis=-2) / (seq_lens * self.lstm_dim)
+            lstm_output = tf.reshape(lstm_output, (num_model, b, self.lstm_dim))
+            return self.dense(lstm_output)[...,0]
+        else:
+            tau = self.tau_kernel
+            if self.clusters is not None:
+                tau = tf.gather(tau, self.clusters, axis=-1)
+            if subset is not None:
+                tau = tf.gather_nd(tau, subset, batch_dims=1)
+            return tf.math.softplus(tau)
     
     def make_per_matrix_rate(self):
         return tf.math.softplus(self.per_matrix_rates_kernel)
@@ -231,8 +268,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
             only_std_aa_inputs = inputs * tf.cast(bool_mask, inputs.dtype)
         else:
             only_std_aa_inputs = inputs
-        rate_indices = tf.expand_dims(rate_indices, -1)
-        tau_subset = self.make_tau(rate_indices)
+        tau_subset = self.make_tau(inputs, tf.expand_dims(rate_indices, -1))
         if self.per_matrix_rate:
             per_matrix_rates = self.make_per_matrix_rate()
             per_matrix_rates = tf.expand_dims(per_matrix_rates, 1)
@@ -280,12 +316,15 @@ class AncProbsLayer(tf.keras.layers.Layer):
              "exchangeability_init" : self.exchangeability_kernel.numpy(),
              "rate_init" : self.tau_kernel.numpy(),
              "trainable_rate_matrices" : self.trainable_rate_matrices,
+            "trainable_distances" : self.trainable_distances,
              "per_matrix_rate" : self.per_matrix_rate,
              "matrix_rate_init" : self.per_matrix_rates_kernel if self.per_matrix_rate else None,
              "matrix_rate_l2" : self.matrix_rate_l2,
              "shared_matrix" : self.shared_matrix,
              "equilibrium_sample" : self.equilibrium_sample,
-             "transposed" : self.transposed
+             "transposed" : self.transposed,
+                "clusters" : self.clusters,
+             "use_lstm" : self.use_lstm
         })
         return config
     
