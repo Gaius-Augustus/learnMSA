@@ -173,7 +173,8 @@ def run_learnMSA(data : SequenceDataset,
                  select_best_for_comparison=True,
                  logo_gif_mode=False,
                  logo_dir="",
-                 output_format="fasta"):
+                 output_format="fasta",
+                 load_model=""):
     """ Wraps fit_and_align and adds file parsing, verbosity, model selection, reference file comparison and an outfile file.
     Args: 
         data: Dataset of sequences. 
@@ -188,6 +189,7 @@ def run_learnMSA(data : SequenceDataset,
         verbose: If False, all output messages will be disabled.
         logo_gif_mode: If true, trains with a special mode that generates a sequence logo per train step.
         output_format: Format of the output file. 
+        load_model: Path to a model file that should be loaded instead of training a new model.
     Returns:
         An AlignmentModel object.
     """
@@ -196,26 +198,29 @@ def run_learnMSA(data : SequenceDataset,
         print("Configuration:", as_str(config)) 
     # optionally load the reference and find the corresponding sequences in the train file
     subset = np.array([data.seq_ids.index(sid) for sid in subset_ids]) if subset_ids else None
-    try:
-        t_a = time.time()
-        if logo_gif_mode:
-            am = fit_and_align_with_logo_gif(data, config, initial_model_length_callback, logo_dir)
-        else:
-            am = fit_and_align(data, 
-                                config=config,
-                                model_generator=model_generator,
-                                batch_generator=batch_generator,
-                                subset=subset, 
-                                initial_model_length_callback=initial_model_length_callback,
-                                sequence_weights=sequence_weights,
-                                clusters=clusters,
-                                verbose=verbose)
-        if verbose:
-            print("Time for alignment:", "%.4f" % (time.time()-t_a))
-    except tf.errors.ResourceExhaustedError as e:
-        print("Out of memory. A resource was exhausted.")
-        print("Try reducing the batch size (-b). The current batch size was: "+str(config["batch_size"])+".")
-        sys.exit(e.error_code)
+    if load_model:
+            am = AlignmentModel.load_models_from_file(load_model, data, custom_batch_gen=batch_generator)
+    else:
+        try:
+            t_a = time.time()
+            if logo_gif_mode:
+                am = fit_and_align_with_logo_gif(data, config, initial_model_length_callback, logo_dir)
+            else:
+                am = fit_and_align(data, 
+                                    config=config,
+                                    model_generator=model_generator,
+                                    batch_generator=batch_generator,
+                                    subset=subset, 
+                                    initial_model_length_callback=initial_model_length_callback,
+                                    sequence_weights=sequence_weights,
+                                    clusters=clusters,
+                                    verbose=verbose)
+            if verbose:
+                print("Time for alignment:", "%.4f" % (time.time()-t_a))
+        except tf.errors.ResourceExhaustedError as e:
+            print("Out of memory. A resource was exhausted.")
+            print("Try reducing the batch size (-b). The current batch size was: "+str(config["batch_size"])+".")
+            sys.exit(e.error_code)
     am.best_model = select_model(am, config["model_criterion"], verbose)
         
     Path(os.path.dirname(out_filename)).mkdir(parents=True, exist_ok=True)
