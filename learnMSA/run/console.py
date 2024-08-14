@@ -32,7 +32,7 @@ def run_main():
                         help="Should be lowered if memory issues with the default settings occur. Default: Adaptive, depending on model length (64-512).")
     parser.add_argument("-d", "--cuda_visible_devices", dest="cuda_visible_devices", type=str, default="default",
                         help="Controls the GPU devices visible to learnMSA as a comma-separated list of device IDs. The value -1 forces learnMSA to run on CPU. Per default, learnMSA attempts to use all available GPUs.")
-    parser.add_argument("-f", "--format", dest="format", type=str, default="fasta", help="Sequence file format (supports all of Biopython's SeqIO formats).")
+    parser.add_argument("-f", "--format", dest="format", type=str, default="fasta", help="Output file format (see Biopython's SeqIO formats suitable for aligned data).")
 
     parser.add_argument("--max_surgery_runs", dest="max_surgery_runs", type=int, default=4, 
                         help="Maximum number of model surgery iterations. (default: %(default)s)")
@@ -220,7 +220,8 @@ def run_main():
                                     verbose = not args.silent,
                                     logo_gif_mode = args.logo_gif,
                                     logo_dir = args.logo_path,
-                                    initial_model_length_callback = get_initial_model_lengths_logo_gif_mode if args.logo_gif else Align.get_initial_model_lengths)
+                                    initial_model_length_callback = get_initial_model_lengths_logo_gif_mode if args.logo_gif else Align.get_initial_model_lengths,
+                                    output_format = args.format)
             if args.logo:
                 Visualize.plot_and_save_logo(alignment_model, alignment_model.best_model, args.logo_path + "/logo.pdf")
             if args.dist_out:

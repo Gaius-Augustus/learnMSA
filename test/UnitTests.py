@@ -125,10 +125,22 @@ class TestDataset(unittest.TestCase):
             np.testing.assert_equal(data.get_column_map(1), [0,1,3,4])
 
 
+    def test_file_output_formats(self):
+        #write an alignment to various formats
+        for fmt in ["fasta", "clustal", "stockholm"]:
+            with AlignedDataset(aligned_sequences=[("seq1", "FELIX"), ("seq2", "FE-IX"), ("seq3", "-ELI-")]) as data:
+                data.write("example."+fmt, fmt)
+        #read it back in and check if it is the same
+        for fmt in ["fasta", "clustal", "stockholm"]:
+            with AlignedDataset("example."+fmt, fmt) as data:
+                self.assertEqual(data.num_seq, 3)
+                np.testing.assert_equal(data.get_encoded_seq(0), [13, 6, 10, 9, 20])
+                np.testing.assert_equal(data.get_encoded_seq(1), [13, 6, 9, 20])
+                np.testing.assert_equal(data.get_encoded_seq(2), [6, 10, 9])
+                np.testing.assert_equal(data.get_column_map(0), [0,1,2,3,4])
+                np.testing.assert_equal(data.get_column_map(1), [0,1,3,4])
+                np.testing.assert_equal(data.get_column_map(2), [1,2,3])
 
-
-
-    
 
 
 class TestMsaHmmCell(unittest.TestCase):

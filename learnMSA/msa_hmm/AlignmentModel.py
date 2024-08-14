@@ -254,7 +254,8 @@ class AlignmentModel():
             i += batch_size
         return alignment_strings_all
     
-    def to_file(self, filepath, model_index, batch_size=100000, add_block_sep=False, aligned_insertions : AlignedInsertions = AlignedInsertions()):
+    def to_file(self, filepath, model_index, batch_size=100000, add_block_sep=False, 
+                aligned_insertions : AlignedInsertions = AlignedInsertions(), format="fasta"):
         """ Uses one model to decode an alignment and stores it in fasta file format. Currently no other output format is supported.
             The file is written batch wise. The memory required for this operation must be large enough to hold decode and store a single batch
             of aligned sequences but not the whole alignment.
@@ -264,19 +265,27 @@ class AlignmentModel():
                         lower this if memory is sufficient to store the table-form alignment but GPU memory used for decoding a batch is limited.
             add_block_sep: If true, columns containing a special character are added to the alignment indicating domain boundaries.
             aligned_insertions: Can be used to override insertion metadata if insertions are aligned after the main procedure.
+            format: Output format. Important for large data: learnMSA is only able to stream fasta files. 
+                    Other formats require a conversion, i.e. the whole alignment is stored in memory.
         """
-        with open(filepath, "w") as output_file:
-            n = self.indices.size
-            i = 0
-            while i < n:
-                batch_indices = np.arange(i, min(n, i+batch_size))
-                batch_alignment = self.get_batch_alignment(model_index, batch_indices, add_block_sep, aligned_insertions)
-                alignment_strings = self.batch_to_string(batch_alignment)
-                for s, seq_ind in zip(alignment_strings, batch_indices):
-                    seq_id = self.data.seq_ids[self.indices[seq_ind]]
-                    output_file.write(">"+seq_id+"\n")
-                    output_file.write(s+"\n")
-                i += batch_size
+        if format == "fasta": #streaming batches to file
+            with open(filepath, "w") as output_file:
+                n = self.indices.size
+                i = 0
+                while i < n:
+                    batch_indices = np.arange(i, min(n, i+batch_size))
+                    batch_alignment = self.get_batch_alignment(model_index, batch_indices, add_block_sep, aligned_insertions)
+                    alignment_strings = self.batch_to_string(batch_alignment)
+                    for s, seq_ind in zip(alignment_strings, batch_indices):
+                        seq_id = self.data.seq_ids[self.indices[seq_ind]]
+                        output_file.write(">"+seq_id+"\n")
+                        output_file.write(s+"\n")
+                    i += batch_size
+        else:
+            msa = self.to_string(model_index, batch_size, add_block_sep, aligned_insertions)
+            msa = [(self.data.seq_ids[self.indices[i]], msa[i]) for i in range(len(msa))]
+            data = AlignedDataset(aligned_sequences=msa)
+            data.write(filepath, format)
     
     def get_batch_alignment(self, model_index, batch_indices, add_block_sep, aligned_insertions : AlignedInsertions = AlignedInsertions()):
         """ Returns a dense matrix representing a subset of sequences

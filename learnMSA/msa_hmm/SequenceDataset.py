@@ -1,7 +1,7 @@
 import numpy as np
 import copy
 import math
-from Bio import SeqIO, SeqRecord
+from Bio import SeqIO, SeqRecord, Seq
 import re
 from functools import partial
 
@@ -204,3 +204,11 @@ class AlignedDataset(SequenceDataset):
         true_positives -= total_len
         sp = true_positives / max(1, ref_positives - total_len)
         return sp
+
+
+    def write(self, filename, fmt="fasta"):
+        sequences = list(self.record_dict.values())
+        for s in sequences:
+            s.seq = Seq.Seq(s.seq)
+            s.description = ""
+        SeqIO.write(sequences, filename, fmt)

@@ -172,7 +172,8 @@ def run_learnMSA(data : SequenceDataset,
                  initial_model_length_callback=get_initial_model_lengths,
                  select_best_for_comparison=True,
                  logo_gif_mode=False,
-                 logo_dir=""):
+                 logo_dir="",
+                 output_format="fasta"):
     """ Wraps fit_and_align and adds file parsing, verbosity, model selection, reference file comparison and an outfile file.
     Args: 
         data: Dataset of sequences. 
@@ -186,6 +187,7 @@ def run_learnMSA(data : SequenceDataset,
         aligner_threads: Number of threads to use by the aligner.
         verbose: If False, all output messages will be disabled.
         logo_gif_mode: If true, trains with a special mode that generates a sequence logo per train step.
+        output_format: Format of the output file. 
     Returns:
         An AlignmentModel object.
     """
@@ -221,9 +223,9 @@ def run_learnMSA(data : SequenceDataset,
     
     if align_insertions:
         aligned_insertions = make_aligned_insertions(am, insertion_aligner, aligner_threads, verbose=verbose)
-        am.to_file(out_filename, am.best_model, aligned_insertions = aligned_insertions)
+        am.to_file(out_filename, am.best_model, aligned_insertions = aligned_insertions, format=output_format)
     else:
-        am.to_file(out_filename, am.best_model)
+        am.to_file(out_filename, am.best_model, format=output_format)
     
     if verbose:
         if am.fixed_viterbi_seqs.size > 0:
