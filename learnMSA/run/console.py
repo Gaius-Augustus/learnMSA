@@ -75,7 +75,7 @@ def run_main():
     parser.add_argument("--alpha_global_compl", dest="alpha_global_compl", type=float, default=1, help=argparse.SUPPRESS)
 
     parser.add_argument("--frozen_distances", dest="frozen_distances", action='store_true', help="Prevents learning evolutionary distances for all sequences.")
-    parser.add_argument("--initial_distance", dest="initial_distance", type=float, default=0.05, help="The initial evolutionary distance for all sequences. (default: %(default)s)")
+    parser.add_argument("--initial_distance", dest="initial_distance", type=float, default=0.2, help="The initial evolutionary distance for all sequences. (default: %(default)s)")
     parser.add_argument("--trainable_rate_matrices", dest="trainable_rate_matrices", action='store_true', help="Prevents learning the amino acid rate matrices of the evolutionary model.")
     parser.add_argument("--dist_out", dest="dist_out", type=str, default="", help="Optional output file for the learned evolutionary distances.")
 
