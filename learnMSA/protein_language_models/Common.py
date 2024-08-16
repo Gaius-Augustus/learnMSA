@@ -25,6 +25,14 @@ class ScoringModelConfig():
     def __repr__(self):
         return f"ScoringModelConfig(lm_name={self.lm_name}, dim={self.dim}, activation={self.activation}, suffix={self.suffix})"
 
+    def to_dict(self):
+        return {
+            "lm_name" : self.lm_name,
+            "dim" : self.dim,
+            "activation" : self.activation,
+            "use_aa" : self.use_aa,
+            "scaled" : self.scaled,
+            "suffix" : self.suffix}
 
 
 def get_scoring_model_path(config : ScoringModelConfig):

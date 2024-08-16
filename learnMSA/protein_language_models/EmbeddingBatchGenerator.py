@@ -111,6 +111,15 @@ class EmbeddingBatchGenerator(DefaultBatchGenerator):
         else:
             return (tf.uint8, tf.int64, tf.float32)  
 
+    def sample_embedding_variance(self, n_samples=10000):
+        """ Approximates the variance of embedding dimensions. """
+        if self.cache_embeddings:
+            if self.cache is None or not self.cache.is_filled():
+                raise ValueError("Cannot sample embedding variance before embeddings are cached. Call configure().")
+            return np.var(self.cache.cache, axis=0)
+        else:
+            raise NotImplementedError("Sampling embedding variance is not supported when embeddings are not cached.")
+
 
 def make_generic_embedding_model_generator(dim):
     def generic_embedding_model_generator(encoder_layers,

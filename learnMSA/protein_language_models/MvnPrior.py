@@ -51,10 +51,15 @@ class MvnPrior(tf.keras.layers.Layer):
     def get_config(self):
         config = super(MvnPrior, self).get_config()
         config.update({
-             "scoring_model_config" : self.scoring_model_config,
+             "scoring_model_config" : self.scoring_model_config.to_dict(),
             "num_components" : self.num_components
         })
         return config
+
+    @classmethod
+    def from_config(cls, config):
+        config["scoring_model_config"] = Common.ScoringModelConfig(**config["scoring_model_config"])
+        return cls(**config)
 
 
 
@@ -121,7 +126,7 @@ class MvnPriorLayer(tf.keras.layers.Layer):
     def get_config(self):
         config = super(MvnPriorLayer, self).get_config()
         config.update({
-             "scoring_model_config" : self.scoring_model_config,
+             "scoring_model_config" : self.scoring_model_config.to_dict(),
             "num_components" : self.num_components,
             "kernel_init" : self.kernel_init,
             "mixture_kernel_init" : self.mixture_kernel_init,
@@ -130,6 +135,11 @@ class MvnPriorLayer(tf.keras.layers.Layer):
             "trainable" : self.trainable
         })
         return config
+
+    @classmethod
+    def from_config(cls, config):
+        config["scoring_model_config"] = Common.ScoringModelConfig(**config["scoring_model_config"])
+        return cls(**config)
 
 
 

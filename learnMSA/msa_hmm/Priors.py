@@ -157,10 +157,23 @@ class JointEmissionPrior(tf.keras.layers.Layer):
     def get_config(self):
         config = super(JointEmissionPrior, self).get_config()
         config.update({
-                    "priors" : self.priors,
-                    "kernel_split" : self.kernel_split
+                    "kernel_split" : self.kernel_split,
+                    "num_priors" : len(self.priors)
+                    })
+        config.update({
+                    f"prior_{i}" : p for i,p in enumerate(self.priors)
                     })
         return config
+
+    @classmethod
+    def from_config(cls, config):
+        priors = []
+        for i in range(config["num_priors"]):
+            priors.append(config[f"prior_{i}"])
+            config.pop(f"prior_{i}")
+        config.pop("num_priors")
+        config["priors"] = priors
+        return cls(**config)
     
     def __repr__(self):
         return f"JointEmissionPrior(" + ", ".join([str(p) for p in self.priors]) + ")"

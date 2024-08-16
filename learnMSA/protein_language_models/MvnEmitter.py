@@ -30,7 +30,7 @@ class MvnEmitter(ProfileHMMEmitter):
                  emission_init=None, 
                  insertion_init=None,
                  num_prior_components = Common.PRIOR_DEFAULT_COMPONENTS,
-                 diag_init_var = 1,
+                 diag_init_var = 1.,
                  full_covariance = False,
                  temperature = 10.,
                  regularize_variances = True,
@@ -167,12 +167,18 @@ class MvnEmitter(ProfileHMMEmitter):
     
     def get_config(self):
         config = super(MvnEmitter, self).get_config()
-        config.update({"scoring_model_config" : self.scoring_model_config,
+        config.update({"scoring_model_config" : self.scoring_model_config.to_dict(),
                         "num_prior_components" : self.num_prior_components,
                         "diag_init_var" : self.diag_init_var,
                         "full_covariance" : self.full_covariance,
                         "temperature" : self.temperature})
         return config
+
+
+    @classmethod
+    def from_config(cls, config):
+        config["scoring_model_config"] = Common.ScoringModelConfig(**config["scoring_model_config"])
+        return cls(**config)
 
 
     def __repr__(self):
