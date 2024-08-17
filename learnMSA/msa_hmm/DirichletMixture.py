@@ -152,7 +152,7 @@ class DirichletMixtureLayer(tf.keras.layers.Layer):
 def make_model(dirichlet_mixture_layer):
     """Utility function that constructs a keras model over a DirichletMixtureLayer.
     """
-    prob_vectors = tf.keras.Input(shape=(dirichlet_mixture_layer.alphabet_size), 
+    prob_vectors = tf.keras.Input(shape=(dirichlet_mixture_layer.alphabet_size,), 
                                   name="prob_vectors", 
                                   dtype=dirichlet_mixture_layer.dtype)
     loglik = dirichlet_mixture_layer(prob_vectors)
