@@ -3,34 +3,13 @@ import numpy as np
 import copy
 import random
 import tensorflow as tf
-import learnMSA.msa_hmm.DirichletMixture as dm
-
-    
-dtype = tf.float64
-index_dtype = tf.int16
-
-
-PRIOR_PATH = os.path.dirname(__file__)+"/trained_prior/"
-DIRICHLET_COMP_COUNT = 1
-model, DMP = dm.make_model(DIRICHLET_COMP_COUNT, 20, -1, trainable=False)
-model.load_weights(PRIOR_PATH+str(DIRICHLET_COMP_COUNT)+"_components_prior_pdf/ckpt").expect_partial()
-emission_dirichlet_mix = dm.DirichletMixturePrior(DIRICHLET_COMP_COUNT, 20, -1,
-                                    DMP.alpha_kernel.numpy(),
-                                    DMP.q_kernel.numpy(),
-                                    trainable=False)
-background_distribution = emission_dirichlet_mix.expectation()
-#the prior was trained on example distributions over the 20 amino acid alphabet
-#the additional frequencies for 'B', 'Z',  'X', 'U', 'O' were derived from Pfam
-background_distribution = np.concatenate([background_distribution, [2.03808244e-05, 1.02731819e-05, 7.92076933e-04, 5.84256792e-08, 1e-32]], axis=0)
-background_distribution /= np.sum(background_distribution)
-
-
-
 
 def inverse_softplus(features):
-    #cast to float 64 to prevent overflow of large entries
-    features64 = features.astype(np.float64)
-    return np.log(np.expm1(features64)).astype(features.dtype)
+    # Cast to float64 to prevent overflow of large entries
+    features64 = tf.cast(features, tf.float64)
+    result = tf.math.log(tf.math.expm1(features64))
+    # Cast back to the original data type of `features`
+    return tf.cast(result, features.dtype)
     
 
 class DefaultDiagBijector():
@@ -40,7 +19,7 @@ class DefaultDiagBijector():
         """
         super(DefaultDiagBijector, self).__init__()
         base_std = np.sqrt(base_variance).astype(np.float32)
-        self.scale_diag_init = tfp.math.softplus_inverse(base_std)
+        self.scale_diag_init = inverse_softplus(base_std)
         self.epsilon = epsilon
 
     def forward(self, x):
@@ -164,7 +143,7 @@ def fill_triangular_inverse(x, upper=False, name=None):
 
 
 class FillScaleTriL():
-    def __init__(diag_bijector):
+    def __init__(self, diag_bijector):
         self.diag_bijector = diag_bijector
 
     def forward(self, x):
@@ -191,7 +170,7 @@ def make_kernel(mean, scale, diag_bijector=DefaultDiagBijector(1.)):
     if len(scale.shape) == 4:
         return tf.concat([mean, diag_bijector.inverse(scale)], -1)
     elif len(scale.shape) == 5:
-        scale_tril = FillScaleTriL.forward(diag_bijector=diag_bijector)
+        scale_tril = FillScaleTriL(diag_bijector=diag_bijector)
         return tf.concat([mean, scale_tril.inverse(scale)], -1)
     else:
         raise ValueError(f"Invalid scale shape: {scale.shape}")
