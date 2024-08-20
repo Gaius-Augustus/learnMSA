@@ -1,5 +1,4 @@
 import tensorflow as tf
-import tensorflow_probability as tfp
 import numpy as np
 import os
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
@@ -7,9 +6,10 @@ from learnMSA.msa_hmm.Emitter import ProfileHMMEmitter
 import learnMSA.msa_hmm.Initializers as Initializers
 import learnMSA.msa_hmm.Priors as priors
 from learnMSA.protein_language_models.BilinearSymmetric import make_scoring_model
-from learnMSA.protein_language_models.MvnMixture import MvnMixture, DefaultDiagBijector
+from learnMSA.protein_language_models.MvnMixture import MvnMixture
 from learnMSA.protein_language_models.MvnPrior import MvnPrior, get_expected_emb
 import learnMSA.protein_language_models.Common as Common
+from learnMSA.msa_hmm.Utility import DefaultDiagBijector
 
 
 

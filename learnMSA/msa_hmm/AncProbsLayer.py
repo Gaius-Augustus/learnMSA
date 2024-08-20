@@ -2,16 +2,12 @@ import tensorflow as tf
 import numpy as np
 import learnMSA.msa_hmm.Initializers as initializers
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
+from learnMSA.msa_hmm.Utility import inverse_softplus
 
 """Ancestral Probability Layer
 Learn one or several rate matrices jointly with a downstream model. Amino acid sequences can be smeared towards expected amino acid distributions after
 some amount of evolutionary time has passed under a substitution model. This can help to train models on distantly related sequences.
 """
-              
-def inverse_softplus(features):
-    #cast to float 64 to prevent overflow of large entries
-    features64 = features.astype(np.float64)
-    return np.log(np.expm1(features64)).astype(features.dtype)
 
 def parse_paml(lines, desired_alphabet):
     """Parses the content of a paml file.

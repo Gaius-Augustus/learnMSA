@@ -1847,7 +1847,7 @@ class TestModelToFile(unittest.TestCase):
             msa_str_from_deserialized_model = deserialized_am.to_string(model_index = 0)
             tf.get_logger().setLevel('WARNING')
             self.assertEqual(msa_str, msa_str_from_deserialized_model)
-
+make_kernel
 
 
 class TestMvnMixture(unittest.TestCase):

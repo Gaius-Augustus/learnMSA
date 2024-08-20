@@ -1,7 +1,8 @@
 import os
 import tensorflow as tf
 import learnMSA.protein_language_models.Common as Common
-from learnMSA.protein_language_models.MvnMixture import MvnMixture, DefaultDiagBijector
+from learnMSA.protein_language_models.MvnMixture import MvnMixture 
+from learnMSA.msa_hmm.Utility import DefaultDiagBijector
 
 
 class MvnPrior(tf.keras.layers.Layer):

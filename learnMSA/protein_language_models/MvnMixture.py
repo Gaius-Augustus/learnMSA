@@ -1,43 +1,7 @@
 import tensorflow as tf
-import tensorflow_probability as tfp
 import numpy as np
 import math
-
-
-
-
-class DefaultDiagBijector(tfp.bijectors.Softplus):
-    def __init__(self, base_variance):
-        """ Args:
-                base_variance: The initial variance (diagonal entries of the covariance matrix) if kernel = 0.
-        """
-        super(DefaultDiagBijector, self).__init__()
-        base_std = np.sqrt(base_variance).astype(np.float32)
-        self.scale_diag_init = tfp.math.softplus_inverse(base_std)
-
-    def forward(self, x, name='forward', **kwargs):
-        return super(DefaultDiagBijector, self).forward(x + self.scale_diag_init, name, **kwargs)
-
-    def inverse(self, y, name='inverse', **kwargs):
-        return super(DefaultDiagBijector, self).inverse(y) - self.scale_diag_init
-
-
-
-def make_kernel(mean, scale, diag_bijector=DefaultDiagBijector(1.)):
-    """Creates a kernel matrix from mean and scale.
-    Args:
-        mean: Shape (k1, k2, num_components, dim)
-        scale: Shape (k1, k2, num_components, dim, dim) or (k1, k2, num_components, dim)
-    Returns:
-        Shape (k1, k2, num_components, dim + dim*(dim+1)//2) or (k1, k2, num_components, 2*dim)
-    """
-    if len(scale.shape) == 4:
-        return tf.concat([mean, diag_bijector.inverse(scale)], -1)
-    elif len(scale.shape) == 5:
-        scale_tril = tfp.bijectors.FillScaleTriL(diag_bijector=diag_bijector)
-        return tf.concat([mean, scale_tril.inverse(scale)], -1)
-    else:
-        raise ValueError(f"Invalid scale shape: {scale.shape}")
+from learnMSA.msa_hmm.Utility import DefaultDiagBijector, FillScaleTriL
 
 
 class MvnMixture():
@@ -72,7 +36,7 @@ class MvnMixture():
         self.diag_only = diag_only
         self.diag_bijector = diag_bijector
         self.precomputed = precomputed
-        self.scale_tril = tfp.bijectors.FillScaleTriL(diag_bijector=diag_bijector)
+        self.scale_tril = FillScaleTriL(diag_bijector=diag_bijector)
         self.constant = self.dim * tf.math.log(2*math.pi)
         self.scale = None
         self.pinv = None
@@ -193,3 +157,4 @@ class MvnMixture():
         """Computes the L2 loss of the variance kernels, preventing too small and too large variances.
         """
         return tf.reduce_mean(tf.reduce_sum(tf.math.square(self.kernel[..., self.dim:]), axis=-1))
+
