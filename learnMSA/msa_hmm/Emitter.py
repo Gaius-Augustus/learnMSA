@@ -4,6 +4,7 @@ import os
 import learnMSA.msa_hmm.Initializers as initializers
 import learnMSA.msa_hmm.Priors as priors
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
+from learnMSA.msa_hmm.Utility import get_num_states, deserialize
 # from learnMSA.protein_language_models.BilinearSymmetric import make_scoring_model
 # import learnMSA.protein_language_models.Common as Common
 from packaging import version
@@ -14,11 +15,10 @@ import math
 
 
 class ProfileHMMEmitter(tf.keras.layers.Layer):
-    """ An emitter defines emission distribution and prior for HMM states. This emitter in its default configuration 
-        implements multinomial match distributions over the amino acid alphabet with a Dirichlet Prior.
-        New emitters may be subclassed from the default emitter or made from scratch following this interface.
-        Multiple emitters can be used jointly. 
-    Args:
+    """ An emitter defines emission distribution and prior. 
+        This emitter in its default configuration implements multinomial match distributions over the amino acid alphabet with a Dirichlet Prior.
+        New emitters may be subclassed from the default emitter or made from scratch following the same interface.
+        Todo: Implement an emitter base class.
         emission_init: List of initializers for the match states (i.e. initializes a (model_len, s) matrix), one per model.
         insertion_init: List of initializers for the shared insertion states (i.e. initializes a (s) vector), one per model.
         prior: A compatible prior (or NullPrior).
@@ -33,23 +33,26 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
                  ):
         super(ProfileHMMEmitter, self).__init__(**kwargs)
         self.emission_init = [emission_init] if not hasattr(emission_init, '__iter__') else emission_init 
-        self.insertion_init = [insertion_init] if not hasattr(insertion_init, '__iter__') else insertion_init 
+        self.insertion_init = [insertion_init] if not hasattr(insertion_init, '__iter__') else insertion_init
         self.prior = prior
         self.frozen_insertions = frozen_insertions
-        
-    def cell_init(self, cell):
-        """ Automatically called when the owner cell is created.
+
+
+    def set_lengths(self, lengths):
         """
-        self.length = cell.length
-        self.dim = cell.dim-1
-        assert len(self.length) == len(self.emission_init), \
-            f"The number of emission initializers ({len(self.emission_init)}) should match the number of models ({len(self.length)})."
-        assert len(self.length) == len(self.insertion_init), \
-            f"The number of insertion initializers ({len(self.insertion_init)}) should match the number of models ({len(self.length)})."
-        self.max_num_states = cell.max_num_states
-        self.num_models = cell.num_models
-        self.prior.load(self.dtype)
+        Sets the model lengths.
+        Args:
+            lengths: A list of model lengths.
+        """
+        self.lengths = lengths
+        self.num_models = len(lengths) 
+        # make sure the lengths are valid
+        assert len(self.lengths) == len(self.emission_init), \
+            f"The number of emission initializers ({len(self.emission_init)}) should match the number of models ({len(self.lengths)})."
+        assert len(self.lengths) == len(self.insertion_init), \
+            f"The number of insertion initializers ({len(self.insertion_init)}) should match the number of models ({len(self.lengths)})."
         
+
     def build(self, input_shape):
         if self.built:
             return
@@ -58,15 +61,17 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
                                         shape=[length, s], 
                                         initializer=init, 
                                         name="emission_kernel_"+str(i)) 
-                                    for i,(length, init) in enumerate(zip(self.length, self.emission_init))]
+                                    for i,(length, init) in enumerate(zip(self.lengths, self.emission_init))]
         self.insertion_kernel = [ self.add_weight(
                                 shape=[s],
                                 initializer=init,
                                 name="insertion_kernel_"+str(i),
                                 trainable=not self.frozen_insertions) 
                                     for i,init in enumerate(self.insertion_init)]
+        self.prior.load(self.dtype)
         self.built = True
         
+
     def recurrent_init(self):
         """ Automatically called before each recurrent run. Should be used for setups that
             are only required once per application of the recurrent layer.
@@ -74,6 +79,7 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
         self.B = self.make_B()
         self.B_transposed = tf.transpose(self.B, [0,2,1])
         
+
     def make_emission_matrix(self, i):
         """Constructs an emission matrix from kernels with a shared insertion distribution.
         Args:
@@ -82,35 +88,40 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
             The emission matrix.
         """
         em, ins = self.emission_kernel[i], self.insertion_kernel[i]
-        length = self.length[i]
+        length = self.lengths[i]
         return self.make_emission_matrix_from_kernels(em, ins, length)
     
+
     def make_emission_matrix_from_kernels(self, em, ins, length):
         s = em.shape[-1]
         emissions = tf.concat([tf.expand_dims(ins, 0), 
                                em, 
-                               tf.stack([ins]*(length+1))] , axis=0)
+                               tf.stack([tf.identity(ins)]*(length+1))] , axis=0)
         emissions = tf.nn.softmax(emissions)
         emissions = tf.concat([emissions, tf.zeros_like(emissions[:,:1])], axis=-1) 
         end_state_emission = tf.one_hot([s], s+1, dtype=em.dtype) 
         emissions = tf.concat([emissions, end_state_emission], axis=0)
         return emissions
         
+
     def make_B(self):
         emission_matrices = []
+        max_num_states = max(get_num_states(self.lengths))
         for i in range(self.num_models):
-            em_mat = self.make_emission_matrix(i) 
-            padding = self.max_num_states - em_mat.shape[0]
+            em_mat = self.make_emission_matrix(i)
+            padding = max_num_states - em_mat.shape[0]
             em_mat_pad = tf.pad(em_mat, [[0, padding], [0,0]])
             emission_matrices.append(em_mat_pad)
         B = tf.stack(emission_matrices, axis=0)
         return B
         
+
     def make_B_amino(self):
         """ A variant of make_B used for plotting the HMM. Can be overridden for more complex emissions. Per default this is equivalent to make_B
         """
         return self.make_B()
         
+
     def call(self, inputs, end_hints=None, training=False):
         """ 
         Args: 
@@ -135,14 +146,16 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
         emit = tf.reshape(emit, emit_shape)
         return emit
     
+
     def get_prior_log_density(self):
-        return self.prior(self.make_B(), self.length)
+        return self.prior(self.make_B(), self.lengths)
     
+
     def duplicate(self, model_indices=None, share_kernels=False):
         if model_indices is None:
             model_indices = range(len(self.emission_init))
-        sub_emission_init = [tf.constant_initializer(self.emission_kernel[i].numpy()) for i in model_indices]
-        sub_insertion_init = [tf.constant_initializer(self.insertion_kernel[i].numpy()) for i in model_indices]
+        sub_emission_init = [initializers.ConstantInitializer(self.emission_kernel[i].numpy()) for i in model_indices]
+        sub_insertion_init = [initializers.ConstantInitializer(self.insertion_kernel[i].numpy()) for i in model_indices]
         emitter_copy = ProfileHMMEmitter(
                              emission_init = sub_emission_init,
                              insertion_init = sub_insertion_init,
@@ -155,15 +168,28 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
             emitter_copy.built = True
         return emitter_copy
     
+
     def get_config(self):
         config = super(ProfileHMMEmitter, self).get_config()
         config.update({
+        "lengths" : self.lengths.tolist() if isinstance(self.lengths, np.ndarray) else self.lengths,
         "emission_init" : self.emission_init,
         "insertion_init" : self.insertion_init,
         "prior" : self.prior,
         "frozen_insertions" : self.frozen_insertions
         })
         return config
+    
+
+    @classmethod
+    def from_config(cls, config):
+        config["emission_init"] = [deserialize(e) for e in config["emission_init"]]
+        config["insertion_init"] = [deserialize(i) for i in config["insertion_init"]]
+        config["prior"] = deserialize(config["prior"])
+        lengths = config.pop("lengths")
+        emitter = cls(**config)
+        emitter.set_lengths(lengths)
+        return emitter
     
     def __repr__(self):
         return f"ProfileHMMEmitter(\n emission_init={self.emission_init[0]},\n insertion_init={self.insertion_init[0]},\n prior={self.prior},\n frozen_insertions={self.frozen_insertions}, )"

@@ -3,47 +3,38 @@ import tensorflow as tf
 import numpy as np
 import learnMSA.msa_hmm.Emitter as emit
 import learnMSA.msa_hmm.Transitioner as trans
+from learnMSA.msa_hmm.Utility import get_num_states, get_num_states_implicit, deserialize
 
-class MsaHmmCell(tf.keras.layers.Layer):
+
+
+class HmmCell(tf.keras.layers.Layer):
     """ A general cell that computes one recursion step of the forward algorithm in its call method and can also compute the backward algorithm.
         It is meant to be used with the generic RNN-layer to compute the likelihood of a batch of sequences. It also wraps a prior and provides 
         functionality (through the injected emitter and transitioner) to construct the emission- and transition-matricies also used elsewhere e.g. during Viterbi.
         Based on https://github.com/mslehre/classify-seqs/blob/main/HMMCell.py.
     Args:
-        length: Model length / number of match states or a list of lengths.
+        num_states: A list of the number of states per model.
         dim: The number of dimensions of the input sequence.
         emitter: An object or a list of objects following the emitter interface (see MultinomialAminoAcidEmitter).
         transitioner: An object following the transitioner interface (see ProfileHMMTransitioner).
     """
     def __init__(self,
-                 length, 
-                 dim=24,
-                 emitter = None,
-                 transitioner = None,
+                 num_states,
+                 dim,
+                 emitter,
+                 transitioner,
                  **kwargs
                 ):
-        super(MsaHmmCell, self).__init__(**kwargs)
-        if emitter is None:
-            emitter = emit.ProfileHMMEmitter()
-        if transitioner is None:
-            transitioner = trans.ProfileHMMTransitioner()
-        self.length = [length] if not hasattr(length, '__iter__') else length 
-        self.num_models = len(self.length)
+        super(HmmCell, self).__init__(**kwargs)
+        self.num_states = num_states
+        self.num_models = len(self.num_states)
+        self.max_num_states = max(self.num_states)
+        self.dim = dim
         self.emitter = [emitter] if not hasattr(emitter, '__iter__') else emitter 
         self.transitioner = transitioner
-        #number of emitting states, i.e. not counting flanking states and deletions
-        self.num_states = [2 * length + 3 for length in self.length]  
-        self.num_states_implicit = [num_states + length + 2 
-                                    for num_states, length in zip(self.num_states, self.length)]
-        self.max_num_states = max(self.num_states)
         self.state_size = (tf.TensorShape([self.max_num_states]), tf.TensorShape([1]))
-        #self.output_size = tf.TensorShape([self.max_num_states])
         self.epsilon = tf.constant(1e-16, self.dtype)
         self.reverse = False
-        self.dim = dim
-        self.transitioner.cell_init(self)
-        for em in self.emitter:
-            em.cell_init(self)
             
             
     def build(self, input_shape):
@@ -125,7 +116,7 @@ class MsaHmmCell(tf.keras.layers.Layer):
             output = tf.concat([output, loglik], axis=-1)
         if not self.reverse:
             self.step_counter.assign_add(1)
-        return output, new_state
+        return (output, new_state)
 
     
     def get_initial_state(self, inputs=None, batch_size=None, dtype=None, parallel_factor=1):
@@ -173,7 +164,6 @@ class MsaHmmCell(tf.keras.layers.Layer):
             loglik = tf.zeros((self.num_models*batch_size, self.max_num_states), dtype=self.dtype)
             return [init_dist, loglik]
             
-
     
     def get_prior_log_density(self, add_metrics=False):  
         em_priors = [tf.reduce_sum(em.get_prior_log_density(), 1) for em in self.emitter]
@@ -195,10 +185,10 @@ class MsaHmmCell(tf.keras.layers.Layer):
         assert self.built, "Can only duplicate a cell that was built before (i.e. it has kernels)."
         if model_indices is None:
             model_indices = range(self.num_models)
-        sub_lengths = [self.length[i] for i in model_indices]
+        sub_num_states = [self.num_states[i] for i in model_indices]
         sub_emitter = [e.duplicate(model_indices, shared_kernels) for e in self.emitter]
         sub_transitioner = self.transitioner.duplicate(model_indices, shared_kernels)
-        subset_cell = MsaHmmCell(sub_lengths, self.dim, sub_emitter, sub_transitioner)
+        subset_cell = HmmCell(sub_num_states, self.dim, sub_emitter, sub_transitioner)
         return subset_cell
     
     
@@ -218,9 +208,9 @@ class MsaHmmCell(tf.keras.layers.Layer):
 
         
     def get_config(self):
-        config = super(MsaHmmCell, self).get_config()
+        config = super(HmmCell, self).get_config()
         config.update({
-             "length" : self.length, 
+             "num_states" : self.num_states, 
              "dim" : self.dim, 
              "num_emitters" : len(self.emitter),
              "transitioner" : self.transitioner
@@ -229,15 +219,66 @@ class MsaHmmCell(tf.keras.layers.Layer):
              config[f"emitter_{i}"] = em
         return config
     
+    
     @classmethod
     def from_config(cls, config):
         emitter = []
         for i in range(config["num_emitters"]):
-            emitter.append(config[f"emitter_{i}"])
+            em = config[f"emitter_{i}"]
             config.pop(f"emitter_{i}")
+            emitter.append(deserialize(em))
         config.pop("num_emitters")
         config["emitter"] = emitter
+        config["transitioner"] = deserialize(config["transitioner"])
         return cls(**config)
+
+
+
+
+class MsaHmmCell(HmmCell):
+    """ A cell for profile HMMs that computes the forward recursion of the forward algorithm.
+    Args:
+        length: Model length / number of match states or a list of lengths.
+        dim: The number of dimensions of the input sequence.
+        emitter: An object or a list of objects following the emitter interface (see MultinomialAminoAcidEmitter).
+        transitioner: An object following the transitioner interface (see ProfileHMMTransitioner).
+    """
+    def __init__(self,
+                 length, 
+                 dim=24,
+                 emitter = None,
+                 transitioner = None,
+                 **kwargs
+                ):
+        if emitter is None:
+            emitter = emit.ProfileHMMEmitter()
+        if transitioner is None:
+            transitioner = trans.ProfileHMMTransitioner()
+        self.length = [length] if not hasattr(length, '__iter__') else length 
+        super(MsaHmmCell, self).__init__(get_num_states(self.length), dim, emitter, transitioner, **kwargs)
+        for em in self.emitter:
+            em.set_lengths(self.length)
+        self.transitioner.set_lengths(self.length)
+    
+    
+    def duplicate(self, model_indices=None, shared_kernels=False):
+        """ Returns a new cell by copying the models specified in model_indices from this cell. 
+        """
+        assert self.built, "Can only duplicate a cell that was built before (i.e. it has kernels)."
+        if model_indices is None:
+            model_indices = range(self.num_models)
+        sub_lengths = [self.length[i] for i in model_indices]
+        sub_emitter = [e.duplicate(model_indices, shared_kernels) for e in self.emitter]
+        sub_transitioner = self.transitioner.duplicate(model_indices, shared_kernels)
+        subset_cell = MsaHmmCell(sub_lengths, self.dim, sub_emitter, sub_transitioner)
+        return subset_cell
+
+        
+    def get_config(self):
+        config = super(MsaHmmCell, self).get_config()
+        config["length"] = self.length
+        del config["num_states"]
+        return config
 
 
 

@@ -4,7 +4,7 @@ import numpy as np
 import tensorflow as tf
 
 from learnMSA.msa_hmm.MsaHmmLayer import MsaHmmLayer
-from learnMSA.msa_hmm.MsaHmmCell import MsaHmmCell
+from learnMSA.msa_hmm.MsaHmmCell import HmmCell
 from learnMSA.msa_hmm.Initializers import ConstantInitializer
 # from learnMSA.msa_hmm import Align, Emitter, Transitioner, Initializers, MsaHmmCell, MsaHmmLayer, Training, Configuration, Viterbi, AncProbsLayer, Priors, DirichletMixture
 # from learnMSA.msa_hmm.SequenceDataset import SequenceDataset, AlignedDataset
@@ -61,11 +61,6 @@ class CasinoHMMEmitter(tf.keras.layers.Layer):
         self.num_states = num_states
         self.init = init
         
-    def cell_init(self, cell):
-        """ Automatically called when the owner cell is created.
-        """
-        pass #nothing to do here in this case
-        
     def build(self, input_shape):
         if self.built:
             return
@@ -83,7 +78,7 @@ class CasinoHMMEmitter(tf.keras.layers.Layer):
         self.B = self.make_B()
 
     def make_B(self):
-        return tf.nn.softmax(self.emission_kernel)
+        return tf.nn.softmax(self.emission_kernel, name="B")
         
     def call(self, inputs, end_hints=None, training=False):
         """ 
@@ -117,12 +112,6 @@ class CasinoHMMTransitioner(tf.keras.layers.Layer):
         self.init = init
         self.start_init = start_init
         self.reverse = False
-        
-    
-    def cell_init(self, cell):
-        """ Automatically called when the owner cell is created.
-        """
-        pass #nothing to do here in this case
         
 
     def build(self, input_shape=None):
@@ -191,14 +180,6 @@ class CasinoHMMTransitioner(tf.keras.layers.Layer):
                 "start_init": self.start_init}
 
 
-def configure_cell_workaround(cell):
-    # ignore this as well, will change in the future when the Cell is refactored for general (i.e. non-MSA) usage
-    cell.num_states = n
-    cell.max_num_states = n
-    cell.state_size = (tf.TensorShape([cell.max_num_states]), tf.TensorShape([1]))
-    cell.output_size = tf.TensorShape([cell.max_num_states])
-
-
 class CasinoHMMLayer(MsaHmmLayer):
 
     def __init__(self, parallel_factor, **kwargs):
@@ -214,18 +195,16 @@ class CasinoHMMLayer(MsaHmmLayer):
         if True:
             emitter = CasinoHMMEmitter(n)
             transitioner = CasinoHMMTransitioner(n)
-        self.cell = MsaHmmCell(length=[1], #ignore this argument, it's meaningless for this HMM
-                                dim=input_shape[-1],
-                                emitter=emitter, 
-                                transitioner=transitioner,
-                                name="gene_pred_hmm_cell")
-        configure_cell_workaround(self.cell)
+        self.cell = HmmCell(num_states=[n],
+                            dim=input_shape[-1],
+                            emitter=emitter, 
+                            transitioner=transitioner,
+                            name="gene_pred_hmm_cell")
         super(CasinoHMMLayer, self).build(input_shape)
-        configure_cell_workaround(self.reverse_cell)
 
     def call(self, inputs, use_loglik=True, training=False):
         """ 
-        Computes the state posterior log-probabilities.
+        Computes the state posterior log-probabilities.f
         Args: 
                 inputs: Shape (batch, len, alphabet_size)
         Returns:

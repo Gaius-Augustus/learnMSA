@@ -1,5 +1,6 @@
 import tensorflow as tf
 import numpy as np
+from learnMSA.msa_hmm.Utility import inverse_softplus
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 import learnMSA.msa_hmm.AncProbsLayer as anc_probs
 import learnMSA.msa_hmm.DirichletMixture as dm
@@ -19,23 +20,41 @@ class EmissionInitializer(tf.keras.initializers.Initializer):
         return f"EmissionInitializer()"
 
     def get_config(self):  # To support serialization
-        return {"dist": self.dist}
+        return {"dist": self.dist.tolist()}
+
+    @classmethod
+    def from_config(cls, config):
+        return cls(np.array(config["dist"]))
     
 
 class ConstantInitializer(tf.keras.initializers.Constant):
+
+    def __init__(self, value):
+        super(ConstantInitializer, self).__init__(value)
+
     def __repr__(self):
         if np.isscalar(self.value):
             return f"Const({self.value})"
+        elif isinstance(self.value, list):
+            return f"Const(size={len(self.value)})"
         else:
             return f"Const(shape={self.value.shape})"
-    
-R, p = anc_probs.parse_paml(anc_probs.LG_paml, SequenceDataset.alphabet[:-1])
-exchangeability_init = anc_probs.inverse_softplus(R + 1e-32)
 
+    def get_config(self):  # To support serialization
+        return {"value": self.value.tolist() if isinstance(self.value, np.ndarray) else self.value}
+
+    @classmethod
+    def from_config(cls, config):
+        return cls(np.array(config["value"]))
+    
+
+
+R, p = anc_probs.parse_paml(anc_probs.LG_paml, SequenceDataset.alphabet[:-1])
+exchangeability_init = inverse_softplus(R + 1e-32).numpy()
 
 
 prior_path = os.path.dirname(__file__)+"/trained_prior/"
-model_path = prior_path+"_".join([str(1), "True", "float32", "_dirichlet/ckpt"])
+model_path = prior_path+"_".join([str(1), "True", "float32", "_dirichlet.h5"])
 model = dm.load_mixture_model(model_path, 1, 20, trainable=False, dtype=tf.float32)
 dirichlet = model.layers[-1]
 background_distribution = dirichlet.expectation()
@@ -156,84 +175,9 @@ def make_default_transition_init(MM=1,
     return transition_init_kernel
 
 
-# class EmbeddingEmissionInitializer(tf.keras.initializers.Initializer):
-#     """ Initializes the embedding distributions by assigning a AA background distribution to the first 25 positions
-#         and a precomputed global average embedding for the other positions.
-#     """
-
-#     def __init__(self,
-#                  scoring_model_config : Common.ScoringModelConfig,
-#                  aa_dist=np.log(background_distribution), 
-#                  num_prior_components=100):
-#         self.aa_dist = aa_dist
-#         self.scoring_model_config = scoring_model_config
-#         self.num_prior_components = num_prior_components
-#         self.global_emb = get_global_emb(scoring_model_config, num_prior_components)
-
-
-#     def __call__(self, shape, dtype=None, **kwargs):
-#         assert shape[-1] >= self.aa_dist.size
-#         emb_dim = self.global_emb.shape[-1]
-#         assert (shape[-1] - self.aa_dist.size) % emb_dim == 0
-#         num_repeats = tf.cast((shape[-1] - self.aa_dist.size) / emb_dim, tf.int32)
-#         aa_dist = tf.cast(self.aa_dist, dtype)
-#         global_emb = tf.cast(self.global_emb, dtype)
-#         aa_init = tf.reshape(tf.tile(aa_dist, tf.cast(tf.math.reduce_prod(shape[:-1], keepdims=True), tf.int32)), 
-#                                 list(shape[:-1])+[self.aa_dist.size])
-#         emb_init = tf.reshape(tf.tile(global_emb, tf.cast(tf.math.reduce_prod(shape[:-1], keepdims=True), tf.int32)*num_repeats), 
-#                                 list(shape[:-1])+[emb_dim * num_repeats])
-#         return tf.concat([aa_init, emb_init], axis=-1)
-    
-#     def __repr__(self):
-#         return f"EmbeddingEmissionInitializer(scoring_model_config={self.scoring_model_config})"
-
-#     def get_config(self):  # To support serialization
-#         return {"aa_dist": self.aa_dist, "scoring_model_config": self.scoring_model_config, "num_prior_components": self.num_prior_components}
-
-
-# class AminoAcidPlusMvnEmissionInitializer(tf.keras.initializers.Initializer):
-#     """ Initializes emission kernels for joint, conditionally independent amino acid and multivariate normal distributions.
-#     """
-
-#     def __init__(self,
-#                  scoring_model_config : Common.ScoringModelConfig,
-#                  aa_dist=np.log(background_distribution), 
-#                  num_prior_components=100,
-#                  scale_kernel_init = tf.random_normal_initializer(stddev=0.02),
-#                  full_covariance=False):
-#         self.aa_dist = aa_dist
-#         self.scoring_model_config = scoring_model_config
-#         self.num_prior_components = num_prior_components
-#         self.global_emb = get_global_emb(scoring_model_config, num_prior_components)
-#         self.scale_kernel_init = scale_kernel_init
-#         self.full_covariance = full_covariance
-
-
-#     def __call__(self, shape, dtype=None, **kwargs):
-#         assert shape[-1] >= self.aa_dist.size
-#         emb_dim = self.global_emb.shape[-1]
-#         if self.full_covariance:
-#             assert (shape[-1] - self.aa_dist.size) == emb_dim + emb_dim * (emb_dim+1) // 2, f"shape[-1]={shape[-1]} emb_dim={emb_dim}"
-#         else:
-#             assert (shape[-1] - self.aa_dist.size) == 2*emb_dim, f"shape[-1]={shape[-1]} emb_dim={emb_dim}"
-#         aa_dist = tf.cast(self.aa_dist, dtype)
-#         global_emb = tf.cast(self.global_emb, dtype)
-#         aa_init = tf.reshape(tf.tile(aa_dist, tf.cast(tf.math.reduce_prod(shape[:-1], keepdims=True), tf.int32)), 
-#                                 list(shape[:-1])+[self.aa_dist.size])
-#         mu_init = tf.reshape(tf.tile(global_emb, tf.cast(tf.math.reduce_prod(shape[:-1], keepdims=True), tf.int32)), 
-#                                 list(shape[:-1])+[emb_dim])
-#         if self.full_covariance:
-#             scale_init = self.scale_kernel_init(shape=list(shape[:-1])+[emb_dim * (emb_dim+1) // 2], dtype=mu_init.dtype)
-#         else:
-#             scale_init = tf.zeros(shape=list(shape[:-1])+[emb_dim], dtype=mu_init.dtype)
-#         return tf.concat([aa_init, mu_init, scale_init], axis=-1)
-
-
-
 tf.keras.utils.get_custom_objects()["EmissionInitializer"] = EmissionInitializer
 tf.keras.utils.get_custom_objects()["ConstantInitializer"] = ConstantInitializer
 tf.keras.utils.get_custom_objects()["EntryInitializer"] = EntryInitializer
 tf.keras.utils.get_custom_objects()["ExitInitializer"] = ExitInitializer
 tf.keras.utils.get_custom_objects()["MatchTransitionInitializer"] = MatchTransitionInitializer
 tf.keras.utils.get_custom_objects()["RandomNormalInitializer"] = RandomNormalInitializer
-#tf.keras.utils.get_custom_objects()["EmbeddingEmissionInitializer"] = EmbeddingEmissionInitializer

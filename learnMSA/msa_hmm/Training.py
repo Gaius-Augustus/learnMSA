@@ -7,7 +7,13 @@ from learnMSA.msa_hmm.MsaHmmLayer import MsaHmmLayer
 from learnMSA.msa_hmm.AncProbsLayer import AncProbsLayer
 from learnMSA.msa_hmm.Configuration import assert_config
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
-        
+
+
+
+class Permute(tf.keras.layers.Layer):
+    def call(self, sequences, indices):
+        return tf.transpose(sequences, [1,0,2]), tf.transpose(indices)
+
 
 def generic_model_generator(encoder_layers,
                             msa_hmm_layer):
@@ -23,8 +29,7 @@ def generic_model_generator(encoder_layers,
     indices = tf.keras.Input(shape=(None,), name="indices", dtype=tf.int64)
     #in the input pipeline, we need the batch dimension to come first to make multi GPU work 
     #we transpose here, because all learnMSA layers require the model dimension to come first
-    transposed_sequences = tf.transpose(sequences, [1,0,2])
-    transposed_indices = tf.transpose(indices)
+    transposed_sequences, transposed_indices = Permute()(sequences, indices)
     forward_seq = transposed_sequences
     for layer in encoder_layers:
         forward_seq = layer(forward_seq, transposed_indices)
@@ -34,6 +39,7 @@ def generic_model_generator(encoder_layers,
     model = tf.keras.Model(inputs=[sequences, indices], 
                         outputs=[tf.keras.layers.Lambda(lambda x: x, name="loglik")(loglik)])
     return model
+
 
 def make_msa_hmm_layer(effective_num_seq,
                         model_lengths, 
@@ -54,6 +60,7 @@ def make_msa_hmm_layer(effective_num_seq,
                                 dtype=tf.float32)
     return msa_hmm_layer
 
+
 def make_anc_probs_layer(num_seq, config, clusters=None):
     assert_config(config)
     anc_probs_layer = AncProbsLayer(config["num_models"],
@@ -72,6 +79,7 @@ def make_anc_probs_layer(num_seq, config, clusters=None):
                                      transposed=config["transposed"],
                                      clusters=clusters)
     return anc_probs_layer
+
 
 def default_model_generator(num_seq,
                             effective_num_seq,

@@ -166,7 +166,7 @@ def run_main():
         config["equilibrium_sample"] = True
         config["transposed"] = True
     assert args.initial_distance >= 0, "The evolutionary distance must be >= 0."
-    config["encoder_initializer"][0] = Initializers.ConstantInitializer(inverse_softplus(np.array(args.initial_distance) + 1e-8))
+    config["encoder_initializer"][0] = Initializers.ConstantInitializer(inverse_softplus(np.array(args.initial_distance) + 1e-8).numpy())
     transitioners = config["transitioner"] if hasattr(config["transitioner"], '__iter__') else [config["transitioner"]]
     for trans in transitioners:
         trans.prior.alpha_flank = args.alpha_flank

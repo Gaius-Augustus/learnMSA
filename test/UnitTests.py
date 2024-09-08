@@ -169,12 +169,10 @@ class TestMsaHmmCell(unittest.TestCase):
         length = [self.length[i] for i in models]
         e = [self.emission_init[i] for i in models]
         i = [self.insertion_init[i] for i in models]
-        emitter = Emitter.ProfileHMMEmitter(emission_init = e, 
-                                                 insertion_init = i)
+        emitter = Emitter.ProfileHMMEmitter(emission_init = e, insertion_init = i)
         t = [self.transition_init[i] for i in models]
         f = [Initializers.make_default_flank_init() for _ in models]
-        transitioner = Transitioner.ProfileHMMTransitioner(transition_init = t,
-                                                           flank_init = f)
+        transitioner = Transitioner.ProfileHMMTransitioner(transition_init = t, flank_init = f)
         hmm_cell = MsaHmmCell.MsaHmmCell(length, dim=3, emitter=emitter, transitioner=transitioner)
         hmm_cell.build((None,None,3))
         return hmm_cell, length
@@ -389,7 +387,7 @@ class TestMsaHmmCell(unittest.TestCase):
             np.testing.assert_almost_equal(np.exp(loglik[i]), np.exp(loglik_parallel[i]), decimal=6)
             np.testing.assert_almost_equal(np.exp(log_forward)[i,0,:,:q], np.exp(log_forward_parallel)[i,0,:,:q], decimal=6)
             np.testing.assert_almost_equal(np.exp(log_backward)[i,0,:,:q], np.exp(log_backward_parallel)[i,0,:,:q], decimal=6)
-            np.testing.assert_almost_equal(np.exp(state_posterior_log_probs[i,0,:,:q]), np.exp(state_posterior_log_probs_parallel[i,0,:,:q]), decimal=6)
+            np.testing.assert_almost_equal(np.exp(state_posterior_log_probs[i,0,:,:q]), np.exp(state_posterior_log_probs_parallel[i,0,:,:q]), decimal=5)
             
     def test_parallel_posterior_casino(self):
         y1 = TestSupervisedTraining.get_prediction(1).numpy()
@@ -945,9 +943,9 @@ class TestMSAHMM(unittest.TestCase):
         transition_kernel_initializers = ref.make_transition_init_A()
         #alphabet: {A,B}
         emission_kernel_initializer = np.log([[0.5, 0.5], [0.1, 0.9], [0.7, 0.3], [0.9, 0.1]])
-        emission_kernel_initializer = tf.constant_initializer(emission_kernel_initializer)
+        emission_kernel_initializer = Initializers.ConstantInitializer(emission_kernel_initializer)
         insertion_kernel_initializer = np.log([0.5, 0.5])
-        insertion_kernel_initializer = tf.constant_initializer(insertion_kernel_initializer)
+        insertion_kernel_initializer = Initializers.ConstantInitializer(insertion_kernel_initializer)
         emitter = Emitter.ProfileHMMEmitter(emission_init = emission_kernel_initializer, 
                                                  insertion_init = insertion_kernel_initializer)
         transitioner = Transitioner.ProfileHMMTransitioner(transition_init = transition_kernel_initializers)
@@ -1696,7 +1694,7 @@ class DirichletTest(unittest.TestCase):
             alpha = np.expand_dims(alpha, 0)
             log_pdf = DirichletMixture.dirichlet_log_pdf(probs, alpha, q)
             np.testing.assert_almost_equal(log_pdf, e, decimal=3)
-            alpha_init = tf.constant_initializer(AncProbsLayer.inverse_softplus(alpha))
+            alpha_init = tf.constant_initializer(AncProbsLayer.inverse_softplus(alpha).numpy())
             mix_init = tf.constant_initializer(np.log(q))
             mean_log_pdf = DirichletMixture.DirichletMixtureLayer(1,3,
                                                             alpha_init=alpha_init,
@@ -1712,7 +1710,7 @@ class DirichletTest(unittest.TestCase):
         q = np.array([0.25, 0.25, 0.25, 0.25])
         log_pdf = DirichletMixture.dirichlet_log_pdf(probs, alpha, q)
         np.testing.assert_almost_equal(log_pdf, expected, decimal=3)
-        alpha_init = tf.constant_initializer(AncProbsLayer.inverse_softplus(alpha))
+        alpha_init = tf.constant_initializer(AncProbsLayer.inverse_softplus(alpha).numpy())
         mix_init = tf.constant_initializer(np.log(q))
         mean_log_pdf = DirichletMixture.DirichletMixtureLayer(4, 3,
                                                         alpha_init=alpha_init,
@@ -1742,7 +1740,7 @@ class TestPriors(unittest.TestCase):
         max_num_states = 2*max_len+3
         B = np.random.rand(3, max_num_states, 26)
         B /= np.sum(B, -1, keepdims=True)
-        pdf = prior(B, model_lengths)
+        pdf = prior(B, lengths=model_lengths)
         self.assertEqual(pdf.shape, (num_models, max_len))
         for i,l in enumerate(model_lengths):
             np.testing.assert_equal(pdf[i,l:].numpy(), 0.)

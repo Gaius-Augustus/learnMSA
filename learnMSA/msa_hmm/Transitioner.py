@@ -3,11 +3,14 @@ import numpy as np
 import learnMSA.msa_hmm.Initializers as initializers
 import learnMSA.msa_hmm.Priors as priors
 import learnMSA.msa_hmm.Configuration as config
+from learnMSA.msa_hmm.Utility import get_num_states, get_num_states_implicit, deserialize
 from packaging import version
 if version.parse(tf.__version__) < version.parse("2.10.0"):
     from tensorflow.python.training.tracking.data_structures import NoDependency #see https://github.com/tensorflow/tensorflow/issues/36916
 else:
     from tensorflow.python.trackable.data_structures import NoDependency 
+
+
 
 class ProfileHMMTransitioner(tf.keras.layers.Layer):
     """ A transitioner defines which transitions between HMM states are allowed, how they are initialized
@@ -35,29 +38,30 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
         self.frozen_kernels = frozen_kernels
         self.approx_log_zero = -1000.
         self.reverse = False
-        
-    def cell_init(self, cell):
-        """ Automatically called when the owner cell is created.
+
+
+    def set_lengths(self, lengths):
         """
-        self.length = cell.length
-        assert len(self.length) == len(self.transition_init), \
-            f"The number of transition initializers ({len(self.transition_init)}) should match the number of models ({len(self.length)})."
-        assert len(self.length) == len(self.flank_init), \
-            f"The number of flank initializers ({len(self.flank_init)}) should match the number of models ({len(self.length)})."
-        self.num_states = cell.num_states
-        self.num_states_implicit = cell.num_states_implicit
-        self.max_num_states = cell.max_num_states
-        self.num_models = cell.num_models
-        #sub-arrays of the complete transition kernel for convenience
-        #describes name and length for kernels of the categorical transition distributions
-        #for states or families of states
-        self.explicit_transition_kernel_parts = [_make_explicit_transition_kernel_parts(length) for length in self.length]
-        self.implicit_transition_parts = [_make_implicit_transition_parts(length) for length in self.length]
-        self.sparse_transition_indices_implicit = [_make_sparse_transition_indices_implicit(length) for length in self.length]
-        self.sparse_transition_indices_explicit = [_make_sparse_transition_indices_explicit(length) for length in self.length]
+        Sets the model lengths.
+        Args:
+            lengths: A list of model lengths.
+        """
+        self.lengths = lengths
+        self.num_states = get_num_states(lengths)
+        self.num_states_implicit = get_num_states_implicit(lengths)
+        self.max_num_states = max(self.num_states)
+        self.num_models = len(lengths)
+        self.explicit_transition_kernel_parts = [_make_explicit_transition_kernel_parts(length) for length in self.lengths]
+        self.implicit_transition_parts = [_make_implicit_transition_parts(length) for length in self.lengths]
+        self.sparse_transition_indices_implicit = [_make_sparse_transition_indices_implicit(length) for length in self.lengths]
+        self.sparse_transition_indices_explicit = [_make_sparse_transition_indices_explicit(length) for length in self.lengths]
+        # make sure the parameters are valid
+        assert len(self.lengths) == len(self.transition_init), \
+            f"The number of transition initializers ({len(self.transition_init)}) should match the number of models ({len(self.lengths)})."
+        assert len(self.lengths) == len(self.flank_init), \
+            f"The number of flank initializers ({len(self.flank_init)}) should match the number of models ({len(self.lengths)})."
         for init, parts in zip(self.transition_init, self.explicit_transition_kernel_parts):
             _assert_transition_init_kernel(init, parts)
-        self.prior.load(self.dtype)
         
     def build(self, input_shape=None):
         if self.built:
@@ -75,8 +79,7 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
                     k = self.add_weight(shape=[length], 
                                         initializer = init,
                                         name="transition_kernel_"+part_name+"_"+str(i),
-                                        trainable=not frozen,
-                                        dtype=self.dtype)
+                                        trainable=not frozen)
                 else:
                     for s in shared_with:
                         if s in model_transition_kernel:
@@ -84,12 +87,12 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
                             break
                 model_transition_kernel[part_name] = k
             self.transition_kernel.append(model_transition_kernel)
+        self.prior.load(self.dtype)
         
         # closely related to the initial probability of the left flank state
         self.flank_init_kernel = [self.add_weight(shape=[1],
                                          initializer=init,
-                                         name="init_logit_"+str(i),
-                                         dtype=self.dtype)
+                                         name="init_logit_"+str(i))
                                       for i,init in enumerate(self.flank_init)]
         tf.keras.utils.get_custom_objects()["ProfileHMMTransitioner"] = ProfileHMMTransitioner
         self.built = True
@@ -103,7 +106,7 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
         self.A_t = tf.transpose(self.A, (0,2,1))
         
     def make_flank_init_prob(self):
-        return tf.math.sigmoid(tf.stack(self.flank_init_kernel))
+        return tf.math.sigmoid(tf.stack([tf.identity(k) for k in self.flank_init_kernel]))
         
     def make_initial_distribution(self):
         """Constructs the initial state distribution per model which depends on the transition probabilities.
@@ -128,7 +131,7 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
             log_init_terminal = (self.implicit_log_probs[i]["left_flank_to_terminal"] 
                              + log_complement_init_flank_probs[i] 
                              - self.log_probs[i]["left_flank_exit"] )
-            log_init_insert = tf.zeros((self.length[i]-1), dtype=self.dtype) + self.approx_log_zero
+            log_init_insert = tf.zeros((self.lengths[i]-1), dtype=self.dtype) + self.approx_log_zero
             log_init_dist = tf.concat([log_init_flank_probs[i], 
                                         log_init_match, 
                                         log_init_insert, 
@@ -200,7 +203,7 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
         """
         log_probs, probs = self.make_log_probs()
         implicit_log_probs = []
-        for p, length in zip(log_probs, self.length):
+        for p, length in zip(log_probs, self.lengths):
             #compute match_skip(i,j) = P(Mj+2 | Mi)  , L x L
             #considers "begin" as M0 and "end" as ML
             MD = tf.expand_dims(p["match_to_delete"], -1)
@@ -398,9 +401,10 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
         config = super(ProfileHMMTransitioner, self).get_config()
         if self.built:
             for key in self.transition_kernel[0].keys():
-                config[key] = [self.transition_kernel[i][key].numpy() for i in range(self.num_models)]
-            config["flank_init"] = [k.numpy() for k in self.flank_init_kernel]
+                config[key] = [self.transition_kernel[i][key].numpy().tolist() for i in range(self.num_models)]
+            config["flank_init"] = [k.numpy().tolist() for k in self.flank_init_kernel]
         config.update({
+            "lengths" : self.lengths.tolist() if isinstance(self.lengths, np.ndarray) else self.lengths,
             "num_models" : self.num_models,
             "prior" : self.prior,
             "frozen_kernels" : self.frozen_kernels
@@ -416,7 +420,11 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
                 d[key] = initializers.ConstantInitializer(kernels[i])
         config["transition_init"] = transition_init
         config["flank_init"] = [initializers.ConstantInitializer(k) for k in config["flank_init"]]
-        return cls(**config)
+        config["prior"] = deserialize(config["prior"])
+        lengths = config.pop("lengths")
+        emitter = cls(**config)
+        emitter.set_lengths(lengths)
+        return emitter
     
     def __repr__(self):
         return f"ProfileHMMTransitioner(\n transition_init={config.as_str(self.transition_init[0], 2, '    ', ' , ')},\n flank_init={self.flank_init[0]},\n prior={self.prior},\n frozen_kernels={self.frozen_kernels})"

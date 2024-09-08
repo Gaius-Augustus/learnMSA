@@ -22,7 +22,7 @@ class AminoAcidPrior(tf.keras.layers.Layer):
     def load(self, dtype):
         prior_path = os.path.dirname(__file__)+"/trained_prior/"
         dtype = dtype if isinstance(dtype, str) else dtype.name
-        model_path = prior_path+"_".join([str(self.comp_count), "True", dtype, "_dirichlet/ckpt"])
+        model_path = prior_path+"_".join([str(self.comp_count), "True", dtype, "_dirichlet.h5"])
         model = dm.load_mixture_model(model_path, self.comp_count, 20, trainable=False, dtype=dtype)
         self.emission_dirichlet_mix = model.layers[-1]
         
@@ -237,13 +237,13 @@ class ProfileHMMTransitionPrior(tf.keras.layers.Layer):
     def load(self, dtype):
         prior_path = os.path.dirname(__file__)+"/trained_prior/transition_priors/"
 
-        match_model_path = prior_path + "_".join(["match_prior", str(self.match_comp), dtype]) + "/ckpt"
+        match_model_path = prior_path + "_".join(["match_prior", str(self.match_comp), dtype]) + ".h5"
         match_model = dm.load_mixture_model(match_model_path, self.match_comp, 3, trainable=False, dtype=dtype)
         self.match_dirichlet = match_model.layers[-1]
-        insert_model_path = prior_path + "_".join(["insert_prior", str(self.insert_comp), dtype]) + "/ckpt"
+        insert_model_path = prior_path + "_".join(["insert_prior", str(self.insert_comp), dtype]) + ".h5"
         insert_model = dm.load_mixture_model(insert_model_path, self.insert_comp, 2, trainable=False, dtype=dtype)
         self.insert_dirichlet = insert_model.layers[-1]
-        delete_model_path = prior_path + "_".join(["delete_prior", str(self.delete_comp), dtype]) + "/ckpt"
+        delete_model_path = prior_path + "_".join(["delete_prior", str(self.delete_comp), dtype]) + ".h5"
         delete_model = dm.load_mixture_model(delete_model_path, self.delete_comp, 2, trainable=False, dtype=dtype)
         self.delete_dirichlet = delete_model.layers[-1]
         

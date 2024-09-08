@@ -3,6 +3,18 @@ import numpy as np
 import copy
 import random
 import tensorflow as tf
+from packaging import version
+
+
+
+def get_num_states(lengths):
+    """ Returns the number of states in a profile HMM with the given lengths. """
+    return [2 * l + 3 for l in lengths]
+
+def get_num_states_implicit(lengths):
+    """ Returns the number of states in a profile HMM with the given lengths including silent states. """
+    return [3 * l + 5 for l in lengths]
+
 
 def inverse_softplus(features):
     # Cast to float64 to prevent overflow of large entries
@@ -174,3 +186,10 @@ def make_kernel(mean, scale, diag_bijector=DefaultDiagBijector(1.)):
         return tf.concat([mean, scale_tril.inverse(scale)], -1)
     else:
         raise ValueError(f"Invalid scale shape: {scale.shape}")
+
+
+def deserialize(obj):
+    if version.parse(tf.__version__) < version.parse("2.11.0"):
+        return obj
+    else:
+        return tf.keras.utils.deserialize_keras_object(obj)

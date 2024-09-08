@@ -2,14 +2,6 @@ import tensorflow as tf
 import numpy as np
 
 
-background_init_default = np.log([0.08561094, 0.05293611, 0.04151133, 0.05672544, 0.01636436,
-       0.03728793, 0.06006028, 0.08408517, 0.0247461 , 0.06263597,
-       0.09096471, 0.05326487, 0.02224342, 0.03875183, 0.04393068,
-       0.05451456, 0.05665095, 0.01439066, 0.03299227, 0.07033241])
-
-def inverse_softplus(features):
-    return np.log(np.expm1(features))
-
 # p: n x s probability distributions over alphabet
 def dirichlet_log_pdf(p, alpha, q):
     """ Computes the logarithmic Dirichlet density at p for a mixture given by alpha and q.
@@ -162,6 +154,8 @@ def make_model(dirichlet_mixture_layer):
 def load_mixture_model(model_path, num_components, alphabet_size, trainable=False, dtype=tf.float32):
     dm = DirichletMixtureLayer(num_components, alphabet_size, trainable=trainable, dtype=dtype)
     model = make_model(dm)
-    model.load_weights(model_path).expect_partial()
+    model.load_weights(model_path)
     return model
+    
+
     

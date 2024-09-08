@@ -78,7 +78,7 @@ class MvnEmitter(ProfileHMMEmitter):
         """
         super(MvnEmitter, self).recurrent_init()
         # make use of the shared insertions and compute emissions for all matches and one insertion
-        B_mvn_param = self.B[:, :max(self.length)+1, self.num_aa+1:]
+        B_mvn_param = self.B[:, :max(self.lengths)+1, self.num_aa+1:]
         # create the mvn mixture object in each step with the current kernel values
         self.mvn_mixture = MvnMixture(self.scoring_model_config.dim, B_mvn_param[..., tf.newaxis, :],
                                         diag_only = not self.full_covariance,
@@ -89,13 +89,13 @@ class MvnEmitter(ProfileHMMEmitter):
         aa_em = self.emission_kernel[i][:, :self.num_aa]
         emb_em = self.emission_kernel[i][:, self.num_aa:]
         #drop the terminal state probs since we have identical ones for the embeddings
-        aa_emissions = self.make_emission_matrix_from_kernels(aa_em, self.insertion_kernel[i][:self.num_aa], self.length[i])
+        aa_emissions = self.make_emission_matrix_from_kernels(aa_em, self.insertion_kernel[i][:self.num_aa], self.lengths[i])
         """ Construct the emission matrix the same way as usual but leave away the softmax.
         """
         emb_ins = self.insertion_kernel[i][self.num_aa:]
         emb_em = tf.concat([tf.expand_dims(emb_ins, 0), 
                             emb_em, 
-                            tf.stack([emb_ins]*(self.length[i]+1))] , axis=0)
+                            tf.stack([emb_ins]*(self.lengths[i]+1))] , axis=0)
         end_state_emission = tf.zeros_like(emb_em[:1])
         emb_emissions = tf.concat([emb_em, end_state_emission], axis=0)
         return tf.concat([aa_emissions, emb_emissions], -1)
@@ -106,10 +106,10 @@ class MvnEmitter(ProfileHMMEmitter):
         _, batch, seq_len, _  = tf.unstack(tf.shape(emb_inputs))
         #compute emission density value
         log_pdf = self.mvn_mixture.log_pdf(tf.reshape(emb_inputs[..., :-1], (self.num_models, batch*seq_len, self.scoring_model_config.dim)))
-        log_pdf = tf.reshape(log_pdf, (self.num_models, batch, seq_len, max(self.length)+1))
+        log_pdf = tf.reshape(log_pdf, (self.num_models, batch, seq_len, max(self.lengths)+1))
 
         # we optimized away some states and have to append clones of the first insert to make activations like softmax work correctly
-        rest = tf.repeat(log_pdf[..., :1], tf.shape(self.B_transposed)[-1] - max(self.length)-1, axis=-1)
+        rest = tf.repeat(log_pdf[..., :1], tf.shape(self.B_transposed)[-1] - max(self.lengths)-1, axis=-1)
         log_pdf = tf.concat([log_pdf, rest], axis=-1)
 
         # compute density to the power of 1/temperature 
@@ -178,7 +178,10 @@ class MvnEmitter(ProfileHMMEmitter):
     @classmethod
     def from_config(cls, config):
         config["scoring_model_config"] = Common.ScoringModelConfig(**config["scoring_model_config"])
-        return cls(**config)
+        lengths = config.pop("lengths")
+        emitter = cls(**config)
+        emitter.set_lengths(lengths)
+        return emitter
 
 
     def __repr__(self):
