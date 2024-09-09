@@ -315,3 +315,6 @@ def fit_model(model_generator,
                         verbose = 2*int(verbose))
     tf.get_logger().setLevel('INFO')
     return model, history
+
+    
+tf.keras.utils.get_custom_objects()["Permute"] = Permute
