@@ -5,7 +5,7 @@
 <img src="https://github.com/Gaius-Augustus/learnMSA/blob/main/logo/training_loop.gif" alt="" loop=infinite>
 
 # Introduction
-Multiple sequence alignment formulated as a statistical machine learning problem, where an optimal profile hidden Markov model for a potentially ultra-large family of protein sequences is learned from unaligned sequences and an alignment is decoded. We use a novel, automatically differentiable variant of the forward algorithm to train pHMMs via gradient descent.
+Multiple sequence alignment formulated as a machine learning problem, where an optimal profile hidden Markov model for a potentially ultra-large family of protein sequences is learned from unaligned sequences and an alignment is decoded. We use a novel, automatically differentiable variant of the forward algorithm to train pHMMs via gradient descent.
 
 Since version 2.0.0, learnMSA can utilize protein language models (`--use_language_model`) for significantly improved accuracy.
 
@@ -27,48 +27,55 @@ Since version 2.0.0, learnMSA can utilize protein language models (`--use_langua
 
 # Installation
 
-Currently, learnMSA 2.0.0 is only supported for python <= 3.10, because of incompatibilities with TensorFlow. This is expected to change in the future.
+learnMSA requires python <= 3.10 and TensorFlow >=2.5.0, <2.11. Version 2.10.* is recommended. Tensorflow should be installed with GPU support. *We will try to support newer python and TensorFlow versions in the future.*
 
-*Recommended way to install learnMSA:*
+*Recommended way to install learnMSA along with Tensorflow + GPU:*
+
+1. Create a conda environment:
 
 ```
-conda create -n learnMSA_env python=3.10 pip
-conda activate learnMSA_env
+conda create -n learnMSA python=3.10
+conda activate learnMSA
+```
+
+2. Install cuda toolkit in the environment:
+
+```
+conda install -c conda-forge cudatoolkit=11.2.2 cudnn=8.1.0
+mkdir -p $CONDA_PREFIX/etc/conda/activate.d
+echo 'export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$CONDA_PREFIX/lib/' >> $CONDA_PREFIX/etc/conda/activate.d/env_vars.sh
+conda deactivate
+conda activate learnMSA
+```
+
+3. Install learnMSA in the environment:
+   
+```
 pip install learnMSA
+conda install -c bioconda mmseqs2
 ```
 
-Another quick option is to use mamba (if conda is too slow):
-
-If you haven't done it yet, set up [Bioconda channels](https://bioconda.github.io/) first.
+4. (optional) Verify that TensorFlow 2.10 and learnMSA are correctly installed:
 
 ```
-conda install mamba
-mamba create -n learnMSA_env learnMSA
-conda activate learnMSA_env
+python3 -c "import tensorflow as tf; print(tf.__version__, tf.config.list_physical_devices('GPU'))"
+learnMSA -h
 ```
+   
+Another quick option is to use mamba (replace conda with mamba in above instructions).
+If you have problems to install some packages, set up [Bioconda channels](https://bioconda.github.io/).
 
-or simply with conda:
+## Using learnMSA for alignment
 
-```
-conda create -n learnMSA_env learnMSA
-conda activate learnMSA_env
-```
+Recommended way to align proteins:
 
-While in principle we attempt to support all tensorflow versions since 2.5.0, there are known incompatiblities with tf >= 2.12.0. We recommend tensorflow version 2.10.0 if there are no particular reasons to use something else.
+<code>learnMSA -i INPUT_FILE -o OUTPUT_FILE --use_language_model --sequence_weights</code>
 
-## Command line use after installing with Bioconda or pip
+Without language model support (faster):
 
-<code>learnMSA -h</code>
+<code>learnMSA -i INPUT_FILE -o OUTPUT_FILE --sequence_weights</code>
 
-Align with language model support (recommended):
-
-<code>learnMSA -i INPUT_FILE -o OUTPUT_FILE --use_language_model</code>
-
-Without language model support:
-
-<code>learnMSA -i INPUT_FILE -o OUTPUT_FILE</code>
-
-We always recommend to run learnMSA with the `--sequence_weights` flag to improve accuracy. This requires `mmseqs2` to be installed. You can use conda for this: `conda install -c bioconda mmseqs2`. Sequence weights (and thus the `mmseqs2` requirement are turned off by default).
+We always recommend to run learnMSA with the `--sequence_weights` flag to improve accuracy. This requires `mmseqs2` to be installed. You can use conda for this: `conda install -c bioconda mmseqs2`. Sequence weights (and thus the `mmseqs2` requirement) are turned off by default.
 
 *Since learnMSA version 1.2.0, insertions are aligned with famsa. This improves overall accuracy. The old behavior can be restored with the `--unaligned_insertions` flag.*
 
