@@ -10,7 +10,7 @@ from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 
 
 
-class Permute(tf.keras.layers.Layer):
+class PermuteSeqs(tf.keras.layers.Layer):
     def call(self, sequences, indices):
         return tf.transpose(sequences, [1,0,2]), tf.transpose(indices)
 
@@ -29,7 +29,7 @@ def generic_model_generator(encoder_layers,
     indices = tf.keras.Input(shape=(None,), name="indices", dtype=tf.int64)
     #in the input pipeline, we need the batch dimension to come first to make multi GPU work 
     #we transpose here, because all learnMSA layers require the model dimension to come first
-    transposed_sequences, transposed_indices = Permute()(sequences, indices)
+    transposed_sequences, transposed_indices = PermuteSeqs()(sequences, indices)
     forward_seq = transposed_sequences
     for layer in encoder_layers:
         forward_seq = layer(forward_seq, transposed_indices)
@@ -317,4 +317,4 @@ def fit_model(model_generator,
     return model, history
 
     
-tf.keras.utils.get_custom_objects()["Permute"] = Permute
+tf.keras.utils.get_custom_objects()["PermuteSeqs"] = PermuteSeqs
