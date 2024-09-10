@@ -125,9 +125,12 @@ def make_default(default_num_models=5,
                                                                         for _ in range(default_num_models)],
                                                     [initializers.make_default_flank_init() 
                                                                         for _ in range(default_num_models)])
-    #automaticall scale to a memory friendly version, if the GPU has less than 32GB                                                                    
-    gpu_mem = get_gpu_memory()
-    small_gpu = gpu_mem[0] < 32000 if len(gpu_mem) > 0 else False
+    #automaticall scale to a memory friendly version, if the GPU has less than 32GB     
+    small_gpu = False
+    if len([x.name for x in tf.config.list_logical_devices() if x.device_type == 'GPU']) > 0:     
+        #if there is at least one GPU, check its memory                                                          
+        gpu_mem = get_gpu_memory()
+        small_gpu = gpu_mem[0] < 32000 if len(gpu_mem) > 0 else False
     if use_language_model:                                                                    
         batch_callback = partial(get_adaptive_batch_size_with_language_model, embedding_dim=scoring_model_config.dim, small_gpu=small_gpu)  
     else:
