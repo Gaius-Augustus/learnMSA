@@ -36,11 +36,11 @@ class ScoringModelConfig():
 
 
 def get_scoring_model_path(config : ScoringModelConfig):
-    return f"{SCORING_MODEL_PATH}/{config.lm_name}_{config.dim}_{config.activation}{config.suffix}/checkpoints"
+    return f"{SCORING_MODEL_PATH}/{config.lm_name}_{config.dim}_{config.activation}{config.suffix}.h5"
 
 
 def get_prior_path(config : ScoringModelConfig, components):
-    return f"{PRIOR_PATH}/{config.lm_name}_{config.dim}_reduced_mix{components}_{config.activation}{config.suffix}/checkpoints"
+    return f"{PRIOR_PATH}/{config.lm_name}_{config.dim}_reduced_mix{components}_{config.activation}{config.suffix}.h5"
 
 
 ## Constructs and loads a language model with contextual imports.
