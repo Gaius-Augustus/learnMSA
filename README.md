@@ -91,4 +91,6 @@ Run the notebooks <code>learnMSA_demo.ipynb</code> or <code>learnMSA_with_langua
 
 # Publications
 
+Becker F, Stanke M. **learnMSA2: deep protein multiple alignments with large language and hidden Markov models**. *Bioinformatics*. 2024
+
 Becker F, Stanke M. **learnMSA: learning and aligning large protein families**. *GigaScience*. 2022
