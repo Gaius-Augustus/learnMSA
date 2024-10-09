@@ -11,8 +11,15 @@ from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 
 
 class PermuteSeqs(tf.keras.layers.Layer):
-    def call(self, sequences, indices):
-        return tf.transpose(sequences, [1,0,2]), tf.transpose(indices)
+    def __init__(self, perm, **kwargs):
+        super(PermuteSeqs, self).__init__(**kwargs)
+        self.perm = perm
+
+    def call(self, sequences):
+        return tf.transpose(sequences, self.perm)
+
+    def get_config(self):
+        return {"perm": self.perm}
 
 
 def generic_model_generator(encoder_layers,
@@ -29,15 +36,16 @@ def generic_model_generator(encoder_layers,
     indices = tf.keras.Input(shape=(None,), name="indices", dtype=tf.int64)
     #in the input pipeline, we need the batch dimension to come first to make multi GPU work 
     #we transpose here, because all learnMSA layers require the model dimension to come first
-    transposed_sequences, transposed_indices = PermuteSeqs()(sequences, indices)
+    transposed_sequences = PermuteSeqs([1,0,2])(sequences)
+    transposed_indices = PermuteSeqs([1,0])(indices)
     forward_seq = transposed_sequences
     for layer in encoder_layers:
         forward_seq = layer(forward_seq, transposed_indices)
     loglik = msa_hmm_layer(forward_seq, transposed_indices)
     #transpose back to make model.predict work correctly
-    loglik = tf.transpose(loglik)
+    loglik = PermuteSeqs([1,0], name="loglik")(loglik)
     model = tf.keras.Model(inputs=[sequences, indices], 
-                        outputs=[tf.keras.layers.Lambda(lambda x: x, name="loglik")(loglik)])
+                        outputs=[loglik])
     return model
 
 

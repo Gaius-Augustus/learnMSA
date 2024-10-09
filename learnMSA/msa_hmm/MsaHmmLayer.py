@@ -1,6 +1,7 @@
 import tensorflow as tf
 import numpy as np
 from learnMSA.msa_hmm.TotalProbabilityCell import TotalProbabilityCell
+from learnMSA.msa_hmm.Utility import deserialize
 
 
 class MsaHmmLayer(tf.keras.layers.Layer):
@@ -84,7 +85,6 @@ class MsaHmmLayer(tf.keras.layers.Layer):
             log-likelihoods: Shape: (num_model, b)
         """
         #initialize transition- and emission-matricies
-        self.cell.recurrent_init()
         return _forward_recursion_impl(inputs, self.cell, self.rnn, self.total_prob_rnn, 
                                        end_hints=end_hints, training=training, parallel_factor=self.parallel_factor)
     
@@ -99,7 +99,6 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         Returns:
             backward variables: Shape: (num_model, b, seq_len, q)
         """
-        self.reverse_cell.recurrent_init()
         return _backward_recursion_impl(inputs, self.cell, self.reverse_cell, self.rnn_backward, self.total_prob_rnn_rev, 
                                             end_hints=end_hints, training=training, parallel_factor=self.parallel_factor)
     
@@ -115,8 +114,6 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         Returns:
             state posterior probbabilities: Shape: (num_model, b, seq_len, q)
         """
-        self.cell.recurrent_init()
-        self.reverse_cell.recurrent_init()
         return _state_posterior_log_probs_impl(inputs, self.cell, self.reverse_cell, self.bidirectional_rnn, self.total_prob_rnn, self.total_prob_rnn_rev,
                                                 end_hints=end_hints, training=training, no_loglik=no_loglik, parallel_factor=self.parallel_factor)
     
@@ -180,10 +177,17 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         })
         return config
 
+    
+    @classmethod
+    def from_config(cls, config):
+        config["cell"] = deserialize(config["cell"])
+        return cls(**config)
+
 
     
     
         
+@tf.function
 def _forward_recursion_impl(inputs, cell, rnn, total_prob_rnn, end_hints=None, training=False, parallel_factor=1):
     """ Computes the forward recursion for multiple models where each model
         receives a batch of sequences as input.
@@ -199,6 +203,7 @@ def _forward_recursion_impl(inputs, cell, rnn, total_prob_rnn, end_hints=None, t
         forward variables: Shape: (num_model, b, seq_len, q)
         log-likelihoods: Shape: (num_model, b)
     """
+    cell.recurrent_init()
     #initialize transition- and emission-matricies
     num_model, b, seq_len, s = tf.unstack(tf.shape(inputs))
     q = cell.max_num_states
@@ -253,6 +258,7 @@ def _get_total_forward_from_chunks(forward, cell, total_prob_rnn, b, seq_len, pa
     return forward_result, loglik
     
     
+@tf.function
 def _backward_recursion_impl(inputs, cell, reverse_cell, rnn_backward, total_prob_rnn_rev, end_hints=None, training=False, parallel_factor=1):
     """ Computes the backward recursion for multiple models where each model
         receives a batch of sequences as input.
@@ -268,6 +274,8 @@ def _backward_recursion_impl(inputs, cell, reverse_cell, rnn_backward, total_pro
     Returns:
         backward variables: Shape: (num_model, b, seq_len, q)
     """
+    cell.recurrent_init()
+    reverse_cell.recurrent_init()
     num_model, b, seq_len, s = tf.unstack(tf.shape(inputs))
     q = cell.max_num_states
     emission_probs = reverse_cell.emission_probs(inputs, end_hints=end_hints, training=training)
@@ -325,6 +333,7 @@ def proper_shape(tensor):
   return tf.shape(tensor)
 
 
+@tf.function
 def _state_posterior_log_probs_impl(inputs, cell, reverse_cell, bidirectional_rnn, total_prob_rnn, total_prob_rnn_rev, end_hints=None, training=False, no_loglik=False, parallel_factor=1):
     """ Computes the log-probability of state q at position i given inputs.
     Args:
@@ -342,6 +351,8 @@ def _state_posterior_log_probs_impl(inputs, cell, reverse_cell, bidirectional_rn
     Returns:
         state posterior probbabilities: Shape: (num_model, b, seq_len, q)
     """
+    cell.recurrent_init()
+    reverse_cell.recurrent_init()
     num_model, b, seq_len, s = tf.unstack(tf.shape(inputs))
     q = cell.max_num_states
     emission_probs = cell.emission_probs(inputs, end_hints=end_hints, training=training)

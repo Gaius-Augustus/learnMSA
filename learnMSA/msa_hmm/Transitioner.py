@@ -27,14 +27,14 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
     def __init__(self, 
                 transition_init = initializers.make_default_transition_init(),
                 flank_init = initializers.make_default_flank_init(),
-                prior = priors.ProfileHMMTransitionPrior(),
+                prior = None,
                 frozen_kernels={},
                 **kwargs):
         super(ProfileHMMTransitioner, self).__init__(**kwargs)
         transition_init = [transition_init] if isinstance(transition_init, dict) else transition_init 
         self.transition_init = NoDependency(transition_init)
         self.flank_init = [flank_init] if not hasattr(flank_init, '__iter__') else flank_init 
-        self.prior = prior
+        self.prior = priors.ProfileHMMTransitionPrior(dtype=self.dtype) if prior is None else prior
         self.frozen_kernels = frozen_kernels
         self.approx_log_zero = -1000.
         self.reverse = False
@@ -87,7 +87,6 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
                             break
                 model_transition_kernel[part_name] = k
             self.transition_kernel.append(model_transition_kernel)
-        self.prior.load(self.dtype)
         
         # closely related to the initial probability of the left flank state
         self.flank_init_kernel = [self.add_weight(shape=[1],
@@ -97,6 +96,7 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
         tf.keras.utils.get_custom_objects()["ProfileHMMTransitioner"] = ProfileHMMTransitioner
         self.built = True
         
+
     def recurrent_init(self):
         """ Automatically called before each recurrent run. Should be used for setups that
             are only required once per application of the recurrent layer.
@@ -105,9 +105,11 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
         self.A = tf.sparse.to_dense(self.A_sparse)
         self.A_t = tf.transpose(self.A, (0,2,1))
         
+
     def make_flank_init_prob(self):
         return tf.math.sigmoid(tf.stack([tf.identity(k) for k in self.flank_init_kernel]))
         
+
     def make_initial_distribution(self):
         """Constructs the initial state distribution per model which depends on the transition probabilities.
         Returns:
@@ -147,6 +149,7 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
         init_dists = tf.math.exp(log_init_dists)
         return init_dists
     
+
     def make_transition_kernel(self):
         """Concatenates the kernels of all transition types (e.g. match-to-match) in a consistent order.
         Returns:
@@ -158,6 +161,7 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
             concat_transition_kernels.append( concat_kernel )
         return concat_transition_kernels
               
+
     def make_probs(self):
         """Computes all transition probabilities from kernels. Applies a softmax to the kernel values of 
             all outgoing edges of a state.
@@ -191,10 +195,12 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
             model_prob_dicts.append(probs_dict)
         return model_prob_dicts
     
+
     def make_log_probs(self):
         probs = self.make_probs()
         log_probs = [{key : tf.math.log(p) for key,p in model_probs.items()} for model_probs in probs]
         return log_probs, probs
+    
     
     def make_implicit_log_probs(self):
         """Computes all logarithmic transition probabilities in the implicit model. 
@@ -252,6 +258,7 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
             implicit_log_probs.append(imp_probs)
         return implicit_log_probs, log_probs, probs
     
+
     def make_log_A_sparse(self, return_probs=False):
         """
         Returns:
@@ -280,6 +287,7 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
         else:
             return log_A_sparse
     
+
     def make_log_A(self):
         """
         Returns:
@@ -290,6 +298,7 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
         log_A = tf.sparse.to_dense(log_A, default_value=self.approx_log_zero)
         return log_A
     
+
     def make_A_sparse(self, return_probs=False):
         """
         Returns:
@@ -309,6 +318,7 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
         else:
             return A_sparse
         
+
     def make_A(self):
         """
         Returns:
@@ -319,6 +329,7 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
         A = tf.sparse.to_dense(A)
         return A
         
+
     def call(self, inputs):
         """ 
         Args: 
@@ -332,9 +343,11 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
         else:
             return tf.matmul(inputs, self.A)
     
+
     def get_prior_log_densities(self):
         return self.prior(self.make_probs(), self.make_flank_init_prob())
     
+
     def duplicate(self, model_indices=None, share_kernels=False):
         if model_indices is None:
             model_indices = range(len(self.transition_init))
@@ -381,6 +394,7 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
                                         for part_name, length in parts] )
         return kernel_part_list
         
+
     def _pad_and_stack(self, dicts):
         # takes a list of dictionaries with the same keys that map to arrays of different lengths
         # returns a dictionary where each key is mapped to a stacked array with zero padding
@@ -397,6 +411,7 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
                               for k,arrays in transposed.items()}
         return padded_and_stacked
     
+
     def get_config(self):
         config = super(ProfileHMMTransitioner, self).get_config()
         if self.built:
@@ -411,6 +426,7 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
         })
         return config
     
+
     @classmethod
     def from_config(cls, config):
         transition_init = [{} for i in range(config.pop("num_models"))]
@@ -426,6 +442,7 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
         emitter.set_lengths(lengths)
         return emitter
     
+
     def __repr__(self):
         return f"ProfileHMMTransitioner(\n transition_init={config.as_str(self.transition_init[0], 2, '    ', ' , ')},\n flank_init={self.flank_init[0]},\n prior={self.prior},\n frozen_kernels={self.frozen_kernels})"
     

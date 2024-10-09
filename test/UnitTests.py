@@ -466,7 +466,7 @@ class TestMSAHMM(unittest.TestCase):
             
     def test_cell(self):
         length = 4
-        emission_init = tf.constant_initializer(string_to_one_hot("ACGT").numpy() * 10)
+        emission_init = Initializers.ConstantInitializer(string_to_one_hot("ACGT").numpy() * 10)
         transition_init = Initializers.make_default_transition_init(MM = 2, 
                                                                     MI = 0,
                                                                     MD = 0,
@@ -537,8 +537,8 @@ class TestMSAHMM(unittest.TestCase):
             
     def test_viterbi(self):
         length = [5, 3]
-        emission_init = [tf.constant_initializer(string_to_one_hot("FELIK").numpy()*20),
-                         tf.constant_initializer(string_to_one_hot("AHC").numpy()*20)]
+        emission_init = [Initializers.ConstantInitializer(string_to_one_hot("FELIK").numpy()*20),
+                         Initializers.ConstantInitializer(string_to_one_hot("AHC").numpy()*20)]
         transition_init = [Initializers.make_default_transition_init(MM = 0, 
                                                                     MI = 0,
                                                                     MD = 0,
@@ -867,8 +867,8 @@ class TestMSAHMM(unittest.TestCase):
 
     def test_parallel_viterbi(self):
         length = [5, 3]
-        emission_init = [tf.constant_initializer(string_to_one_hot("FELIK").numpy()*20),
-                         tf.constant_initializer(string_to_one_hot("AHC").numpy()*20)]
+        emission_init = [Initializers.ConstantInitializer(string_to_one_hot("FELIK").numpy()*20),
+                         Initializers.ConstantInitializer(string_to_one_hot("AHC").numpy()*20)]
         transition_init = [Initializers.make_default_transition_init(MM = 0, 
                                                                     MI = 0,
                                                                     MD = 0,
@@ -1015,7 +1015,7 @@ class TestAncProbs(unittest.TestCase):
     
     def __init__(self, *args, **kwargs):
         super(TestAncProbs, self).__init__(*args, **kwargs)
-        self.paml_all = [AncProbsLayer.LG_paml] + AncProbsLayer.LG4X_paml
+        self.paml_all = [Utility.LG_paml] + Utility.LG4X_paml
         self.A = SequenceDataset.alphabet[:20]
     
     def assert_vec(self, x, y, almost=False):
@@ -1076,7 +1076,7 @@ class TestAncProbs(unittest.TestCase):
                 self.assert_rate_matrix(rate,equi)
                 
     def test_paml_parsing(self):
-        R1, p1 = AncProbsLayer.parse_paml(AncProbsLayer.LG4X_paml[0], self.A)
+        R1, p1 = Utility.parse_paml(Utility.LG4X_paml[0], self.A)
         true_p1_str = """0.147383 0.017579 0.058208 0.017707 0.026331 
                         0.041582 0.017494 0.027859 0.011849 0.076971 
                         0.147823 0.019535 0.037132 0.029940 0.008059 
@@ -1091,12 +1091,12 @@ class TestAncProbs(unittest.TestCase):
         self.assert_vec(R1[1,:1], self.parse_a(true_X_row_1))
         self.assert_vec(R1[4,:4], self.parse_a(true_X_row_4))
         self.assert_vec(R1[19,:19], self.parse_a(true_X_row_19))
-        for R,p in map(AncProbsLayer.parse_paml, self.paml_all, [self.A]*len(self.paml_all)):
+        for R,p in map(Utility.parse_paml, self.paml_all, [self.A]*len(self.paml_all)):
             self.assert_equilibrium(p)
             self.assert_symmetric(R)
             
     def test_rate_matrices(self):
-        for R,p in map(AncProbsLayer.parse_paml, self.paml_all, [self.A]*len(self.paml_all)):
+        for R,p in map(Utility.parse_paml, self.paml_all, [self.A]*len(self.paml_all)):
             Q = AncProbsLayer.make_rate_matrix(R,p)
             self.assert_rate_matrix(Q, p)
             
@@ -1120,9 +1120,9 @@ class TestAncProbs(unittest.TestCase):
                         R_stack = np.concatenate([inv_sp_R]*num_matrices, axis=1)
                         p_stack = np.concatenate([log_p]*num_matrices, axis=1)
                         config["encoder_initializer"] = (config["encoder_initializer"][:1] + 
-                                                       [tf.constant_initializer(R_stack),
-                                                        tf.constant_initializer(p_stack)] )
-                    config["encoder_initializer"] = ([tf.constant_initializer(rate_init)] + 
+                                                       [Initializers.ConstantInitializer(R_stack),
+                                                        Initializers.ConstantInitializer(p_stack)] )
+                    config["encoder_initializer"] = ([Initializers.ConstantInitializer(rate_init)] + 
                                                      config["encoder_initializer"][1:])
                     case["config"] = config 
                     if rate_init == -100.:
@@ -1181,8 +1181,8 @@ class TestAncProbs(unittest.TestCase):
             for case in self.get_test_configs(sequences):
                 # the default emitter initializers expect 25 as last dimension which is not compatible with num_matrix=3
                 config = dict(case["config"])
-                config["emitter"] = Emitter.ProfileHMMEmitter(emission_init = tf.constant_initializer(0.), 
-                                                                insertion_init = tf.constant_initializer(0.))
+                config["emitter"] = Emitter.ProfileHMMEmitter(emission_init = Initializers.ConstantInitializer(0.), 
+                                                                insertion_init = Initializers.ConstantInitializer(0.))
                 model = Training.default_model_generator(num_seq=n, 
                                                             effective_num_seq=n, 
                                                             model_lengths=[model_length], 
@@ -1219,7 +1219,7 @@ class TestAncProbs(unittest.TestCase):
         shape = (config["num_models"], n, sequences.shape[2], config["num_rate_matrices"], len(SequenceDataset.alphabet))
         anc_prob_seqs = np.reshape(anc_prob_seqs, shape)
         anc_prob_seqs = tf.cast(anc_prob_seqs, B.dtype)
-        anc_prob_B = anc_probs_layer(B[tf.newaxis,tf.newaxis,:,:20], [[0]])
+        anc_prob_B = anc_probs_layer(B[tf.newaxis,tf.newaxis,:,:20], rate_indices=[[0]])
         anc_prob_B = tf.squeeze(anc_prob_B)
         prob1 = tf.linalg.matvec(B, anc_prob_seqs)
         oh_seqs = tf.one_hot(sequences, 20, dtype=anc_prob_B.dtype)
@@ -1279,13 +1279,13 @@ class TestModelSurgery(unittest.TestCase):
                                                                             RF = 0, 
                                                                             T = 0, 
                                                                            scale = 0)
-        transition_init["match_to_match"] = tf.constant_initializer(0)
-        transition_init["match_to_insert"] = tf.constant_initializer(0)
-        transition_init["match_to_delete"] = tf.constant_initializer(-1)
-        transition_init["begin_to_match"] = tf.constant_initializer([1,0,0,0,0])
-        transition_init["match_to_end"] = tf.constant_initializer(0)
-        config["emitter"] = Emitter.ProfileHMMEmitter(emission_init = tf.constant_initializer(emission_init), 
-                                                           insertion_init = tf.constant_initializer(insert_init))
+        transition_init["match_to_match"] = Initializers.ConstantInitializer(0)
+        transition_init["match_to_insert"] = Initializers.ConstantInitializer(0)
+        transition_init["match_to_delete"] = Initializers.ConstantInitializer(-1)
+        transition_init["begin_to_match"] = Initializers.ConstantInitializer([1,0,0,0,0])
+        transition_init["match_to_end"] = Initializers.ConstantInitializer(0)
+        config["emitter"] = Emitter.ProfileHMMEmitter(emission_init = Initializers.ConstantInitializer(emission_init), 
+                                                           insertion_init = Initializers.ConstantInitializer(insert_init))
         config["transitioner"] = Transitioner.ProfileHMMTransitioner(transition_init = transition_init)
         model = Training.default_model_generator(num_seq=10, 
                                                       effective_num_seq=10, 
@@ -1369,28 +1369,28 @@ class TestModelSurgery(unittest.TestCase):
             pos_expand = np.array([2,3,5])
             expansion_lens = np.array([9,1,3])
             pos_discard = np.array([4])
-            emission_init2 = [tf.constant_initializer(string_to_one_hot("A").numpy()*10)]
-            transition_init2 = {"begin_to_match" : tf.constant_initializer(77),
-                                "match_to_end" : tf.constant_initializer(77),
-                                "match_to_match" : tf.constant_initializer(77),
-                                "match_to_insert" : tf.constant_initializer(77),
-                                "insert_to_match" : tf.constant_initializer(77),
-                                "insert_to_insert" : tf.constant_initializer(77),
-                                "match_to_delete" : tf.constant_initializer(77),
-                                "delete_to_match" : tf.constant_initializer(77),
-                                "delete_to_delete" : tf.constant_initializer(77),
-                                "left_flank_loop" : tf.constant_initializer(77),
-                                "left_flank_exit" : tf.constant_initializer(77),
-                                "right_flank_loop" : tf.constant_initializer(77),
-                                "right_flank_exit" : tf.constant_initializer(77),
-                                "unannotated_segment_loop" : tf.constant_initializer(77),
-                                "unannotated_segment_exit" : tf.constant_initializer(77),
-                                "end_to_unannotated_segment" : tf.constant_initializer(77),
-                                "end_to_right_flank" : tf.constant_initializer(77),
-                                "end_to_terminal" : tf.constant_initializer(77) }
+            emission_init2 = [Initializers.ConstantInitializer(string_to_one_hot("A").numpy()*10)]
+            transition_init2 = {"begin_to_match" : Initializers.ConstantInitializer(77),
+                                "match_to_end" : Initializers.ConstantInitializer(77),
+                                "match_to_match" : Initializers.ConstantInitializer(77),
+                                "match_to_insert" : Initializers.ConstantInitializer(77),
+                                "insert_to_match" : Initializers.ConstantInitializer(77),
+                                "insert_to_insert" : Initializers.ConstantInitializer(77),
+                                "match_to_delete" : Initializers.ConstantInitializer(77),
+                                "delete_to_match" : Initializers.ConstantInitializer(77),
+                                "delete_to_delete" : Initializers.ConstantInitializer(77),
+                                "left_flank_loop" : Initializers.ConstantInitializer(77),
+                                "left_flank_exit" : Initializers.ConstantInitializer(77),
+                                "right_flank_loop" : Initializers.ConstantInitializer(77),
+                                "right_flank_exit" : Initializers.ConstantInitializer(77),
+                                "unannotated_segment_loop" : Initializers.ConstantInitializer(77),
+                                "unannotated_segment_exit" : Initializers.ConstantInitializer(77),
+                                "end_to_unannotated_segment" : Initializers.ConstantInitializer(77),
+                                "end_to_right_flank" : Initializers.ConstantInitializer(77),
+                                "end_to_terminal" : Initializers.ConstantInitializer(77) }
             transitions_new, emissions_new,_ = Align.update_kernels(am, 0,
                                                                 pos_expand, expansion_lens, pos_discard,
-                                                                emission_init2, transition_init2, tf.constant_initializer(0.0))
+                                                                emission_init2, transition_init2, Initializers.ConstantInitializer(0.0))
         ref_consensus = "FE"+"A"*9+"LAI"+"A"*3
         self.assertEqual(emissions_new[0].shape[0], len(ref_consensus))
         self.assert_vec(emissions_new[0], string_to_one_hot(ref_consensus).numpy()*10)
@@ -1541,8 +1541,8 @@ class TestAlignment(unittest.TestCase):
         config = Configuration.make_default(1)
         emission_init = string_to_one_hot("FELIK").numpy()*20
         insert_init= np.squeeze(string_to_one_hot("A") + string_to_one_hot("H") + string_to_one_hot("C"))*20
-        config["emitter"] = Emitter.ProfileHMMEmitter(emission_init = tf.constant_initializer(emission_init), 
-                                                           insertion_init = tf.constant_initializer(insert_init))
+        config["emitter"] = Emitter.ProfileHMMEmitter(emission_init = Initializers.ConstantInitializer(emission_init), 
+                                                           insertion_init = Initializers.ConstantInitializer(insert_init))
         config["transitioner"] = Transitioner.ProfileHMMTransitioner(transition_init =(
                             Initializers.make_default_transition_init(MM = 0, 
                                                                             MI = 0,
@@ -1694,8 +1694,8 @@ class DirichletTest(unittest.TestCase):
             alpha = np.expand_dims(alpha, 0)
             log_pdf = DirichletMixture.dirichlet_log_pdf(probs, alpha, q)
             np.testing.assert_almost_equal(log_pdf, e, decimal=3)
-            alpha_init = tf.constant_initializer(AncProbsLayer.inverse_softplus(alpha).numpy())
-            mix_init = tf.constant_initializer(np.log(q))
+            alpha_init = Initializers.ConstantInitializer(AncProbsLayer.inverse_softplus(alpha).numpy())
+            mix_init = Initializers.ConstantInitializer(np.log(q))
             mean_log_pdf = DirichletMixture.DirichletMixtureLayer(1,3,
                                                             alpha_init=alpha_init,
                                                             mix_init=mix_init)(probs)
@@ -1710,8 +1710,8 @@ class DirichletTest(unittest.TestCase):
         q = np.array([0.25, 0.25, 0.25, 0.25])
         log_pdf = DirichletMixture.dirichlet_log_pdf(probs, alpha, q)
         np.testing.assert_almost_equal(log_pdf, expected, decimal=3)
-        alpha_init = tf.constant_initializer(AncProbsLayer.inverse_softplus(alpha).numpy())
-        mix_init = tf.constant_initializer(np.log(q))
+        alpha_init = Initializers.ConstantInitializer(AncProbsLayer.inverse_softplus(alpha).numpy())
+        mix_init = Initializers.ConstantInitializer(np.log(q))
         mean_log_pdf = DirichletMixture.DirichletMixtureLayer(4, 3,
                                                         alpha_init=alpha_init,
                                                         mix_init=mix_init)(probs)
@@ -1721,7 +1721,7 @@ class DirichletTest(unittest.TestCase):
         q2 = np.array([0.7, 0.02, 0.08, 0.2])
         log_pdf2 = DirichletMixture.dirichlet_log_pdf(probs, alpha, q2)
         np.testing.assert_almost_equal(log_pdf2, expected2, decimal=3)
-        mix_init2 = tf.constant_initializer(np.log(q2))
+        mix_init2 = Initializers.ConstantInitializer(np.log(q2))
         mean_log_pdf2 = DirichletMixture.DirichletMixtureLayer(4, 3,
                                                         alpha_init=alpha_init,
                                                         mix_init=mix_init2)(probs)
@@ -1733,7 +1733,7 @@ class TestPriors(unittest.TestCase):
         
     def test_amino_acid_match_prior(self):
         prior = Priors.AminoAcidPrior(dtype=tf.float64)
-        prior.load(tf.float64)
+        prior.build([])
         model_lengths = [2,5,3]
         num_models = len(model_lengths)
         max_len = max(model_lengths)
@@ -1771,10 +1771,10 @@ class TestModelToFile(unittest.TestCase):
                                                                                      RF=-2, 
                                                                                      T=-10)
         custom_flank_init = Initializers.ConstantInitializer(2)
-        em_init_np = np.random.rand(1, model_len, len(SequenceDataset.alphabet)-1)
-        em_init_np[:,2:6] = string_to_one_hot("ACGT").numpy()*20.
+        em_init_np = np.random.rand(model_len, len(SequenceDataset.alphabet)-1)
+        em_init_np[2:6] = string_to_one_hot("ACGT").numpy()*20.
         custom_emission_init = Initializers.ConstantInitializer(em_init_np)
-        custom_insertion_init = Initializers.ConstantInitializer(np.random.rand(1, len(SequenceDataset.alphabet)-1))
+        custom_insertion_init = Initializers.ConstantInitializer(np.random.rand(len(SequenceDataset.alphabet)-1))
         encoder_initializer = Initializers.make_default_anc_probs_init(1)
         encoder_initializer[0] = Initializers.ConstantInitializer(np.random.rand(1, 2))
         config = Configuration.make_default(1)
@@ -1785,14 +1785,22 @@ class TestModelToFile(unittest.TestCase):
         msa_hmm_layer = Training.make_msa_hmm_layer(2, [model_len], config)
         model = Training.generic_model_generator([anc_probs_layer], msa_hmm_layer)
         model.compile() #prevents warnings
+
+        def easy_get_layer(model, name):
+            for layer in model.layers:
+                if name in layer.name:
+                    return layer
+            return None
         
         #copy current parameter state
-        emission_kernel = model.layers[-3].cell.emitter[0].emission_kernel[0].numpy()
-        insertion_kernel = model.layers[-3].cell.emitter[0].insertion_kernel[0].numpy()
+        msa_hmm_layer = easy_get_layer(model, "msa_hmm_layer")
+        anc_probs_layer = easy_get_layer(model, "anc_probs_layer")
+        emission_kernel = msa_hmm_layer.cell.emitter[0].emission_kernel[0].numpy()
+        insertion_kernel = msa_hmm_layer.cell.emitter[0].insertion_kernel[0].numpy()
         transition_kernel = {key : kernel.numpy() 
-                                for key, kernel in model.layers[-3].cell.transitioner.transition_kernel[0].items()}
-        flank_init_kernel = model.layers[-3].cell.transitioner.flank_init_kernel[0].numpy()
-        tau_kernel = model.layers[-4].tau_kernel.numpy()
+                                for key, kernel in msa_hmm_layer.cell.transitioner.transition_kernel[0].items()}
+        flank_init_kernel = msa_hmm_layer.cell.transitioner.flank_init_kernel[0].numpy()
+        tau_kernel = anc_probs_layer.tau_kernel.numpy()
         seq = np.random.randint(25, size=(1,1,17))
         seq[:,:,-1] = 25
         loglik = model([seq, np.array([[0]])]).numpy()
@@ -1826,13 +1834,13 @@ class TestModelToFile(unittest.TestCase):
             np.testing.assert_equal(insertion_kernel, deserialized_insertion_kernel)
             
             for key, k in transition_kernel.items():
-                deserialized_k = model.layers[-3].cell.transitioner.transition_kernel[0][key].numpy()
+                deserialized_k = msa_hmm_layer.cell.transitioner.transition_kernel[0][key].numpy()
                 np.testing.assert_equal(k, deserialized_k)
                 
             deserialized_flank_init_kernel = deserialized_am.msa_hmm_layer.cell.transitioner.flank_init_kernel[0].numpy()
             np.testing.assert_equal(flank_init_kernel, deserialized_flank_init_kernel)
             
-            deserialized_tau_kernel = deserialized_am.model.layers[-4].tau_kernel.numpy()
+            deserialized_tau_kernel = easy_get_layer(deserialized_am.model, "anc_probs_layer").tau_kernel.numpy()
             np.testing.assert_equal(tau_kernel, deserialized_tau_kernel)
             
             #test if likelihood is the same as before
@@ -1957,8 +1965,8 @@ class TestLanguageModelExtension(unittest.TestCase):
         # test the regularizer
         reg_shared = Priors.L2Regularizer(1, 1, True)
         reg_non_shared = Priors.L2Regularizer(1, 1, False)
-        reg_shared.load("float32")
-        reg_non_shared.load("float32")
+        reg_shared.build([])
+        reg_non_shared.build([])
         #just test the embedding part
         lengths = [5, 6]
         B = np.zeros((2, 20, 101), dtype=np.float32)

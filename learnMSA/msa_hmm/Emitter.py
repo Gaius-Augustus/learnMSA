@@ -27,14 +27,14 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
     def __init__(self, 
                  emission_init = initializers.make_default_emission_init(),
                  insertion_init = initializers.make_default_insertion_init(),
-                 prior = priors.AminoAcidPrior(),
+                 prior = None,
                  frozen_insertions = True,
                  **kwargs
                  ):
         super(ProfileHMMEmitter, self).__init__(**kwargs)
         self.emission_init = [emission_init] if not hasattr(emission_init, '__iter__') else emission_init 
         self.insertion_init = [insertion_init] if not hasattr(insertion_init, '__iter__') else insertion_init
-        self.prior = prior
+        self.prior = priors.AminoAcidPrior(dtype=self.dtype) if prior is None else prior
         self.frozen_insertions = frozen_insertions
 
 
@@ -58,17 +58,16 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
             return
         s = input_shape[-1]-1 # substract one for terminal symbol
         self.emission_kernel = [self.add_weight(
-                                        shape=[length, s], 
+                                        shape=(length, s), 
                                         initializer=init, 
                                         name="emission_kernel_"+str(i)) 
                                     for i,(length, init) in enumerate(zip(self.lengths, self.emission_init))]
         self.insertion_kernel = [ self.add_weight(
-                                shape=[s],
+                                shape=(s,),
                                 initializer=init,
                                 name="insertion_kernel_"+str(i),
                                 trainable=not self.frozen_insertions) 
                                     for i,init in enumerate(self.insertion_init)]
-        self.prior.load(self.dtype)
         self.built = True
         
 
@@ -94,9 +93,9 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
 
     def make_emission_matrix_from_kernels(self, em, ins, length):
         s = em.shape[-1]
-        emissions = tf.concat([tf.expand_dims(ins, 0), 
-                               em, 
-                               tf.stack([tf.identity(ins)]*(length+1))] , axis=0)
+        i1 = tf.expand_dims(ins, 0)
+        i2 = tf.stack([tf.identity(ins)]*(length+1))
+        emissions = tf.concat([i1, em, i2] , axis=0)
         emissions = tf.nn.softmax(emissions)
         emissions = tf.concat([emissions, tf.zeros_like(emissions[:,:1])], axis=-1) 
         end_state_emission = tf.one_hot([s], s+1, dtype=em.dtype) 
@@ -148,7 +147,7 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
     
 
     def get_prior_log_density(self):
-        return self.prior(self.make_B(), self.lengths)
+        return self.prior(self.make_B(), lengths=self.lengths)
     
 
     def duplicate(self, model_indices=None, share_kernels=False):

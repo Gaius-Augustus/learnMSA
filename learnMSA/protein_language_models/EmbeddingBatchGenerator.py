@@ -149,6 +149,6 @@ def make_generic_embedding_model_generator(dim):
         #transpose back to make model.predict work correctly
         loglik = tf.transpose(loglik)
         model = tf.keras.Model(inputs=[sequences, indices, embeddings], 
-                            outputs=[tf.keras.layers.Lambda(lambda x: x, name="loglik")(loglik)])
+                            outputs=[tf.identity(loglik, name="loglik")])
         return model
     return partial(default_model_generator, generic_gen=generic_embedding_model_generator)

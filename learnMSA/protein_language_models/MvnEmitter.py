@@ -14,13 +14,13 @@ from learnMSA.msa_hmm.Utility import DefaultDiagBijector
 
 
 
-def make_joint_prior(scoring_model_config : Common.ScoringModelConfig, num_prior_components):
-    prior_list = [priors.AminoAcidPrior(),
-                MvnPrior(scoring_model_config, num_prior_components),
-                priors.NullPrior()]
+def make_joint_prior(scoring_model_config : Common.ScoringModelConfig, num_prior_components, dtype):
+    prior_list = [priors.AminoAcidPrior(dtype=dtype),
+                MvnPrior(scoring_model_config, num_prior_components, dtype=dtype),
+                priors.NullPrior(dtype=dtype)]
     num_aa = len(SequenceDataset.alphabet)-1
     kernel_split = [num_aa, num_aa + scoring_model_config.dim]
-    return priors.JointEmissionPrior(prior_list, kernel_split)
+    return priors.JointEmissionPrior(prior_list, kernel_split, dtype=dtype)
 
 
 #have a single emitter that handles both AA inputs and embeddings
@@ -52,7 +52,7 @@ class MvnEmitter(ProfileHMMEmitter):
             prior = kwargs["prior"]
             del kwargs["prior"]
         else:
-            prior = make_joint_prior(scoring_model_config, num_prior_components)
+            prior = make_joint_prior(scoring_model_config, num_prior_components, self.dtype)
                                                              
         super(MvnEmitter, self).__init__(emission_init, insertion_init, prior, **kwargs)
 

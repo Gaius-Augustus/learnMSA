@@ -12,6 +12,7 @@ import learnMSA.msa_hmm.Transitioner as trans
 import learnMSA.msa_hmm.Emitter as emit
 import json
 import shutil
+from packaging import version
 from pathlib import Path
 
         
@@ -459,7 +460,10 @@ class AlignmentModel():
         #serialize indices
         np.savetxt(filepath+"/indices", self.indices, fmt='%i')
         #save the model
-        self.model.save(filepath+"/model", save_traces=False) 
+        if version.parse(tf.__version__) < version.parse("2.12.0"):
+            self.model.save(filepath+".keras", save_traces=False) 
+        else:
+            self.model.save(filepath+".keras") 
         if pack:
             shutil.make_archive(filepath, "zip", filepath)
             try:
@@ -485,7 +489,7 @@ class AlignmentModel():
         #deserialize indices
         indices = np.loadtxt(filepath+"/indices", dtype=int)
         #load the model
-        model = tf.keras.models.load_model(filepath+"/model", 
+        model = tf.keras.models.load_model(filepath+".keras", 
                                            custom_objects={"AncProbsLayer": anc_probs.AncProbsLayer, 
                                                            "MsaHmmLayer": msa_hmm_layer.MsaHmmLayer,
                                                            "MsaHmmCell": msa_hmm_cell.MsaHmmCell, 
@@ -720,7 +724,7 @@ def find_faulty_sequences(state_seqs_max_lik, model_length, seq_lens):
     prev_C_state = np.roll(C_state, 1, axis=2)
     prev_C_state[:,:,0] = False
     C_state_starts = C_state & ~prev_C_state
-    previous_state = np.roll(state_seqs_max_lik, 1, axis=2)
+    previous_state = np.roll(state_seqs_max_lik, 1, axis=2).astype(np.int32)
     previous_state[:,:,0] = -1
     previous_is_match = (previous_state > 0) & (previous_state < model_length+1)
     #there are enough match states to align without repeat
