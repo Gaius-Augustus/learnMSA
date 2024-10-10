@@ -23,6 +23,7 @@ class HmmCell(tf.keras.layers.Layer):
                  dim,
                  emitter,
                  transitioner,
+                 use_step_counter=False,
                  **kwargs
                 ):
         super(HmmCell, self).__init__(**kwargs)
@@ -35,6 +36,7 @@ class HmmCell(tf.keras.layers.Layer):
         self.state_size = (tf.TensorShape([self.max_num_states]), tf.TensorShape([1]))
         self.epsilon = tf.constant(1e-16, self.dtype)
         self.reverse = False
+        self.use_step_counter = use_step_counter
             
             
     def build(self, input_shape):
@@ -43,8 +45,9 @@ class HmmCell(tf.keras.layers.Layer):
         for em in self.emitter:
             em.build((None, input_shape[-2], self.dim))
         self.transitioner.build((None, input_shape[-2], self.dim))
-        if not self.reverse:
-            self.step_counter = tf.Variable(-1, trainable=False, name="step_counter", dtype=tf.int32)
+        if not self.reverse and self.use_step_counter:
+            self.step_counter = self.add_weight(shape=(), initializer=tf.constant_initializer(-1), 
+                                                trainable=False, name="step_counter", dtype=tf.int32)
         self.built = True
         self.recurrent_init()
 
@@ -56,7 +59,7 @@ class HmmCell(tf.keras.layers.Layer):
         self.log_A_dense = self.transitioner.make_log_A()
         self.log_A_dense_t = tf.transpose(self.log_A_dense, [0,2,1])
         self.init_dist = self.make_initial_distribution()
-        if not self.reverse:
+        if not self.reverse and self.use_step_counter:
             self.step_counter.assign(-1)
     
     
@@ -114,7 +117,7 @@ class HmmCell(tf.keras.layers.Layer):
         else:
             output = tf.math.log(scaled_forward) 
             output = tf.concat([output, loglik], axis=-1)
-        if not self.reverse:
+        if not self.reverse and self.use_step_counter:
             self.step_counter.assign_add(1)
         return (output, new_state)
 
@@ -276,10 +279,9 @@ class MsaHmmCell(HmmCell):
         
     def get_config(self):
         config = super(MsaHmmCell, self).get_config()
-        config["length"] = self.length
+        config["length"] = self.length.tolist() if isinstance(self.length, np.ndarray) else self.length
         del config["num_states"]
         return config
-
 
 
 tf.keras.utils.get_custom_objects()["MsaHmmCell"] = MsaHmmCell

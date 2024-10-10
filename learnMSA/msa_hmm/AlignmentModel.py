@@ -383,7 +383,7 @@ class AlignmentModel():
                                 shuffle=False)
         loglik = np.zeros((self.msa_hmm_layer.cell.num_models))
         for x, _ in ds:
-            loglik += np.sum(self.model(x), axis=0)
+            loglik += np.sum(self.model(x)[1], axis=0)
         loglik /= ll_subset.size
         return loglik
     
@@ -425,7 +425,7 @@ class AlignmentModel():
         #TODO this does not work with self.model which expects indices rather than distributions
         #this is a workaround, but will break with a user defined encoder model
         #we skip the anc probs for simplicity as this would require fitting evolutionary times
-        consensus_logliks = self.msa_hmm_layer(match_seqs)
+        consensus_logliks = self.msa_hmm_layer(match_seqs)[1]
         
         consensus_logliks *= 1-tf.eye(self.num_models)
         # Axis 1 means we reduce over the batch dimension rather than the model dimension,

@@ -145,10 +145,10 @@ def make_generic_embedding_model_generator(dim):
         for layer in encoder_layers:
             forward_seq = layer(forward_seq, transposed_indices)
         concat_seq = tf.concat([forward_seq, transposed_embeddings], -1)
-        loglik = msa_hmm_layer(concat_seq, transposed_indices)
+        loss, loglik = msa_hmm_layer(concat_seq, transposed_indices)
         #transpose back to make model.predict work correctly
         loglik = tf.transpose(loglik)
         model = tf.keras.Model(inputs=[sequences, indices, embeddings], 
-                            outputs=[tf.identity(loglik, name="loglik")])
+                            outputs=[loss, loglik])
         return model
     return partial(default_model_generator, generic_gen=generic_embedding_model_generator)

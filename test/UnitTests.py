@@ -173,7 +173,8 @@ class TestMsaHmmCell(unittest.TestCase):
         t = [self.transition_init[i] for i in models]
         f = [Initializers.make_default_flank_init() for _ in models]
         transitioner = Transitioner.ProfileHMMTransitioner(transition_init = t, flank_init = f)
-        hmm_cell = MsaHmmCell.MsaHmmCell(length, dim=3, emitter=emitter, transitioner=transitioner)
+        hmm_cell = MsaHmmCell.MsaHmmCell(length, dim=3, emitter=emitter, 
+                                        transitioner=transitioner, use_step_counter=True)
         hmm_cell.build((None,None,3))
         return hmm_cell, length
    
@@ -257,7 +258,7 @@ class TestMsaHmmCell(unittest.TestCase):
         #we have 2 identical inputs for 2 models respectively
         #the batch size is still 1
         seq = np.repeat(seq[np.newaxis], len(models), axis=0)
-        loglik = hmm_layer(seq)
+        loglik = hmm_layer(seq)[1]
         log_forward,_ = hmm_layer.forward_recursion(seq)
         self.assertEqual(hmm_layer.cell.step_counter.numpy(), 4)
         log_backward = hmm_layer.backward_recursion(seq)
@@ -276,7 +277,7 @@ class TestMsaHmmCell(unittest.TestCase):
         hmm_cell, length = self.make_test_cell(models)
         hmm_layer = MsaHmmLayer.MsaHmmLayer(hmm_cell, use_prior=False)
         sequences = tf.keras.Input(shape=(None,None,3), name="sequences", dtype=tf.float32)
-        loglik = hmm_layer(sequences)
+        _, loglik = hmm_layer(sequences)
         hmm_tf_model = tf.keras.Model(inputs=[sequences], outputs=[loglik])
         hmm_tf_model.compile()
         seq = tf.one_hot([[0,1,0,2]], 3)
@@ -1803,7 +1804,7 @@ class TestModelToFile(unittest.TestCase):
         tau_kernel = anc_probs_layer.tau_kernel.numpy()
         seq = np.random.randint(25, size=(1,1,17))
         seq[:,:,-1] = 25
-        loglik = model([seq, np.array([[0]])]).numpy()
+        loglik = model([seq, np.array([[0]])])[1].numpy()
         
         #make alignment and save
         with SequenceDataset("test/data/simple.fa") as data:
@@ -1844,7 +1845,7 @@ class TestModelToFile(unittest.TestCase):
             np.testing.assert_equal(tau_kernel, deserialized_tau_kernel)
             
             #test if likelihood is the same as before
-            loglik_in_deserialized_model = deserialized_am.model([seq, np.array([[0]])]).numpy()
+            loglik_in_deserialized_model = deserialized_am.model([seq, np.array([[0]])])[1].numpy()
             np.testing.assert_equal(loglik, loglik_in_deserialized_model)
             
             #test MSA as string

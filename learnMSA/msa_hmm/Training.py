@@ -16,7 +16,7 @@ class PermuteSeqs(tf.keras.layers.Layer):
         self.perm = perm
 
     def call(self, sequences):
-        return tf.transpose(sequences, self.perm)
+        return tf.transpose(sequences, self.perm, name="loglik")
 
     def get_config(self):
         return {"perm": self.perm}
@@ -41,11 +41,11 @@ def generic_model_generator(encoder_layers,
     forward_seq = transposed_sequences
     for layer in encoder_layers:
         forward_seq = layer(forward_seq, transposed_indices)
-    loglik = msa_hmm_layer(forward_seq, transposed_indices)
+    map_loss, loglik = msa_hmm_layer(forward_seq, transposed_indices)
     #transpose back to make model.predict work correctly
     loglik = PermuteSeqs([1,0], name="loglik")(loglik)
-    model = tf.keras.Model(inputs=[sequences, indices], 
-                        outputs=[loglik])
+    model = tf.keras.Model(inputs=(sequences, indices), 
+                        outputs=(map_loss, loglik))
     return model
 
 
@@ -184,7 +184,7 @@ class DefaultBatchGenerator():
     
 # batch_generator is a callable object that maps a vector of sequence indices to
 # inputs compatible with the model
-def make_dataset(indices, batch_generator, batch_size=512, shuffle=True, bucket_by_seq_length=False, model_lengths=[0]):   
+def make_dataset(indices, batch_generator, batch_size=512, shuffle=True, bucket_by_seq_length=False, model_lengths=[0]): 
     shuffle = shuffle and not bucket_by_seq_length
     batch_generator.shuffle = shuffle
     ds = tf.data.Dataset.from_tensor_slices(indices)
@@ -211,8 +211,12 @@ def make_dataset(indices, batch_generator, batch_size=512, shuffle=True, bucket_
             ds = ds.shuffle(indices.size, reshuffle_each_iteration=True)
             ds = ds.repeat()
         ds = ds.batch(batch_size)
-
-        batch_func = lambda i: tf.numpy_function(func=batch_generator, inp=[i], Tout=batch_generator.get_out_types())
+        def batch_func(i):
+            batch, ind = tf.numpy_function(batch_generator, [i], batch_generator.get_out_types())
+            #explicitly set output shapes or tf 2.17 will complain about unknown shapes
+            batch.set_shape(tf.TensorShape([None, batch_generator.num_models, None]))
+            ind.set_shape(tf.TensorShape([None, batch_generator.num_models]))
+            return batch, ind
 
     ds = ds.map(batch_func,
                 # no parallel processing if using an indexed dataset
@@ -267,12 +271,12 @@ def fit_model(model_generator,
                                 data=data,
                                 sequence_weights=sequence_weights,
                                 clusters=clusters)
-        model.compile(optimizer=optimizer)
+        model.compile(optimizer=optimizer, loss=[(lambda _,loss: loss), None])
         return model
     num_gpu = len([x.name for x in tf.config.list_logical_devices() if x.device_type == 'GPU']) 
     if verbose:
         print("Using", num_gpu, "GPUs.")
-    if num_gpu > 1:       
+    if num_gpu > 1:   
         if config["use_language_model"]:
             print("Found multiple GPUs, but using a language model is currently not supported in multi-GPU mode. Using single GPU.")
             model = make_and_compile()
@@ -285,7 +289,7 @@ def fit_model(model_generator,
             with mirrored_strategy.scope():
                 model = make_and_compile()
     else:
-         model = make_and_compile()
+        model = make_and_compile()
     
     steps = max(10, int(100*np.sqrt(indices.shape[0])/batch_size))
     dataset = make_dataset(indices, 
@@ -315,7 +319,6 @@ def fit_model(model_generator,
         #         msa_hmm_layer.cell.emitter[0].step_counter.assign_add(1.)
         #         msa_hmm_layer.reverse_cell.emitter[0].step_counter.assign_add(1.)
         # callbacks.append(CustomCallback())
-
     history = model.fit(dataset, 
                         epochs=epochs,
                         steps_per_epoch=steps,

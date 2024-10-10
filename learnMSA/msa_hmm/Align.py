@@ -644,7 +644,7 @@ def compute_sequence_weights(fasta_filename, directory, cluster_seq_id=0.5, retu
                     "--kmer-per-seq", "100",
                     "--min-seq-id", str(cluster_seq_id),
                     "--remove-tmp-files", "true",
-                    "-v", "0"]
+                    "-v", "1"]
         result = subprocess.run(command, check=True)
         clustering = pd.read_csv(cluster_files + "_cluster.tsv", sep="\t", names=["representative", "sequence"])
         cluster_counts = clustering.groupby("representative").size().to_frame("cluster_size")

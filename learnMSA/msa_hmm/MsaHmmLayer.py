@@ -155,15 +155,9 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         if self.use_prior:
             prior = self.compute_prior()
             MAP = loglik_mean + prior
-            self.add_loss(tf.squeeze(-MAP))
+            return tf.squeeze(-MAP), loglik
         else:
-            self.add_loss(tf.squeeze(-loglik_mean))
-        #tensorflow output summary statistics-
-        if training:
-            self.add_metric(loglik_mean, "loglik")
-            if self.use_prior:
-                self.add_metric(prior, "logprior")
-        return loglik
+            return tf.squeeze(-loglik_mean), loglik
         
         
     def get_config(self):
@@ -371,7 +365,8 @@ def _state_posterior_log_probs_impl(inputs, cell, reverse_cell, bidirectional_rn
     else:
         #posterior as defined here is never used but required to make the tf autograph work
         posterior, states = tf.zeros(()), forward_step_1_state + backward_step_1_state
-        cell.step_counter.assign_add(1)
+        if cell.use_step_counter:
+            cell.step_counter.assign_add(1)
     #because of the bidirectionality, we also have to manually do the last forward and backward step
     forward_last, final_state = cell(emission_probs[:,-1], states[:2], training=training)
     backward_last, _ = reverse_cell(emission_probs[:,0], states[2:], training=training)
