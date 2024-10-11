@@ -177,17 +177,19 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
             indices_explicit = np.concatenate([indices_explicit[part_name] 
                                                     for part_name,_ in parts], axis=0)
             # tf.sparse requires a strict row-major ordering of the indices
-            # however, a custom ordering is more convenient in code
-            # these indices revert a tf.sparse.reorder:
-            a = np.argsort([i*num_states+j for i,j in indices_explicit])
-            reverse_reorder_indices = np.argsort(a)
+            row_major_order = np.argsort([i*num_states+j for i,j in indices_explicit])
+            #reorder row-major
+            indices_explicit_row_major = indices_explicit[row_major_order]
+            kernel_row_major = tf.gather(kernel, row_major_order)
+            exp_kernel = tf.math.exp(kernel_row_major)
             sparse_kernel =  tf.sparse.SparseTensor(
-                                        indices=indices_explicit, 
-                                        values=kernel, 
+                                        indices=indices_explicit_row_major, 
+                                        values=exp_kernel, 
                                         dense_shape=[num_states]*2)
-            sparse_kernel = tf.sparse.reorder(sparse_kernel)
-            probs = tf.sparse.softmax(sparse_kernel, name="A") #ignores implicit zeros
-            probs_vec = tf.gather(probs.values, reverse_reorder_indices) #revert tf.sparse.reorder
+            dense_kernel = tf.sparse.to_dense(sparse_kernel)
+            #softmax that ignores non-existing transitions
+            dense_probs = dense_kernel / tf.reduce_sum(dense_kernel, axis=-1, keepdims=True)
+            probs_vec = tf.gather_nd(dense_probs, indices_explicit)
             lsum = 0
             for part_name, length in parts:
                 probs_dict[part_name] = probs_vec[lsum : lsum+length]
@@ -267,11 +269,17 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
         """
         implicit_log_probs, log_probs, probs = self.make_implicit_log_probs()
         values_all_models, indices_all_models = [], []
-        for i, (p, parts, indices) in enumerate(zip(implicit_log_probs, 
+        for i, (p, parts, indices, num_states) in enumerate(zip(implicit_log_probs, 
                                                            self.implicit_transition_parts, 
-                                                           self.sparse_transition_indices_implicit)):
+                                                           self.sparse_transition_indices_implicit,
+                                                           self.num_states_implicit)):
+            #obtain values and indices in model order
             values = tf.concat([p[part_name] for part_name,_ in parts], axis=0)
             indices_concat = np.concatenate([indices[part_name] for part_name,_ in parts], axis=0)
+            #reorder row-major
+            row_major_order = np.argsort([i*num_states+j for i,j in indices_concat])
+            indices_concat = indices_concat[row_major_order]
+            values = tf.gather(values, row_major_order)
             indices_concat = np.pad(indices_concat, ((0,0), (1,0)), constant_values=i)
             values_all_models.append(values)
             indices_all_models.append(indices_concat)
@@ -281,7 +289,6 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
                             indices=indices_all_models, 
                             values=values_all_models, 
                             dense_shape=[self.num_models] + [self.max_num_states]*2)
-        log_A_sparse = tf.sparse.reorder(log_A_sparse)
         if return_probs:
             return log_A_sparse, implicit_log_probs, log_probs, probs
         else:
