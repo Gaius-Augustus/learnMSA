@@ -271,7 +271,7 @@ def fit_model(model_generator,
                                 data=data,
                                 sequence_weights=sequence_weights,
                                 clusters=clusters)
-        model.compile(optimizer=optimizer, loss=[(lambda _,loss: loss), None])
+        model.compile(optimizer=optimizer, loss=[(lambda _,loss: loss), None], jit_compile=False)
         return model
     num_gpu = len([x.name for x in tf.config.list_logical_devices() if x.device_type == 'GPU']) 
     if verbose:
