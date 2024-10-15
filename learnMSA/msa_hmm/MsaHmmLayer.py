@@ -132,7 +132,7 @@ class MsaHmmLayer(tf.keras.layers.Layer):
     
     #compute the prior, scale it depending on seq weights
     def compute_prior(self):
-        prior = self.cell.get_prior_log_density(add_metrics=False)
+        prior = self.cell.get_prior_log_density()
         prior = tf.reduce_mean(prior)
         if self.sequence_weights is not None:
             prior /= self.weight_sum
@@ -153,8 +153,10 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         _, loglik = self.forward_recursion(inputs, training=training)
         loglik_mean = self.apply_sequence_weights(loglik, indices, aggregate=True)
         if self.use_prior:
+            self.cell.recurrent_init()
             prior = self.compute_prior()
-            MAP = loglik_mean + prior
+            aux_loss = self.cell.get_aux_loss()
+            MAP = loglik_mean + prior - aux_loss
             return tf.squeeze(-MAP), loglik
         else:
             return tf.squeeze(-loglik_mean), loglik

@@ -144,6 +144,10 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
         emit_shape = tf.concat([tf.shape(B)[:1], input_shape[1:-1], tf.shape(B)[-1:]], 0)
         emit = tf.reshape(emit, emit_shape)
         return emit
+
+
+    def get_aux_loss(self):
+        return 0.
     
 
     def get_prior_log_density(self):

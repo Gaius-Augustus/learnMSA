@@ -135,7 +135,6 @@ class JointEmissionPrior(tf.keras.layers.Layer):
 
     def build(self, input_shape):
         for prior in self.priors:
-            prior.dtype = self.dtype
             prior.build(input_shape)
         
     def call(self, B, lengths):
@@ -145,11 +144,11 @@ class JointEmissionPrior(tf.keras.layers.Layer):
         Returns:
             Shape: (k, q)
         """
-        log_joint_pdf = self.priors[0](B[..., :self.kernel_split[0]], lengths)
+        log_joint_pdf = self.priors[0](B[..., :self.kernel_split[0]], lengths=lengths)
         for i in range(1, len(self.priors)):
             split_left = self.kernel_split[i-1]
             split_right = self.kernel_split[i] if i < len(self.kernel_split) else None
-            log_joint_pdf += self.priors[i](B[..., split_left : split_right], lengths)
+            log_joint_pdf += self.priors[i](B[..., split_left : split_right], lengths=lengths)
         return log_joint_pdf
     
     def get_config(self):
@@ -180,9 +179,6 @@ class JointEmissionPrior(tf.keras.layers.Layer):
 class NullPrior(tf.keras.layers.Layer):
     """NullObject if no prior should be used.
     """
-    def load(self, dtype):
-        pass
-    
     def call(self, B, lengths):
         k = tf.shape(B)[0]
         max_model_length = tf.reduce_max(lengths)

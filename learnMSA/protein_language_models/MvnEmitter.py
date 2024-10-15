@@ -17,7 +17,7 @@ from learnMSA.msa_hmm.Utility import DefaultDiagBijector
 def make_joint_prior(scoring_model_config : Common.ScoringModelConfig, num_prior_components, dtype):
     prior_list = [priors.AminoAcidPrior(dtype=dtype),
                 MvnPrior(scoring_model_config, num_prior_components, dtype=dtype),
-                priors.NullPrior(dtype=dtype)]
+                priors.NullPrior()]
     num_aa = len(SequenceDataset.alphabet)-1
     kernel_split = [num_aa, num_aa + scoring_model_config.dim]
     return priors.JointEmissionPrior(prior_list, kernel_split, dtype=dtype)
@@ -34,6 +34,7 @@ class MvnEmitter(ProfileHMMEmitter):
                  full_covariance = False,
                  temperature = 10.,
                  regularize_variances = True,
+                 dtype=tf.float32,
                  **kwargs):
 
         self.scoring_model_config = scoring_model_config
@@ -52,9 +53,9 @@ class MvnEmitter(ProfileHMMEmitter):
             prior = kwargs["prior"]
             del kwargs["prior"]
         else:
-            prior = make_joint_prior(scoring_model_config, num_prior_components, self.dtype)
+            prior = make_joint_prior(scoring_model_config, num_prior_components, dtype)
                                                              
-        super(MvnEmitter, self).__init__(emission_init, insertion_init, prior, **kwargs)
+        super(MvnEmitter, self).__init__(emission_init, insertion_init, prior, dtype=dtype, **kwargs)
 
         self.diag_init_var = diag_init_var
         self.full_covariance = full_covariance
@@ -137,9 +138,14 @@ class MvnEmitter(ProfileHMMEmitter):
         aa_emission_probs = super().call(inputs[..., :self.num_aa+1], training=training)
         emb_emission_probs = self.compute_embedding_emission_probs(inputs[..., self.num_aa+1:], training=training)
         emission_probs = aa_emission_probs * emb_emission_probs 
-        if self.regularize_variances:
-            self.add_loss(0.01 * self.mvn_mixture.get_regularization_L2_loss())
         return emission_probs
+
+
+    def get_aux_loss(self):
+        if self.regularize_variances:
+            return 0.01 * self.mvn_mixture.get_regularization_L2_loss()
+        else:
+            return 0.
     
     
     def duplicate(self, model_indices=None, share_kernels=False):
@@ -196,17 +202,19 @@ class AminoAcidPlusMvnEmissionInitializer(Initializers.EmissionInitializer):
 
     def __init__(self,
                  scoring_model_config : Common.ScoringModelConfig,
+                 dist=None,
                  aa_dist=np.log(Initializers.background_distribution), 
                  num_prior_components=100,
-                 scale_kernel_init = tf.random_normal_initializer(stddev=0.02),
+                 scale_kernel_init = Initializers.RandomNormalInitializer(stddev=0.02),
                  full_covariance=False):
         self.aa_dist = aa_dist
         self.scoring_model_config = scoring_model_config
         self.num_prior_components = num_prior_components
-        self.expected_emb = get_expected_emb(scoring_model_config, num_prior_components)
         self.scale_kernel_init = scale_kernel_init
         self.full_covariance = full_covariance
-        dist = np.concatenate([self.aa_dist, self.expected_emb], axis=0)
+        if dist is None:
+            self.expected_emb = get_expected_emb(scoring_model_config, num_prior_components)
+            dist = np.concatenate([self.aa_dist, self.expected_emb], axis=0)
         super(AminoAcidPlusMvnEmissionInitializer, self).__init__(dist = dist)
 
 
@@ -225,5 +233,30 @@ class AminoAcidPlusMvnEmissionInitializer(Initializers.EmissionInitializer):
         return tf.concat([aa_plus_emb_init, scale_init], axis=-1)
 
 
+    def get_config(self):  # To support serialization
+        config = super(AminoAcidPlusMvnEmissionInitializer, self).get_config()
+        config.update({
+            "scoring_model_config" : self.scoring_model_config.to_dict(),
+            "aa_dist" : self.aa_dist.tolist(),
+            "num_prior_components" : self.num_prior_components,
+            "scale_kernel_init" : self.scale_kernel_init,
+            "full_covariance" : self.full_covariance,
+            "expected_emb" : self.expected_emb.tolist() 
+        })
+        return config
+
+    @classmethod
+    def from_config(cls, config):
+        config["scoring_model_config"] = Common.ScoringModelConfig(**config["scoring_model_config"])
+        config["aa_dist"] = np.array(config["aa_dist"])
+        config["dist"] = np.array(config["dist"])
+        expected_emb = np.array(config["expected_emb"])
+        del config["expected_emb"]
+        instance = cls(**config)
+        instance.expected_emb = expected_emb
+        return instance
+
+
         
 tf.keras.utils.get_custom_objects()["MvnEmitter"] = MvnEmitter
+tf.keras.utils.get_custom_objects()["AminoAcidPlusMvnEmissionInitializer"] = AminoAcidPlusMvnEmissionInitializer

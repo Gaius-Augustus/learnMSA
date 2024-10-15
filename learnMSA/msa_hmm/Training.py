@@ -212,11 +212,19 @@ def make_dataset(indices, batch_generator, batch_size=512, shuffle=True, bucket_
             ds = ds.repeat()
         ds = ds.batch(batch_size)
         def batch_func(i):
-            batch, ind = tf.numpy_function(batch_generator, [i], batch_generator.get_out_types())
-            #explicitly set output shapes or tf 2.17 will complain about unknown shapes
-            batch.set_shape(tf.TensorShape([None, batch_generator.num_models, None]))
-            ind.set_shape(tf.TensorShape([None, batch_generator.num_models]))
-            return batch, ind
+            if len(batch_generator.get_out_types()) == 2:
+                batch, ind = tf.numpy_function(batch_generator, [i], batch_generator.get_out_types())
+                #explicitly set output shapes or tf 2.17 will complain about unknown shapes
+                batch.set_shape(tf.TensorShape([None, batch_generator.num_models, None]))
+                ind.set_shape(tf.TensorShape([None, batch_generator.num_models]))
+                return batch, ind
+            else:
+                batch, ind, emb = tf.numpy_function(batch_generator, [i], batch_generator.get_out_types())
+                #explicitly set output shapes or tf 2.17 will complain about unknown shapes
+                batch.set_shape(tf.TensorShape([None, batch_generator.num_models, None]))
+                ind.set_shape(tf.TensorShape([None, batch_generator.num_models]))
+                emb.set_shape(tf.TensorShape([None, batch_generator.num_models, None, batch_generator.scoring_model_config.dim+1]))
+                return batch, ind, emb
 
     ds = ds.map(batch_func,
                 # no parallel processing if using an indexed dataset
@@ -250,7 +258,7 @@ def fit_model(model_generator,
     tf.keras.backend.clear_session() #frees occupied memory 
     tf.get_logger().setLevel('ERROR')
     batch_generator.configure(data, config, verbose)
-    optimizer = tf.optimizers.Adam(config["learning_rate"])
+    optimizer = tf.keras.optimizers.Adam(config["learning_rate"])
     if verbose:
         print("Fitting models of lengths", model_lengths, "on", indices.shape[0], "sequences.")
         print("Batch size=", batch_size, "Learning rate=", config["learning_rate"])

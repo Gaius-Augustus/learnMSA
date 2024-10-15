@@ -300,7 +300,7 @@ def print_and_plot(am,
                             am.batch_generator,
                             am.batch_size, 
                             shuffle=False)
-    ll = am.model.predict(ds)[1][:,model_index] + am.compute_log_prior()[model_index]
+    ll = am.model.predict(ds)[1][:,model_index] 
     for i,s in enumerate(msa[:max_seq]):
         indices = np.array([[am.indices[i]]]*am.msa_hmm_layer.cell.num_models)
         tau = anc_probs_layer.make_tau(subset=indices)[model_index].numpy()
