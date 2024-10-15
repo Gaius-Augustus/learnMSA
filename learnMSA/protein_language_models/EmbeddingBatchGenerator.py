@@ -3,7 +3,7 @@ import os
 import gc
 import numpy as np
 import tensorflow as tf
-from learnMSA.msa_hmm.Training import DefaultBatchGenerator, default_model_generator, PermuteSeqs, Identity
+from learnMSA.msa_hmm.Training import DefaultBatchGenerator, default_model_generator, PermuteSeqs, Identity, LearnMSAModel
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 from learnMSA.protein_language_models.BilinearSymmetric import make_scoring_model
 import learnMSA.protein_language_models.Common as Common
@@ -151,7 +151,7 @@ def make_generic_embedding_model_generator(dim):
         aggregated_loglik = Identity(name="aggregated_loglik")(aggregated_loglik)
         prior = Identity(name="prior")(prior)
         aux_loss = Identity(name="aux_loss")(aux_loss)
-        model = tf.keras.Model(inputs=[sequences, indices, embeddings], 
+        model = LearnMSAModel(inputs=[sequences, indices, embeddings], 
                         outputs=[loglik, aggregated_loglik, prior, aux_loss])
         return model
     return partial(default_model_generator, generic_gen=generic_embedding_model_generator)
