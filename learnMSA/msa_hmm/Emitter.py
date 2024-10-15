@@ -147,7 +147,7 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
 
 
     def get_aux_loss(self):
-        return 0.
+        return tf.constant(0., dtype=self.dtype)
     
 
     def get_prior_log_density(self):

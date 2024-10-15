@@ -258,7 +258,7 @@ class TestMsaHmmCell(unittest.TestCase):
         #we have 2 identical inputs for 2 models respectively
         #the batch size is still 1
         seq = np.repeat(seq[np.newaxis], len(models), axis=0)
-        loglik = hmm_layer(seq)[1]
+        loglik = hmm_layer(seq)[0]
         log_forward,_ = hmm_layer.forward_recursion(seq)
         self.assertEqual(hmm_layer.cell.step_counter.numpy(), 4)
         log_backward = hmm_layer.backward_recursion(seq)
@@ -277,7 +277,7 @@ class TestMsaHmmCell(unittest.TestCase):
         hmm_cell, length = self.make_test_cell(models)
         hmm_layer = MsaHmmLayer.MsaHmmLayer(hmm_cell, use_prior=False)
         sequences = tf.keras.Input(shape=(None,None,3), name="sequences", dtype=tf.float32)
-        _, loglik = hmm_layer(sequences)
+        loglik = hmm_layer(sequences)[0]
         hmm_tf_model = tf.keras.Model(inputs=[sequences], outputs=[loglik])
         hmm_tf_model.compile()
         seq = tf.one_hot([[0,1,0,2]], 3)

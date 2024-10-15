@@ -22,6 +22,22 @@ class PermuteSeqs(tf.keras.layers.Layer):
         return {"perm": self.perm}
 
 
+class Identity(tf.keras.layers.Layer):
+    def call(self, x):
+        return x
+
+
+class LearnMSAModel(tf.keras.Model):
+    def compute_loss(self, x, y, y_pred, sample_weight):
+        self.full_loss =  -y_pred[1] - tf.reduce_mean(y_pred[2]) + y_pred[3]
+        self.full_loss += sum(self.losses)
+        return self.full_loss
+
+    def compute_metrics(self, x, y, y_pred, sample_weight):
+        return {"loss" : self.full_loss, "loglik": y_pred[1], "prior": tf.reduce_mean(y_pred[2]), "aux_loss": y_pred[3]}
+
+
+
 def generic_model_generator(encoder_layers,
                             msa_hmm_layer):
     """A generic model generator function. The model inputs are sequences of shape (b, num_model, L) 
@@ -41,11 +57,14 @@ def generic_model_generator(encoder_layers,
     forward_seq = transposed_sequences
     for layer in encoder_layers:
         forward_seq = layer(forward_seq, transposed_indices)
-    map_loss, loglik = msa_hmm_layer(forward_seq, transposed_indices)
+    loglik, aggregated_loglik, prior, aux_loss = msa_hmm_layer(forward_seq, transposed_indices)
     #transpose back to make model.predict work correctly
     loglik = PermuteSeqs([1,0], name="loglik")(loglik)
-    model = tf.keras.Model(inputs=(sequences, indices), 
-                        outputs=(map_loss, loglik))
+    aggregated_loglik = Identity(name="aggregated_loglik")(aggregated_loglik)
+    prior = Identity(name="prior")(prior)
+    aux_loss = Identity(name="aux_loss")(aux_loss)
+    model = LearnMSAModel(inputs=(sequences, indices), 
+                        outputs=(loglik, aggregated_loglik, prior, aux_loss))
     return model
 
 
@@ -279,7 +298,7 @@ def fit_model(model_generator,
                                 data=data,
                                 sequence_weights=sequence_weights,
                                 clusters=clusters)
-        model.compile(optimizer=optimizer, loss=[(lambda _,loss: loss), None], jit_compile=False)
+        model.compile(optimizer=optimizer, jit_compile=False)
         return model
     num_gpu = len([x.name for x in tf.config.list_logical_devices() if x.device_type == 'GPU']) 
     if verbose:
@@ -337,3 +356,5 @@ def fit_model(model_generator,
 
     
 tf.keras.utils.get_custom_objects()["PermuteSeqs"] = PermuteSeqs
+tf.keras.utils.get_custom_objects()["Identity"] = Identity
+tf.keras.utils.get_custom_objects()["LearnMSAModel"] = LearnMSAModel
