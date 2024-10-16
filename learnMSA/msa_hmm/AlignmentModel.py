@@ -383,7 +383,7 @@ class AlignmentModel():
                                 shuffle=False)
         loglik = np.zeros((self.msa_hmm_layer.cell.num_models))
         for x, _ in ds:
-            loglik += np.sum(self.model(x)[1], axis=0)
+            loglik += np.sum(self.model(x)[0], axis=0)
         loglik /= ll_subset.size
         return loglik
     
