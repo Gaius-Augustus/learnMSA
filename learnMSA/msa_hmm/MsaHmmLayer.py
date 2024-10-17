@@ -2,6 +2,7 @@ import tensorflow as tf
 import numpy as np
 from learnMSA.msa_hmm.TotalProbabilityCell import TotalProbabilityCell
 from learnMSA.msa_hmm.Utility import deserialize
+from learnMSA.msa_hmm.Bidirectional import Bidirectional
 
 
 class MsaHmmLayer(tf.keras.layers.Layer):
@@ -52,11 +53,12 @@ class MsaHmmLayer(tf.keras.layers.Layer):
                                                 return_state=True,
                                                 go_backwards=True)
         # make a bidirectional rnn layer to run forward and backward in parallel
-        self.bidirectional_rnn = tf.keras.layers.Bidirectional(self.rnn, 
-                                                                merge_mode="concat" if self.parallel_factor > 1 else "sum", 
-                                                                backward_layer=self.rnn_backward)
+        self.bidirectional_rnn = Bidirectional(self.rnn, 
+                                                merge_mode="concat" if self.parallel_factor > 1 else "sum", 
+                                                backward_layer=self.rnn_backward)
         # Bidirectional makes a copy rather than taking the original rnn, override the copy
         self.bidirectional_rnn.forward_layer = self.rnn 
+        self.bidirectional_rnn.backward_layer = self.rnn_backward 
         # build the RNN layers with a different input shape
         rnn_input_shape = (None, input_shape[-2], self.cell.max_num_states)
         self.rnn.build(rnn_input_shape)

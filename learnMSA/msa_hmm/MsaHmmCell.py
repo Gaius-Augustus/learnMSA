@@ -24,6 +24,7 @@ class HmmCell(tf.keras.layers.Layer):
                  emitter,
                  transitioner,
                  use_step_counter=False,
+                 use_fake_step_counter=False, #only for backwards compatibility in Tiberius, never else set this to True
                  **kwargs
                 ):
         super(HmmCell, self).__init__(**kwargs)
@@ -37,6 +38,7 @@ class HmmCell(tf.keras.layers.Layer):
         self.epsilon = tf.constant(1e-16, self.dtype)
         self.reverse = False
         self.use_step_counter = use_step_counter
+        self.use_fake_step_counter = use_fake_step_counter
             
             
     def build(self, input_shape):
@@ -45,7 +47,7 @@ class HmmCell(tf.keras.layers.Layer):
         for em in self.emitter:
             em.build((None, input_shape[-2], self.dim))
         self.transitioner.build((None, input_shape[-2], self.dim))
-        if not self.reverse and self.use_step_counter:
+        if not self.reverse and self.use_step_counter or self.use_fake_step_counter:
             self.step_counter = self.add_weight(shape=(), initializer=tf.constant_initializer(-1), 
                                                 trainable=False, name="step_counter", dtype=tf.int32)
         self.built = True
