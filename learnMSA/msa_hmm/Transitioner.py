@@ -181,14 +181,13 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
             #reorder row-major
             indices_explicit_row_major = indices_explicit[row_major_order]
             kernel_row_major = tf.gather(kernel, row_major_order)
-            exp_kernel = tf.math.exp(kernel_row_major)
             sparse_kernel =  tf.sparse.SparseTensor(
                                         indices=indices_explicit_row_major, 
-                                        values=exp_kernel, 
+                                        values=kernel_row_major, 
                                         dense_shape=[num_states]*2)
-            dense_kernel = tf.sparse.to_dense(sparse_kernel)
+            dense_kernel = tf.sparse.to_dense(sparse_kernel, default_value=self.approx_log_zero)
             #softmax that ignores non-existing transitions
-            dense_probs = dense_kernel / tf.reduce_sum(dense_kernel, axis=-1, keepdims=True)
+            dense_probs = tf.nn.softmax(dense_kernel, axis=-1)
             probs_vec = tf.gather_nd(dense_probs, indices_explicit)
             lsum = 0
             for part_name, length in parts:
