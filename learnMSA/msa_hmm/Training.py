@@ -7,6 +7,7 @@ from learnMSA.msa_hmm.MsaHmmLayer import MsaHmmLayer
 from learnMSA.msa_hmm.AncProbsLayer import AncProbsLayer
 from learnMSA.msa_hmm.Configuration import assert_config
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
+from learnMSA.msa_hmm.Utility import deserialize
 
 
 
@@ -28,12 +29,8 @@ class Identity(tf.keras.layers.Layer):
 
 
 class LearnMSAModel(tf.keras.Model):
-    def __init__(self, use_prior, **kwargs):
-        super(LearnMSAModel, self).__init__(**kwargs)
-        self.use_prior = use_prior
-
     def compute_loss(self, x, y, y_pred, sample_weight):
-        if self.use_prior:
+        if len(y_pred) == 4:
             self.full_loss =  -y_pred[1] - tf.reduce_mean(y_pred[2]) + y_pred[3]
         else:
             self.full_loss =  -y_pred[1]
@@ -41,11 +38,10 @@ class LearnMSAModel(tf.keras.Model):
         return self.full_loss
 
     def compute_metrics(self, x, y, y_pred, sample_weight):
-        if self.use_prior:
+        if len(y_pred) == 4:
             return {"loss" : self.full_loss, "loglik": y_pred[1], "prior": tf.reduce_mean(y_pred[2]), "aux_loss": y_pred[3]}
         else:
             return {"loss" : self.full_loss, "loglik": y_pred[1]}
-
 
 
 def generic_model_generator(encoder_layers,
@@ -74,16 +70,14 @@ def generic_model_generator(encoder_layers,
         aggregated_loglik = Identity(name="aggregated_loglik")(aggregated_loglik)
         prior = Identity(name="prior")(prior)
         aux_loss = Identity(name="aux_loss")(aux_loss)
-        model = LearnMSAModel(use_prior=msa_hmm_layer.use_prior,
-                            inputs=(sequences, indices), 
+        model = LearnMSAModel(inputs=(sequences, indices), 
                             outputs=(loglik, aggregated_loglik, prior, aux_loss))
     else:
         loglik, aggregated_loglik = msa_hmm_layer(forward_seq, transposed_indices)
         #transpose back to make model.predict work correctly
         loglik = PermuteSeqs([1,0], name="loglik")(loglik)
         aggregated_loglik = Identity(name="aggregated_loglik")(aggregated_loglik)
-        model = LearnMSAModel(use_prior=msa_hmm_layer.use_prior,
-                            inputs=(sequences, indices), 
+        model = LearnMSAModel(inputs=(sequences, indices), 
                             outputs=(loglik, aggregated_loglik))
     return model
 

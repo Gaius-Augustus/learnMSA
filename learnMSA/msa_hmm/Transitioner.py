@@ -189,13 +189,14 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
             #softmax that ignores non-existing transitions
             dense_probs = tf.nn.softmax(dense_kernel, axis=-1)
             probs_vec = tf.gather_nd(dense_probs, indices_explicit)
+            probs_vec += 1e-16
             lsum = 0
             for part_name, length in parts:
                 probs_dict[part_name] = probs_vec[lsum : lsum+length]
                 lsum += length
             model_prob_dicts.append(probs_dict)
         return model_prob_dicts
-    
+
 
     def make_log_probs(self):
         probs = self.make_probs()

@@ -304,7 +304,8 @@ class ProfileHMMTransitionPrior(tf.keras.layers.Layer):
             "delete_prior" : delete_dirichlet,
             "flank_prior" : flank_prior,
             "hit_prior" : hit_prior,
-            "global_prior" : global_prior}
+            "global_prior" : global_prior
+            }
         prior_val = {k : tf.stack(v) for k,v in prior_val.items()}
         return prior_val
     
