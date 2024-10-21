@@ -28,13 +28,23 @@ class Identity(tf.keras.layers.Layer):
 
 
 class LearnMSAModel(tf.keras.Model):
+    def __init__(self, use_prior, **kwargs):
+        super(LearnMSAModel, self).__init__(**kwargs)
+        self.use_prior = use_prior
+
     def compute_loss(self, x, y, y_pred, sample_weight):
-        self.full_loss =  -y_pred[1] - tf.reduce_mean(y_pred[2]) + y_pred[3]
+        if self.use_prior:
+            self.full_loss =  -y_pred[1] - tf.reduce_mean(y_pred[2]) + y_pred[3]
+        else:
+            self.full_loss =  -y_pred[1]
         self.full_loss += sum(self.losses)
         return self.full_loss
 
     def compute_metrics(self, x, y, y_pred, sample_weight):
-        return {"loss" : self.full_loss, "loglik": y_pred[1], "prior": tf.reduce_mean(y_pred[2]), "aux_loss": y_pred[3]}
+        if self.use_prior:
+            return {"loss" : self.full_loss, "loglik": y_pred[1], "prior": tf.reduce_mean(y_pred[2]), "aux_loss": y_pred[3]}
+        else:
+            return {"loss" : self.full_loss, "loglik": y_pred[1]}
 
 
 
@@ -57,14 +67,24 @@ def generic_model_generator(encoder_layers,
     forward_seq = transposed_sequences
     for layer in encoder_layers:
         forward_seq = layer(forward_seq, transposed_indices)
-    loglik, aggregated_loglik, prior, aux_loss = msa_hmm_layer(forward_seq, transposed_indices)
-    #transpose back to make model.predict work correctly
-    loglik = PermuteSeqs([1,0], name="loglik")(loglik)
-    aggregated_loglik = Identity(name="aggregated_loglik")(aggregated_loglik)
-    prior = Identity(name="prior")(prior)
-    aux_loss = Identity(name="aux_loss")(aux_loss)
-    model = LearnMSAModel(inputs=(sequences, indices), 
-                        outputs=(loglik, aggregated_loglik, prior, aux_loss))
+    if msa_hmm_layer.use_prior:
+        loglik, aggregated_loglik, prior, aux_loss = msa_hmm_layer(forward_seq, transposed_indices)
+        #transpose back to make model.predict work correctly
+        loglik = PermuteSeqs([1,0], name="loglik")(loglik)
+        aggregated_loglik = Identity(name="aggregated_loglik")(aggregated_loglik)
+        prior = Identity(name="prior")(prior)
+        aux_loss = Identity(name="aux_loss")(aux_loss)
+        model = LearnMSAModel(use_prior=msa_hmm_layer.use_prior,
+                            inputs=(sequences, indices), 
+                            outputs=(loglik, aggregated_loglik, prior, aux_loss))
+    else:
+        loglik, aggregated_loglik = msa_hmm_layer(forward_seq, transposed_indices)
+        #transpose back to make model.predict work correctly
+        loglik = PermuteSeqs([1,0], name="loglik")(loglik)
+        aggregated_loglik = Identity(name="aggregated_loglik")(aggregated_loglik)
+        model = LearnMSAModel(use_prior=msa_hmm_layer.use_prior,
+                            inputs=(sequences, indices), 
+                            outputs=(loglik, aggregated_loglik))
     return model
 
 
