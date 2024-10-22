@@ -176,26 +176,45 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
             probs_dict = {}
             indices_explicit = np.concatenate([indices_explicit[part_name] 
                                                     for part_name,_ in parts], axis=0)
-            # tf.sparse requires a strict row-major ordering of the indices
-            row_major_order = np.argsort([i*num_states+j for i,j in indices_explicit])
-            #reorder row-major
-            indices_explicit_row_major = indices_explicit[row_major_order]
-            kernel_row_major = tf.gather(kernel, row_major_order)
-            sparse_kernel =  tf.sparse.SparseTensor(
-                                        indices=indices_explicit_row_major, 
-                                        values=kernel_row_major, 
-                                        dense_shape=[num_states]*2)
-            dense_kernel = tf.sparse.to_dense(sparse_kernel, default_value=self.approx_log_zero)
-            #softmax that ignores non-existing transitions
-            dense_probs = tf.nn.softmax(dense_kernel, axis=-1)
+            dense_probs = self.make_transition_matrix_from_indices(indices_explicit, kernel, num_states)
             probs_vec = tf.gather_nd(dense_probs, indices_explicit)
-            probs_vec += 1e-16
             lsum = 0
             for part_name, length in parts:
                 probs_dict[part_name] = probs_vec[lsum : lsum+length]
                 lsum += length
             model_prob_dicts.append(probs_dict)
         return model_prob_dicts
+
+
+    def make_transition_matrix_from_indices(self, indices, kernel, num_states):
+        """Constructs a dense probabilistic transition matrix from a sparse index list and a kernel.
+        Args:
+            indices: A 2D tensor of shape (num_transitions, 2) that specifies the indices of the kernel.
+            kernel: A 1D tensor of shape (num_transitions) that contains the kernel values.
+            num_states: The number of states in the model. 
+        Returns:
+            A dense probabilistic transition matrix of shape (num_states, num_states).
+        """
+        # tf.sparse requires a strict row-major ordering of the indices
+        row_major_order = np.argsort([i*num_states+j for i,j in indices])
+        #reorder row-major
+        indices_row_major = indices[row_major_order]
+        kernel_row_major = tf.gather(kernel, row_major_order)
+        #don't allow too small values in the kernel
+        kernel_row_major = tf.maximum(kernel_row_major, self.approx_log_zero+1)
+        sparse_kernel =  tf.sparse.SparseTensor(
+                                    indices=indices_row_major, 
+                                    values=kernel_row_major, 
+                                    dense_shape=[num_states]*2)
+        dense_kernel = tf.sparse.to_dense(sparse_kernel, default_value=self.approx_log_zero)
+        #softmax that ignores non-existing transitions
+        dense_probs = tf.nn.softmax(dense_kernel, axis=-1)
+        #mask out non-existing transitions and rescale for numerical stability
+        mask = tf.cast(dense_kernel > self.approx_log_zero, dense_probs.dtype)
+        dense_probs += 1e-16
+        dense_probs = dense_probs * mask
+        dense_probs /= tf.reduce_sum(dense_probs, axis=-1, keepdims=True)
+        return dense_probs
 
 
     def make_log_probs(self):
