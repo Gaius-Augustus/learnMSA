@@ -178,7 +178,7 @@ def make_pdf_model(scoring_model_config : Common.ScoringModelConfig,
     # compute log pdf per observation
     log_pdf = MvnPriorLayer(scoring_model_config, num_components, trainable=trainable)(embeddings)
     log_pdf = ZeroMaskEmbeddings(aggregate_result)(embeddings, log_pdf)
-    model = tf.keras.Model(inputs=[embeddings], outputs=[log_pdf])
+    model = tf.keras.Model(inputs=embeddings, outputs=log_pdf)
     return model
 
 

@@ -29,19 +29,51 @@ class Identity(tf.keras.layers.Layer):
 
 
 class LearnMSAModel(tf.keras.Model):
+    def __init__(self, *args, **kwargs):
+        super(LearnMSAModel, self).__init__(*args, **kwargs)
+        #use mean trackers for scalars to use their update logic
+        self.loss_tracker = tf.keras.metrics.Mean()
+        self.loglik_tracker = tf.keras.metrics.Mean()
+        self.prior_tracker = tf.keras.metrics.Mean()
+        self.aux_loss_tracker = tf.keras.metrics.Mean()
+        self.use_prior = False
+
+    def loglik(self, y_pred):
+        return y_pred[1]
+
+    def prior(self, y_pred):
+        return tf.reduce_mean(y_pred[2])
+
+    def aux_loss(self, y_pred):
+        return y_pred[3]
+
     def compute_loss(self, x, y, y_pred, sample_weight):
         if len(y_pred) == 4:
-            self.full_loss =  -y_pred[1] - tf.reduce_mean(y_pred[2]) + y_pred[3]
+            loss = -self.loglik(y_pred) -self.prior(y_pred) + self.aux_loss(y_pred) 
         else:
-            self.full_loss =  -y_pred[1]
-        self.full_loss += sum(self.losses)
-        return self.full_loss
+            loss = -self.loglik(y_pred)
+        loss += sum(self.losses)
+        self.loss_tracker.update_state(loss)
+        return loss
 
     def compute_metrics(self, x, y, y_pred, sample_weight):
+        metric_results = {"loss": self.loss_tracker.result()}
+        self.loglik_tracker.update_state(self.loglik(y_pred))
+        metric_results["loglik"] = self.loglik_tracker.result()
         if len(y_pred) == 4:
-            return {"loss" : self.full_loss, "loglik": y_pred[1], "prior": tf.reduce_mean(y_pred[2]), "aux_loss": y_pred[3]}
-        else:
-            return {"loss" : self.full_loss, "loglik": y_pred[1]}
+            self.use_prior = True
+            self.prior_tracker.update_state(self.prior(y_pred))
+            self.aux_loss_tracker.update_state(self.aux_loss(y_pred))
+            metric_results["prior"] = self.prior_tracker.result()
+            metric_results["aux_loss"] = self.aux_loss_tracker.result()
+        return metric_results
+
+    def reset_metrics(self):
+        self.loss_tracker.reset_state()
+        self.loglik_tracker.reset_state()
+        self.prior_tracker.reset_state()
+        self.aux_loss_tracker.reset_state()
+
 
 
 def generic_model_generator(encoder_layers,

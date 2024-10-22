@@ -151,7 +151,7 @@ def make_generic_embedding_model_generator(dim):
         aggregated_loglik = Identity(name="aggregated_loglik")(aggregated_loglik)
         prior = Identity(name="prior")(prior)
         aux_loss = Identity(name="aux_loss")(aux_loss)
-        model = LearnMSAModel(inputs=[sequences, indices, embeddings], 
-                        outputs=[loglik, aggregated_loglik, prior, aux_loss])
+        model = LearnMSAModel(inputs=(sequences, indices, embeddings), 
+                        outputs=(loglik, aggregated_loglik, prior, aux_loss))
         return model
     return partial(default_model_generator, generic_gen=generic_embedding_model_generator)
