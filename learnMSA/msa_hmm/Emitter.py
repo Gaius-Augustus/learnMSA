@@ -68,6 +68,7 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
                                 name="insertion_kernel_"+str(i),
                                 trainable=not self.frozen_insertions) 
                                     for i,init in enumerate(self.insertion_init)]
+        self.prior.build()
         self.built = True
         
 

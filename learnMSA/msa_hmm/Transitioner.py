@@ -93,7 +93,7 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
                                          initializer=init,
                                          name="init_logit_"+str(i))
                                       for i,init in enumerate(self.flank_init)]
-        tf.keras.utils.get_custom_objects()["ProfileHMMTransitioner"] = ProfileHMMTransitioner
+        self.prior.build()
         self.built = True
         
 
