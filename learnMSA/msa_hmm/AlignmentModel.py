@@ -322,7 +322,7 @@ class AlignmentModel():
         for i in range(data.num_repeats):
             consensus = data.consensus[i]
             #remove columns consisting only of gaps
-            consensus = consensus[:, np.any(consensus != -1, axis=0)]
+            is_non_empty = np.any(consensus != -1, axis=0)
             ins_len = data.insertion_lens[i]
             ins_start = data.insertion_start[i]
             alignment_block = self.get_alignment_block(sequences, 
@@ -330,6 +330,7 @@ class AlignmentModel():
                                                   ins_len[batch_indices], 
                                                   np.maximum(data.insertion_lens_total, aligned_insertions.ext_insertions)[i],
                                                   ins_start[batch_indices],
+                                                  is_non_empty=is_non_empty,
                                                   custom_columns=aligned_insertions.get_custom_columns_insertion(batch_indices, i))
             blocks.append(alignment_block)
             if add_block_sep:
@@ -383,7 +384,7 @@ class AlignmentModel():
                                 shuffle=False)
         loglik = np.zeros((self.msa_hmm_layer.cell.num_models))
         for x, _ in ds:
-            loglik += np.sum(self.model(x)[1], axis=0)
+            loglik += np.sum(self.model(x)[0], axis=0)
         loglik /= ll_subset.size
         return loglik
     
@@ -648,7 +649,7 @@ class AlignmentModel():
 
 
     @classmethod
-    def get_alignment_block(cls, sequences, consensus, ins_len, ins_len_total, ins_start, custom_columns=None):
+    def get_alignment_block(cls, sequences, consensus, ins_len, ins_len_total, ins_start, is_non_empty=None, custom_columns=None):
         """ Constructs one core model hit block from an implicitly represented alignment.
         Args: 
         Returns:
@@ -657,6 +658,7 @@ class AlignmentModel():
         length = consensus.shape[1] + np.sum(ins_len_total)
         block = np.zeros((sequences.shape[0], length), dtype=np.uint8) + len(SequenceDataset.alphabet) - 1
         i = 0
+        columns_to_remove = [] #track empty columns to be removed later
         for c in range(consensus.shape[1]-1):
             column = consensus[:,c]
             ins_l = ins_len[:,c]
@@ -665,6 +667,9 @@ class AlignmentModel():
             #one column
             no_gap = column != -1
             block[no_gap,i] = sequences[A[no_gap],column[no_gap]]
+            #is this column empty in ALL batches? if yes, mark for removal
+            if is_non_empty is not None and not is_non_empty[c]:
+                columns_to_remove.append(i)
             i += 1
             #insertion
             block[:,i:i+ins_l_total] = cls.get_insertion_block(sequences,
@@ -676,6 +681,10 @@ class AlignmentModel():
         #final column
         no_gap = consensus[:,-1] != -1
         block[no_gap,i] = sequences[A[no_gap],consensus[:,-1][no_gap]]
+        if is_non_empty is not None and not is_non_empty[-1]:
+            columns_to_remove.append(i)
+        #remove columns that are empty in ALL batches
+        block = np.delete(block, columns_to_remove, axis=1)
         return block
 
     

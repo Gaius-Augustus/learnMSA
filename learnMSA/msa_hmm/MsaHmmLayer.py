@@ -2,6 +2,7 @@ import tensorflow as tf
 import numpy as np
 from learnMSA.msa_hmm.TotalProbabilityCell import TotalProbabilityCell
 from learnMSA.msa_hmm.Utility import deserialize
+from learnMSA.msa_hmm.Bidirectional import Bidirectional
 
 
 class MsaHmmLayer(tf.keras.layers.Layer):
@@ -52,11 +53,12 @@ class MsaHmmLayer(tf.keras.layers.Layer):
                                                 return_state=True,
                                                 go_backwards=True)
         # make a bidirectional rnn layer to run forward and backward in parallel
-        self.bidirectional_rnn = tf.keras.layers.Bidirectional(self.rnn, 
-                                                                merge_mode="concat" if self.parallel_factor > 1 else "sum", 
-                                                                backward_layer=self.rnn_backward)
+        self.bidirectional_rnn = Bidirectional(self.rnn, 
+                                                merge_mode="concat" if self.parallel_factor > 1 else "sum", 
+                                                backward_layer=self.rnn_backward)
         # Bidirectional makes a copy rather than taking the original rnn, override the copy
         self.bidirectional_rnn.forward_layer = self.rnn 
+        self.bidirectional_rnn.backward_layer = self.rnn_backward 
         # build the RNN layers with a different input shape
         rnn_input_shape = (None, input_shape[-2], self.cell.max_num_states)
         self.rnn.build(rnn_input_shape)
@@ -73,12 +75,14 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         built = True
         
         
-    def forward_recursion(self, inputs, end_hints=None, training=False):
+    def forward_recursion(self, inputs, end_hints=None, 
+                            return_prior=False, training=False):
         """ Computes the forward recursion for multiple models where each model
             receives a batch of sequences as input.
         Args:
             inputs: Sequences. Shape: (num_model, b, seq_len, s)
             end_hints: A tensor of shape (..., 2, num_states) that contains the correct state for the left and right ends of each chunk.
+            return_prior: If true, the prior is computed and returned.
             training: If true, the cell is run in training mode.
         Returns:
             forward variables: Shape: (num_model, b, seq_len, q)
@@ -86,36 +90,47 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         """
         #initialize transition- and emission-matricies
         return _forward_recursion_impl(inputs, self.cell, self.rnn, self.total_prob_rnn, 
-                                       end_hints=end_hints, training=training, parallel_factor=self.parallel_factor)
+                                       end_hints=end_hints, return_prior=return_prior,
+                                       training=training, parallel_factor=self.parallel_factor)
     
     
-    def backward_recursion(self, inputs, end_hints=None, training=False):
+    def backward_recursion(self, inputs, end_hints=None, 
+                            return_prior=False, training=False):
         """ Computes the backward recursion for multiple models where each model
             receives a batch of sequences as input.
         Args:
             inputs: Sequences. Shape: (num_model, b, seq_len, s)
             end_hints: A tensor of shape (..., 2, num_states) that contains the correct state for the left and right ends of each chunk.
+            return_prior: If true, the prior is computed and returned.
             training: If true, the cell is run in training mode.
         Returns:
             backward variables: Shape: (num_model, b, seq_len, q)
         """
-        return _backward_recursion_impl(inputs, self.cell, self.reverse_cell, self.rnn_backward, self.total_prob_rnn_rev, 
-                                            end_hints=end_hints, training=training, parallel_factor=self.parallel_factor)
+        return _backward_recursion_impl(inputs, self.cell, self.reverse_cell, 
+                                        self.rnn_backward, self.total_prob_rnn_rev, 
+                                        end_hints=end_hints, return_prior=return_prior,
+                                        training=training, parallel_factor=self.parallel_factor)
     
 
-    def state_posterior_log_probs(self, inputs, end_hints=None, training=False, no_loglik=False):
+    def state_posterior_log_probs(self, inputs, end_hints=None, 
+                                return_prior=False, training=False, no_loglik=False):
         """ Computes the log-probability of state q at position i given inputs.
         Args:
             inputs: Sequences. Shape: (num_model, b, seq_len, s)
             end_hints: A tensor of shape (..., 2, num_states) that contains the correct state for the left and right ends of each chunk.
+            return_prior: If true, the prior is computed and returned.
             training: If true, the cell is run in training mode.
             no_loglik: If true, the loglik is not used in the return value. This can be beneficial for end-to-end training when the
                         normalizing constant of the posteriors is not important and the activation function is the softmax.
         Returns:
             state posterior probbabilities: Shape: (num_model, b, seq_len, q)
         """
-        return _state_posterior_log_probs_impl(inputs, self.cell, self.reverse_cell, self.bidirectional_rnn, self.total_prob_rnn, self.total_prob_rnn_rev,
-                                                end_hints=end_hints, training=training, no_loglik=no_loglik, parallel_factor=self.parallel_factor)
+        return _state_posterior_log_probs_impl(inputs, self.cell, self.reverse_cell, 
+                                                self.bidirectional_rnn, self.total_prob_rnn, 
+                                                self.total_prob_rnn_rev,
+                                                end_hints=end_hints, return_prior=return_prior,
+                                                training=training, no_loglik=no_loglik, 
+                                                parallel_factor=self.parallel_factor)
     
     
     def apply_sequence_weights(self, loglik, indices, aggregate=False):
@@ -131,9 +146,15 @@ class MsaHmmLayer(tf.keras.layers.Layer):
     
     
     #compute the prior, scale it depending on seq weights
-    def compute_prior(self):
-        prior = self.cell.get_prior_log_density(add_metrics=False)
-        prior = tf.reduce_mean(prior)
+    def compute_prior(self, scaled=True):
+        self.cell.recurrent_init() #initialize all relevant tensors
+        prior = self.cell.get_prior_log_density()
+        if scaled:
+            prior = self._scale_prior(prior)
+        return prior
+
+
+    def _scale_prior(self, prior):
         if self.sequence_weights is not None:
             prior /= self.weight_sum
         elif self.num_seqs is not None:
@@ -147,17 +168,23 @@ class MsaHmmLayer(tf.keras.layers.Layer):
             inputs: Sequences. Shape: (num_model, b, seq_len, s)
             indices: Optional sequence indices required to assign sequence weights. Shape: (num_model, b)
         Returns:
-            log-likelihoods: Sequences. Shape: (num_model, b)
+            log-likelihoods: Shape: (num_model, b)
+            aggregated loglik: Shape: ()
+            prior: Shape: (num_model)
+            aux_loss: Shape: ()
         """
         inputs = tf.cast(inputs, self.dtype)
-        _, loglik = self.forward_recursion(inputs, training=training)
-        loglik_mean = self.apply_sequence_weights(loglik, indices, aggregate=True)
         if self.use_prior:
-            prior = self.compute_prior()
-            MAP = loglik_mean + prior
-            return tf.squeeze(-MAP), loglik
+            _, loglik, prior, aux_loss = self.forward_recursion(inputs, return_prior=True, training=training)
+            prior = self._scale_prior(prior)
         else:
-            return tf.squeeze(-loglik_mean), loglik
+            _, loglik = self.forward_recursion(inputs, return_prior=False, training=training)
+        loglik_mean = self.apply_sequence_weights(loglik, indices, aggregate=True)
+        loglik_mean = tf.squeeze(loglik_mean)
+        if self.use_prior:
+            return loglik, loglik_mean, prior, aux_loss
+        else:
+            return loglik, loglik_mean
         
         
     def get_config(self):
@@ -182,7 +209,9 @@ class MsaHmmLayer(tf.keras.layers.Layer):
     
         
 @tf.function
-def _forward_recursion_impl(inputs, cell, rnn, total_prob_rnn, end_hints=None, training=False, parallel_factor=1):
+def _forward_recursion_impl(inputs, cell, rnn, total_prob_rnn, 
+                            end_hints=None, return_prior=False,
+                            training=False, parallel_factor=1):
     """ Computes the forward recursion for multiple models where each model
         receives a batch of sequences as input.
     Args:
@@ -191,6 +220,7 @@ def _forward_recursion_impl(inputs, cell, rnn, total_prob_rnn, end_hints=None, t
         rnn: A RNN layer that runs the forward recursion.
         total_prob_rnn: A RNN layer that computes the total probability of the forward variables.
         end_hints: A tensor of shape (..., 2, num_states) that contains the correct state for the left and right ends of each chunk.
+        return_prior: If true, the prior is computed and returned.
         training: If true, the cell is run in training mode.
         parallel_factor: Increasing this number allows computing likelihoods and posteriors chunk-wise in parallel at the cost of memory usage.
     Returns:
@@ -223,7 +253,12 @@ def _forward_recursion_impl(inputs, cell, rnn, total_prob_rnn, end_hints=None, t
         loglik = tf.reshape(loglik, (num_model, b))
     else:
         forward_result, loglik = _get_total_forward_from_chunks(forward, cell, total_prob_rnn, b, seq_len, parallel_factor=parallel_factor)
-    return forward_result, loglik
+    if return_prior:
+        prior = cell.get_prior_log_density()
+        aux_loss = cell.get_aux_loss()
+        return forward_result, loglik, prior, aux_loss
+    else:
+        return forward_result, loglik
 
 
 def _get_total_forward_from_chunks(forward, cell, total_prob_rnn, b, seq_len, parallel_factor=1):
@@ -253,7 +288,10 @@ def _get_total_forward_from_chunks(forward, cell, total_prob_rnn, b, seq_len, pa
     
     
 @tf.function
-def _backward_recursion_impl(inputs, cell, reverse_cell, rnn_backward, total_prob_rnn_rev, end_hints=None, training=False, parallel_factor=1):
+def _backward_recursion_impl(inputs, cell, reverse_cell, 
+                            rnn_backward, total_prob_rnn_rev, 
+                            end_hints=None, return_prior=False,
+                            training=False, parallel_factor=1):
     """ Computes the backward recursion for multiple models where each model
         receives a batch of sequences as input.
     Args:
@@ -263,6 +301,7 @@ def _backward_recursion_impl(inputs, cell, reverse_cell, rnn_backward, total_pro
         rnn_backward: A RNN layer that runs the backward recursion.
         total_prob_rnn_rev: A RNN layer that computes the total probability of the backward variables.
         end_hints: A tensor of shape (..., 2, num_states) that contains the correct state for the left and right ends of each chunk.
+        return_prior: If true, the prior is computed and returned.
         training: If true, the cell is run in training mode.
         parallel_factor: Increasing this number allows computing likelihoods and posteriors chunk-wise in parallel at the cost of memory usage.
     Returns:
@@ -291,7 +330,12 @@ def _backward_recursion_impl(inputs, cell, reverse_cell, rnn_backward, total_pro
         backward_result = tf.reverse(backward_result, [-2])
     else:
         backward_result = _get_total_backward_from_chunks(backward, cell, reverse_cell, total_prob_rnn_rev, b, seq_len, parallel_factor=parallel_factor)
-    return backward_result
+    if return_prior:
+        prior = cell.get_prior_log_density()
+        aux_loss = cell.get_aux_loss()
+        return backward_result, prior, aux_loss
+    else:
+        return backward_result
 
 
 def _get_total_backward_from_chunks(backward, cell, reverse_cell, total_prob_rnn_rev, b, seq_len, revert_chunks=True, parallel_factor=1):
@@ -328,7 +372,11 @@ def proper_shape(tensor):
 
 
 @tf.function
-def _state_posterior_log_probs_impl(inputs, cell, reverse_cell, bidirectional_rnn, total_prob_rnn, total_prob_rnn_rev, end_hints=None, training=False, no_loglik=False, parallel_factor=1):
+def _state_posterior_log_probs_impl(inputs, cell, reverse_cell, 
+                                    bidirectional_rnn, total_prob_rnn, 
+                                    total_prob_rnn_rev, 
+                                    end_hints=None, return_prior=False,
+                                    training=False, no_loglik=False, parallel_factor=1):
     """ Computes the log-probability of state q at position i given inputs.
     Args:
         inputs: Sequences. Shape: (num_model, b, seq_len, s)
@@ -338,6 +386,7 @@ def _state_posterior_log_probs_impl(inputs, cell, reverse_cell, bidirectional_rn
         total_prob_rnn: A RNN layer that computes the total probability of the forward variables.
         total_prob_rnn_rev: A RNN layer that computes the total probability of the backward variables.
         end_hints: A tensor of shape (..., 2, num_states) that contains the correct state for the left and right ends of each chunk.
+        return_prior: If true, the prior is computed and returned.
         training: If true, the cell is run in training mode.
         no_loglik: If true, the loglik is not used in the return value. This can be beneficial for end-to-end training when the
                     normalizing constant of the posteriors is not important and the activation function is the softmax.
@@ -389,7 +438,12 @@ def _state_posterior_log_probs_impl(inputs, cell, reverse_cell, bidirectional_rn
         posterior = forward_result + backward_result
     if not no_loglik:
         posterior -= loglik[:,:,tf.newaxis,tf.newaxis]
-    return posterior
+    if return_prior:
+        prior = cell.get_prior_log_density()
+        aux_loss = cell.get_aux_loss()
+        return posterior, prior, aux_loss
+    else:
+        return posterior
 
 
 tf.keras.utils.get_custom_objects()["MsaHmmLayer"] = MsaHmmLayer

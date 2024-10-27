@@ -66,6 +66,8 @@ background_distribution /= np.sum(background_distribution)
 def make_default_anc_probs_init(num_models):
     exchangeability_stack = np.stack([exchangeability_init]*num_models, axis=0)
     log_p_stack = np.stack([np.log(p)]*num_models, axis=0)
+    exchangeability_stack = np.expand_dims(exchangeability_stack, axis=1) #"k" in AncProbLayer
+    log_p_stack = np.expand_dims(log_p_stack, axis=1) #"k" in AncProbLayer
     return [ConstantInitializer(-3), 
             ConstantInitializer(exchangeability_stack), 
             ConstantInitializer(log_p_stack)]

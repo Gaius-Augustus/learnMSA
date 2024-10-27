@@ -68,6 +68,7 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
                                 name="insertion_kernel_"+str(i),
                                 trainable=not self.frozen_insertions) 
                                     for i,init in enumerate(self.insertion_init)]
+        self.prior.build()
         self.built = True
         
 
@@ -144,6 +145,10 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
         emit_shape = tf.concat([tf.shape(B)[:1], input_shape[1:-1], tf.shape(B)[-1:]], 0)
         emit = tf.reshape(emit, emit_shape)
         return emit
+
+
+    def get_aux_loss(self):
+        return tf.constant(0., dtype=self.dtype)
     
 
     def get_prior_log_density(self):

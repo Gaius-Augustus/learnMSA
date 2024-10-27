@@ -7,6 +7,7 @@ from learnMSA.msa_hmm.MsaHmmLayer import MsaHmmLayer
 from learnMSA.msa_hmm.AncProbsLayer import AncProbsLayer
 from learnMSA.msa_hmm.Configuration import assert_config
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
+from learnMSA.msa_hmm.Utility import deserialize
 
 
 
@@ -20,6 +21,59 @@ class PermuteSeqs(tf.keras.layers.Layer):
 
     def get_config(self):
         return {"perm": self.perm}
+
+
+class Identity(tf.keras.layers.Layer):
+    def call(self, x):
+        return x
+
+
+class LearnMSAModel(tf.keras.Model):
+    def __init__(self, *args, **kwargs):
+        super(LearnMSAModel, self).__init__(*args, **kwargs)
+        #use mean trackers for scalars to use their update logic
+        self.loss_tracker = tf.keras.metrics.Mean()
+        self.loglik_tracker = tf.keras.metrics.Mean()
+        self.prior_tracker = tf.keras.metrics.Mean()
+        self.aux_loss_tracker = tf.keras.metrics.Mean()
+        self.use_prior = False
+
+    def loglik(self, y_pred):
+        return y_pred[1]
+
+    def prior(self, y_pred):
+        return tf.reduce_mean(y_pred[2])
+
+    def aux_loss(self, y_pred):
+        return y_pred[3]
+
+    def compute_loss(self, x, y, y_pred, sample_weight):
+        if len(y_pred) == 4:
+            loss = -self.loglik(y_pred) -self.prior(y_pred) + self.aux_loss(y_pred) 
+        else:
+            loss = -self.loglik(y_pred)
+        loss += sum(self.losses)
+        self.loss_tracker.update_state(loss)
+        return loss
+
+    def compute_metrics(self, x, y, y_pred, sample_weight):
+        metric_results = {"loss": self.loss_tracker.result()}
+        self.loglik_tracker.update_state(self.loglik(y_pred))
+        metric_results["loglik"] = self.loglik_tracker.result()
+        if len(y_pred) == 4:
+            self.use_prior = True
+            self.prior_tracker.update_state(self.prior(y_pred))
+            self.aux_loss_tracker.update_state(self.aux_loss(y_pred))
+            metric_results["prior"] = self.prior_tracker.result()
+            metric_results["aux_loss"] = self.aux_loss_tracker.result()
+        return metric_results
+
+    def reset_metrics(self):
+        self.loss_tracker.reset_state()
+        self.loglik_tracker.reset_state()
+        self.prior_tracker.reset_state()
+        self.aux_loss_tracker.reset_state()
+
 
 
 def generic_model_generator(encoder_layers,
@@ -41,11 +95,22 @@ def generic_model_generator(encoder_layers,
     forward_seq = transposed_sequences
     for layer in encoder_layers:
         forward_seq = layer(forward_seq, transposed_indices)
-    map_loss, loglik = msa_hmm_layer(forward_seq, transposed_indices)
-    #transpose back to make model.predict work correctly
-    loglik = PermuteSeqs([1,0], name="loglik")(loglik)
-    model = tf.keras.Model(inputs=(sequences, indices), 
-                        outputs=(map_loss, loglik))
+    if msa_hmm_layer.use_prior:
+        loglik, aggregated_loglik, prior, aux_loss = msa_hmm_layer(forward_seq, transposed_indices)
+        #transpose back to make model.predict work correctly
+        loglik = PermuteSeqs([1,0], name="loglik")(loglik)
+        aggregated_loglik = Identity(name="aggregated_loglik")(aggregated_loglik)
+        prior = Identity(name="prior")(prior)
+        aux_loss = Identity(name="aux_loss")(aux_loss)
+        model = LearnMSAModel(inputs=(sequences, indices), 
+                            outputs=(loglik, aggregated_loglik, prior, aux_loss))
+    else:
+        loglik, aggregated_loglik = msa_hmm_layer(forward_seq, transposed_indices)
+        #transpose back to make model.predict work correctly
+        loglik = PermuteSeqs([1,0], name="loglik")(loglik)
+        aggregated_loglik = Identity(name="aggregated_loglik")(aggregated_loglik)
+        model = LearnMSAModel(inputs=(sequences, indices), 
+                            outputs=(loglik, aggregated_loglik))
     return model
 
 
@@ -188,14 +253,11 @@ def make_dataset(indices, batch_generator, batch_size=512, shuffle=True, bucket_
     shuffle = shuffle and not bucket_by_seq_length
     batch_generator.shuffle = shuffle
     ds = tf.data.Dataset.from_tensor_slices(indices)
-    if bucket_by_seq_length:
+    adaptive_batch = batch_generator.config["batch_size"]
+    if bucket_by_seq_length and callable(adaptive_batch): #bucketing not usable if user has set a fixed batch size
         ds_len = tf.data.Dataset.from_tensor_slices(batch_generator.data.seq_lens[indices].astype(np.int32))
         ds_ind =  tf.data.Dataset.from_tensor_slices(np.arange(indices.size))
         ds = tf.data.Dataset.zip((ds, ds_len, ds_ind))
-        adaptive_batch = batch_generator.config["batch_size"]
-        if not callable(adaptive_batch):
-            raise ValueError("""Batch generator must be configured with a configuration that support adaptive batch size callsback,
-                                if bucket_by_seq_length is True.""")
         bucket_boundaries = [200, 520, 700, 850, 1200, 2000, 4000, math.inf]
         bucket_batch_sizes = [adaptive_batch(model_lengths, b) for b in bucket_boundaries]
         ds = ds.bucket_by_sequence_length(
@@ -212,11 +274,25 @@ def make_dataset(indices, batch_generator, batch_size=512, shuffle=True, bucket_
             ds = ds.repeat()
         ds = ds.batch(batch_size)
         def batch_func(i):
-            batch, ind = tf.numpy_function(batch_generator, [i], batch_generator.get_out_types())
-            #explicitly set output shapes or tf 2.17 will complain about unknown shapes
-            batch.set_shape(tf.TensorShape([None, batch_generator.num_models, None]))
-            ind.set_shape(tf.TensorShape([None, batch_generator.num_models]))
-            return batch, ind
+            if len(batch_generator.get_out_types()) == 2:
+                batch, ind = tf.numpy_function(batch_generator, [i], batch_generator.get_out_types())
+                #explicitly set output shapes or tf 2.17 will complain about unknown shapes
+                batch.set_shape(tf.TensorShape([None, batch_generator.num_models, None]))
+                ind.set_shape(tf.TensorShape([None, batch_generator.num_models]))
+                if bucket_by_seq_length:
+                    return batch, ind, -1
+                else:
+                    return batch, ind
+            else:
+                batch, ind, emb = tf.numpy_function(batch_generator, [i], batch_generator.get_out_types())
+                #explicitly set output shapes or tf 2.17 will complain about unknown shapes
+                batch.set_shape(tf.TensorShape([None, batch_generator.num_models, None]))
+                ind.set_shape(tf.TensorShape([None, batch_generator.num_models]))
+                emb.set_shape(tf.TensorShape([None, batch_generator.num_models, None, batch_generator.scoring_model_config.dim+1]))
+                if bucket_by_seq_length:
+                    return batch, ind, emb, -1  
+                else: 
+                    return batch, ind, emb
 
     ds = ds.map(batch_func,
                 # no parallel processing if using an indexed dataset
@@ -250,7 +326,7 @@ def fit_model(model_generator,
     tf.keras.backend.clear_session() #frees occupied memory 
     tf.get_logger().setLevel('ERROR')
     batch_generator.configure(data, config, verbose)
-    optimizer = tf.optimizers.Adam(config["learning_rate"])
+    optimizer = tf.keras.optimizers.Adam(config["learning_rate"])
     if verbose:
         print("Fitting models of lengths", model_lengths, "on", indices.shape[0], "sequences.")
         print("Batch size=", batch_size, "Learning rate=", config["learning_rate"])
@@ -271,7 +347,7 @@ def fit_model(model_generator,
                                 data=data,
                                 sequence_weights=sequence_weights,
                                 clusters=clusters)
-        model.compile(optimizer=optimizer, loss=[(lambda _,loss: loss), None])
+        model.compile(optimizer=optimizer, jit_compile=False)
         return model
     num_gpu = len([x.name for x in tf.config.list_logical_devices() if x.device_type == 'GPU']) 
     if verbose:
@@ -329,3 +405,5 @@ def fit_model(model_generator,
 
     
 tf.keras.utils.get_custom_objects()["PermuteSeqs"] = PermuteSeqs
+tf.keras.utils.get_custom_objects()["Identity"] = Identity
+tf.keras.utils.get_custom_objects()["LearnMSAModel"] = LearnMSAModel

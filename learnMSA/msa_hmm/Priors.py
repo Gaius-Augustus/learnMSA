@@ -19,12 +19,15 @@ class AminoAcidPrior(tf.keras.layers.Layer):
         self.comp_count = comp_count
         self.epsilon = epsilon
         
-    def build(self, input_shape):
+    def build(self, input_shape=None):
+        if self.built:
+            return
         prior_path = os.path.dirname(__file__)+"/trained_prior/"
         dtype = self.dtype if isinstance(self.dtype, str) else self.dtype.name
         model_path = prior_path+"_".join([str(self.comp_count), "True", dtype, "_dirichlet.h5"])
         model = dm.load_mixture_model(model_path, self.comp_count, 20, trainable=False, dtype=dtype)
         self.emission_dirichlet_mix = model.layers[-1]
+        self.built = True
         
     def call(self, B, lengths):
         """Computes log pdf values for each match state.
@@ -133,10 +136,12 @@ class JointEmissionPrior(tf.keras.layers.Layer):
         assert len(self.priors) > 2, "Joint emission requires at least 2 priors."
         assert len(self.priors) == len(self.kernel_split) + 1, "Number of priors must be one more than the number of kernel splits."
 
-    def build(self, input_shape):
+    def build(self, input_shape=None):
+        if self.built:
+            return
         for prior in self.priors:
-            prior.dtype = self.dtype
             prior.build(input_shape)
+        self.built = True
         
     def call(self, B, lengths):
         """Computes log pdf values for each match state.
@@ -145,11 +150,11 @@ class JointEmissionPrior(tf.keras.layers.Layer):
         Returns:
             Shape: (k, q)
         """
-        log_joint_pdf = self.priors[0](B[..., :self.kernel_split[0]], lengths)
+        log_joint_pdf = self.priors[0](B[..., :self.kernel_split[0]], lengths=lengths)
         for i in range(1, len(self.priors)):
             split_left = self.kernel_split[i-1]
             split_right = self.kernel_split[i] if i < len(self.kernel_split) else None
-            log_joint_pdf += self.priors[i](B[..., split_left : split_right], lengths)
+            log_joint_pdf += self.priors[i](B[..., split_left : split_right], lengths=lengths)
         return log_joint_pdf
     
     def get_config(self):
@@ -180,9 +185,6 @@ class JointEmissionPrior(tf.keras.layers.Layer):
 class NullPrior(tf.keras.layers.Layer):
     """NullObject if no prior should be used.
     """
-    def load(self, dtype):
-        pass
-    
     def call(self, B, lengths):
         k = tf.shape(B)[0]
         max_model_length = tf.reduce_max(lengths)
@@ -232,7 +234,9 @@ class ProfileHMMTransitionPrior(tf.keras.layers.Layer):
         self.alpha_global_compl = alpha_global_compl
         self.epsilon = epsilon
         
-    def build(self, input_shape):
+    def build(self, input_shape=None):
+        if self.built:
+            return
         prior_path = os.path.dirname(__file__)+"/trained_prior/transition_priors/"
 
         match_model_path = prior_path + "_".join(["match_prior", str(self.match_comp), self.dtype]) + ".h5"
@@ -244,6 +248,7 @@ class ProfileHMMTransitionPrior(tf.keras.layers.Layer):
         delete_model_path = prior_path + "_".join(["delete_prior", str(self.delete_comp), self.dtype]) + ".h5"
         delete_model = dm.load_mixture_model(delete_model_path, self.delete_comp, 2, trainable=False, dtype=self.dtype)
         self.delete_dirichlet = delete_model.layers[-1]
+        self.built = True
         
     def call(self, probs_list, flank_init_prob):
         """Computes log pdf values for each transition prior.
@@ -308,7 +313,8 @@ class ProfileHMMTransitionPrior(tf.keras.layers.Layer):
             "delete_prior" : delete_dirichlet,
             "flank_prior" : flank_prior,
             "hit_prior" : hit_prior,
-            "global_prior" : global_prior}
+            "global_prior" : global_prior
+            }
         prior_val = {k : tf.stack(v) for k,v in prior_val.items()}
         return prior_val
     

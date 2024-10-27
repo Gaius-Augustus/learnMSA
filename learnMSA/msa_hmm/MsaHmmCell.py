@@ -24,6 +24,7 @@ class HmmCell(tf.keras.layers.Layer):
                  emitter,
                  transitioner,
                  use_step_counter=False,
+                 use_fake_step_counter=False, #only for backwards compatibility in Tiberius, never else set this to True
                  **kwargs
                 ):
         super(HmmCell, self).__init__(**kwargs)
@@ -37,6 +38,7 @@ class HmmCell(tf.keras.layers.Layer):
         self.epsilon = tf.constant(1e-16, self.dtype)
         self.reverse = False
         self.use_step_counter = use_step_counter
+        self.use_fake_step_counter = use_fake_step_counter
             
             
     def build(self, input_shape):
@@ -45,7 +47,7 @@ class HmmCell(tf.keras.layers.Layer):
         for em in self.emitter:
             em.build((None, input_shape[-2], self.dim))
         self.transitioner.build((None, input_shape[-2], self.dim))
-        if not self.reverse and self.use_step_counter:
+        if not self.reverse and self.use_step_counter or self.use_fake_step_counter:
             self.step_counter = self.add_weight(shape=(), initializer=tf.constant_initializer(-1), 
                                                 trainable=False, name="step_counter", dtype=tf.int32)
         self.built = True
@@ -166,19 +168,16 @@ class HmmCell(tf.keras.layers.Layer):
             init_dist = tf.reshape(init_dist, (self.num_models*batch_size, self.max_num_states*self.max_num_states))
             loglik = tf.zeros((self.num_models*batch_size, self.max_num_states), dtype=self.dtype)
             return [init_dist, loglik]
-            
+
+
+    def get_aux_loss(self):
+        return sum([em.get_aux_loss() for em in self.emitter])
+
     
-    def get_prior_log_density(self, add_metrics=False):  
+    def get_prior_log_density(self):  
         em_priors = [tf.reduce_sum(em.get_prior_log_density(), 1) for em in self.emitter]
         trans_priors = self.transitioner.get_prior_log_densities()
         prior = sum(em_priors) + sum(trans_priors.values())
-        if add_metrics:
-            for i,d in enumerate(em_priors):
-                d = tf.reduce_mean(d)
-                self.add_metric(d, "mean_model_em_prior_"+str(i))
-            for name, d in trans_priors.items():
-                d = tf.reduce_mean(d)
-                self.add_metric(d, "mean_model_"+name)
         return prior
     
     

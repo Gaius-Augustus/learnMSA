@@ -17,7 +17,7 @@ class MvnPrior(tf.keras.layers.Layer):
         self.num_components = num_components
 
 
-    def load(self, dtype):
+    def build(self, input_shape):
         # load the underlying scoring model
         self.prior_path = Common.get_prior_path(self.scoring_model_config, self.num_components)
         self.prior_path = os.path.dirname(__file__)+f"/../protein_language_models/"+self.prior_path
@@ -143,6 +143,24 @@ class MvnPriorLayer(tf.keras.layers.Layer):
         return cls(**config)
 
 
+class ZeroMaskEmbeddings(tf.keras.layers.Layer):
+    def __init__(self, aggregate_result, **kwargs):
+        super(ZeroMaskEmbeddings, self).__init__(**kwargs)
+        self.aggregate_result = aggregate_result
+
+    def call(self, embeddings, log_pdf):
+        # zero out pdfs of zero embeddings (assumed padding)
+        mask = tf.reduce_any(tf.not_equal(embeddings, 0), -1)
+        mask = tf.cast(mask, log_pdf.dtype)
+        if self.aggregate_result:
+            log_pdf = aggregate(log_pdf, mask)
+        else:
+            log_pdf *= mask
+        return log_pdf
+
+    def get_config(self):
+        return {"aggregate_result": self.aggregate_result}
+
 
 def make_pdf_model(scoring_model_config : Common.ScoringModelConfig, 
                    num_components=Common.PRIOR_DEFAULT_COMPONENTS, 
@@ -159,14 +177,8 @@ def make_pdf_model(scoring_model_config : Common.ScoringModelConfig,
     embeddings = tf.keras.Input((None, scoring_model_config.dim))
     # compute log pdf per observation
     log_pdf = MvnPriorLayer(scoring_model_config, num_components, trainable=trainable)(embeddings)
-    # zero out pdfs of zero embeddings (assumed padding)
-    mask = tf.reduce_any(tf.not_equal(embeddings, 0), -1)
-    mask = tf.cast(mask, log_pdf.dtype)
-    if aggregate_result:
-        log_pdf = aggregate(log_pdf, mask)
-    else:
-        log_pdf *= mask
-    model = tf.keras.Model(inputs=[embeddings], outputs=[log_pdf])
+    log_pdf = ZeroMaskEmbeddings(aggregate_result)(embeddings, log_pdf)
+    model = tf.keras.Model(inputs=embeddings, outputs=log_pdf)
     return model
 
 
@@ -180,8 +192,9 @@ def get_mvn_layer(pdf_model):
     return mvn_layer
 
 
+emb_cache = {}
 
-def aggregate(x, mask):
+def aggregate(self, x, mask):
     """ Utility that reduces values to a scalar by averaging over sequences and batch.
         Args:
             x: A tensor of shape (batch, seq_len)
@@ -192,9 +205,6 @@ def aggregate(x, mask):
     seg_avg = tf.reduce_sum(x * mask, -1) / tf.maximum(seq_lens, 1.)
     # average over batch
     return tf.reduce_mean(seg_avg)
-
-
-emb_cache = {}
 
 def get_expected_emb(scoring_model_config : Common.ScoringModelConfig, num_prior_components):
     if num_prior_components == 0:

@@ -25,7 +25,7 @@ class SymmetricBilinearReduction(tf.keras.layers.Layer):
             regularizer=tf.keras.regularizers.L2(self.L2),
             trainable=self.trainable,
             name="R")
-        self.b = self.add_weight(shape=(1), initializer=tf.constant_initializer(-3), trainable=self.trainable, name="b")
+        self.b = self.add_weight(shape=(1,), initializer=tf.constant_initializer(-3), trainable=self.trainable, name="b")
         self.dropout = tf.keras.layers.Dropout(self.dropout_prob)
         
     def _reduce(self, embeddings, training):
@@ -80,7 +80,7 @@ class BackgroundEmbedding(tf.keras.layers.Layer):
     
     def build(self, input_shape):
         self.background_embedding = self.add_weight(
-            shape=(self.reduction_layer.reduced_dim),
+            shape=(self.reduction_layer.reduced_dim,),
             initializer="zeros",
             name="background_embedding")
         
