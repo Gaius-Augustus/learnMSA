@@ -15,7 +15,7 @@ setup(
         where=".",
         include=["learnMSA", "learnMSA.run", "learnMSA.msa_hmm", "learnMSA.protein_language_models"]
     ),
-    install_requires=["tensorflow>=2.5.0,<2.11",
+    install_requires=["tensorflow>=2.5.0,<2.18",
                       "networkx",
                       "logomaker", 
                       "seaborn",
