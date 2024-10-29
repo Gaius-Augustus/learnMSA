@@ -9,11 +9,11 @@ PRIOR_DEFAULT_COMPONENTS = 100
 
 class ScoringModelConfig():
     def __init__(self, 
-                 lm_name="esm2",
-                 dim=64,
-                 activation="softmax",
+                 lm_name="protT5",
+                 dim=16,
+                 activation="sigmoid",
                  use_aa=False,
-                 scaled=True,
+                 scaled=False,
                  suffix=""):
         self.lm_name = lm_name
         self.dim = dim

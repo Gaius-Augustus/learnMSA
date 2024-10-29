@@ -367,7 +367,7 @@ def fit_model(model_generator,
     else:
         model = make_and_compile()
     
-    steps = max(10, int(100*np.sqrt(indices.shape[0])/batch_size))
+    steps = min(max(10, int(100*np.sqrt(indices.shape[0])/batch_size)), 500)
     dataset = make_dataset(indices, 
                            batch_generator, 
                            batch_size,
