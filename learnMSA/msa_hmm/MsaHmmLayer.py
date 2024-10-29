@@ -229,7 +229,8 @@ def _forward_recursion_impl(inputs, cell, rnn, total_prob_rnn,
     """
     cell.recurrent_init()
     #initialize transition- and emission-matricies
-    num_model, b, seq_len, s = tf.unstack(tf.shape(inputs))
+    _, b, seq_len, s = tf.unstack(tf.shape(inputs))
+    num_model = cell.num_models
     q = cell.max_num_states
     emission_probs = cell.emission_probs(inputs, end_hints=end_hints, training=training)
     #reshape to 3D inputs for RNN (cell will reshape back in each step)
@@ -309,7 +310,8 @@ def _backward_recursion_impl(inputs, cell, reverse_cell,
     """
     cell.recurrent_init()
     reverse_cell.recurrent_init()
-    num_model, b, seq_len, s = tf.unstack(tf.shape(inputs))
+    _, b, seq_len, s = tf.unstack(tf.shape(inputs))
+    num_model = cell.num_models
     q = cell.max_num_states
     emission_probs = reverse_cell.emission_probs(inputs, end_hints=end_hints, training=training)
     #reshape to 3D inputs for RNN (cell will reshape back in each step)
@@ -396,7 +398,8 @@ def _state_posterior_log_probs_impl(inputs, cell, reverse_cell,
     """
     cell.recurrent_init()
     reverse_cell.recurrent_init()
-    num_model, b, seq_len, s = tf.unstack(tf.shape(inputs))
+    _, b, seq_len, s = tf.unstack(tf.shape(inputs))
+    num_model = cell.num_models
     q = cell.max_num_states
     emission_probs = cell.emission_probs(inputs, end_hints=end_hints, training=training)
     #reshape to equally sizes chunks according to parallel factor
