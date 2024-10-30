@@ -214,6 +214,12 @@ def assert_config(config):
             
 def get_gpu_memory():
     command = "nvidia-smi --query-gpu=memory.total --format=csv"
-    memory_free_info = sp.check_output(command.split()).decode('ascii').split('\n')[:-1][1:]
-    memory_free_values = [int(x.split()[0]) for i, x in enumerate(memory_free_info)]
+    try:
+        memory_free_info = sp.check_output(command.split()).decode('ascii').split('\n')[:-1][1:]
+        memory_free_values = [int(x.split()[0]) for i, x in enumerate(memory_free_info)]
+    except sp.CalledProcessError as e:
+        print("Warning: There were GPU(s) detected, but nvidia-smi failed to run. It is used to infer GPU memory and adapt the batch size.")
+        print("Please make sure nvidia-smi is installed and working properly. It might also mean that you are not running an NVIDIA GPU.")
+        print("learnMSA will continue with default settings and might behave as expected. You can adjust the batch size manually with the -b option.")
+        return []
     return memory_free_values
