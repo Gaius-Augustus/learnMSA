@@ -1943,7 +1943,10 @@ class TestLanguageModelExtension(unittest.TestCase):
             for i,j in enumerate(indices):
                 batch[i, :seq_lens[j]] = (j+1) * np.ones((seq_lens[j], dim), dtype=np.float32)
             return batch
-        cache = EmbeddingCache.EmbeddingCache(seq_lens, dim)
+        #use float32 to avoid batch size scaling
+        #in learnMSA production, float16 (default for dtype) will be used for efficiency and the batch sizes
+        #will be automaticcally increased, which would let this test fail
+        cache = EmbeddingCache.EmbeddingCache(seq_lens, dim, dtype=np.float32) 
         num_calls = [0, 0]
         def batch_size_callback(L):
             if L > 10:

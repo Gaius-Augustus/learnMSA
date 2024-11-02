@@ -10,8 +10,8 @@ logging.set_verbosity_error()
 
 class ProtT5LanguageModel(common.LanguageModel):
     
-    def __init__(self, trainable=False):
-        super(ProtT5LanguageModel, self).__init__()
+    def __init__(self, trainable=False, dtype=tf.float16):
+        super(ProtT5LanguageModel, self).__init__(dtype=dtype)
         self.model = TFT5EncoderModel.from_pretrained("Rostlab/prot_t5_xl_half_uniref50-enc", from_pt=True, cache_dir=os.path.dirname(__file__)+"/protT5_model")
         self.model.trainable = trainable
         self.inputs = self.model.inputs
@@ -20,10 +20,10 @@ class ProtT5LanguageModel(common.LanguageModel):
     def call(self, inputs):
         ids, mask = inputs[0], inputs[1]
         protT5_output = self.model(ids, mask)
-        embeddings = tf.cast(protT5_output.last_hidden_state[:,:-1], tf.float32)
+        embeddings = tf.cast(protT5_output.last_hidden_state[:,:-1], self.dtype)
         mask = mask[:,1:] #mask also contains one special token per sequence, do not count it
         max_len = tf.reduce_max(tf.reduce_sum(mask, -1))
-        mask = tf.cast(tf.expand_dims(mask, -1), tf.float32)
+        mask = tf.cast(tf.expand_dims(mask, -1), self.dtype)
         embeddings = (embeddings * mask)[:,:max_len]
         return embeddings
     

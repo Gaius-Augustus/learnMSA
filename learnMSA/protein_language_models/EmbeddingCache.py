@@ -3,12 +3,13 @@ import numpy as np
 class EmbeddingCache:
     """ A datastructure to store large amounts of embeddings space efficiently in memory by avoiding fragmentation.
         The embeddings are stored in a single chunk of memory and can be accessed by index.
+        Stores embeddings in half-precision per default.
     Args:
         seq_lens: An array that contains the lengths of the sequences.
         dim: The dimensionality of the embeddings returned by compute_emb_func.
         dtype: The data type of the embeddings.
     """
-    def __init__(self, seq_lens, dim, dtype=np.float32):
+    def __init__(self, seq_lens, dim, dtype=np.float16):
         self.seq_lens = seq_lens
         self.dim = dim
         self.cum_lens = np.cumsum(seq_lens)
@@ -20,15 +21,17 @@ class EmbeddingCache:
     def fill_cache(self, compute_emb_func, batch_size_callback, verbose=True):
         """ Fill the cache with embeddings.
         Args:
-            compute_emb_func: A function that computes the embeddings for a batch of sequence indices.
+            compute_emb_func: A function that computes the embeddings for a batch of sequence indices of the same dtype as the cache.
             batch_size_callback: A function that returns an appropriate batch size for a given sequence length.
         """
         sorted_indices = np.argsort(-self.seq_lens)
         i = 0
         last = 0
         n = self.seq_lens.size
+        batch_size_mul = 2 if self.cache.dtype==np.float16 else 1 #double batch size if half precision for speed
         while i < n:
             batch_size = batch_size_callback(self.seq_lens[sorted_indices[i]])
+            batch_size *= batch_size_mul
             batch_indices = sorted_indices[i:i+batch_size]
             embeddings = compute_emb_func(batch_indices)
             for j,k in enumerate(batch_indices):
