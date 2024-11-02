@@ -102,7 +102,11 @@ def fit_and_align(data : SequenceDataset,
                                           sequence_weights=sequence_weights,
                                           clusters=clusters,
                                           verbose=verbose)
+        if verbose:
+            print("Creating alignment model...")
         am = AlignmentModel(data, batch_generator, decode_indices, batch_size=batch_size, model=model)
+        if verbose:
+            print("Successfully created alignment model.")
         if last_iteration:
             break
         config, model_lengths, surgery_converged = do_model_surgery(i,
@@ -221,6 +225,7 @@ def run_learnMSA(data : SequenceDataset,
             print("Out of memory. A resource was exhausted.")
             print("Try reducing the batch size (-b). The current batch size was: "+str(config["batch_size"])+".")
             sys.exit(e.error_code)
+    tf.keras.backend.clear_session() #not sure if necessary
     am.best_model = select_model(am, config["model_criterion"], verbose)
         
     Path(os.path.dirname(out_filename)).mkdir(parents=True, exist_ok=True)

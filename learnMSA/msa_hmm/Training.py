@@ -254,7 +254,7 @@ def make_dataset(indices, batch_generator, batch_size=512, shuffle=True, bucket_
     batch_generator.shuffle = shuffle
     ds = tf.data.Dataset.from_tensor_slices(indices)
     adaptive_batch = batch_generator.config["batch_size"]
-    if bucket_by_seq_length and callable(adaptive_batch): #bucketing not usable if user has set a fixed batch size
+    if bucket_by_seq_length and callable(adaptive_batch): #bucketing only usable if user has not set a fixed batch size
         ds_len = tf.data.Dataset.from_tensor_slices(batch_generator.data.seq_lens[indices].astype(np.int32))
         ds_ind =  tf.data.Dataset.from_tensor_slices(np.arange(indices.size))
         ds = tf.data.Dataset.zip((ds, ds_len, ds_ind))
@@ -269,30 +269,33 @@ def make_dataset(indices, batch_generator, batch_size=512, shuffle=True, bucket_
         func = (lambda i,j: (batch_generator(i), j)) if len(batch_func_out_types) == 2 else lambda i,j: (*batch_generator(i), j)
         batch_func = lambda i,_,j: tf.numpy_function(func=func, inp=[i,j], Tout=batch_func_out_types)
     else:
+        if bucket_by_seq_length:
+            ds_arange = tf.data.Dataset.from_tensor_slices(np.arange(indices.size))
+            ds = tf.data.Dataset.zip((ds, ds_arange))
         if shuffle:
             ds = ds.shuffle(indices.size, reshuffle_each_iteration=True)
             ds = ds.repeat()
         ds = ds.batch(batch_size)
-        def batch_func(i):
+        def _batch_func(i):
             if len(batch_generator.get_out_types()) == 2:
                 batch, ind = tf.numpy_function(batch_generator, [i], batch_generator.get_out_types())
                 #explicitly set output shapes or tf 2.17 will complain about unknown shapes
                 batch.set_shape(tf.TensorShape([None, batch_generator.num_models, None]))
                 ind.set_shape(tf.TensorShape([None, batch_generator.num_models]))
-                if bucket_by_seq_length:
-                    return batch, ind, -1
-                else:
-                    return batch, ind
+                return batch, ind
             else:
                 batch, ind, emb = tf.numpy_function(batch_generator, [i], batch_generator.get_out_types())
                 #explicitly set output shapes or tf 2.17 will complain about unknown shapes
                 batch.set_shape(tf.TensorShape([None, batch_generator.num_models, None]))
                 ind.set_shape(tf.TensorShape([None, batch_generator.num_models]))
                 emb.set_shape(tf.TensorShape([None, batch_generator.num_models, None, batch_generator.scoring_model_config.dim+1]))
-                if bucket_by_seq_length:
-                    return batch, ind, emb, -1  
-                else: 
-                    return batch, ind, emb
+                return batch, ind, emb
+        if bucket_by_seq_length:
+            def batch_func(i,j):
+                return *_batch_func(i), j
+        else:
+            batch_func = _batch_func
+            
 
     ds = ds.map(batch_func,
                 # no parallel processing if using an indexed dataset
@@ -400,6 +403,8 @@ def fit_model(model_generator,
                         steps_per_epoch=steps,
                           callbacks=callbacks,
                         verbose = 2*int(verbose))
+    if verbose:
+        print("Fitted model successfully.")
     tf.get_logger().setLevel('INFO')
     return model, history
 

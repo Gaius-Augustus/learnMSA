@@ -18,6 +18,8 @@ class MvnPrior(tf.keras.layers.Layer):
 
 
     def build(self, input_shape):
+        if self.built:
+            return
         # load the underlying scoring model
         self.prior_path = Common.get_prior_path(self.scoring_model_config, self.num_components)
         self.prior_path = os.path.dirname(__file__)+f"/../protein_language_models/"+self.prior_path
@@ -30,6 +32,7 @@ class MvnPrior(tf.keras.layers.Layer):
         self.pdf_model.trainable = False
         self.mvn_prior_layer = get_mvn_layer(self.pdf_model)
         self.mvn_prior_layer.trainable = False
+        self.built = True
 
  
     def call(self, B, lengths):
