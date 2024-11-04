@@ -726,20 +726,23 @@ def one_hot_set(indices, d, dtype):
     return tf.reduce_sum(tf.one_hot(indices, d, dtype=dtype), axis=0)
 
 
-def find_faulty_sequences(state_seqs_max_lik, model_length, seq_lens):
-    # Returns an array of sequences indices for that Viterbi should be rerun with restrictions
-    C = 2 * model_length
-    C_state = state_seqs_max_lik == C
-    prev_C_state = np.roll(C_state, 1, axis=2)
-    prev_C_state[:,:,0] = False
-    C_state_starts = C_state & ~prev_C_state
-    previous_state = np.roll(state_seqs_max_lik, 1, axis=2).astype(np.int32)
-    previous_state[:,:,0] = -1
-    previous_is_match = (previous_state > 0) & (previous_state < model_length+1)
-    #there are enough match states to align without repeat
-    remaining_matches = model_length - previous_state
-    remaining_residues = seq_lens[np.newaxis,:,np.newaxis] - np.arange(state_seqs_max_lik.shape[-1])[np.newaxis,np.newaxis,:]
-    enough_matches = remaining_matches >= remaining_residues
-    faulty_sequences = np.any(C_state_starts & previous_is_match & enough_matches, axis=-1)
-    faulty_sequences = np.argwhere(faulty_sequences[0])[:,0]
-    return faulty_sequences
+def find_faulty_sequences(state_seqs_max_lik, model_length, seq_lens, limit=32000):
+    if state_seqs_max_lik.shape[1] > limit:
+        return np.array([], dtype=np.int32)
+    else:
+        # Returns an array of sequences indices for that Viterbi should be rerun with restrictions
+        C = 2 * model_length
+        C_state = state_seqs_max_lik == C
+        prev_C_state = np.roll(C_state, 1, axis=2)
+        prev_C_state[:,:,0] = False
+        C_state_starts = C_state & ~prev_C_state
+        previous_state = np.roll(state_seqs_max_lik, 1, axis=2).astype(np.int32)
+        previous_state[:,:,0] = -1
+        previous_is_match = (previous_state > 0) & (previous_state < model_length+1)
+        #there are enough match states to align without repeat
+        remaining_matches = model_length - previous_state
+        remaining_residues = seq_lens[np.newaxis,:,np.newaxis] - np.arange(state_seqs_max_lik.shape[-1])[np.newaxis,np.newaxis,:]
+        enough_matches = remaining_matches >= remaining_residues
+        faulty_sequences = np.any(C_state_starts & previous_is_match & enough_matches, axis=-1)
+        faulty_sequences = np.argwhere(faulty_sequences[0])[:,0]
+        return faulty_sequences
