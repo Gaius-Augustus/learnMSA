@@ -1,5 +1,6 @@
 import os
 import tensorflow as tf
+import numpy as np
 import learnMSA.protein_language_models.Common as Common
 from learnMSA.protein_language_models.MvnMixture import MvnMixture 
 from learnMSA.msa_hmm.Utility import DefaultDiagBijector
@@ -64,6 +65,36 @@ class MvnPrior(tf.keras.layers.Layer):
     def from_config(cls, config):
         config["scoring_model_config"] = Common.ScoringModelConfig(**config["scoring_model_config"])
         return cls(**config)
+
+
+
+class InverseGammaPrior(tf.keras.layers.Layer):
+    """ To regularize variances. Can not be trained.
+    """
+    def __init__(self, alpha=3., beta=3., **kwargs):
+        super(InverseGammaPrior, self).__init__(**kwargs)
+        self.alpha = alpha
+        self.beta = beta
+        self.const_part = alpha * tf.math.log(beta) - tf.math.lgamma(alpha)
+
+
+    def call(self, B, lengths):
+        max_model_length = tf.reduce_max(lengths)
+        length_mask = tf.cast(tf.sequence_mask(lengths), B.dtype)
+        match_states = B[:,1:max_model_length+1] + 1e-8 #prevent too small values
+        inverse_gamma_log_pdf = self.const_part - (self.alpha + 1) * tf.math.log(match_states) - self.beta / match_states
+        inverse_gamma_log_pdf = tf.reduce_sum(inverse_gamma_log_pdf, -1)
+        inverse_gamma_log_pdf *= length_mask
+        return inverse_gamma_log_pdf
+
+
+    def get_config(self):
+        config = super(MvnPrior, self).get_config()
+        config.update({
+             "alpha" : self.alpha,
+            "beta" : self.beta
+        })
+        return config
 
 
 

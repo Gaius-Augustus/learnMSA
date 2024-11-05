@@ -7,7 +7,7 @@ import learnMSA.msa_hmm.Initializers as Initializers
 import learnMSA.msa_hmm.Priors as priors
 from learnMSA.protein_language_models.BilinearSymmetric import make_scoring_model
 from learnMSA.protein_language_models.MvnMixture import MvnMixture
-from learnMSA.protein_language_models.MvnPrior import MvnPrior, get_expected_emb
+from learnMSA.protein_language_models.MvnPrior import MvnPrior, InverseGammaPrior, get_expected_emb
 import learnMSA.protein_language_models.Common as Common
 from learnMSA.msa_hmm.Utility import DefaultDiagBijector
 
@@ -17,9 +17,10 @@ from learnMSA.msa_hmm.Utility import DefaultDiagBijector
 def make_joint_prior(scoring_model_config : Common.ScoringModelConfig, num_prior_components, dtype):
     prior_list = [priors.AminoAcidPrior(dtype=dtype),
                 MvnPrior(scoring_model_config, num_prior_components, dtype=dtype),
+                InverseGammaPrior(),
                 priors.NullPrior()]
     num_aa = len(SequenceDataset.alphabet)-1
-    kernel_split = [num_aa, num_aa + scoring_model_config.dim]
+    kernel_split = [num_aa, num_aa + scoring_model_config.dim, num_aa + 2*scoring_model_config.dim]
     return priors.JointEmissionPrior(prior_list, kernel_split, dtype=dtype)
 
 
@@ -33,7 +34,7 @@ class MvnEmitter(ProfileHMMEmitter):
                  diag_init_var = 1.,
                  full_covariance = False,
                  temperature = 10.,
-                 regularize_variances = True,
+                 regularize_variances = False, #deprecated
                  dtype=tf.float32,
                  **kwargs):
 
