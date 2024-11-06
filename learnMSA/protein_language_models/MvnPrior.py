@@ -18,7 +18,7 @@ class MvnPrior(tf.keras.layers.Layer):
         self.num_components = num_components
 
 
-    def build(self, input_shape):
+    def build(self, input_shape=None):
         if self.built:
             return
         # load the underlying scoring model
