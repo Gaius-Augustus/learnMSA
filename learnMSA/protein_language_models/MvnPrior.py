@@ -81,7 +81,7 @@ class InverseGammaPrior(tf.keras.layers.Layer):
     def call(self, B, lengths):
         max_model_length = tf.reduce_max(lengths)
         length_mask = tf.cast(tf.sequence_mask(lengths), B.dtype)
-        match_states = B[:,1:max_model_length+1] + 1e-8 #prevent too small values
+        match_states = B[:,1:max_model_length+1] + 1e-16 #prevent too small values
         inverse_gamma_log_pdf = self.const_part - (self.alpha + 1) * tf.math.log(match_states) - self.beta / match_states
         inverse_gamma_log_pdf = tf.reduce_sum(inverse_gamma_log_pdf, -1)
         inverse_gamma_log_pdf *= length_mask

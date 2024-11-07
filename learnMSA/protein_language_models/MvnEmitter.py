@@ -19,7 +19,7 @@ def make_joint_prior(scoring_model_config : Common.ScoringModelConfig, num_prior
                 MvnPrior(scoring_model_config, num_prior_components, dtype=dtype),
                 InverseGammaPrior(),
                 priors.NullPrior()]
-    num_aa = len(SequenceDataset.alphabet)-1
+    num_aa = len(SequenceDataset.alphabet)
     kernel_split = [num_aa, num_aa + scoring_model_config.dim, num_aa + 2*scoring_model_config.dim]
     return priors.JointEmissionPrior(prior_list, kernel_split, dtype=dtype)
 
@@ -72,19 +72,32 @@ class MvnEmitter(ProfileHMMEmitter):
             s = self.num_aa + 2*self.scoring_model_config.dim
         shape = (input_shape[0], s+1)
         super().build(shape)
-    
 
-    def recurrent_init(self):
-        """ Automatically called before each recurrent run. Should be used for setups that
-            are only required once per application of the recurrent layer.
-        """
-        super(MvnEmitter, self).recurrent_init()
+
+    def make_B(self):
+        #first use the base class logic to construct a prototype B
+        #this B does not contain the correct variances for the MVN disributions yet
+        B = super(MvnEmitter, self).make_B()
+        max_model_len = max(self.lengths)
         # make use of the shared insertions and compute emissions for all matches and one insertion
-        B_mvn_param = self.B[:, :max(self.lengths)+1, self.num_aa+1:]
+        B_mvn_param = B[:, :max_model_len+1, self.num_aa+1:]
         # create the mvn mixture object in each step with the current kernel values
         self.mvn_mixture = MvnMixture(self.scoring_model_config.dim, B_mvn_param[..., tf.newaxis, :],
                                         diag_only = not self.full_covariance,
                                         diag_bijector = DefaultDiagBijector(self.diag_init_var))
+        cov = self.mvn_mixture.component_covariances()
+        if self.full_covariance:
+            raise ValueError("Full covariance matrix is currently not fully implemented.")
+        else:
+            #remove mixture component dimension (not used)
+            var = cov[...,0,:]
+            #append copies of insertion states
+            ins_copy = tf.repeat(var[:,:1], repeats=max_model_len+2, axis=1)
+            var = tf.concat([var, ins_copy], axis=1)
+            # replace the kernel values for the variances in B with the actual variances
+            B_no_var = B[..., :self.num_aa+1+self.scoring_model_config.dim]
+            B = tf.concat([B_no_var, var], axis=-1)
+        return B
                                     
 
     def make_emission_matrix(self, i):

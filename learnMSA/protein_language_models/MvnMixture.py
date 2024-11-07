@@ -9,7 +9,7 @@ class MvnMixture():
                 dim,
                 kernel,
                 mixture_coeff_kernel = None,
-                diag_only = True,
+                diag_only = True, #setting this to false is experimental and might currently not work 
                 diag_bijector = DefaultDiagBijector(1.),
                 precomputed = False,
                 **kwargs):
@@ -78,6 +78,8 @@ class MvnMixture():
     
     def component_scales(self, return_scale_diag=False, return_inverse=False):
         """Computes the scale matrices of the mixture components. The covariance matrices can be computed as scale * scale^T.
+        Returns:
+            Shape (k1, k2, num_components, dim) if return_scale_diag is True else (k1, k2, num_components, dim, dim) 
         """
         if not self.precomputed or self.scale is None:
             if self.diag_only:
@@ -99,10 +101,13 @@ class MvnMixture():
     def component_covariances(self):
         """Computes the covariance matrices of the mixture components.
         Returns:
-            Shape (k1, k2, num_components, dim, dim)
+            Shape (k1, k2, num_components, dim) if self.diag_only is True else (k1, k2, num_components, dim, dim) 
         """
-        scale = self.component_scales()
-        return tf.matmul(scale, scale, transpose_b=True)
+        scale = self.component_scales(return_scale_diag=self.diag_only)
+        if self.diag_only:
+            return tf.square(scale)
+        else:
+            return tf.matmul(scale, scale, transpose_b=True)
 
 
     def component_log_pdf(self, inputs):
