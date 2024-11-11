@@ -81,7 +81,9 @@ def make_default(default_num_models=5,
                  conditionally_independent=True,
                  V2_emitter=True,
                  V2_full_covariance=False,
-                 V2_temperature=100.):
+                 V2_temperature=3.,
+                 inv_gamma_alpha=3.,
+                 inv_gamma_beta=3.):
     if use_language_model:
         if V2_emitter:
             emission_init = [AminoAcidPlusMvnEmissionInitializer(scoring_model_config=scoring_model_config,
@@ -96,7 +98,9 @@ def make_default(default_num_models=5,
                                 num_prior_components=num_prior_components,
                                 full_covariance=V2_full_covariance,
                                 temperature=V2_temperature,
-                                frozen_insertions=frozen_insertions)
+                                frozen_insertions=frozen_insertions,
+                                inv_gamma_alpha=inv_gamma_alpha,
+                                inv_gamma_beta=inv_gamma_beta)
         else:
             emission_init = [initializers.EmbeddingEmissionInitializer(scoring_model_config=scoring_model_config,
                                                                         num_prior_components=num_prior_components) 

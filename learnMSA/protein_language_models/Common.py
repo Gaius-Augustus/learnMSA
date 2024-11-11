@@ -5,7 +5,7 @@ import numpy as np
 
 PRIOR_PATH = "priors_V3"
 SCORING_MODEL_PATH = "new_scoring_models_frozen"
-PRIOR_DEFAULT_COMPONENTS = 100
+PRIOR_DEFAULT_COMPONENTS = 32
 
 class ScoringModelConfig():
     def __init__(self, 

@@ -62,6 +62,8 @@ def run_main():
     parser.add_argument("--crop", dest="crop", type=str,  default="auto", help="""During training, sequences longer than the given value will be cropped randomly. 
     Reduces training runtime and memory usage, but might produce inaccurate results if too much of the sequences is cropped. The output alignment will not be cropped. 
     Can be set to auto in which case sequences longer than 3 times the average length are cropped. Can be set to disable. (default: %(default)s)""")
+    parser.add_argument("--auto_crop_scale", dest="auto_crop_scale", type=float, default=2., 
+                        help="During training sequences longer than this factor times the average length are cropped. (default: %(default)s)")
     parser.add_argument("--frozen_insertions", dest="frozen_insertions", action='store_true', help="Insertions will be frozen during training.")
     
     parser.add_argument("--sequence_weights", dest="sequence_weights", action='store_true', help="Uses mmseqs2 to rapidly cluster the sequences and compute sequence weights before the MSA. (default: %(default)s)")
@@ -73,6 +75,9 @@ def run_main():
     parser.add_argument("--alpha_flank_compl", dest="alpha_flank_compl", type=float, default=1, help=argparse.SUPPRESS)
     parser.add_argument("--alpha_single_compl", dest="alpha_single_compl", type=float, default=1, help=argparse.SUPPRESS)
     parser.add_argument("--alpha_global_compl", dest="alpha_global_compl", type=float, default=1, help=argparse.SUPPRESS)
+
+    parser.add_argument("--inverse_gamma_alpha", dest="inverse_gamma_alpha", type=float, default=3., help=argparse.SUPPRESS)
+    parser.add_argument("--inverse_gamma_beta", dest="inverse_gamma_beta", type=float, default=3., help=argparse.SUPPRESS)
 
     parser.add_argument("--frozen_distances", dest="frozen_distances", action='store_true', help="Prevents learning evolutionary distances for all sequences.")
     parser.add_argument("--initial_distance", dest="initial_distance", type=float, default=0.05, help="The initial evolutionary distance for all sequences. (default: %(default)s)")
@@ -144,7 +149,9 @@ def run_main():
                                         frozen_insertions=args.frozen_insertions or args.use_language_model,
                                         temperature_mode=args.temperature_mode,
                                         V2_emitter=True,
-                                        V2_temperature=args.temperature)
+                                        V2_temperature=args.temperature,
+                                        inv_gamma_alpha=args.inverse_gamma_alpha,
+                                        inv_gamma_beta=args.inverse_gamma_beta)
     
     if args.batch_size > 0:
         config["batch_size"] = args.batch_size
@@ -202,7 +209,7 @@ def run_main():
             if args.crop == "disable":
                 config["crop_long_seqs"] = math.inf
             elif args.crop == "auto":
-                config["crop_long_seqs"] = int(np.ceil(3 * np.mean(data.seq_lens)))
+                config["crop_long_seqs"] = int(np.ceil(args.auto_crop_scale * np.mean(data.seq_lens)))
             else:
                 config["crop_long_seqs"] = int(args.crop)
             if args.logo_gif:

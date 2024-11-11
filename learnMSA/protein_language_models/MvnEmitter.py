@@ -14,10 +14,11 @@ from learnMSA.msa_hmm.Utility import DefaultDiagBijector
 
 
 
-def make_joint_prior(scoring_model_config : Common.ScoringModelConfig, num_prior_components, dtype):
+def make_joint_prior(scoring_model_config : Common.ScoringModelConfig, num_prior_components, 
+                    inv_gamma_alpha, inv_gamma_beta, dtype):
     prior_list = [priors.AminoAcidPrior(dtype=dtype),
                 MvnPrior(scoring_model_config, num_prior_components, dtype=dtype),
-                InverseGammaPrior(),
+                InverseGammaPrior(inv_gamma_alpha, inv_gamma_beta),
                 priors.NullPrior()]
     num_aa = len(SequenceDataset.alphabet)
     kernel_split = [num_aa, num_aa + scoring_model_config.dim, num_aa + 2*scoring_model_config.dim]
@@ -34,6 +35,8 @@ class MvnEmitter(ProfileHMMEmitter):
                  diag_init_var = 1.,
                  full_covariance = False,
                  temperature = 10.,
+                 inv_gamma_alpha = 3., 
+                 inv_gamma_beta = 3.,
                  regularize_variances = False, #deprecated
                  dtype=tf.float32,
                  **kwargs):
@@ -54,13 +57,15 @@ class MvnEmitter(ProfileHMMEmitter):
             prior = kwargs["prior"]
             del kwargs["prior"]
         else:
-            prior = make_joint_prior(scoring_model_config, num_prior_components, dtype)
+            prior = make_joint_prior(scoring_model_config, num_prior_components, inv_gamma_alpha, inv_gamma_beta, dtype)
                                                              
         super(MvnEmitter, self).__init__(emission_init, insertion_init, prior, dtype=dtype, **kwargs)
 
         self.diag_init_var = diag_init_var
         self.full_covariance = full_covariance
         self.temperature = temperature
+        self.inv_gamma_alpha = inv_gamma_alpha
+        self.inv_gamma_beta = inv_gamma_beta
         self.regularize_variances = regularize_variances
         self.num_aa = len(SequenceDataset.alphabet)-1
 
@@ -177,6 +182,8 @@ class MvnEmitter(ProfileHMMEmitter):
                                 full_covariance = self.full_covariance,
                                 temperature = self.temperature,
                                 frozen_insertions = self.frozen_insertions,
+                                inv_gamma_alpha = self.inv_gamma_alpha,
+                                inv_gamma_beta = self.inv_gamma_beta,
                                 dtype = self.dtype) 
         if share_kernels:
             emitter_copy.emission_kernel = self.emission_kernel
@@ -191,7 +198,9 @@ class MvnEmitter(ProfileHMMEmitter):
                         "num_prior_components" : self.num_prior_components,
                         "diag_init_var" : self.diag_init_var,
                         "full_covariance" : self.full_covariance,
-                        "temperature" : self.temperature})
+                        "temperature" : self.temperature,
+                        "inv_gamma_alpha" : self.inv_gamma_alpha,
+                        "inv_gamma_beta" : self.inv_gamma_beta})
         return config
 
 
