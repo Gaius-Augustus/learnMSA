@@ -72,7 +72,6 @@ class InverseGammaPrior(tf.keras.layers.Layer):
     """ To regularize variances. Can not be trained.
     """
     def __init__(self, alpha=3., beta=3., **kwargs):
-        print(alpha, beta)
         super(InverseGammaPrior, self).__init__(**kwargs)
         self.alpha = alpha
         self.beta = beta

@@ -227,7 +227,7 @@ class AminoAcidPlusMvnEmissionInitializer(Initializers.EmissionInitializer):
                  scoring_model_config : Common.ScoringModelConfig,
                  dist=None,
                  aa_dist=np.log(Initializers.background_distribution), 
-                 num_prior_components=100,
+                 num_prior_components=Common.PRIOR_DEFAULT_COMPONENTS,
                  scale_kernel_init = Initializers.RandomNormalInitializer(stddev=0.02),
                  full_covariance=False):
         self.aa_dist = aa_dist

@@ -698,10 +698,11 @@ def non_homogeneous_mask_func(i, seq_lens, hmm_cell):
         A mask of shape (num_models, batch_size, num_states, num_states) indicating allowed transitions.
     """
     k = hmm_cell.num_models
-    q = hmm_cell.max_num_states
+    q = tf.cast(hmm_cell.max_num_states, tf.int32)
     template = tf.ones((1,q,q), dtype=hmm_cell.dtype)
     model_masks = []
     for k,length in enumerate(hmm_cell.length):
+        length = tf.cast(length, tf.int32)
         C = 2 * length
         states_left = one_hot_set([C], q, hmm_cell.dtype)
         states_right = one_hot_set([C], q, hmm_cell.dtype)
