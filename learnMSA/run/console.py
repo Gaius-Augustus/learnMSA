@@ -77,7 +77,7 @@ def run_main():
     parser.add_argument("--alpha_global_compl", dest="alpha_global_compl", type=float, default=1, help=argparse.SUPPRESS)
 
     parser.add_argument("--inverse_gamma_alpha", dest="inverse_gamma_alpha", type=float, default=3., help=argparse.SUPPRESS)
-    parser.add_argument("--inverse_gamma_beta", dest="inverse_gamma_beta", type=float, default=3., help=argparse.SUPPRESS)
+    parser.add_argument("--inverse_gamma_beta", dest="inverse_gamma_beta", type=float, default=0.5, help=argparse.SUPPRESS)
 
     parser.add_argument("--frozen_distances", dest="frozen_distances", action='store_true', help="Prevents learning evolutionary distances for all sequences.")
     parser.add_argument("--initial_distance", dest="initial_distance", type=float, default=0.05, help="The initial evolutionary distance for all sequences. (default: %(default)s)")
