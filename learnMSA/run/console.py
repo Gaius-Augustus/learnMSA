@@ -36,7 +36,7 @@ def run_main():
     parser.add_argument("--save_model", dest="save_model", type=str, default="", help="Optional filepath to store the trained model.")
     parser.add_argument("--load_model", dest="load_model", type=str, default="", help="A pretrained model can be loaded from a file, skipping the training process.")
 
-    parser.add_argument("--max_surgery_runs", dest="max_surgery_runs", type=int, default=4, 
+    parser.add_argument("--max_surgery_runs", dest="max_surgery_runs", type=int, default=2, 
                         help="Maximum number of model surgery iterations. (default: %(default)s)")
     parser.add_argument("--length_init_quantile", dest="length_init_quantile", type=float, default=0.5, 
                         help="Quantile of the input sequence lengths that defines the initial model lengths. (default: %(default)s)")
