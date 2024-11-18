@@ -49,7 +49,7 @@ class SequenceDataset:
             self.filename = ""
             self.fmt = ""
             self.indexed = False
-            self.record_dict = {s[0] : SeqRecord.SeqRecord(s[1], id=s[0]) for s in sequences}
+            self.record_dict = {s[0] : SeqRecord.SeqRecord(Seq.Seq(s[1]) if isinstance(s[1], str) else s[1], id=s[0]) for s in sequences}
         #since Python 3.7 key order is preserved in dictionaries so this list is correctly ordered
         self.seq_ids = list(self.record_dict)
         self.num_seq = len(self.seq_ids)

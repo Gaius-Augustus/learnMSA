@@ -48,6 +48,8 @@ Args:
     subset: Optional subset of the sequence ids. Only the specified sequences will be aligned but the models will be trained on all sequences 
             (if None, all sequences in the dataset will be aligned).
     verbose: If False, all output messages will be disabled.
+    A2M_output: If True, insertions will be indicated by lower case letters in the output and "." will indicate insertions in other sequences.
+                Otherwise all upper case letters and only "-" will be used.
 Returns:
     An AlignmentModel object.
 """
@@ -59,7 +61,8 @@ def fit_and_align(data : SequenceDataset,
                   initial_model_length_callback=get_initial_model_lengths,
                   sequence_weights=None,
                   clusters=None,
-                  verbose=True):
+                  verbose=True,
+                  A2M_output=True):
     assert_config(config)
     model_generator, batch_generator = _make_defaults_if_none(model_generator, batch_generator)
     if verbose:
@@ -104,7 +107,7 @@ def fit_and_align(data : SequenceDataset,
                                           verbose=verbose)
         if verbose:
             print("Creating alignment model...")
-        am = AlignmentModel(data, batch_generator, decode_indices, batch_size=batch_size, model=model)
+        am = AlignmentModel(data, batch_generator, decode_indices, batch_size=batch_size, model=model, A2M=A2M_output)
         if verbose:
             print("Successfully created alignment model.")
         if last_iteration:
@@ -178,7 +181,8 @@ def run_learnMSA(data : SequenceDataset,
                  logo_gif_mode=False,
                  logo_dir="",
                  output_format="fasta",
-                 load_model=""):
+                 load_model="",
+                 A2M_output=True):
     """ Wraps fit_and_align and adds file parsing, verbosity, model selection, reference file comparison and an outfile file.
     Args: 
         data: Dataset of sequences. 
@@ -194,6 +198,8 @@ def run_learnMSA(data : SequenceDataset,
         logo_gif_mode: If true, trains with a special mode that generates a sequence logo per train step.
         output_format: Format of the output file. 
         load_model: Path to a model file that should be loaded instead of training a new model.
+        A2M_output: If True, insertions will be indicated by lower case letters in the output and "." will indicate insertions in other sequences.
+                    Otherwise all upper case letters and only "-" will be used.
     Returns:
         An AlignmentModel object.
     """
@@ -218,7 +224,8 @@ def run_learnMSA(data : SequenceDataset,
                                     initial_model_length_callback=initial_model_length_callback,
                                     sequence_weights=sequence_weights,
                                     clusters=clusters,
-                                    verbose=verbose)
+                                    verbose=verbose,
+                                    A2M_output=A2M_output)
             if verbose:
                 print("Time for alignment:", "%.4f" % (time.time()-t_a))
         except tf.errors.ResourceExhaustedError as e:

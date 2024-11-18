@@ -155,6 +155,8 @@ class AlignmentModel():
         model: A learnMSA model which internally might represent multiple pHMM models.
         gap_symbol: Character used to denote missing match positions.
         gap_symbol_insertions: Character used to denote insertions in other sequences.
+        A2M: If true, the output is in A2M format, a variant of fasta where lower case amino acids indicate insertions
+            and "." indicates insertions in other sequences. If false, pure fasta with all upper case amino acids and only "-" is used.
     """
     def __init__(self, 
                  data : SequenceDataset, 
@@ -163,7 +165,8 @@ class AlignmentModel():
                  batch_size, 
                  model,
                  gap_symbol="-",
-                 gap_symbol_insertions="."):
+                 gap_symbol_insertions=".",
+                 A2M=True):
         self.data = data
         self.batch_generator = batch_generator
         self.indices = indices
@@ -181,10 +184,16 @@ class AlignmentModel():
         assert self.encoder_model is not None, "Can not find a MsaHmmLayer in the specified model."
         self.gap_symbol = gap_symbol
         self.gap_symbol_insertions = gap_symbol_insertions
-        self.output_alphabet = np.array((list(data.get_alphabet_no_gap()) + 
-                                        [gap_symbol] + 
-                                        list(data.get_alphabet_no_gap().lower()) + 
-                                        [gap_symbol_insertions, "$"]))
+        if A2M:
+            self.output_alphabet = np.array((list(data.get_alphabet_no_gap()) + 
+                                            [gap_symbol] + 
+                                            list(data.get_alphabet_no_gap().lower()) + 
+                                            [gap_symbol_insertions, "$"]))
+        else:
+            self.output_alphabet = np.array((list(data.get_alphabet_no_gap()) + 
+                                            [gap_symbol] + 
+                                            list(data.get_alphabet_no_gap()) + 
+                                            [gap_symbol, "$"]))
         self.metadata = {}
         self.num_models = self.msa_hmm_layer.cell.num_models
         self.length = self.msa_hmm_layer.cell.length
@@ -256,7 +265,7 @@ class AlignmentModel():
         return alignment_strings_all
     
     def to_file(self, filepath, model_index, batch_size=100000, add_block_sep=False, 
-                aligned_insertions : AlignedInsertions = AlignedInsertions(), format="fasta"):
+                aligned_insertions : AlignedInsertions = AlignedInsertions(), format="fasta", fasta_line_limit=80):
         """ Uses one model to decode an alignment and stores it in fasta file format. Currently no other output format is supported.
             The file is written batch wise. The memory required for this operation must be large enough to hold decode and store a single batch
             of aligned sequences but not the whole alignment.
@@ -268,6 +277,7 @@ class AlignmentModel():
             aligned_insertions: Can be used to override insertion metadata if insertions are aligned after the main procedure.
             format: Output format. Important for large data: learnMSA is only able to stream fasta files. 
                     Other formats require a conversion, i.e. the whole alignment is stored in memory.
+            fasta_line_limit: Maximum number of characters per line in the fasta file (only applies to sequences).
         """
         if format == "fasta": #streaming batches to file
             with open(filepath, "w") as output_file:
@@ -280,7 +290,8 @@ class AlignmentModel():
                     for s, seq_ind in zip(alignment_strings, batch_indices):
                         seq_header = self.data.get_header(self.indices[seq_ind])
                         output_file.write(">"+seq_header+"\n")
-                        output_file.write(s+"\n")
+                        for j in range(0, len(s), fasta_line_limit):
+                            output_file.write(s[j:j+fasta_line_limit]+"\n")
                     i += batch_size
         else:
             msa = self.to_string(model_index, batch_size, add_block_sep, aligned_insertions)
