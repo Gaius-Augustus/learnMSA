@@ -29,7 +29,7 @@
 We provide a hassle-free docker image including GPU and pLM support.
 
 ```
-singularity build learnmsa.sif docker://felbecker/learnmsa:2.0.8
+singularity build learnmsa.sif docker://felbecker/learnmsa:2.0.9
 singularity run --nv learnmsa.sif learnMSA
 ```
 
