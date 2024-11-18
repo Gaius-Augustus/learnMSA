@@ -32,7 +32,7 @@ def run_main():
                         help="Should be lowered if memory issues with the default settings occur. Default: Adaptive, depending on model length (64-512).")
     parser.add_argument("-d", "--cuda_visible_devices", dest="cuda_visible_devices", type=str, default="default",
                         help="Controls the GPU devices visible to learnMSA as a comma-separated list of device IDs. The value -1 forces learnMSA to run on CPU. Per default, learnMSA attempts to use all available GPUs.")
-    parser.add_argument("-f", "--format", dest="format", type=str, default="fasta", help="Output file format (see Biopython's SeqIO formats suitable for aligned data).")
+    parser.add_argument("-f", "--format", dest="format", type=str, default="fasta", help="Output file format (see Biopython's SeqIO formats suitable for aligned data). Default: fasta (A2M).")
     parser.add_argument("--save_model", dest="save_model", type=str, default="", help="Optional filepath to store the trained model.")
     parser.add_argument("--load_model", dest="load_model", type=str, default="", help="A pretrained model can be loaded from a file, skipping the training process.")
     parser.add_argument("--noA2M", dest="noA2M", action='store_true', help="If set, the output will use only upper case letters and \"-\" for gaps. Otherwise, lower case letters are used for insertions and \".\" denotes an insertion in another sequence.")
