@@ -4,14 +4,9 @@
 
 <img src="https://github.com/Gaius-Augustus/learnMSA/blob/main/logo/training_loop.gif" alt="" loop=infinite>
 
-# Introduction
-Multiple sequence alignment formulated as a machine learning problem, where an optimal profile hidden Markov model for a potentially ultra-large family of protein sequences is learned from unaligned sequences and an alignment is decoded. We use a novel, automatically differentiable variant of the forward algorithm to train pHMMs via gradient descent.
-
-Since version 2.0.0, learnMSA can utilize protein language models (`--use_language_model`) for significantly improved accuracy.
-
 ## Features
 
-- Aligns large numbers of protein sequences with state-of-the-art accuracy
+- Aligns large numbers of protein sequences with above state-of-the-art accuracy
 - Can utilize protein language models (`--use_language_model`) for significantly improved accuracy
 - Enables ultra-large alignment of millions of sequences 
 - GPU acceleration, multi-GPU support
@@ -21,49 +16,60 @@ Since version 2.0.0, learnMSA can utilize protein language models (`--use_langua
 
 ## Current limitations
 
-- Requires many sequences (in most cases starting at 1000, a few 100 might still be enough) to achieve state-of-the-art accuracy
+- Requires many sequences (in most cases starting at 1000, a few 100 might still be enough) to achieve high accuracy
 - Only for protein sequences
 - Increasingly slow for long proteins with a length > 1000 residues
 
 # Installation
 
-learnMSA requires python <= 3.10 and TensorFlow >=2.5.0, <2.11. Version 2.10.* is recommended. Tensorflow should be installed with GPU support. *We will try to support newer python and TensorFlow versions in the future.*
+*Recommended ways to install learnMSA along with Tensorflow + GPU:*
 
-*Recommended way to install learnMSA along with Tensorflow + GPU:*
+## Singularity/Docker
+
+We provide a hassle-free docker image including GPU and pLM support.
+
+```
+singularity build learnmsa.sif docker://felbecker/learnmsa:2.0.8
+singularity run --nv learnmsa.sif learnMSA
+```
+
+Running the container with `--nv` is required for GPU support.
+
+## conda/mamba and pip
 
 1. Create a conda environment:
 
 ```
-conda create -n learnMSA python=3.10
+conda create -n learnMSA python=3.12
 conda activate learnMSA
 ```
 
-2. Install cuda toolkit in the environment:
+2. Install learnMSA (cuda toolkit included):
 
-```
-conda install -c conda-forge cudatoolkit=11.2.2 cudnn=8.1.0
-mkdir -p $CONDA_PREFIX/etc/conda/activate.d
-echo 'export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$CONDA_PREFIX/lib/' >> $CONDA_PREFIX/etc/conda/activate.d/env_vars.sh
-conda deactivate
-conda activate learnMSA
-```
-
-3. Install learnMSA in the environment:
-   
 ```
 pip install learnMSA
+```
+
+3. Additional installs for sequence weights (recommended!):
+   
+```
 conda install -c bioconda mmseqs2
 ```
 
-4. (optional) Verify that TensorFlow 2.10 and learnMSA are correctly installed:
+You may have to set up [Bioconda channels](https://bioconda.github.io/).
+
+4. Additional installs for language model support (recommended!):
+   
+```
+pip install torch==2.2.1 tf-keras==2.17.0
+```
+
+5. (optional) Verify that TensorFlow 2.10 and learnMSA are correctly installed:
 
 ```
 python3 -c "import tensorflow as tf; print(tf.__version__, tf.config.list_physical_devices('GPU'))"
 learnMSA -h
 ```
-   
-Another quick option is to use mamba (replace conda with mamba in above instructions).
-If you have problems to install some packages, set up [Bioconda channels](https://bioconda.github.io/).
 
 ## Using learnMSA for alignment
 
@@ -75,9 +81,9 @@ Without language model support (faster):
 
 <code>learnMSA -i INPUT_FILE -o OUTPUT_FILE --sequence_weights</code>
 
-We always recommend to run learnMSA with the `--sequence_weights` flag to improve accuracy. This requires `mmseqs2` to be installed. You can use conda for this: `conda install -c bioconda mmseqs2`. Sequence weights (and thus the `mmseqs2` requirement) are turned off by default.
+Note: If you installed learnMSA via docker/singularity, you have to run `singularity run --nv learnmsa.sif learnMSA -i ...`
 
-*Since learnMSA version 1.2.0, insertions are aligned with famsa. This improves overall accuracy. The old behavior can be restored with the `--unaligned_insertions` flag.*
+We always recommend to run learnMSA with the `--sequence_weights` flag to improve accuracy. This requires `mmseqs2` to be installed (see above). Sequence weights (and thus the `mmseqs2` requirement) are turned off by default.
 
 To output a pdf with a sequence logo alongside the msa, use `--logo`. For a fun gif that visualizes the training process, you can use `--logo_gif` (attention, slows down training and should not be used for real alignments).
   
