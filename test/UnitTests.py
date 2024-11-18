@@ -141,6 +141,15 @@ class TestDataset(unittest.TestCase):
                 np.testing.assert_equal(data.get_column_map(2), [1,2,3])
 
 
+    def test_seq_headers(self):
+        #make sure learnMSA keeps the full header >seqID seq_description [organism]
+        with SequenceDataset("test/data/headers.fasta", "fasta") as data:
+            self.assertEqual(data.get_header(0), "QEG08237.1 MAG: ORF1b polyprotein [Pacific salmon nidovirus]")
+            self.assertEqual(data.get_header(1), "CAG77604.1 RNA-dependent RNA polymerase [Amasya cherry disease-associated mycovirus]")
+            self.assertEqual(data.get_header(2), "QED42866.1 ORF1 [Anemone nepovirus A]")
+            self.assertEqual(data.get_header(3), "QZQ78639.1 polyprotein [Potato black ringspot virus]")
+            self.assertEqual(data.get_header(4), "Supergroup001--NEW-Clstr134_soil_ORF36_ERR2562197_k141_13787_flag1_multi16_len6988")
+
 
 class TestMsaHmmCell(unittest.TestCase):
     

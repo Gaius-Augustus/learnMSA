@@ -50,6 +50,7 @@ class SequenceDataset:
             self.fmt = ""
             self.indexed = False
             self.record_dict = {s[0] : SeqRecord.SeqRecord(s[1], id=s[0]) for s in sequences}
+        #since Python 3.7 key order is preserved in dictionaries so this list is correctly ordered
         self.seq_ids = list(self.record_dict)
         self.num_seq = len(self.seq_ids)
         self.seq_lens = np.array([sum([1 for x in str(self.get_record(i).seq) if x.isalpha()]) for i in range(self.num_seq)])
@@ -71,6 +72,10 @@ class SequenceDataset:
 
     def get_record(self, i):
         return self.record_dict[self.seq_ids[i]]
+
+    
+    def get_header(self, i):
+        return self.get_record(i).description
 
 
     def get_alphabet_no_gap(self):

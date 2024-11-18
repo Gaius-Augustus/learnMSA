@@ -278,8 +278,8 @@ class AlignmentModel():
                     batch_alignment = self.get_batch_alignment(model_index, batch_indices, add_block_sep, aligned_insertions)
                     alignment_strings = self.batch_to_string(batch_alignment)
                     for s, seq_ind in zip(alignment_strings, batch_indices):
-                        seq_id = self.data.seq_ids[self.indices[seq_ind]]
-                        output_file.write(">"+seq_id+"\n")
+                        seq_header = self.data.get_header(self.indices[seq_ind])
+                        output_file.write(">"+seq_header+"\n")
                         output_file.write(s+"\n")
                     i += batch_size
         else:
