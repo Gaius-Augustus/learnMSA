@@ -1,6 +1,6 @@
 *Our tool is under active development and feedback is very much appreciated.*
 
-# learnMSA: Learning and Aligning large Protein Families
+# learnMSA2: deep protein multiple alignments with large language and hidden Markov models
 
 <img src="https://github.com/Gaius-Augustus/learnMSA/blob/main/logo/training_loop.gif" alt="" loop=infinite>
 
