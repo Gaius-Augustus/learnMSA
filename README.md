@@ -64,7 +64,7 @@ You may have to set up [Bioconda channels](https://bioconda.github.io/).
 pip install torch==2.2.1 tf-keras==2.17.0
 ```
 
-5. (optional) Verify that TensorFlow 2.10 and learnMSA are correctly installed:
+5. (optional) Verify that TensorFlow and learnMSA are correctly installed:
 
 ```
 python3 -c "import tensorflow as tf; print(tf.__version__, tf.config.list_physical_devices('GPU'))"
