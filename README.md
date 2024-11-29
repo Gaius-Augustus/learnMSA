@@ -77,7 +77,7 @@ Recommended way to align proteins:
 
 <code>learnMSA -i INPUT_FILE -o OUTPUT_FILE --use_language_model --sequence_weights</code>
 
-Without language model support (faster):
+Without language model support (recommended for speed and for proteins with very high sequence similarity):
 
 <code>learnMSA -i INPUT_FILE -o OUTPUT_FILE --sequence_weights</code>
 
