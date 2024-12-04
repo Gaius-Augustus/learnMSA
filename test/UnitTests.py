@@ -2103,7 +2103,7 @@ class TestClustering(unittest.TestCase):
         clustering = self.make_clustering()
         tree = Clustering.cluster_tree(clustering)
         data = SequenceDataset("test/data/test_clustering.fa")
-        clusters, leaves, cluster_nodes  = Clustering.create_cluster_sets(data, tree)
+        clusters, leaves, cluster_nodes = Clustering.create_cluster_sets(data, tree)
         np.testing.assert_equal(clusters, [0, 1, 0, 1, 1, 2, 0, 1])
         np.testing.assert_equal(leaves, [tree.node_names.index(n) for n in data.seq_ids])
         np.testing.assert_equal(cluster_nodes, [tree.node_names.index(n) for n in ["rep_A", "rep_B", "rep_C"]])
@@ -2127,6 +2127,7 @@ class TestClustering(unittest.TestCase):
 
     def test_faulty_seqs(self):
         from learnMSA.msa_hmm import Clustering
+        from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
         clustering = self.make_clustering()
         tree = Clustering.cluster_tree(clustering)
         data = SequenceDataset("test/data/faulty_clustering.fa")
@@ -2137,6 +2138,41 @@ class TestClustering(unittest.TestCase):
         except Exception:
             faulty_seqs_error = True
         self.assertTrue(faulty_seqs_error)
+
+
+    def test_test_dataset_cluster_indices(self):
+        from learnMSA.msa_hmm import Clustering
+        from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
+        from learnMSA.msa_hmm.Training import DefaultBatchGenerator, make_dataset
+        from learnMSA.msa_hmm.Configuration import make_default
+        clustering = self.make_clustering()
+        tree = Clustering.cluster_tree(clustering)
+        data = SequenceDataset("test/data/test_clustering.fa")
+        clusters,_,_ = Clustering.create_cluster_sets(data, tree)
+        batch_gen = DefaultBatchGenerator(shuffle=False)
+        batch_gen.configure(data, config=make_default(1), cluster_indices=clusters)
+        dataset = make_dataset(np.arange(data.num_seq), batch_gen, batch_size=4, shuffle=False)
+        # dataset is 8 sequences, so we have 2 batches of size 4 each
+        iterator = iter(dataset)
+        (_,_,c1), _ = next(iterator)
+        (_,_,c2), _ = next(iterator)
+        np.testing.assert_equal(c1.numpy(), [[0], [1], [0], [1]])
+        np.testing.assert_equal(c2.numpy(), [[1], [2], [0], [1]])
+
+        # test with embeddings
+        from learnMSA.protein_language_models.EmbeddingBatchGenerator import EmbeddingBatchGenerator
+        config2 = make_default(1, use_language_model=True)
+        fake_emb_func = lambda i: tf.ones((len(i),1,4,16), dtype=tf.float32)
+        emb_batch_gen = EmbeddingBatchGenerator(fake_emb_func, shuffle=False)
+        emb_batch_gen.configure(data, config=config2, cluster_indices=clusters)
+        emb_dataset = make_dataset(np.arange(data.num_seq), emb_batch_gen, batch_size=4, shuffle=False)
+        iterator = iter(emb_dataset)
+        (_,_,c1,_), _ = next(iterator)
+        (_,_,c2,_), _ = next(iterator)
+        np.testing.assert_equal(c1.numpy(), [[0], [1], [0], [1]])
+        np.testing.assert_equal(c2.numpy(), [[1], [2], [0], [1]])
+
+
 
 
 if __name__ == '__main__':

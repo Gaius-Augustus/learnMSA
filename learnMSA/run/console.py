@@ -135,7 +135,7 @@ def run_main():
         print("Found tensorflow version", tf.__version__)
     
     import learnMSA.protein_language_models.Common as Common
-    from learnMSA.protein_language_models.EmbeddingBatchGenerator import EmbeddingBatchGenerator, make_generic_embedding_model_generator
+    import learnMSA.protein_language_models.EmbeddingBatchGenerator as EmbeddingBatchGenerator
     scoring_model_config = Common.ScoringModelConfig(lm_name=args.language_model,
                                                     dim=args.scoring_model_dim, 
                                                     activation=args.scoring_model_activation,
@@ -197,8 +197,9 @@ def run_main():
     if args.use_language_model:
         # we have to define a special model- and batch generator if using a language model
         # because the emission probabilities are computed differently and the LM requires specific inputs
-        model_gen = make_generic_embedding_model_generator(config["scoring_model_config"].dim)
-        batch_gen = EmbeddingBatchGenerator(config["scoring_model_config"])
+        model_gen = EmbeddingBatchGenerator.make_generic_embedding_model_generator(config["scoring_model_config"].dim)
+        batch_gen = EmbeddingBatchGenerator.EmbeddingBatchGenerator(
+            EmbeddingBatchGenerator.generic_compute_embedding_func(data, config["scoring_model_config"]))
     else:
         model_gen = None
         batch_gen = None

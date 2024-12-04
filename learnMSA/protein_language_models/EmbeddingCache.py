@@ -1,4 +1,5 @@
 import numpy as np
+from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 
 class EmbeddingCache:
     """ A datastructure to store large amounts of embeddings space efficiently in memory by avoiding fragmentation.

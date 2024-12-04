@@ -128,5 +128,6 @@ def make_cache_dir(path, model_id):
 dims = {
     "proteinBERT" : 1562,
     "esm2" : 2560,
-    "protT5" : 1024
+    "protT5" : 1024,
+    "fake" : 16
 }

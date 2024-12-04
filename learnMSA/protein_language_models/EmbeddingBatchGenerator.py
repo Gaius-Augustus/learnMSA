@@ -10,63 +10,85 @@ import learnMSA.protein_language_models.Common as Common
 from learnMSA.protein_language_models.EmbeddingCache import EmbeddingCache
 
 
+
+@tf.function
+def call_lm_scoring_model(lm_inputs, language_model, scoring_layer):
+    emb = language_model(lm_inputs)
+    reduced_emb = scoring_layer._reduce(emb, training=False)
+    return reduced_emb
+
+
+""" Computes embeddings from a language model and a scoring model.
+Args:
+    indices: A list of sequence indices.
+    data: A SequenceDataset object.
+    language_model: A language model that takes a batch of sequences and returns embeddings.
+    encoder: An input encoder that converts sequences to the input format of the language model.
+    scoring_layer: The scoring layer of the scoring model that reduces the embeddings to the desired dimension.
+"""
+def compute_reduced_embeddings(indices, 
+                               data : SequenceDataset, 
+                               language_model : Common.LanguageModel, 
+                               encoder : Common.InputEncoder, 
+                               scoring_layer):
+    seq_batch = [data.get_standardized_seq(i) for i in indices]   
+    lm_inputs = encoder(seq_batch, np.repeat([[False, False]], len(seq_batch), axis=0))
+    return call_lm_scoring_model(lm_inputs, language_model, scoring_layer)
+
+
+""" A generic embedding function with cached models.
+"""
+def generic_compute_embedding_func(data : SequenceDataset, scoring_model_config : Common.ScoringModelConfig):
+    # load the language model and the scoring model
+    # initialize the weights correctly and make sure they are not trainable
+    language_model, encoder = Common.get_language_model(scoring_model_config.lm_name, 
+                                                        max_len = data.max_len+2, trainable=False)
+    scoring_model = make_scoring_model(scoring_model_config, dropout=0.0, trainable=False)    
+    scoring_model_path = Common.get_scoring_model_path(scoring_model_config)
+    scoring_model.load_weights(os.path.dirname(__file__)+f"/../protein_language_models/"+scoring_model_path)
+    scoring_layer = scoring_model.layers[-1]
+    scoring_layer.trainable = False #don't forget to freeze the scoring model!
+    return partial(compute_reduced_embeddings, data=data, language_model=language_model, encoder=encoder, scoring_layer=scoring_layer)
+    
+
+
+
 class EmbeddingBatchGenerator(DefaultBatchGenerator):
     """ Computes batches of input sequences along with static embeddings.
+    Args:
+        compute_embedding_func: A function that computes the embeddings for a batch of sequence indices.
         cache_embeddings: If true, all embeddings will be computed once when configuring the generator and kept in memory. Otherwise they are loaded on the fly.
     """
     def __init__(self, 
-                 scoring_model_config : Common.ScoringModelConfig,
+                 compute_embedding_func,
                  cache_embeddings=True, 
                  shuffle=True):
         super().__init__(shuffle=shuffle)
-        self.scoring_model_config = scoring_model_config
+        self.compute_embedding_func = compute_embedding_func
         self.cache_embeddings = cache_embeddings
         self.cache = None
-
-
-    @tf.function
-    def _call_lm_scoring_model(self, lm_inputs, language_model):
-        emb = language_model(lm_inputs)
-        reduced_emb = self.scoring_layer._reduce(emb, training=False)
-        return reduced_emb
-
-
-    def _compute_reduced_embeddings(self, indices, language_model, encoder):
-        seq_batch = [self.data.get_standardized_seq(i) for i in indices]   
-        lm_inputs = encoder(seq_batch, np.repeat([[False, False]], len(seq_batch), axis=0))
-        return self._call_lm_scoring_model(lm_inputs, language_model)
         
-
-    def configure(self, data : SequenceDataset, config, verbose=False):
-        super().configure(data, config)
+    """
+    Args:
+        <Rest as DefaultBatchGenerator>
+    """
+    def configure(self, data : SequenceDataset, config, cluster_indices=None, verbose=False):
+        super().configure(data, config, cluster_indices, verbose)
 
         # nothing to do if embeddings are already computed
         if self.cache is not None and self.cache.is_filled():
             return
 
-        # load the language model and the scoring model
-        # initialize the weights correctly and make sure they are not trainable
-        language_model, encoder = Common.get_language_model(self.scoring_model_config.lm_name, 
-                                                            max_len = data.max_len+2, 
-                                                            trainable=False,
-                                                            cache_dir=config["plm_cache_dir"])
-        self.scoring_model = make_scoring_model(self.scoring_model_config, dropout=0.0, trainable=False)    
-        scoring_model_path = Common.get_scoring_model_path(self.scoring_model_config)
-        self.scoring_model.load_weights(os.path.dirname(__file__)+f"/../protein_language_models/"+scoring_model_path)
-        self.scoring_layer = self.scoring_model.layers[-1]
-        self.scoring_layer.trainable = False #don't forget to freeze the scoring model!
-
         if self.cache_embeddings:
-            self.cache = EmbeddingCache(self.data.seq_lens, self.scoring_model_config.dim)
-            compute_emb_func = partial(self._compute_reduced_embeddings, language_model=language_model, encoder=encoder)
+            self.cache = EmbeddingCache(self.data.seq_lens, config["scoring_model_config"].dim)
             batch_size_callback = (lambda L: max(1, config["batch_size"]([0], L)//2)) if callable(config["batch_size"]) else (lambda L: max(1, config["batch_size"]//2))
             print("Computing all embeddings (this may take a while).")
-            self.cache.fill_cache(compute_emb_func, batch_size_callback, verbose=verbose)
+            self.cache.fill_cache(self.compute_embedding_func, batch_size_callback, verbose=verbose)
             # once we have cached the embeddings do a cleanup to erase the LM from memory
+            del self.compute_embedding_func #remove cached LM
             tf.keras.backend.clear_session()
             gc.collect()
-        else:
-            self.language_model, self.encoder = language_model, encoder
+
                 
     def _get_reduced_embedding(self, i):
         """ Returns a 2D tensor of shape (length of sequence i, reduced_embedding_dim) that contains the embeddings of
@@ -75,7 +97,7 @@ class EmbeddingBatchGenerator(DefaultBatchGenerator):
         if self.cache_embeddings:
             emb = self.cache.get_embedding(i)
         else: #load the embeddings dynamically (not recommended, currently implemented inefficiently)
-            emb = self._compute_reduced_embeddings([i], self.language_model, self.encoder)[0]
+            emb = self._compute_reduced_embeddings([i])[0]
         return emb
                 
     def _pad_and_crop_embeddings(self, embeddings, start, end):
@@ -96,7 +118,10 @@ class EmbeddingBatchGenerator(DefaultBatchGenerator):
         return padded_embeddings
         
     def __call__(self, indices):
-        batch, batch_indices, start, end = super().__call__(indices, return_crop_boundaries=True)
+        if self.use_clusters:
+            batch, batch_indices, clusters, start, end = super().__call__(indices, return_crop_boundaries=True)
+        else:
+            batch, batch_indices, start, end = super().__call__(indices, return_crop_boundaries=True)
         #retrieve the embeddings for all models and sequences in list-of-lists format
         embeddings = []
         for ind in batch_indices:
@@ -105,13 +130,20 @@ class EmbeddingBatchGenerator(DefaultBatchGenerator):
                 embeddings[-1].append(self._get_reduced_embedding(i))
         #put them in a tensor with padding
         padded_embeddings = self._pad_and_crop_embeddings(embeddings, start, end)
-        return batch, batch_indices, padded_embeddings
+        if self.use_clusters:
+            return batch, batch_indices, clusters, padded_embeddings
+        else:
+            return batch, batch_indices, padded_embeddings
     
     def get_out_types(self):
-        if self.return_only_sequences:
-            return (tf.uint8, )
-        else:
-            return (tf.uint8, tf.int64, tf.float32)  
+        types = (tf.uint8, )
+        if not self.return_only_sequences:
+            types += (tf.int64,)
+        if self.use_clusters:
+            types += (tf.int32,)
+        if not self.return_only_sequences:
+            types += (tf.float32,)
+        return types
 
     def sample_embedding_variance(self, n_samples=10000):
         """ Approximates the variance of embedding dimensions. """

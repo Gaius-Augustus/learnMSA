@@ -1,15 +1,13 @@
 import math
-import numpy as np
 import tensorflow as tf
 from functools import partial
 import learnMSA.msa_hmm.Emitter as emit
 import learnMSA.msa_hmm.Transitioner as trans
 import learnMSA.msa_hmm.Initializers as initializers
 import learnMSA.msa_hmm.Priors as priors
-import learnMSA.protein_language_models.Common as plm_common
+import learnMSA.protein_language_models.Common as Common
 from learnMSA.protein_language_models.MvnEmitter import MvnEmitter, AminoAcidPlusMvnEmissionInitializer, make_joint_prior
 import subprocess as sp
-import os
 
 def as_str(config, items_per_line=1, prefix="", sep=""):
     return "\n"+prefix+"{" + sep.join(("\n"+prefix)*(i%items_per_line==0) + key + " : " + str(val) for i,(key,val) in enumerate(config.items())) + "\n"+prefix+"}"
@@ -66,14 +64,15 @@ def get_adaptive_batch_size_with_language_model(model_lengths, max_seq_len, embe
         batch_size = batch_size//2
     return batch_size
 
+
 #the configuration can be changed by experienced users
 #proper command line support for these parameters will be added in the future
 def make_default(default_num_models=5, 
                  use_language_model=False, 
                  allow_user_keys_in_config=False,
                  use_l2=False,
-                 scoring_model_config=plm_common.ScoringModelConfig(),
-                 num_prior_components=plm_common.PRIOR_DEFAULT_COMPONENTS,
+                 scoring_model_config=Common.ScoringModelConfig(),
+                 num_prior_components=Common.PRIOR_DEFAULT_COMPONENTS,
                  frozen_insertions=True,
                  L2_match=10.,
                  L2_insert=0.,

@@ -247,21 +247,21 @@ class DefaultBatchGenerator():
                 batch[i, k, :min(self.data.seq_lens[j], self.crop_long_seqs)] = seq
 
         output = (batch, )
-        if self.use_clusters:
-            output += (self.cluster_indices[permutated_indices],)
         if not self.return_only_sequences:
             output += (permutated_indices,)
-        if return_crop_boundaries:
-            output += (start, end)
+            if self.use_clusters:
+                output += (self.cluster_indices[permutated_indices],)
+            if return_crop_boundaries:
+                output += (start, end)
         return output[0] if len(output) == 1 else output
     
 
     def get_out_types(self):
         types = (tf.uint8, )
-        if self.use_clusters:
-            types += (tf.int32,)
         if not self.return_only_sequences:
             types += (tf.int64, )
+        if self.use_clusters:
+            types += (tf.int32,)
         return types
 
     
@@ -296,19 +296,21 @@ def make_dataset(indices, batch_generator, batch_size=512, shuffle=True, bucket_
             ds = ds.repeat()
         ds = ds.batch(batch_size)
         def _batch_func(i):
-            if len(batch_generator.get_out_types()) == 2:
-                batch, ind = tf.numpy_function(batch_generator, [i], batch_generator.get_out_types())
-                #explicitly set output shapes or tf 2.17 will complain about unknown shapes
-                batch.set_shape(tf.TensorShape([None, batch_generator.num_models, None]))
-                ind.set_shape(tf.TensorShape([None, batch_generator.num_models]))
-                return batch, ind
-            else:
-                batch, ind, emb = tf.numpy_function(batch_generator, [i], batch_generator.get_out_types())
-                #explicitly set output shapes or tf 2.17 will complain about unknown shapes
-                batch.set_shape(tf.TensorShape([None, batch_generator.num_models, None]))
-                ind.set_shape(tf.TensorShape([None, batch_generator.num_models]))
-                emb.set_shape(tf.TensorShape([None, batch_generator.num_models, None, batch_generator.scoring_model_config.dim+1]))
-                return batch, ind, emb
+            batch_data = tf.numpy_function(batch_generator, [i], batch_generator.get_out_types())
+            batch, ind = batch_data[:2]
+            batch.set_shape(tf.TensorShape([None, batch_generator.num_models, None]))
+            ind.set_shape(tf.TensorShape([None, batch_generator.num_models]))
+            outputs = (batch, ind)
+            if batch_generator.use_clusters:
+                clusters = batch_data[2]
+                clusters.set_shape(tf.TensorShape([None, batch_generator.num_models]))
+                outputs += (clusters,)
+            if (batch_generator.use_clusters and len(batch_generator.get_out_types()) == 4 
+                or not batch_generator.use_clusters and len(batch_generator.get_out_types()) == 3):
+                emb = batch_data[-1]
+                emb.set_shape(tf.TensorShape([None, batch_generator.num_models, None, batch_generator.config["scoring_model_config"].dim+1]))
+                outputs += (emb,)
+            return outputs
         if bucket_by_seq_length:
             def batch_func(i,j):
                 return *_batch_func(i), j
