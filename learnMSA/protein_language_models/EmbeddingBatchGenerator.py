@@ -70,7 +70,7 @@ class EmbeddingBatchGenerator(DefaultBatchGenerator):
         
     """
     Args:
-        <Rest as DefaultBatchGenerator>
+        <as DefaultBatchGenerator>
     """
     def configure(self, data : SequenceDataset, config, cluster_indices=None, verbose=False):
         super().configure(data, config, cluster_indices, verbose)

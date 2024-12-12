@@ -10,6 +10,8 @@ from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 sys.path.insert(0, "../TensorTree")
 from tensortree import TreeHandler
 
+tensortree.set_backend("tensorflow")
+
 
 """ Computes a clustering of the sequences in a fasta file based on sequence identity using mmseqs2.
 Args:

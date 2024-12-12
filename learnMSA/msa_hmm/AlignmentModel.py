@@ -174,15 +174,15 @@ class AlignmentModel():
         self.model = model
         #encoder model is the same as model but with the MsaHmmLayer removed
         #the output of the encoder model will be the input to viterbi
-        #in the default learnMSA, the encoder model is only the Ancestral Probability layer.
+        #in the default learnMSA, the encoder model is only the ancestral probability layer.
         self.encoder_model = None
-        for i, layer in enumerate(model.layers[1:]):
+        for i, layer in enumerate(model.layers):
             if layer.name.startswith("anc_probs_layer"):
-                self.anc_probs_layer = layer
-            if layer.name.startswith("msa_hmm_layer"):
                 encoder_out = model.layers[i].output
-                self.msa_hmm_layer = layer
                 self.encoder_model = tf.keras.Model(inputs=self.model.inputs, outputs=[encoder_out])
+            if layer.name.startswith("msa_hmm_layer"):
+                self.msa_hmm_layer = layer
+                break
         assert self.encoder_model is not None, "Can not find a MsaHmmLayer in the specified model."
         self.gap_symbol = gap_symbol
         self.gap_symbol_insertions = gap_symbol_insertions

@@ -1024,218 +1024,322 @@ class TestMSAHMM(unittest.TestCase):
                             
 class TestAncProbs(unittest.TestCase):
     
-    def __init__(self, *args, **kwargs):
-        super(TestAncProbs, self).__init__(*args, **kwargs)
-        self.paml_all = [Utility.LG_paml] + Utility.LG4X_paml
-        self.A = SequenceDataset.alphabet[:20]
+    # def __init__(self, *args, **kwargs):
+    #     super(TestAncProbs, self).__init__(*args, **kwargs)
+    #     self.paml_all = [Utility.LG_paml] + Utility.LG4X_paml
+    #     self.A = SequenceDataset.alphabet[:20]
     
-    def assert_vec(self, x, y, almost=False):
-        for i,(a,b) in enumerate(zip(x.shape, y.shape)):
-            self.assertTrue(a==b or a==1 or b==1, f"{a} {b} (dim {i})")
-        self.assertEqual(x.dtype, y.dtype)
-        if almost:
-            np.testing.assert_almost_equal(x, y, decimal=5)
-        else:
-            self.assertTrue(np.all(x == y), str(x) + " not equal to " + str(y))
+    # def assert_vec(self, x, y, almost=False):
+    #     for i,(a,b) in enumerate(zip(x.shape, y.shape)):
+    #         self.assertTrue(a==b or a==1 or b==1, f"{a} {b} (dim {i})")
+    #     self.assertEqual(x.dtype, y.dtype)
+    #     if almost:
+    #         np.testing.assert_almost_equal(x, y, decimal=5)
+    #     else:
+    #         self.assertTrue(np.all(x == y), str(x) + " not equal to " + str(y))
     
-    def parse_a(self, string):
-        return np.array([float(x) for x in string.split()], dtype=np.float32)
+    # def parse_a(self, string):
+    #     return np.array([float(x) for x in string.split()], dtype=np.float32)
     
-    def assert_equilibrium(self, p):
-        np.testing.assert_almost_equal(np.sum(p), 1., decimal=5)
+    # def assert_equilibrium(self, p):
+    #     np.testing.assert_almost_equal(np.sum(p), 1., decimal=5)
     
-    def assert_symmetric(self, matrix):
-        self.assertEqual(matrix.shape[-1], matrix.shape[-2])
-        n = matrix.shape[-1]
-        for i in range(n):
-            self.assertEqual(matrix[i,i], 0.)
-            for j in range(i+1,n):
-                self.assertEqual(matrix[i,j], matrix[j,i])
+    # def assert_symmetric(self, matrix):
+    #     self.assertEqual(matrix.shape[-1], matrix.shape[-2])
+    #     n = matrix.shape[-1]
+    #     for i in range(n):
+    #         self.assertEqual(matrix[i,i], 0.)
+    #         for j in range(i+1,n):
+    #             self.assertEqual(matrix[i,j], matrix[j,i])
             
-    def assert_rate_matrix(self, Q, p):
-        for i in range(Q.shape[0]-1):
-            for j in range(Q.shape[0]-1):
-                np.testing.assert_almost_equal(Q[i,j] * p[i], 
-                                               Q[j,i] * p[j])
+    # def assert_rate_matrix(self, Q, p):
+    #     for i in range(Q.shape[0]-1):
+    #         for j in range(Q.shape[0]-1):
+    #             np.testing.assert_almost_equal(Q[i,j] * p[i], 
+    #                                            Q[j,i] * p[j])
         
-    def assert_anc_probs(self, anc_prob_seqs, expected_sum, expected_anc_probs=None):
-        self.assert_vec( np.sum(anc_prob_seqs, -1, keepdims=True), expected_sum, almost=True)
-        if expected_anc_probs is not None:
-            self.assert_vec( anc_prob_seqs, expected_anc_probs, almost=True)
+    # def assert_anc_probs(self, anc_prob_seqs, expected_sum, expected_anc_probs=None):
+    #     self.assert_vec( np.sum(anc_prob_seqs, -1, keepdims=True), expected_sum, almost=True)
+    #     if expected_anc_probs is not None:
+    #         self.assert_vec( anc_prob_seqs, expected_anc_probs, almost=True)
         #todo: maybe use known properties of amino acids (e.g. polar, charged, aromatic) to test distributions
         #after some time tau
-        
-    def assert_anc_probs_layer(self, anc_probs_layer, config):
-        anc_probs_layer.build()
-        p = anc_probs_layer.make_p()
-        R = anc_probs_layer.make_R()
-        Q = anc_probs_layer.make_Q()
-        self.assertEqual(p.shape[0], config["num_models"])
-        self.assertEqual(R.shape[0], config["num_models"])
-        self.assertEqual(Q.shape[0], config["num_models"])
-        self.assertEqual(p.shape[1], config["num_rate_matrices"])
-        self.assertEqual(R.shape[1], config["num_rate_matrices"])
-        self.assertEqual(Q.shape[1], config["num_rate_matrices"])
-        for model_equi in p:
-            for equi in model_equi:
-                self.assert_equilibrium(equi)
-        for model_exchange in R:
-            for exchange in model_exchange:
-                self.assert_symmetric(exchange)
-        for model_rate,model_equi in zip(Q,p):
-            for rate,equi in zip(model_rate,model_equi):
-                self.assert_rate_matrix(rate,equi)
+
+    def _assert_anc_probs_layer(self, anc_probs_layer, test_times=True):
+        R = anc_probs_layer.make_exchangeability_matrix()[0]
+        p = anc_probs_layer.make_equilibrium()[0]
+        Q = anc_probs_layer.make_rate_matrix()[0]
+        #test symmetry and zero diagonal
+        np.testing.assert_almost_equal(R, np.transpose(R))
+        np.testing.assert_almost_equal(np.diag(R), 0.)
+        #test equilibrium
+        np.testing.assert_almost_equal(np.sum(p, -1), 1., decimal=6)
+        #test rate matrix
+        for i in range(Q.shape[1]):
+            for j in range(Q.shape[1]):
+                np.testing.assert_almost_equal(Q[i,j] * p[i], 
+                                               Q[j,i] * p[j])
+        #test times
+        if not test_times:
+            return
+        t = anc_probs_layer.make_times()
+        t13 = anc_probs_layer.make_times([[1],[2]])
+        np.testing.assert_almost_equal(t[:,0], np.array([.1,.2,.3,.4,.5]))
+        np.testing.assert_almost_equal(t13[:,0], np.array([.2, .3]))
+
+
+    def test_matrices(self):
+        R_init, p_init = Initializers.make_LG_init(1) 
+        x = Utility.inverse_softplus(np.array([0.1, 0.2, 0.3, 0.4, 0.5])).numpy()[:,None]
+        t_init = Initializers.ConstantInitializer(x)
+        anc_probs_layer = AncProbsLayer.AncProbsLayer(num_models=1, num_times=5, 
+                                                      equilibrium_init=p_init,
+                                                      exchangeability_init=R_init,
+                                                      time_init=t_init)
+        self._assert_anc_probs_layer(anc_probs_layer)
+
+    # def assert_anc_probs_layer(self, anc_probs_layer, config):
+    #     anc_probs_layer.build()
+    #     p = anc_probs_layer.make_p()
+    #     R = anc_probs_layer.make_R()
+    #     Q = anc_probs_layer.make_Q()
+    #     self.assertEqual(p.shape[0], config["num_models"])
+    #     self.assertEqual(R.shape[0], config["num_models"])
+    #     self.assertEqual(Q.shape[0], config["num_models"])
+    #     self.assertEqual(p.shape[1], config["num_rate_matrices"])
+    #     self.assertEqual(R.shape[1], config["num_rate_matrices"])
+    #     self.assertEqual(Q.shape[1], config["num_rate_matrices"])
+    #     for model_equi in p:
+    #         for equi in model_equi:
+    #             self.assert_equilibrium(equi)
+    #     for model_exchange in R:
+    #         for exchange in model_exchange:
+    #             self.assert_symmetric(exchange)
+    #     for model_rate,model_equi in zip(Q,p):
+    #         for rate,equi in zip(model_rate,model_equi):
+    #             self.assert_rate_matrix(rate,equi)
                 
-    def test_paml_parsing(self):
-        R1, p1 = Utility.parse_paml(Utility.LG4X_paml[0], self.A)
-        true_p1_str = """0.147383 0.017579 0.058208 0.017707 0.026331 
-                        0.041582 0.017494 0.027859 0.011849 0.076971 
-                        0.147823 0.019535 0.037132 0.029940 0.008059 
-                        0.088179 0.089653 0.006477 0.032308 0.097931"""
-        true_X_row_1 = "0.295719"
-        true_X_row_4 = "1.029289 0.576016 0.251987 0.189008"
-        true_X_row_19 = """0.916683 0.102065 0.043986 0.080708 0.885230 
-                            0.072549 0.206603 0.306067 0.205944 5.381403 
-                            0.561215 0.112593 0.693307 0.400021 0.584622 
-                            0.089177 0.755865 0.133790 0.154902"""
-        self.assert_vec(p1, self.parse_a(true_p1_str))
-        self.assert_vec(R1[1,:1], self.parse_a(true_X_row_1))
-        self.assert_vec(R1[4,:4], self.parse_a(true_X_row_4))
-        self.assert_vec(R1[19,:19], self.parse_a(true_X_row_19))
-        for R,p in map(Utility.parse_paml, self.paml_all, [self.A]*len(self.paml_all)):
-            self.assert_equilibrium(p)
-            self.assert_symmetric(R)
+
+    # def test_paml_parsing(self):
+    #     R1, p1 = Utility.parse_paml(Utility.LG4X_paml[0], self.A)
+    #     true_p1_str = """0.147383 0.017579 0.058208 0.017707 0.026331 
+    #                     0.041582 0.017494 0.027859 0.011849 0.076971 
+    #                     0.147823 0.019535 0.037132 0.029940 0.008059 
+    #                     0.088179 0.089653 0.006477 0.032308 0.097931"""
+    #     true_X_row_1 = "0.295719"
+    #     true_X_row_4 = "1.029289 0.576016 0.251987 0.189008"
+    #     true_X_row_19 = """0.916683 0.102065 0.043986 0.080708 0.885230 
+    #                         0.072549 0.206603 0.306067 0.205944 5.381403 
+    #                         0.561215 0.112593 0.693307 0.400021 0.584622 
+    #                         0.089177 0.755865 0.133790 0.154902"""
+    #     self.assert_vec(p1, self.parse_a(true_p1_str))
+    #     self.assert_vec(R1[1,:1], self.parse_a(true_X_row_1))
+    #     self.assert_vec(R1[4,:4], self.parse_a(true_X_row_4))
+    #     self.assert_vec(R1[19,:19], self.parse_a(true_X_row_19))
+    #     for R,p in map(Utility.parse_paml, self.paml_all, [self.A]*len(self.paml_all)):
+    #         self.assert_equilibrium(p)
+    #         self.assert_symmetric(R)
             
-    def test_rate_matrices(self):
-        for R,p in map(Utility.parse_paml, self.paml_all, [self.A]*len(self.paml_all)):
-            Q = AncProbsLayer.make_rate_matrix(R,p)
-            self.assert_rate_matrix(Q, p)
+    # def test_rate_matrices(self):
+    #     for R,p in map(Utility.parse_paml, self.paml_all, [self.A]*len(self.paml_all)):
+    #         Q = AncProbsLayer.make_rate_matrix(R,p)
+    #         self.assert_rate_matrix(Q, p)
+           
             
-    def get_test_configs(self, sequences):
-        #assuming sequences only contain the 20 standard AAs
-        oh_sequences = tf.one_hot(sequences, 20) 
-        anc_probs_init = Initializers.make_default_anc_probs_init(1)
-        inv_sp_R = anc_probs_init[1]((1,1,20,20))
-        log_p = anc_probs_init[2]((1,1,20))
-        p = tf.nn.softmax(log_p)
-        cases = []
-        for equilibrium_sample in [True, False]:
-            for rate_init in [-100., -3., 100.]:
-                for num_matrices in [1,3]:
-                    case = {}
-                    config = Configuration.make_default(1)
-                    config["num_models"] = 1
-                    config["equilibrium_sample"] = equilibrium_sample
-                    config["num_rate_matrices"] = num_matrices
-                    if num_matrices > 1:
-                        R_stack = np.concatenate([inv_sp_R]*num_matrices, axis=1)
-                        p_stack = np.concatenate([log_p]*num_matrices, axis=1)
-                        config["encoder_initializer"] = (config["encoder_initializer"][:1] + 
-                                                       [Initializers.ConstantInitializer(R_stack),
-                                                        Initializers.ConstantInitializer(p_stack)] )
-                    config["encoder_initializer"] = ([Initializers.ConstantInitializer(rate_init)] + 
-                                                     config["encoder_initializer"][1:])
-                    case["config"] = config 
-                    if rate_init == -100.:
-                        case["expected_anc_probs"] = tf.one_hot(sequences, len(SequenceDataset.alphabet)).numpy()
-                    elif rate_init == 100.:
-                        anc = np.concatenate([p, np.zeros((1,1,len(SequenceDataset.alphabet)-20), dtype=np.float32)], axis=-1)
-                        anc = np.concatenate([anc] * sequences.shape[0] * sequences.shape[1] * sequences.shape[2], axis=1)
-                        anc = np.reshape(anc, (sequences.shape[0], sequences.shape[1], sequences.shape[2], len(SequenceDataset.alphabet)))
-                        case["expected_anc_probs"] = anc 
-                    if equilibrium_sample:
-                        expected_freq = tf.linalg.matvec(p, oh_sequences).numpy()
-                        case["expected_freq"] = expected_freq
-                        if rate_init != -3.:
-                            case["expected_anc_probs"] *= expected_freq
-                        case["expected_freq"] = np.stack([case["expected_freq"]]*num_matrices, axis=-2)
-                    else:
-                        case["expected_freq"] = np.ones((), dtype=np.float32)
-                    if "expected_anc_probs" in case:
-                        case["expected_anc_probs"] = np.stack([case["expected_anc_probs"]]*num_matrices, axis=-2)
-                    cases.append(case)
-        return cases
+    # def get_test_configs(self, sequences):
+    #     #assuming sequences only contain the 20 standard AAs
+    #     oh_sequences = tf.one_hot(sequences, 20) 
+    #     anc_probs_init = Initializers.make_anc_probs_init(1)
+    #     inv_sp_R = anc_probs_init[1]((1,1,20,20))
+    #     log_p = anc_probs_init[2]((1,1,20))
+    #     p = tf.nn.softmax(log_p)
+    #     cases = []
+    #     for equilibrium_sample in [True, False]:
+    #         for rate_init in [-100., -3., 100.]:
+    #             for num_matrices in [1,3]:
+    #                 case = {}
+    #                 config = Configuration.make_default(1)
+    #                 config["num_models"] = 1
+    #                 config["equilibrium_sample"] = equilibrium_sample
+    #                 config["num_rate_matrices"] = num_matrices
+    #                 if num_matrices > 1:
+    #                     R_stack = np.concatenate([inv_sp_R]*num_matrices, axis=1)
+    #                     p_stack = np.concatenate([log_p]*num_matrices, axis=1)
+    #                     config["encoder_initializer"] = (config["encoder_initializer"][:1] + 
+    #                                                    [Initializers.ConstantInitializer(R_stack),
+    #                                                     Initializers.ConstantInitializer(p_stack)] )
+    #                 config["encoder_initializer"] = ([Initializers.ConstantInitializer(rate_init)] + 
+    #                                                  config["encoder_initializer"][1:])
+    #                 case["config"] = config 
+    #                 if rate_init == -100.:
+    #                     case["expected_anc_probs"] = tf.one_hot(sequences, len(SequenceDataset.alphabet)).numpy()
+    #                 elif rate_init == 100.:
+    #                     anc = np.concatenate([p, np.zeros((1,1,len(SequenceDataset.alphabet)-20), dtype=np.float32)], axis=-1)
+    #                     anc = np.concatenate([anc] * sequences.shape[0] * sequences.shape[1] * sequences.shape[2], axis=1)
+    #                     anc = np.reshape(anc, (sequences.shape[0], sequences.shape[1], sequences.shape[2], len(SequenceDataset.alphabet)))
+    #                     case["expected_anc_probs"] = anc 
+    #                 if equilibrium_sample:
+    #                     expected_freq = tf.linalg.matvec(p, oh_sequences).numpy()
+    #                     case["expected_freq"] = expected_freq
+    #                     if rate_init != -3.:
+    #                         case["expected_anc_probs"] *= expected_freq
+    #                     case["expected_freq"] = np.stack([case["expected_freq"]]*num_matrices, axis=-2)
+    #                 else:
+    #                     case["expected_freq"] = np.ones((), dtype=np.float32)
+    #                 if "expected_anc_probs" in case:
+    #                     case["expected_anc_probs"] = np.stack([case["expected_anc_probs"]]*num_matrices, axis=-2)
+    #                 cases.append(case)
+    #     return cases
     
-    def get_simple_seq(self, data):      
-        sequences = get_all_seqs(data, 1)[:,:,:-1]
-        sequences = np.transpose(sequences, [1,0,2])
-        return sequences
+
+    # def get_simple_seq(self, data):      
+        
+    #     sequences = np.transpose(sequences, [1,0,2])
+    #     return sequences
             
-    def test_anc_probs(self):       
+
+    # def __test_anc_probs(self):       
+    #     filename = os.path.dirname(__file__)+"/data/simple.fa"
+    #     with SequenceDataset(filename) as data:          
+    #         sequences = self.get_simple_seq(data)
+    #     n = sequences.shape[1]
+    #     for case in self.get_test_configs(sequences):
+    #         anc_probs_layer = Training.make_anc_probs_layer(n, case["config"])
+    #         self.assert_anc_probs_layer(anc_probs_layer, case["config"])
+    #         anc_prob_seqs = anc_probs_layer(sequences, np.arange(n)[np.newaxis, :]).numpy()
+    #         shape = (case["config"]["num_models"], n, sequences.shape[2], case["config"]["num_rate_matrices"], len(SequenceDataset.alphabet))
+    #         anc_prob_seqs = np.reshape(anc_prob_seqs, shape)
+    #         if "expected_anc_probs" in case:
+    #             self.assert_anc_probs(anc_prob_seqs, case["expected_freq"], case["expected_anc_probs"])
+    #         else:
+    #             self.assert_anc_probs(anc_prob_seqs, case["expected_freq"])
+
+
+    def test_anc_probs(self):
+        # load some sequences
         filename = os.path.dirname(__file__)+"/data/simple.fa"
         with SequenceDataset(filename) as data:          
-            sequences = self.get_simple_seq(data)
-        n = sequences.shape[1]
-        for case in self.get_test_configs(sequences):
-            anc_probs_layer = Training.make_anc_probs_layer(n, case["config"])
-            self.assert_anc_probs_layer(anc_probs_layer, case["config"])
-            anc_prob_seqs = anc_probs_layer(sequences, np.arange(n)[np.newaxis, :]).numpy()
-            shape = (case["config"]["num_models"], n, sequences.shape[2], case["config"]["num_rate_matrices"], len(SequenceDataset.alphabet))
-            anc_prob_seqs = np.reshape(anc_prob_seqs, shape)
-            if "expected_anc_probs" in case:
-                self.assert_anc_probs(anc_prob_seqs, case["expected_freq"], case["expected_anc_probs"])
-            else:
-                self.assert_anc_probs(anc_prob_seqs, case["expected_freq"])
-                
-        
+            sequences = sequences = get_all_seqs(data, 1)[:,:,:-1]
+        n = sequences.shape[0]
+        s = len(SequenceDataset.alphabet)
+        sequences = np.eye(s)[sequences].astype(np.float32)
+        # create the layer 
+        R_init, p_init = Initializers.make_LG_init(1) 
+        for time_init in [-100., -3., 100.]:
+            anc_probs_layer = AncProbsLayer.AncProbsLayer(num_models=1, num_times=n,
+                                                        time_init=Initializers.ConstantInitializer(time_init),
+                                                        equilibrium_init=p_init,
+                                                        exchangeability_init=R_init)
+            ind = np.arange(n)[:, np.newaxis]
+            anc_probs = anc_probs_layer(sequences, ind).numpy()
+            # the anc probs layer is past -> present per default, so the last output dim should sum to 1
+            np.testing.assert_almost_equal(np.sum(anc_probs, axis=-1), 1., decimal=4)
+            if time_init == -100.:
+                np.testing.assert_almost_equal(anc_probs, np.delete(sequences, [21,22,23], axis=-1))
+            elif time_init == 100.:
+                A = anc_probs[...,:20]
+                np.testing.assert_almost_equal(A, np.exp(p_init(A.shape)), decimal=6)
+
+
+    def test_special_amino_acids(self):
+        # test if special amino acids are handled correctly
+        R_init, p_init = Initializers.make_LG_init(1) 
+        time_init = Initializers.ConstantInitializer(-100.)
+        anc_probs_layer = AncProbsLayer.AncProbsLayer(num_models=1, num_times=1,
+                                                        time_init=time_init,
+                                                        equilibrium_init=p_init,
+                                                        exchangeability_init=R_init)
+        # the largest index (here 22) is used for padding, 21 and 22 are special aa
+        seq = np.eye(23)[[0,5,21,3,17,20,22]]
+        seq = seq[np.newaxis, np.newaxis]
+        ind = np.array([[0]])
+
+        anc_probs = anc_probs_layer(seq, ind, replace_rare_with_equilibrium=True).numpy()
+        # all classical amino acid inputs should be unchanged, since the time is ~0 
+        np.testing.assert_equal(anc_probs[...,[0,1,3,4],:20], seq[...,[0,1,3,4],:20])
+        np.testing.assert_almost_equal(anc_probs[...,[0,1,3,4],2:0], 0.)
+        # all special amino acids should output p
+        np.testing.assert_almost_equal(anc_probs[...,[2,5],:20], 
+                                       np.exp(p_init((1,1,2,20))), decimal=6)
+        np.testing.assert_almost_equal(anc_probs[...,[2,5],2:0], 0.)
+        # padding should be unchanged
+        np.testing.assert_almost_equal(anc_probs[...,[6],:-1], 0.)
+        np.testing.assert_almost_equal(anc_probs[...,[6],-1], 1.)
+
+        anc_probs2 = anc_probs_layer(seq, ind, replace_rare_with_equilibrium=False).numpy()
+        # this mode just copies all special amino acids to the output
+        np.testing.assert_almost_equal(anc_probs2, seq)
+
+
     def test_encoder_model(self):
         #test if everything still works if adding the encoder-model abstraction layer   
         filename = os.path.dirname(__file__)+"/data/simple.fa"
         with SequenceDataset(filename) as data:       
-            sequences = self.get_simple_seq(data)
-            n = sequences.shape[1]
-            ind = np.arange(n)
-            model_length = 10
-            batch_gen = Training.DefaultBatchGenerator()
-            batch_gen.configure(data, Configuration.make_default(1))
-            ds = Training.make_dataset(ind, batch_gen, batch_size=n, shuffle=False)
-            for case in self.get_test_configs(sequences):
-                # the default emitter initializers expect 25 as last dimension which is not compatible with num_matrix=3
-                config = dict(case["config"])
-                config["emitter"] = Emitter.ProfileHMMEmitter(emission_init = Initializers.ConstantInitializer(0.), 
-                                                                insertion_init = Initializers.ConstantInitializer(0.))
-                model = Training.default_model_generator(num_seq=n, 
-                                                            effective_num_seq=n, 
-                                                            model_lengths=[model_length], 
-                                                            config=config,
-                                                            data=data)
-                am = AlignmentModel(data, 
-                                    batch_gen, 
-                                    ind, 
-                                    batch_size=n, 
-                                    model=model)
-                self.assert_anc_probs_layer(am.encoder_model.layers[-1], case["config"])
-                for x,_ in ds:
-                    anc_prob_seqs = am.encoder_model(x).numpy()[:,:,:-1]
-                    shape = (case["config"]["num_models"], n, sequences.shape[2], case["config"]["num_rate_matrices"], len(SequenceDataset.alphabet))
-                    anc_prob_seqs = np.reshape(anc_prob_seqs, shape)
-                if "expected_anc_probs" in case:
-                    self.assert_anc_probs(anc_prob_seqs,  case["expected_freq"], case["expected_anc_probs"])
-                else:
-                    self.assert_anc_probs(anc_prob_seqs,  case["expected_freq"])
+            sequences = get_all_seqs(data, 1)[:,:,:-1]
+        n = sequences.shape[0]
+        s = len(SequenceDataset.alphabet)
+        sequences = np.eye(s)[sequences].astype(np.float32)
+        ind = np.arange(n)
+        batch_gen = Training.DefaultBatchGenerator()
+        batch_gen.configure(data, Configuration.make_default(1))
+        ds = Training.make_dataset(ind, batch_gen, batch_size=n, shuffle=False)
+        for time_init in [-100., -3., 100.]:
+            config = Configuration.make_default(1)
+            config["encoder_initializer"][0] = Initializers.ConstantInitializer(time_init)
+            model = Training.default_model_generator(num_seq=n, 
+                                                    effective_num_seq=n, 
+                                                    model_lengths=[10], 
+                                                    config=config, #todo: make >1 model work
+                                                    data=data)
+            am = AlignmentModel(data, 
+                                batch_gen, 
+                                ind, 
+                                batch_size=n, 
+                                model=model)
+            self._assert_anc_probs_layer(am.encoder_model.layers[-1], test_times=False)
+            for x,_ in ds:
+                anc_probs = am.encoder_model(x).numpy()[:,:,:-1]
+            np.testing.assert_almost_equal(np.sum(anc_probs, axis=-1), 1., decimal=4)
+            if time_init == -100.:
+                np.testing.assert_almost_equal(anc_probs, np.delete(sequences, [21,22,23], axis=-1))
+            elif time_init == 100.:
+                A = anc_probs[...,:20]
+                np.testing.assert_almost_equal(A, np.exp(Initializers.make_LG_init(1)[1](A.shape)), decimal=6)
+
                 
+
     def test_transposed(self):
+        # inputs
         filename = os.path.dirname(__file__)+"/data/simple.fa"
-        with SequenceDataset(filename) as data:     
-            sequences = self.get_simple_seq(data)
-        n = sequences.shape[1]
-        config = Configuration.make_default(1)
-        anc_probs_layer = Training.make_anc_probs_layer(1, config)
-        msa_hmm_layer = Training.make_msa_hmm_layer(n, 10, config)
+        with SequenceDataset(filename) as data:       
+            sequences = sequences = get_all_seqs(data, 1)[:,:,:-1]
+        n = sequences.shape[0]
+        s = len(SequenceDataset.alphabet)
+        sequences = np.eye(s)[sequences].astype(np.float32)
+        ind = np.arange(n)[:, np.newaxis]
+        # create the layer
+        R_init, p_init = Initializers.make_LG_init(1) 
+        time_init = Initializers.ConstantInitializer(-3.)
+        anc_probs_layer_t = AncProbsLayer.AncProbsLayer(num_models=1, num_times=n,
+                                                    time_init=time_init,
+                                                    equilibrium_init=p_init,
+                                                    exchangeability_init=R_init)
+        anc_probs_layer_not_t = AncProbsLayer.AncProbsLayer(num_models=1, num_times=n,
+                                                    time_init=time_init,
+                                                    equilibrium_init=p_init,
+                                                    exchangeability_init=R_init,
+                                                    transposed=False)
+        msa_hmm_layer = Training.make_msa_hmm_layer(n, 10, Configuration.make_default(1))
         msa_hmm_layer.build((1, None, None, len(SequenceDataset.alphabet)))
         B = msa_hmm_layer.cell.emitter[0].make_B()[0]
-        config["transposed"] = True
-        anc_probs_layer_transposed = Training.make_anc_probs_layer(n, config)
-        anc_prob_seqs = anc_probs_layer_transposed(sequences, np.arange(n)[np.newaxis, :]).numpy()
-        shape = (config["num_models"], n, sequences.shape[2], config["num_rate_matrices"], len(SequenceDataset.alphabet))
-        anc_prob_seqs = np.reshape(anc_prob_seqs, shape)
-        anc_prob_seqs = tf.cast(anc_prob_seqs, B.dtype)
-        anc_prob_B = anc_probs_layer(B[tf.newaxis,tf.newaxis,:,:20], rate_indices=[[0]])
-        anc_prob_B = tf.squeeze(anc_prob_B)
-        prob1 = tf.linalg.matvec(B, anc_prob_seqs)
-        oh_seqs = tf.one_hot(sequences, 20, dtype=anc_prob_B.dtype)
-        oh_seqs = tf.expand_dims(oh_seqs, -2)
-        prob2 = tf.linalg.matvec(anc_prob_B, oh_seqs)
+
+        anc_probs_t = anc_probs_layer_t(sequences, ind).numpy()
+        prob1 = tf.linalg.matvec(B[...,:20], anc_probs_t[...,:20])
+
+        anc_probs_not_t = anc_probs_layer_not_t(B[tf.newaxis,tf.newaxis,:,:20], np.array([[0]])).numpy()
+        anc_probs_not_t = tf.squeeze(anc_probs_not_t)
+        prob2 = tf.linalg.matvec(anc_probs_not_t[...,:20], sequences[...,:20])
+
         np.testing.assert_almost_equal(prob1.numpy(), prob2.numpy())
         
             
@@ -1786,7 +1890,7 @@ class TestModelToFile(unittest.TestCase):
         em_init_np[2:6] = string_to_one_hot("ACGT").numpy()*20.
         custom_emission_init = Initializers.ConstantInitializer(em_init_np)
         custom_insertion_init = Initializers.ConstantInitializer(np.random.rand(len(SequenceDataset.alphabet)-1))
-        encoder_initializer = Initializers.make_default_anc_probs_init(1)
+        encoder_initializer = Initializers.make_anc_probs_init(1)
         encoder_initializer[0] = Initializers.ConstantInitializer(np.random.rand(1, 2))
         config = Configuration.make_default(1)
         config["transitioner"] = Transitioner.ProfileHMMTransitioner(custom_transition_init, custom_flank_init)

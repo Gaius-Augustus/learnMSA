@@ -88,13 +88,13 @@ def generic_model_generator(encoder_layers,
     num_models = msa_hmm_layer.cell.num_models
     sequences = tf.keras.Input(shape=(None,None), name="sequences", dtype=tf.uint8)
     indices = tf.keras.Input(shape=(None,), name="indices", dtype=tf.int64)
-    #in the input pipeline, we need the batch dimension to come first to make multi GPU work 
-    #we transpose here, because all learnMSA layers require the model dimension to come first
-    transposed_sequences = PermuteSeqs([1,0,2])(sequences)
-    transposed_indices = PermuteSeqs([1,0])(indices)
-    forward_seq = transposed_sequences
+    forward_seq = tf.keras.layers.CategoryEncoding(len(SequenceDataset.alphabet), 
+                                                   "one_hot")(sequences)
     for layer in encoder_layers:
-        forward_seq = layer(forward_seq, transposed_indices)
+        forward_seq = layer(forward_seq, indices)
+    #todo: make HMM layer have batch first and model second to avoid this transpose
+    forward_seq = PermuteSeqs([1,0,2,3], name="permute_seqs")(forward_seq)
+    transposed_indices = PermuteSeqs([1,0], name="permute_indices")(indices)
     if msa_hmm_layer.use_prior:
         loglik, aggregated_loglik, prior, aux_loss = msa_hmm_layer(forward_seq, transposed_indices)
         #transpose back to make model.predict work correctly
@@ -123,7 +123,7 @@ def make_msa_hmm_layer(effective_num_seq,
     """
     assert_config(config)
     msa_hmm_cell = MsaHmmCell(model_lengths, 
-                                dim = 24 * config["num_rate_matrices"],
+                                dim = len(SequenceDataset.alphabet),
                                 emitter = config["emitter"], 
                                 transitioner = config["transitioner"])
     msa_hmm_layer = MsaHmmLayer(msa_hmm_cell, 
@@ -138,19 +138,9 @@ def make_anc_probs_layer(num_seq, config, clusters=None):
     assert_config(config)
     anc_probs_layer = AncProbsLayer(config["num_models"],
                                     num_seq,
-                                    config["num_rate_matrices"],
-                                    equilibrium_init=config["encoder_initializer"][2],
-                                    rate_init=config["encoder_initializer"][0],
+                                    time_init=config["encoder_initializer"][0],
                                     exchangeability_init=config["encoder_initializer"][1],
-                                    trainable_rate_matrices=config["trainable_rate_matrices"],
-                                    trainable_distances=config["trainable_distances"],
-                                    per_matrix_rate=config["per_matrix_rate"],
-                                     matrix_rate_init=config["encoder_initializer"][3] if len(config["encoder_initializer"]) > 3 else None,
-                                     matrix_rate_l2=config["matrix_rate_l2"],
-                                     shared_matrix=config["shared_rate_matrix"],
-                                     equilibrium_sample=config["equilibrium_sample"],
-                                     transposed=config["transposed"],
-                                     clusters=clusters)
+                                    equilibrium_init=config["encoder_initializer"][2])
     return anc_probs_layer
 
 
