@@ -23,9 +23,23 @@ class PermuteSeqs(tf.keras.layers.Layer):
         return {"perm": self.perm}
 
 
+## Helper layer to name the output of the model
 class Identity(tf.keras.layers.Layer):
     def call(self, x):
         return x
+    
+
+## One-hot encode integer sequences along the last axis
+class OneHotEncoding(tf.keras.layers.Layer):
+    def __init__(self, num_categories, **kwargs):
+        super(OneHotEncoding, self).__init__(**kwargs)
+        self.num_categories = num_categories
+
+    def call(self, indices):
+        return tf.one_hot(indices, self.num_categories, axis=-1)
+
+    def get_config(self):
+        return {"num_categories": self.num_categories}
 
 
 class LearnMSAModel(tf.keras.Model):
@@ -85,16 +99,19 @@ def generic_model_generator(encoder_layers,
                         is compatible with msa_hmm_layer. 
         msa_hmm_layer: An instance of MsaHmmLayer.
     """
-    num_models = msa_hmm_layer.cell.num_models
+
     sequences = tf.keras.Input(shape=(None,None), name="sequences", dtype=tf.uint8)
     indices = tf.keras.Input(shape=(None,), name="indices", dtype=tf.int64)
-    forward_seq = tf.keras.layers.CategoryEncoding(len(SequenceDataset.alphabet), 
-                                                   "one_hot")(sequences)
+
+    forward_seq = OneHotEncoding(len(SequenceDataset.alphabet))(sequences)
+
     for layer in encoder_layers:
         forward_seq = layer(forward_seq, indices)
+
     #todo: make HMM layer have batch first and model second to avoid this transpose
     forward_seq = PermuteSeqs([1,0,2,3], name="permute_seqs")(forward_seq)
     transposed_indices = PermuteSeqs([1,0], name="permute_indices")(indices)
+
     if msa_hmm_layer.use_prior:
         loglik, aggregated_loglik, prior, aux_loss = msa_hmm_layer(forward_seq, transposed_indices)
         #transpose back to make model.predict work correctly
@@ -111,6 +128,7 @@ def generic_model_generator(encoder_layers,
         aggregated_loglik = Identity(name="aggregated_loglik")(aggregated_loglik)
         model = LearnMSAModel(inputs=(sequences, indices), 
                             outputs=(loglik, aggregated_loglik))
+        
     return model
 
 
