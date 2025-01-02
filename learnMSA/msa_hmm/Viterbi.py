@@ -252,17 +252,7 @@ def viterbi(sequences, hmm_cell, end_hints=None, parallel_factor=1, return_varia
         sequences = tf.cast(sequences, hmm_cell.dtype)
     seq_lens = tf.reduce_sum(tf.cast(sequences[..., -1]==0, tf.int32), axis=-1)
     #compute all emission probabilities in parallel
-
-
-    tf.print("sequences\n", sequences[0,0], summarize=-1)
-
-
     emission_probs = hmm_cell.emission_probs(sequences, end_hints=end_hints, training=False)
-
-
-    tf.print("emission_probs\n", emission_probs[0,0], summarize=-1)
-
-
     num_model, b, seq_len, q = tf.unstack(tf.shape(emission_probs))
     tf.debugging.assert_equal(seq_len % parallel_factor, 0, 
         f"The sequence length ({seq_len}) has to be divisible by the parallel factor ({parallel_factor}).")
@@ -345,15 +335,12 @@ def get_state_seqs_max_lik(data : SequenceDataset,
     if encoder:
         @tf.function(input_signature=[[tf.TensorSpec(x.shape, dtype=x.dtype) for x in encoder.inputs]])
         def call_viterbi(inputs):
-            tf.print("inputs\n", inputs[0], summarize=-1)
             encoded_seq = encoder(inputs)
             #todo: make HMM layer have batch first and model second to avoid this transpose
             encoded_seq = tf.transpose(encoded_seq, [1,0,2,3])
             #todo: this can be improved by encoding only for required models, not all
             encoded_seq = tf.gather(encoded_seq, model_ids, axis=0)
             viterbi_seq = viterbi(encoded_seq, hmm_cell, parallel_factor=parallel_factor, non_homogeneous_mask_func=non_homogeneous_mask_func)
-            tf.print(tf.math.argmax(encoded_seq, -1), summarize=-1) 
-            tf.print(viterbi_seq, summarize=-1) 
             return viterbi_seq
     
     @tf.function(input_signature=(tf.TensorSpec(shape=[None, hmm_cell.num_models, None], dtype=tf.uint8),))

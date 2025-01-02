@@ -127,8 +127,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
             indices: Indices that map each input sequences to an evolutionary time. Shape: (b, num_model)
             replace_rare_with_equilibrium: If true, replaces non-standard amino acids with the equilibrium distribution.
         Returns:
-            Ancestral probabilities. Shape: (b, num_model, L, 20 + 1) if replace_rare_with_equilibrium 
-                                    else (b, num_model, L, 20 + z + 1)
+            Ancestral probabilities. Shape: (b, num_model, L, 20 + z + 1)
         """
         # omit non-standard amino acids and traverse the evolutionary times
         std_inputs = inputs[..., :20]
@@ -145,8 +144,9 @@ class AncProbsLayer(tf.keras.layers.Layer):
                 rest = equilibrium[tf.newaxis,:,tf.newaxis] * tf.reduce_sum(inputs[..., 20:-1], axis=-1, keepdims=True)
                 P += rest
                 # account for the case that P might be broadcasted but inputs not
-                other = tf.zeros_like(P[..., -1:]) + inputs[...,-1:]
-                P = tf.concat([P, other], axis=-1)
+                zeros = tf.zeros_like(P[..., -1:])
+                padding = tf.zeros_like(P[..., -1:]) + inputs[...,-1:]
+                P = tf.concat([P] + [zeros]*z + [padding], axis=-1)
             else:
                 other = tf.zeros(P.shape[:-1] + (z+1), dtype=P.dtype) + inputs[..., 20:]
                 P = tf.concat([P, other], axis=-1)
