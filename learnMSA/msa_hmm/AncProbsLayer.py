@@ -110,7 +110,8 @@ class AncProbsLayer(tf.keras.layers.Layer):
         if not self.built:
             self.build()
         if indices is not None:
-            t = tf.gather_nd(self.time_kernel, indices)
+            t = tf.gather(tf.transpose(self.time_kernel), tf.transpose(indices), batch_dims=1)
+            t = tf.transpose(t)
             if hasattr(indices, "shape"):
                 t.set_shape(indices.shape)
         else:
