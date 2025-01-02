@@ -57,7 +57,6 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
         if self.built:
             return
         s = input_shape[-1]-1 # substract one for terminal symbol
-        print(s)
         self.emission_kernel = [self.add_weight(
                                         shape=(length, s), 
                                         initializer=init, 
