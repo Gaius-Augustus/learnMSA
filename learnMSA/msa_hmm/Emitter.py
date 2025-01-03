@@ -139,7 +139,7 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
         if version.parse(tf.__version__) < version.parse("2.11.0") or gpu:
             emit = tf.einsum("kbs,ksq->kbq", inputs, B)
         else:
-            # something weird happens with batch matmul (or einsam on newer tensorflow versions and CPU) 
+            # something weird happens with batch matmul (or einsum on newer tensorflow versions and CPU) 
             # use this workaround at the cost of some performance
             emit = tf.concat([tf.matmul(inputs[i], B[i]) for i in range(self.num_models)], axis=0)
         emit_shape = tf.concat([tf.shape(B)[:1], input_shape[1:-1], tf.shape(B)[-1:]], 0)

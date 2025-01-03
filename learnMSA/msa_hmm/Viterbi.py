@@ -335,9 +335,7 @@ def get_state_seqs_max_lik(data : SequenceDataset,
     if encoder:
         @tf.function(input_signature=[[tf.TensorSpec(x.shape, dtype=x.dtype) for x in encoder.inputs]])
         def call_viterbi(inputs):
-            encoded_seq = encoder(inputs)
-            #todo: make HMM layer have batch first and model second to avoid this transpose
-            encoded_seq = tf.transpose(encoded_seq, [1,0,2,3])
+            encoded_seq = encoder(inputs)[0]
             #todo: this can be improved by encoding only for required models, not all
             encoded_seq = tf.gather(encoded_seq, model_ids, axis=0)
             viterbi_seq = viterbi(encoded_seq, hmm_cell, parallel_factor=parallel_factor, non_homogeneous_mask_func=non_homogeneous_mask_func)
@@ -346,12 +344,11 @@ def get_state_seqs_max_lik(data : SequenceDataset,
     @tf.function(input_signature=(tf.TensorSpec(shape=[None, hmm_cell.num_models, None], dtype=tf.uint8),))
     def call_viterbi_single(inputs):
         
-        #todo: make HMM layer have batch first and model second to avoid these transposes
         if encoder is None:
+            #todo: make HMM layer have batch first and model second to avoid this transpose
             seq = tf.transpose(inputs, [1,0,2])
         else:
-            seq = encoder(inputs) 
-            seq = tf.transpose(seq, [1,0,2])
+            seq = encoder(inputs)[0]
 
         #todo: this can be improved by encoding only for required models, not all
         seq = tf.gather(seq, model_ids, axis=0)

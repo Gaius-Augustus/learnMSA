@@ -1139,12 +1139,12 @@ class TestAncProbs(unittest.TestCase):
                                 ind, 
                                 batch_size=n, 
                                 model=model)
-            self._assert_anc_probs_layer(am.encoder_model.layers[-1], test_times=False)
+            self._assert_anc_probs_layer(am.anc_probs_layer, test_times=False)
             for x,_ in ds:
-                anc_probs = am.encoder_model(x).numpy()[:,:,:-1]
+                anc_probs = am.encoder_model(x)[0].numpy()[:,:,:-1]
             np.testing.assert_almost_equal(np.sum(anc_probs, axis=-1), 1., decimal=4)
             if time_init == -100.:
-                np.testing.assert_almost_equal(anc_probs, sequences)
+                np.testing.assert_almost_equal(anc_probs, np.transpose(sequences, [1,0,2,3]))
             elif time_init == 100.:
                 A = anc_probs[...,:20]
                 np.testing.assert_almost_equal(A, np.exp(Initializers.make_LG_init(1)[1](A.shape)), decimal=6)

@@ -173,7 +173,7 @@ def plot_hmm(am,
     for k, (seq_i, path_color) in enumerate(zip(seq_indices, path_colors)):
         ds = msa_hmm.Training.make_dataset(np.array([seq_i]), am.batch_generator, batch_size=1, shuffle=False)
         for x, _ in ds:
-            sequence = am.encoder_model(x)  
+            sequence = am.encoder_model(x)[0]  
         hidden_seq = msa_hmm.Viterbi.viterbi(sequence, hmm_cell).numpy()[model_index]
         hidden_seq = list(hidden_seq[0])
         for i in range(len(hidden_seq)):
@@ -242,12 +242,9 @@ def plot_anc_probs(am,
                                     batch_size=n, 
                                     shuffle=False)
     for x,_ in ds:
-        ancs = am.encoder_model(x).numpy()[model_index]
-    i = [l.name for l in am.encoder_model.layers].index("anc_probs_layer")
-    anc_probs_layer = am.encoder_model.layers[i]
-    indices = np.stack([am.indices]*am.msa_hmm_layer.cell.num_models)
-    indices = np.expand_dims(indices, -1)
-    tau = anc_probs_layer.make_times(indices)[:,model_index]
+        ancs = am.encoder_model(x)[0].numpy()[model_index]
+    indices = np.stack([am.indices]*am.msa_hmm_layer.cell.num_models, axis=1)
+    tau = am.anc_probs_layer.make_times(indices)[:,model_index]
     if rescale:
         ancs /= np.sum(ancs, -1, keepdims=True)
     f, axes = plt.subplots(n, m, sharey=True)
@@ -263,9 +260,7 @@ def plot_anc_probs(am,
 def plot_rate_matrices(am,
                        model_index,
                        title="normalized rate matrix (1 time unit = 1 expected mutation per site)"):
-    i = [l.name for l in am.encoder_model.layers].index("anc_probs_layer")
-    anc_probs_layer = am.encoder_model.layers[i]
-    Q = anc_probs_layer.make_Q()[model_index]
+    Q = am.anc_probs_layer.make_Q()[model_index]
     k = Q.shape[0]
     f, axes = plt.subplots(1, k, sharey=True)
     f.set_size_inches(10*k, 10.5)
@@ -294,8 +289,6 @@ def print_and_plot(am,
         model_index = am.best_model
     # print the alignment
     msa = am.to_string(model_index)
-    i = [l.name for l in am.encoder_model.layers].index("anc_probs_layer")
-    anc_probs_layer = am.encoder_model.layers[i]
     ds = msa_hmm.Training.make_dataset(am.indices, 
                             am.batch_generator,
                             am.batch_size, 
@@ -303,7 +296,7 @@ def print_and_plot(am,
     ll = am.model.predict(ds)[0][:,model_index] 
     for i,s in enumerate(msa[:max_seq]):
         indices = np.array([[am.indices[i]]*am.msa_hmm_layer.cell.num_models])
-        tau = anc_probs_layer.make_times(indices)[:,model_index].numpy()
+        tau = am.anc_probs_layer.make_times(indices)[:,model_index].numpy()
         param_string = "l=%.2f" % (ll[i]) + "_t=%.2f" % tau
         if seq_ids:
             print(f">{am.data.seq_ids[am.indices[i]]} "+param_string)
