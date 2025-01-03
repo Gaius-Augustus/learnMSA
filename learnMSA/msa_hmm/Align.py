@@ -297,9 +297,7 @@ def get_state_expectations(data : SequenceDataset,
     
     @tf.function(input_signature=[[tf.TensorSpec(x.shape, dtype=x.dtype) for x in encoder.inputs]])
     def batch_posterior_state_probs(inputs):
-        encoded_seq = encoder(inputs) 
-        #todo: make HMM layer have batch first and model second to avoid this transpose
-        encoded_seq = tf.transpose(encoded_seq, [1,0,2,3])
+        encoded_seq = encoder(inputs)[0] 
         posterior_probs = msa_hmm_layer.state_posterior_log_probs(encoded_seq)
         posterior_probs = tf.math.exp(posterior_probs)
         #compute expected number of visits per hidden state and sum over batch dim

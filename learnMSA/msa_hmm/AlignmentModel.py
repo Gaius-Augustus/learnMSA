@@ -178,9 +178,9 @@ class AlignmentModel():
         self.encoder_model = None
         for i, layer in enumerate(model.layers):
             if layer.name.startswith("anc_probs_layer"):
-                encoder_out = model.layers[i].output
-                self.encoder_model = tf.keras.Model(inputs=self.model.inputs, outputs=[encoder_out])
+                self.anc_probs_layer = layer
             if layer.name.startswith("msa_hmm_layer"):
+                self.encoder_model = tf.keras.Model(inputs=self.model.inputs, outputs=layer.input)
                 self.msa_hmm_layer = layer
                 break
         assert self.encoder_model is not None, "Can not find a MsaHmmLayer in the specified model."

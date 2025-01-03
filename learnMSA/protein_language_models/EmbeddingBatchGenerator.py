@@ -3,7 +3,7 @@ import os
 import gc
 import numpy as np
 import tensorflow as tf
-from learnMSA.msa_hmm.Training import DefaultBatchGenerator, default_model_generator, PermuteSeqs, Identity, LearnMSAModel
+from learnMSA.msa_hmm.Training import DefaultBatchGenerator, default_model_generator, PermuteSeqs, Identity, LearnMSAModel, OneHotEncoding
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 from learnMSA.protein_language_models.BilinearSymmetric import make_scoring_model
 import learnMSA.protein_language_models.Common as Common
@@ -170,15 +170,18 @@ def make_generic_embedding_model_generator(dim):
         sequences = tf.keras.Input(shape=(None,None), name="sequences", dtype=tf.uint8)
         indices = tf.keras.Input(shape=(None,), name="indices", dtype=tf.int64)
         embeddings = tf.keras.Input(shape=(None,None,dim+1), name="embeddings", dtype=tf.float32)
-        #in the input pipeline, we need the batch dimension to come first to make multi GPU work 
-        #we transpose here, because all learnMSA layers require the model dimension to come first
-        transposed_sequences = PermuteSeqs([1,0,2])(sequences)
+
+        forward_seq = OneHotEncoding(len(SequenceDataset.alphabet))(sequences)
+
+        for layer in encoder_layers:
+            forward_seq = layer(forward_seq, indices)
+
+        #todo: make HMM layer have batch first and model second to avoid this transpose
+        transposed_sequences = PermuteSeqs([1,0,2,3])(forward_seq)
         transposed_indices = PermuteSeqs([1,0])(indices)
         transposed_embeddings = PermuteSeqs([1,0,2,3])(embeddings)
-        forward_seq = transposed_sequences
-        for layer in encoder_layers:
-            forward_seq = layer(forward_seq, transposed_indices)
-        concat_seq = tf.keras.layers.Concatenate()([forward_seq, transposed_embeddings])
+
+        concat_seq = tf.keras.layers.Concatenate()([transposed_sequences, transposed_embeddings])
         loglik, aggregated_loglik, prior, aux_loss = msa_hmm_layer(concat_seq, transposed_indices)
         #transpose back to make model.predict work correctly
         loglik = PermuteSeqs([1,0], name="loglik")(loglik)
