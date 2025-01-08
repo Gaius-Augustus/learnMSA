@@ -47,6 +47,11 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
         self.lengths = lengths
         self.num_models = len(lengths) 
         # make sure the lengths are valid
+        # first, try to broadcast
+        if len(self.emission_init) == 1:
+            self.emission_init = self.emission_init * self.num_models
+        if len(self.insertion_init) == 1:
+            self.insertion_init = self.insertion_init * self.num_models
         assert len(self.lengths) == len(self.emission_init), \
             f"The number of emission initializers ({len(self.emission_init)}) should match the number of models ({len(self.lengths)})."
         assert len(self.lengths) == len(self.insertion_init), \
@@ -98,8 +103,10 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
         i2 = tf.stack([tf.identity(ins)]*(length+1))
         emissions = tf.concat([i1, em, i2] , axis=0)
         emissions = tf.nn.softmax(emissions)
-        emissions = tf.concat([emissions, tf.zeros_like(emissions[:,:1])], axis=-1) 
+        emissions = tf.concat([emissions, tf.zeros_like(emissions[...,:1])], axis=-1) 
         end_state_emission = tf.one_hot([s], s+1, dtype=em.dtype) 
+        end_state_emission = tf.broadcast_to(end_state_emission[0], emissions.shape[1:])
+        end_state_emission = end_state_emission[tf.newaxis, ...]
         emissions = tf.concat([emissions, end_state_emission], axis=0)
         return emissions
         
@@ -110,7 +117,7 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
         for i in range(self.num_models):
             em_mat = self.make_emission_matrix(i)
             padding = max_num_states - em_mat.shape[0]
-            em_mat_pad = tf.pad(em_mat, [[0, padding], [0,0]])
+            em_mat_pad = tf.pad(em_mat, [[0,padding]]+[[0,0]]*len(em_mat.shape[1:]))
             emission_matrices.append(em_mat_pad)
         B = tf.stack(emission_matrices, axis=0)
         return B
@@ -133,15 +140,16 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
         input_shape = tf.shape(inputs)
         inputs = tf.reshape(inputs, (tf.shape(inputs)[0], -1, input_shape[-1]))
         B = self.B_transposed[..., :input_shape[-1], :]
+        return self._compute_emission_probs(inputs, B, input_shape)
+    
+
+    def _compute_emission_probs(self, inputs, B, input_shape, B_contains_batch=False):
         # batch matmul of k emission matrices with the b x s input matrix 
         # with broadcasting of the inputs
-        gpu = len([x.physical_device_desc for x in device_lib.list_local_devices() if x.device_type == 'GPU']) > 0
-        if version.parse(tf.__version__) < version.parse("2.11.0") or gpu:
-            emit = tf.einsum("kbs,ksq->kbq", inputs, B)
+        if B_contains_batch:
+            emit = tf.einsum("kbLs,kbsq->kbLq", inputs, B)
         else:
-            # something weird happens with batch matmul (or einsum on newer tensorflow versions and CPU) 
-            # use this workaround at the cost of some performance
-            emit = tf.concat([tf.matmul(inputs[i], B[i]) for i in range(self.num_models)], axis=0)
+            emit = tf.einsum("kbs,ksq->kbq", inputs, B)
         emit_shape = tf.concat([tf.shape(B)[:1], input_shape[1:-1], tf.shape(B)[-1:]], 0)
         emit = tf.reshape(emit, emit_shape)
         return emit

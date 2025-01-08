@@ -12,6 +12,7 @@ import pandas as pd
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' 
 tf.get_logger().setLevel('WARNING')
 from learnMSA.msa_hmm import Align, Emitter, Transitioner, Initializers, MsaHmmCell, MsaHmmLayer, Training, Configuration, Viterbi, AncProbsLayer, Priors, DirichletMixture, Utility
+from learnMSA.msa_hmm.TreeEmitter import TreeEmitter
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset, AlignedDataset
 from learnMSA.msa_hmm.AlignmentModel import AlignmentModel, non_homogeneous_mask_func, find_faulty_sequences
 from learnMSA.protein_language_models import Common, DataPipeline, TrainingUtil, MvnMixture, EmbeddingCache
@@ -2120,6 +2121,54 @@ class TestClustering(unittest.TestCase):
         np.testing.assert_equal(c2.numpy(), [[1], [2], [0], [1]])
 
 
+
+class TestTree(unittest.TestCase):
+
+    def test_tree_emitter(self):
+
+        # todo: remove the next line when tensortree has proper package support
+        sys.path.insert(0, "../TensorTree")
+        import tensortree 
+
+        tree_handler = tensortree.TreeHandler.read("test/data/cluster.tree")
+        tree_loss_weight = 0.7
+        emitter = TreeEmitter(tree_handler, tree_loss_weight=tree_loss_weight)
+
+        np.testing.assert_equal(emitter.cluster_indices, [0, 0, 1, 1])
+        self.assertEqual(emitter.num_clusters, 2)
+        self.assertEqual(emitter.ancestral_tree_handler.num_leaves, 2)
+        
+        lengths = [3, 4]
+        emitter.set_lengths(lengths)
+        emitter.build(input_shape = (None, None, 24))
+
+        for i in range(2):
+            self.assertEqual(emitter.emission_kernel[i].shape, (lengths[i], 2, 23))
+            np.testing.assert_almost_equal(emitter.emission_kernel[i],
+                                    np.broadcast_to(np.log(Initializers.background_distribution), 
+                                                    emitter.emission_kernel[i].shape),
+                                                    decimal=5)
+        
+        #creates B and B_transposed, which could also be computed manually via make_B()
+        emitter.recurrent_init()
+        
+        self.assertEqual(emitter.B.shape, (2, 11, 2, 24))
+
+        inputs_ind = np.random.randint(23, size=(2, 4, 10))
+        inputs = tf.one_hot(inputs_ind, 24)
+        indices = np.array([[0,1,2,3], [2,0,3,1]])
+        emission_probs = emitter(inputs, indices)
+
+        self.assertEqual(emission_probs.shape, (2, 4, 10, 11))
+        for i in range(1,5):
+            np.testing.assert_almost_equal(emission_probs[..., i], 
+                                            Initializers.background_distribution[inputs_ind], 
+                                            decimal=5)
+            
+        # test auxiliary loss
+        aux_loss = emitter.get_aux_loss().numpy()
+        print(aux_loss)
+                            
 
 
 if __name__ == '__main__':
