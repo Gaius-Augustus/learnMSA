@@ -2149,7 +2149,7 @@ class TestTree(unittest.TestCase):
                                                     emitter.emission_kernel[i].shape),
                                                     decimal=5)
         
-        #creates B and B_transposed, which could also be computed manually via make_B()
+        # computes B, which could also be computed manually via make_B()
         emitter.recurrent_init()
         
         self.assertEqual(emitter.B.shape, (2, 11, 2, 24))
@@ -2166,10 +2166,38 @@ class TestTree(unittest.TestCase):
                                             decimal=5)
             
         # test auxiliary loss
-        aux_loss = emitter.get_aux_loss().numpy()
-        print(aux_loss)
+        test_distributions = np.zeros((2, 2, 4, 20), dtype=np.float32)
+        for i in range(4):
+            test_distributions[0, 0, i, i] = 1
+            test_distributions[1, 0, i, i+1] = 1
+            test_distributions[0, 1, i, i+2] = 1
+            test_distributions[1, 1, i, i+3] = 1
+        tree_loglik = emitter._compute_anc_tree_loglik(test_distributions).numpy()
+
+        def _compute_column_loglik(obs1, obs2, tau1=0.3, tau2=0.6):
+            # computes the loglik of a single column when observing 
+            # obs1 at the left and obs2 at the right leaf
+            # and when the branch lengths are tau1 and tau2
+            P = tensortree.backend.make_transition_probs(emitter.rate_matrix, 
+                                                         np.array([[tau1], [tau2]], dtype=np.float32))[:,0]
+            O = np.eye(20, dtype=np.float32)[[obs1, obs2]]
+            X = np.matmul(P[np.newaxis], O[...,np.newaxis])[0,...,0]
+            X = np.prod(X, axis=0)
+            L = np.log(np.sum(X * emitter.equilibrium, axis=1))
+            return L[0]
+
+        expected_model_0_loglik = (_compute_column_loglik(0, 1) + 
+                                   _compute_column_loglik(1, 2) + 
+                                   _compute_column_loglik(2, 3)) / 3
+        expected_model_1_loglik = (_compute_column_loglik(2, 3) +
+                                      _compute_column_loglik(3, 4) +
+                                      _compute_column_loglik(4, 5) +
+                                      _compute_column_loglik(5, 6)) / 4
+
+        self.assertAlmostEqual(tree_loglik[0], expected_model_0_loglik, places=5)
+        self.assertAlmostEqual(tree_loglik[1], expected_model_1_loglik, places=5)
+
+
                             
-
-
 if __name__ == '__main__':
     unittest.main()
