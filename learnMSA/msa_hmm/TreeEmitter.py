@@ -25,11 +25,11 @@ r""" A special emitter when the observations are related by a tree.
     E.g.
 
     Fasta:                  Tree:
-    >A                          R
-    ..                        /  \
+    >A                         R
+    ..                        / \
     >B                       U   V
     ..                      / \ / \
-    >C                      A B C D
+    >C                      A B C  D
     ..
     >D
     ..
@@ -52,6 +52,7 @@ class TreeEmitter(ProfileHMMEmitter):
                  tree_loss_weight = 0.1):
         super(TreeEmitter, self).__init__(emission_init, insertion_init, 
                                           prior, frozen_insertions=True)
+        self.tree_handler = tree_handler
         self.ancestral_tree_handler = copy.deepcopy(tree_handler)
         self.ancestral_tree_handler.prune()
         self.ancestral_tree_handler.update()
@@ -78,16 +79,16 @@ class TreeEmitter(ProfileHMMEmitter):
             return
         s = input_shape[-1]-1 # substract one for terminal symbol
         self.emission_kernel = [self.add_weight(
-                                        shape=(length, self.num_clusters, s), 
-                                        initializer=init, 
-                                        name="emission_kernel_"+str(i)) 
-                                    for i,(length, init) in enumerate(zip(self.lengths, self.emission_init))]
-        self.insertion_kernel = [ self.add_weight(
-                                shape=(self.num_clusters, s),
-                                initializer=init,
-                                name="insertion_kernel_"+str(i),
-                                trainable=not self.frozen_insertions) 
-                                    for i,init in enumerate(self.insertion_init)]
+                                    shape=(self.num_clusters, length, s), 
+                                    initializer=init, 
+                                    name="emission_kernel_"+str(i)) 
+                                for i,(length, init) in enumerate(zip(self.lengths, self.emission_init))]
+        self.insertion_kernel = [self.add_weight(
+                                    shape=(self.num_clusters, s),
+                                    initializer=init,
+                                    name="insertion_kernel_"+str(i),
+                                    trainable=not self.frozen_insertions) 
+                                for i,init in enumerate(self.insertion_init)]
         if self.prior is not None:
             self.prior.build()
         self.built = True
@@ -95,7 +96,7 @@ class TreeEmitter(ProfileHMMEmitter):
 
     def recurrent_init(self):
         self.B = self.make_B()
-        self.B_transposed = tf.transpose(self.B, [0,2,3,1])
+        self.B_transposed = tf.transpose(self.B, [0,1,3,2])
 
 
     def call(self, inputs, indices, end_hints=None, training=False):
@@ -107,7 +108,7 @@ class TreeEmitter(ProfileHMMEmitter):
                 A tensor with emission probabilities of shape (num_models, b, L, q) where "..." is identical to inputs.
         """
         input_shape = tf.shape(inputs)
-        B = self.B_transposed[..., :input_shape[-1], :]
+        B = self.B_transposed[..., :input_shape[-1],:]
         # we have to select the correct entry from the second dimension of B
         # for each input sequence
         cluster_indices = tf.gather(self.cluster_indices, indices)
@@ -119,7 +120,7 @@ class TreeEmitter(ProfileHMMEmitter):
     def get_aux_loss(self):
 
         # compute the likelihood of the ancestral tree with TensorTree
-        leaves = self.B[:, 1:max(self.lengths)+1, :, :20] # only consider match positions and standard amino acids
+        leaves = self.B[..., 1:max(self.lengths)+1, :20] # only consider match positions and standard amino acids
         leaves = tf.transpose(leaves, [2,0,1,3])
         leaves /= tf.math.maximum(tf.reduce_sum(leaves, axis=-1, keepdims=True), 1e-16) #re-normalize
 
@@ -147,6 +148,47 @@ class TreeEmitter(ProfileHMMEmitter):
         anc_loglik = tf.reduce_sum(anc_loglik * mask, axis=1) / tf.reduce_sum(mask, axis=1)
         
         return anc_loglik
+    
+
+    def get_prior_log_density(self):
+        B_mod = tf.reshape(self.B, (self.num_models * self.num_clusters, self.num_states, self.emission_kernel.shape[-1]))
+        priors = self.prior(B_mod, lengths=self.lengths)
+        priors = tf.reshape(priors, (self.num_models, self.num_clusters, priors.shape[-1]))
+        return tf.reduce_mean(priors, axis=1) # average over clusters
+    
+
+    def duplicate(self, model_indices=None, share_kernels=False):
+        if model_indices is None:
+            model_indices = range(len(self.emission_init))
+        sub_emission_init = [initializers.ConstantInitializer(self.emission_kernel[i].numpy()) for i in model_indices]
+        sub_insertion_init = [initializers.ConstantInitializer(self.insertion_kernel[i].numpy()) for i in model_indices]
+        emitter_copy = TreeEmitter(
+                             tree_handler = self.tree_handler,
+                             emission_init = sub_emission_init,
+                             insertion_init = sub_insertion_init,
+                             prior = self.prior,
+                             tree_loss_weight = self.tree_loss_weight) 
+        if share_kernels:
+            emitter_copy.emission_kernel = self.emission_kernel
+            emitter_copy.insertion_kernel = self.insertion_kernel
+            emitter_copy.built = True
+        return emitter_copy
+    
+
+    def get_config(self):
+        config = super(TreeEmitter, self).get_config()
+        config.update({
+        "tree_handler": self.tree_handler,
+        "tree_loss_weight": self.tree_loss_weight
+        })
+        return config
+    
+
+    def __repr__(self):
+        return f"TreeEmitter()"
+    
+
+
 
     
 

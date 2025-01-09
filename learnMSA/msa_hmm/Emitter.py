@@ -99,15 +99,14 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
 
     def make_emission_matrix_from_kernels(self, em, ins, length):
         s = em.shape[-1]
-        i1 = tf.expand_dims(ins, 0)
-        i2 = tf.stack([tf.identity(ins)]*(length+1))
-        emissions = tf.concat([i1, em, i2] , axis=0)
+        i1 = tf.expand_dims(ins, -2)
+        i2 = tf.stack([tf.identity(ins)]*(length+1), axis=-2)
+        emissions = tf.concat([i1, em, i2] , axis=-2)
         emissions = tf.nn.softmax(emissions)
         emissions = tf.concat([emissions, tf.zeros_like(emissions[...,:1])], axis=-1) 
         end_state_emission = tf.one_hot([s], s+1, dtype=em.dtype) 
-        end_state_emission = tf.broadcast_to(end_state_emission[0], emissions.shape[1:])
-        end_state_emission = end_state_emission[tf.newaxis, ...]
-        emissions = tf.concat([emissions, end_state_emission], axis=0)
+        end_state_emission = tf.broadcast_to(end_state_emission[0], emissions[...,:1,:].shape)
+        emissions = tf.concat([emissions, end_state_emission], axis=-2)
         return emissions
         
 
@@ -116,8 +115,8 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
         max_num_states = max(get_num_states(self.lengths))
         for i in range(self.num_models):
             em_mat = self.make_emission_matrix(i)
-            padding = max_num_states - em_mat.shape[0]
-            em_mat_pad = tf.pad(em_mat, [[0,padding]]+[[0,0]]*len(em_mat.shape[1:]))
+            padding = max_num_states - em_mat.shape[-2]
+            em_mat_pad = tf.pad(em_mat, [[0,0]]*(len(em_mat.shape)-2)+[[0,padding]]+[[0,0]])
             emission_matrices.append(em_mat_pad)
         B = tf.stack(emission_matrices, axis=0)
         return B

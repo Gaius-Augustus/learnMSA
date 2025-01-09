@@ -2143,7 +2143,7 @@ class TestTree(unittest.TestCase):
         emitter.build(input_shape = (None, None, 24))
 
         for i in range(2):
-            self.assertEqual(emitter.emission_kernel[i].shape, (lengths[i], 2, 23))
+            self.assertEqual(emitter.emission_kernel[i].shape, (2, lengths[i], 23))
             np.testing.assert_almost_equal(emitter.emission_kernel[i],
                                     np.broadcast_to(np.log(Initializers.background_distribution), 
                                                     emitter.emission_kernel[i].shape),
@@ -2152,7 +2152,7 @@ class TestTree(unittest.TestCase):
         # computes B, which could also be computed manually via make_B()
         emitter.recurrent_init()
         
-        self.assertEqual(emitter.B.shape, (2, 11, 2, 24))
+        self.assertEqual(emitter.B.shape, (2, 2, 11, 24))
 
         inputs_ind = np.random.randint(23, size=(2, 4, 10))
         inputs = tf.one_hot(inputs_ind, 24)
