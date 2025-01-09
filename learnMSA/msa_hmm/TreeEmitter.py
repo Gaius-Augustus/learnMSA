@@ -119,20 +119,35 @@ class TreeEmitter(ProfileHMMEmitter):
     def get_aux_loss(self):
 
         # compute the likelihood of the ancestral tree with TensorTree
-        leaves = tf.transpose(self.B, [2,0,1,3])
-        leaves = leaves[..., :20] # only consider standard amino acids
+        leaves = self.B[:, 1:max(self.lengths)+1, :, :20] # only consider match positions and standard amino acids
+        leaves = tf.transpose(leaves, [2,0,1,3])
         leaves /= tf.math.maximum(tf.reduce_sum(leaves, axis=-1, keepdims=True), 1e-16) #re-normalize
-        tree_handler = self.ancestral_tree_handler
-        branch_lengths = self.ancestral_tree_handler.branch_lengths
-        anc_loglik = tensortree.model.loglik(leaves, tree_handler, self.rate_matrix, branch_lengths, tf.math.log(self.equilibrium))
-        
-        #mask out padding states
-        mask = tf.cast(tf.sequence_mask(get_num_states(self.lengths)), anc_loglik.dtype)
-        anc_loglik = tf.reduce_sum(anc_loglik * mask, axis=1)
+
+        anc_loglik = self._compute_anc_tree_loglik(leaves)
 
         loss = -self.tree_loss_weight * tf.reduce_mean(anc_loglik)
 
         return loss
+    
+
+    def _compute_anc_tree_loglik(self, leaf_probs):
+        """ 
+        Args:
+            leaf_probs: A tensor of shape (num_leaves, num_models, model_length, 20) that contains the 
+                        amino acid emission probabilities at the leaves of the ancestral tree.
+        Returns: 
+            loglik per model, averaged over model length
+        """
+        tree_handler = self.ancestral_tree_handler
+        branch_lengths = self.ancestral_tree_handler.branch_lengths
+        anc_loglik = tensortree.model.loglik(leaf_probs, tree_handler, self.rate_matrix, branch_lengths, tf.math.log(self.equilibrium))
+        
+        #mask out padding states and average over model length
+        mask = tf.cast(tf.sequence_mask(self.lengths), anc_loglik.dtype)
+        anc_loglik = tf.reduce_sum(anc_loglik * mask, axis=1) / tf.reduce_sum(mask, axis=1)
+        
+        return anc_loglik
+
     
 
 def _make_default_rate_matrix(num_models=1):
