@@ -7,6 +7,8 @@ import learnMSA.msa_hmm.Initializers as initializers
 import learnMSA.msa_hmm.Priors as priors
 import learnMSA.protein_language_models.Common as Common
 from learnMSA.protein_language_models.MvnEmitter import MvnEmitter, AminoAcidPlusMvnEmissionInitializer, make_joint_prior
+from learnMSA.msa_hmm.TreeEmitter import TreeEmitter
+import learnMSA.msa_hmm.Clustering as clustering
 import subprocess as sp
 
 def as_str(config, items_per_line=1, prefix="", sep=""):
@@ -81,9 +83,9 @@ def make_default(default_num_models=5,
                  V2_emitter=True,
                  V2_full_covariance=False,
                  V2_temperature=3.,
-                 inv_gamma_alpha=3.,
-                 inv_gamma_beta=0.5,
-                 plm_cache_dir=None):
+                 inv_gamma_alpha=0.5,
+                 inv_gamma_beta=3.,
+                 tree_handler=None):
     if use_language_model:
         if V2_emitter:
             emission_init = [AminoAcidPlusMvnEmissionInitializer(scoring_model_config=scoring_model_config,
@@ -119,10 +121,16 @@ def make_default(default_num_models=5,
                                             frozen_insertions=frozen_insertions,
                                             temperature_mode=emit.TemperatureMode.from_string(temperature_mode),
                                             conditionally_independent=conditionally_independent)
-    else:
-        emitter = emit.ProfileHMMEmitter([initializers.make_default_emission_init()
+    elif tree_handler is not None:
+        emitter = TreeEmitter(tree_handler, 
+                              emission_init=[initializers.make_default_emission_init()
                                                                          for _ in range(default_num_models)],
-                                           [initializers.make_default_insertion_init()
+                              insertion_init=[initializers.make_default_insertion_init()
+                                                                         for _ in range(default_num_models)])
+    else:
+        emitter = emit.ProfileHMMEmitter(emission_init=[initializers.make_default_emission_init()
+                                                                         for _ in range(default_num_models)],
+                                           insertion_init=[initializers.make_default_insertion_init()
                                                                          for _ in range(default_num_models)])
 
     transitioner = trans.ProfileHMMTransitioner([initializers.make_default_transition_init() 

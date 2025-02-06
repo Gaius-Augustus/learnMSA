@@ -75,12 +75,14 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         built = True
         
         
-    def forward_recursion(self, inputs, end_hints=None, 
+    def forward_recursion(self, inputs, 
+                          indices=None, end_hints=None, 
                             return_prior=False, training=False):
         """ Computes the forward recursion for multiple models where each model
             receives a batch of sequences as input.
         Args:
             inputs: Sequences. Shape: (num_model, b, seq_len, s)
+            indices: A tensor of shape (num_model, b) that contains the index of each input sequence.
             end_hints: A tensor of shape (..., 2, num_states) that contains the correct state for the left and right ends of each chunk.
             return_prior: If true, the prior is computed and returned.
             training: If true, the cell is run in training mode.
@@ -90,16 +92,18 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         """
         #initialize transition- and emission-matricies
         return _forward_recursion_impl(inputs, self.cell, self.rnn, self.total_prob_rnn, 
-                                       end_hints=end_hints, return_prior=return_prior,
+                                       indices=indices, end_hints=end_hints, return_prior=return_prior,
                                        training=training, parallel_factor=self.parallel_factor)
     
     
-    def backward_recursion(self, inputs, end_hints=None, 
+    def backward_recursion(self, inputs, 
+                           indices=None, end_hints=None, 
                             return_prior=False, training=False):
         """ Computes the backward recursion for multiple models where each model
             receives a batch of sequences as input.
         Args:
             inputs: Sequences. Shape: (num_model, b, seq_len, s)
+            indices: A tensor of shape (num_model, b) that contains the index of each input sequence.
             end_hints: A tensor of shape (..., 2, num_states) that contains the correct state for the left and right ends of each chunk.
             return_prior: If true, the prior is computed and returned.
             training: If true, the cell is run in training mode.
@@ -108,15 +112,17 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         """
         return _backward_recursion_impl(inputs, self.cell, self.reverse_cell, 
                                         self.rnn_backward, self.total_prob_rnn_rev, 
-                                        end_hints=end_hints, return_prior=return_prior,
+                                        indices=indices, end_hints=end_hints, return_prior=return_prior,
                                         training=training, parallel_factor=self.parallel_factor)
     
 
-    def state_posterior_log_probs(self, inputs, end_hints=None, 
+    def state_posterior_log_probs(self, inputs, 
+                                  indices=None, end_hints=None, 
                                 return_prior=False, training=False, no_loglik=False):
         """ Computes the log-probability of state q at position i given inputs.
         Args:
             inputs: Sequences. Shape: (num_model, b, seq_len, s)
+            indices: A tensor of shape (num_model, b) that contains the index of each input sequence.
             end_hints: A tensor of shape (..., 2, num_states) that contains the correct state for the left and right ends of each chunk.
             return_prior: If true, the prior is computed and returned.
             training: If true, the cell is run in training mode.
@@ -128,7 +134,7 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         return _state_posterior_log_probs_impl(inputs, self.cell, self.reverse_cell, 
                                                 self.bidirectional_rnn, self.total_prob_rnn, 
                                                 self.total_prob_rnn_rev,
-                                                end_hints=end_hints, return_prior=return_prior,
+                                                indices=indices, end_hints=end_hints, return_prior=return_prior,
                                                 training=training, no_loglik=no_loglik, 
                                                 parallel_factor=self.parallel_factor)
     
@@ -175,10 +181,10 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         """
         inputs = tf.cast(inputs, self.dtype)
         if self.use_prior:
-            _, loglik, prior, aux_loss = self.forward_recursion(inputs, return_prior=True, training=training)
+            _, loglik, prior, aux_loss = self.forward_recursion(inputs, indices=indices, return_prior=True, training=training)
             prior = self._scale_prior(prior)
         else:
-            _, loglik = self.forward_recursion(inputs, return_prior=False, training=training)
+            _, loglik = self.forward_recursion(inputs, indices=indices, return_prior=False, training=training)
         loglik_mean = self.apply_sequence_weights(loglik, indices, aggregate=True)
         loglik_mean = tf.squeeze(loglik_mean)
         if self.use_prior:
@@ -211,6 +217,7 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         
 @tf.function
 def _forward_recursion_impl(inputs, cell, rnn, total_prob_rnn, 
+                            indices=None,
                             end_hints=None, return_prior=False,
                             training=False, parallel_factor=1):
     """ Computes the forward recursion for multiple models where each model
@@ -220,6 +227,7 @@ def _forward_recursion_impl(inputs, cell, rnn, total_prob_rnn,
         cell: HMM cell used for forward recursion.
         rnn: A RNN layer that runs the forward recursion.
         total_prob_rnn: A RNN layer that computes the total probability of the forward variables.
+        indices: A tensor of shape (num_model, b) that contains the index of each input sequence.
         end_hints: A tensor of shape (..., 2, num_states) that contains the correct state for the left and right ends of each chunk.
         return_prior: If true, the prior is computed and returned.
         training: If true, the cell is run in training mode.
@@ -233,7 +241,7 @@ def _forward_recursion_impl(inputs, cell, rnn, total_prob_rnn,
     _, b, seq_len, s = tf.unstack(tf.shape(inputs))
     num_model = cell.num_models
     q = cell.max_num_states
-    emission_probs = cell.emission_probs(inputs, end_hints=end_hints, training=training)
+    emission_probs = cell.emission_probs(inputs, indices=indices, end_hints=end_hints, training=training)
     #reshape to 3D inputs for RNN (cell will reshape back in each step)
     #if parallel_factor > 1, reshape to equally sized chunks
     chunk_size = seq_len // parallel_factor
@@ -292,6 +300,7 @@ def _get_total_forward_from_chunks(forward, cell, total_prob_rnn, b, seq_len, pa
 @tf.function
 def _backward_recursion_impl(inputs, cell, reverse_cell, 
                             rnn_backward, total_prob_rnn_rev, 
+                            indices=None,
                             end_hints=None, return_prior=False,
                             training=False, parallel_factor=1):
     """ Computes the backward recursion for multiple models where each model
@@ -302,6 +311,7 @@ def _backward_recursion_impl(inputs, cell, reverse_cell,
         reverse_cell: HMM cell used for backward recursion.
         rnn_backward: A RNN layer that runs the backward recursion.
         total_prob_rnn_rev: A RNN layer that computes the total probability of the backward variables.
+        indices: A tensor of shape (num_model, b) that contains the index of each input sequence.
         end_hints: A tensor of shape (..., 2, num_states) that contains the correct state for the left and right ends of each chunk.
         return_prior: If true, the prior is computed and returned.
         training: If true, the cell is run in training mode.
@@ -314,7 +324,7 @@ def _backward_recursion_impl(inputs, cell, reverse_cell,
     _, b, seq_len, s = tf.unstack(tf.shape(inputs))
     num_model = cell.num_models
     q = cell.max_num_states
-    emission_probs = reverse_cell.emission_probs(inputs, end_hints=end_hints, training=training)
+    emission_probs = reverse_cell.emission_probs(inputs, indices=indices, end_hints=end_hints, training=training)
     #reshape to 3D inputs for RNN (cell will reshape back in each step)
     #if parallel_factor > 1, reshape to equally sized chunks
     chunk_size = seq_len // parallel_factor
@@ -378,6 +388,7 @@ def proper_shape(tensor):
 def _state_posterior_log_probs_impl(inputs, cell, reverse_cell, 
                                     bidirectional_rnn, total_prob_rnn, 
                                     total_prob_rnn_rev, 
+                                    indices=None,
                                     end_hints=None, return_prior=False,
                                     training=False, no_loglik=False, parallel_factor=1):
     """ Computes the log-probability of state q at position i given inputs.
@@ -388,6 +399,7 @@ def _state_posterior_log_probs_impl(inputs, cell, reverse_cell,
         bidirectional_rnn: A bidirectional RNN layer that runs forward and backward in parallel.
         total_prob_rnn: A RNN layer that computes the total probability of the forward variables.
         total_prob_rnn_rev: A RNN layer that computes the total probability of the backward variables.
+        indices: A tensor of shape (num_model, b) that contains the index of each input sequence.
         end_hints: A tensor of shape (..., 2, num_states) that contains the correct state for the left and right ends of each chunk.
         return_prior: If true, the prior is computed and returned.
         training: If true, the cell is run in training mode.
@@ -402,7 +414,7 @@ def _state_posterior_log_probs_impl(inputs, cell, reverse_cell,
     _, b, seq_len, s = tf.unstack(tf.shape(inputs))
     num_model = cell.num_models
     q = cell.max_num_states
-    emission_probs = cell.emission_probs(inputs, end_hints=end_hints, training=training)
+    emission_probs = cell.emission_probs(inputs, indices=indices, end_hints=end_hints, training=training)
     #reshape to equally sizes chunks according to parallel factor
     chunk_size = seq_len // parallel_factor
     emission_probs = tf.reshape(emission_probs, (num_model*b*parallel_factor, chunk_size, q))

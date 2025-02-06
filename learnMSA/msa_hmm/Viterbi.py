@@ -228,7 +228,7 @@ def viterbi_full_chunk_backtracking(viterbi_chunk_borders, local_gamma, transiti
     return state_seqs_max_lik
 
 
-def viterbi(sequences, hmm_cell, end_hints=None, parallel_factor=1, return_variables=False, non_homogeneous_mask_func=None):
+def viterbi(sequences, hmm_cell, indices=None, end_hints=None, parallel_factor=1, return_variables=False, non_homogeneous_mask_func=None):
     """ Computes the most likely sequence of hidden states given unaligned sequences and a number of models.
         The implementation is logarithmic (underflow safe) and capable of decoding many sequences in parallel 
         on the GPU. Optionally the function can also parallelize over the sequence length at the cost of memory usage.
@@ -236,6 +236,7 @@ def viterbi(sequences, hmm_cell, end_hints=None, parallel_factor=1, return_varia
     Args:
         sequences: Input sequences. Shape (num_models, b, L, s) or (num_models, b, L)
         hmm_cell: A HMM cell representing k models used for decoding.
+        indices: Optional indices of shape (num_models, b) that specify which sequences in the dataset should be decoded.
         end_hints: A optional tensor of shape (..., 2, num_states) that contains the correct state for the left and right ends of each chunk. (experimental)
         parallel_factor: Increasing this number allows computing likelihoods and posteriors chunk-wise in parallel at the cost of memory usage.
                         The parallel factor has to be a divisor of the sequence length.
@@ -252,7 +253,7 @@ def viterbi(sequences, hmm_cell, end_hints=None, parallel_factor=1, return_varia
         sequences = tf.cast(sequences, hmm_cell.dtype)
     seq_lens = tf.reduce_sum(tf.cast(sequences[..., -1]==0, tf.int32), axis=-1)
     #compute all emission probabilities in parallel
-    emission_probs = hmm_cell.emission_probs(sequences, end_hints=end_hints, training=False)
+    emission_probs = hmm_cell.emission_probs(sequences, indices=indices, end_hints=end_hints, training=False)
     num_model, b, seq_len, q = tf.unstack(tf.shape(emission_probs))
     tf.debugging.assert_equal(seq_len % parallel_factor, 0, 
         f"The sequence length ({seq_len}) has to be divisible by the parallel factor ({parallel_factor}).")
@@ -335,10 +336,11 @@ def get_state_seqs_max_lik(data : SequenceDataset,
     if encoder:
         @tf.function(input_signature=[[tf.TensorSpec(x.shape, dtype=x.dtype) for x in encoder.inputs]])
         def call_viterbi(inputs):
-            encoded_seq = encoder(inputs)[0]
+            encoded_seq, ids = encoder(inputs)
             #todo: this can be improved by encoding only for required models, not all
             encoded_seq = tf.gather(encoded_seq, model_ids, axis=0)
-            viterbi_seq = viterbi(encoded_seq, hmm_cell, parallel_factor=parallel_factor, non_homogeneous_mask_func=non_homogeneous_mask_func)
+            ids = tf.gather(ids, model_ids, axis=0)
+            viterbi_seq = viterbi(encoded_seq, hmm_cell, indices=ids, parallel_factor=parallel_factor, non_homogeneous_mask_func=non_homogeneous_mask_func)
             return viterbi_seq
     
     @tf.function(input_signature=(tf.TensorSpec(shape=[None, hmm_cell.num_models, None], dtype=tf.uint8),))

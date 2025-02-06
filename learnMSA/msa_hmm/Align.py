@@ -297,8 +297,8 @@ def get_state_expectations(data : SequenceDataset,
     
     @tf.function(input_signature=[[tf.TensorSpec(x.shape, dtype=x.dtype) for x in encoder.inputs]])
     def batch_posterior_state_probs(inputs):
-        encoded_seq = encoder(inputs)[0] 
-        posterior_probs = msa_hmm_layer.state_posterior_log_probs(encoded_seq)
+        encoded_seq, ids = encoder(inputs)
+        posterior_probs = msa_hmm_layer.state_posterior_log_probs(encoded_seq, indices=ids)
         posterior_probs = tf.math.exp(posterior_probs)
         #compute expected number of visits per hidden state and sum over batch dim
         posterior_probs = tf.reduce_sum(posterior_probs, -2)
@@ -389,11 +389,14 @@ def apply_mods(x, pos_expand, expansion_lens, pos_discard, insert_value, del_mar
     #mark discard positions with del_marker, expand thereafter 
     #and eventually remove the marked positions
     x = np.copy(x)
-    x[pos_discard] = del_marker
+    if len(x.shape) >= 2:
+        x[..., pos_discard, :] = del_marker
+    else:
+        x[pos_discard] = del_marker
     rep_expand_pos = np.repeat(pos_expand, expansion_lens)
-    x = np.insert(x, rep_expand_pos, insert_value, axis=0)
-    if len(x.shape) == 2:
-        x = x[np.any(x != del_marker, -1)]
+    x = np.insert(x, rep_expand_pos, insert_value, axis=-2 if len(x.shape) >= 2 else -1)
+    if len(x.shape) >= 2:
+        x = x[..., np.any(x != del_marker, -1), :]
     else:
         x = x[x != del_marker]
     return x
@@ -500,11 +503,11 @@ def update_kernels(am,
     emission_dummy = [d((1, em.shape[-1]), dtype).numpy() for d,em in zip(emission_dummy, emissions)]
     transition_dummy = { key : transition_dummy[key](t.shape, dtype).numpy() for key, t in transitions.items()}
     init_flank_dummy = init_flank_dummy((1), dtype).numpy()
-    emissions_new = [apply_mods(k, 
-                                  pos_expand, 
-                                  expansion_lens, 
-                                  pos_discard, 
-                                  d) for k,d in zip(emissions, emission_dummy)]
+    emissions_new = [ apply_mods(k, 
+                                 pos_expand, 
+                                 expansion_lens, 
+                                 pos_discard, 
+                                 d) for k,d in zip(emissions, emission_dummy) ]
     transitions_new = {}
     args1 = extend_mods(pos_expand,expansion_lens,pos_discard,L)
     transitions_new["match_to_match"] = apply_mods(transitions["match_to_match"], 
