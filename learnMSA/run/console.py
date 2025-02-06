@@ -67,7 +67,7 @@ def run_main():
                         help="During training sequences longer than this factor times the average length are cropped. (default: %(default)s)")
     parser.add_argument("--frozen_insertions", dest="frozen_insertions", action='store_true', help="Insertions will be frozen during training.")
     
-    parser.add_argument("--sequence_weights", dest="sequence_weights", action='store_true', help="Uses mmseqs2 to rapidly cluster the sequences and compute sequence weights before the MSA. (default: %(default)s)")
+    parser.add_argument("--no_sequence_weights", dest="no_sequence_weights", action='store_true', help="Do not use sequence weights and strip mmseqs2 from requirements. In general not recommended.")
     parser.add_argument("--cluster_dir", dest="cluster_dir", type=str, default="tmp", help="Directory where the sequence clustering is stored. (default: %(default)s)")
     
     parser.add_argument("--alpha_flank", dest="alpha_flank", type=float, default=7000, help=argparse.SUPPRESS)
@@ -185,7 +185,7 @@ def run_main():
         trans.prior.alpha_flank_compl = args.alpha_flank_compl
         trans.prior.alpha_single_compl = args.alpha_single_compl
         trans.prior.alpha_global_compl = args.alpha_global_compl
-    if args.sequence_weights:
+    if not args.no_sequence_weights:
         os.makedirs(args.cluster_dir, exist_ok = True) 
         try:
             sequence_weights, clusters = Align.compute_sequence_weights(args.input_file, args.cluster_dir, config["cluster_seq_id"], return_clusters=True)

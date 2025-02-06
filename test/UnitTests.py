@@ -1672,19 +1672,19 @@ class ConsoleTest(unittest.TestCase):
         empty_seq_expected_err = f"{empty_seq} contains empty sequences."
         unknown_symbol_expected_err = f"Found unknown character(s) in sequence ersteSequenz. Allowed alphabet: {SequenceDataset.alphabet}."
         
-        test = subprocess.Popen(["python", "learnMSA.py", "--silent", "-o", "test.out", "-i", single_seq], stderr=subprocess.PIPE)
+        test = subprocess.Popen(["python", "learnMSA.py", "--no_sequence_weights", "--silent", "-o", "test.out", "-i", single_seq], stderr=subprocess.PIPE)
         output = test.communicate()[1].strip().decode('ascii')
         self.assertEqual(single_seq_expected_err, output[-len(single_seq_expected_err):])
         
-        test = subprocess.Popen(["python", "learnMSA.py", "--silent", "-o", "test.out", "-i", faulty_format], stderr=subprocess.PIPE)
+        test = subprocess.Popen(["python", "learnMSA.py", "--no_sequence_weights", "--silent", "-o", "test.out", "-i", faulty_format], stderr=subprocess.PIPE)
         output = test.communicate()[1].strip().decode('ascii')
         self.assertEqual(faulty_format_expected_err, output[-len(faulty_format_expected_err):])
         
-        test = subprocess.Popen(["python", "learnMSA.py", "--silent", "-o", "test.out", "-i", empty_seq], stderr=subprocess.PIPE)
+        test = subprocess.Popen(["python", "learnMSA.py", "--no_sequence_weights", "--silent", "-o", "test.out", "-i", empty_seq], stderr=subprocess.PIPE)
         output = test.communicate()[1].strip().decode('ascii')
         self.assertEqual(empty_seq_expected_err, output[-len(empty_seq_expected_err):])
         
-        test = subprocess.Popen(["python", "learnMSA.py", "--silent", "-o", "test.out", "-i", unknown_symbol], stderr=subprocess.PIPE)
+        test = subprocess.Popen(["python", "learnMSA.py", "--no_sequence_weights", "--silent", "-o", "test.out", "-i", unknown_symbol], stderr=subprocess.PIPE)
         output = test.communicate()[1].strip().decode('ascii')
         self.assertTrue(unknown_symbol_expected_err in output)
         
