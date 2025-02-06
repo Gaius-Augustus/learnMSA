@@ -86,6 +86,7 @@ def run_main():
     parser.add_argument("--dist_out", dest="dist_out", type=str, default="", help="Optional output file for the learned evolutionary distances.")
 
     parser.add_argument("--use_language_model", dest="use_language_model", action='store_true', help="Uses a large protein lanague model to generate per-token embeddings that guide the MSA step. (default: %(default)s)")
+    parser.add_argument("--plm_cache_dir", dest="plm_cache_dir", type=str, default=None, help="Directory where the protein language model is stored. (default: learnMSA install dir)")
     parser.add_argument("--language_model", dest="language_model", type=str, default="protT5", help="Name of the language model to use. (default: %(default)s)")
     parser.add_argument("--scoring_model_dim", dest="scoring_model_dim", type=int, default=16, 
                         help="Reduced embedding dimension of the scoring model. (default: %(default)s)")
@@ -152,7 +153,8 @@ def run_main():
                                         V2_emitter=True,
                                         V2_temperature=args.temperature,
                                         inv_gamma_alpha=args.inverse_gamma_alpha,
-                                        inv_gamma_beta=args.inverse_gamma_beta)
+                                        inv_gamma_beta=args.inverse_gamma_beta,
+                                        plm_cache_dir=args.plm_cache_dir)
     
     if args.batch_size > 0:
         config["batch_size"] = args.batch_size

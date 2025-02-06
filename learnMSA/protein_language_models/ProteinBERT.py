@@ -48,10 +48,8 @@ class ProteinBERTInputEncoder(common.InputEncoder):
                  tf.TensorSpec(shape=(None, 2), dtype=tf.float32))
     
 
-def get_proteinBERT_model_and_encoder(max_len, trainable=False, model_dir=os.path.dirname(__file__)+"/proteinBERT_model"):
-    if not os.path.exists(model_dir):
-        os.mkdir(model_dir)
-    pretrained_model_generator, input_encoder = load_pretrained_model(local_model_dump_dir = model_dir,
+def get_proteinBERT_model_and_encoder(max_len, trainable=False, cache_dir=None):
+    pretrained_model_generator, input_encoder = load_pretrained_model(local_model_dump_dir = common.make_cache_dir(cache_dir, "proteinbert"),
                                                                       local_model_dump_file_name = os.path.basename(DEFAULT_REMOTE_MODEL_DUMP_URL),
                                                                       download_model_dump_if_not_exists=True, 
                                                                       validate_downloading = False)

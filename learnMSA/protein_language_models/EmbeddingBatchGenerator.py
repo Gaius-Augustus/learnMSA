@@ -47,7 +47,9 @@ class EmbeddingBatchGenerator(DefaultBatchGenerator):
         # load the language model and the scoring model
         # initialize the weights correctly and make sure they are not trainable
         language_model, encoder = Common.get_language_model(self.scoring_model_config.lm_name, 
-                                                            max_len = data.max_len+2, trainable=False)
+                                                            max_len = data.max_len+2, 
+                                                            trainable=False,
+                                                            cache_dir=config["plm_cache_dir"])
         self.scoring_model = make_scoring_model(self.scoring_model_config, dropout=0.0, trainable=False)    
         scoring_model_path = Common.get_scoring_model_path(self.scoring_model_config)
         self.scoring_model.load_weights(os.path.dirname(__file__)+f"/../protein_language_models/"+scoring_model_path)

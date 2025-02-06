@@ -11,10 +11,10 @@ model_checkpoint_s = "facebook/esm2_t33_650M_UR50D" #smaller variant
 
 class ESM2LanguageModel(common.LanguageModel):
     
-    def __init__(self, trainable=False, small=False):
+    def __init__(self, trainable=False, small=False, cache_dir=None):
         super(ESM2LanguageModel, self).__init__()
         cp = model_checkpoint_s if small else model_checkpoint
-        self.model = TFEsmModel.from_pretrained(cp, cache_dir=os.path.dirname(__file__)+"/esm2")
+        self.model = TFEsmModel.from_pretrained(cp, cache_dir=common.make_cache_dir(cache_dir, "esm2"))
         self.model.trainable = trainable
         self.inputs = self.model.inputs
         self.dim = 1280 if small else 2560
@@ -33,9 +33,9 @@ class ESM2LanguageModel(common.LanguageModel):
 
 class ESM2InputEncoder(common.InputEncoder):
     
-    def __init__(self, small=False):
+    def __init__(self, small=False, cache_dir=None):
         cp = model_checkpoint_s if small else model_checkpoint 
-        self.tokenizer = AutoTokenizer.from_pretrained(cp, cache_dir=os.path.dirname(__file__)+"/esm2")
+        self.tokenizer = AutoTokenizer.from_pretrained(cp, cache_dir=common.make_cache_dir(cache_dir, "esm2"))
         
     def __call__(self, str_seq, crop):
         tokens = self.tokenizer.batch_encode_plus(str_seq, add_special_tokens=True, padding=True, return_tensors="np")

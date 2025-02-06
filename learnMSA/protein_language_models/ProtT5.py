@@ -10,9 +10,11 @@ logging.set_verbosity_error()
 
 class ProtT5LanguageModel(common.LanguageModel):
     
-    def __init__(self, trainable=False, dtype=tf.float16):
+    def __init__(self, trainable=False, dtype=tf.float16, cache_dir=None):
         super(ProtT5LanguageModel, self).__init__(dtype=dtype)
-        self.model = TFT5EncoderModel.from_pretrained("Rostlab/prot_t5_xl_half_uniref50-enc", from_pt=True, cache_dir=os.path.dirname(__file__)+"/protT5_model")
+        self.model = TFT5EncoderModel.from_pretrained("Rostlab/prot_t5_xl_half_uniref50-enc", 
+                                                      from_pt=True, 
+                                                      cache_dir=common.make_cache_dir(cache_dir, "protT5_model"))
         self.model.trainable = trainable
         self.inputs = self.model.inputs
         self.dim = 1024
@@ -34,8 +36,10 @@ class ProtT5LanguageModel(common.LanguageModel):
 
 class ProtT5InputEncoder(common.InputEncoder):
     
-    def __init__(self):
-        self.tokenizer = T5Tokenizer.from_pretrained("Rostlab/prot_t5_xl_half_uniref50-enc", do_lower_case=False, cache_dir=os.path.dirname(__file__)+"/protT5_model")
+    def __init__(self, cache_dir=None):
+        self.tokenizer = T5Tokenizer.from_pretrained("Rostlab/prot_t5_xl_half_uniref50-enc", 
+                                                     do_lower_case=False, 
+                                                     cache_dir=common.make_cache_dir(cache_dir, "protT5_model"))
     
     def __call__(self, str_seq, crop):
         #add whitespaces between residues and replace uncommon amino acids with X

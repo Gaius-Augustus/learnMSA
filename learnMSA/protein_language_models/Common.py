@@ -1,6 +1,6 @@
 import tensorflow as tf
 import numpy as np
-
+import os
 
 
 PRIOR_PATH = "priors_V3"
@@ -44,19 +44,24 @@ def get_prior_path(config : ScoringModelConfig, components):
 
 
 ## Constructs and loads a language model with contextual imports.
-def get_language_model(name, max_len=512, trainable=False):
+def get_language_model(name, max_len=512, trainable=False, cache_dir=None):
     if name == "proteinBERT":
         import learnMSA.protein_language_models.ProteinBERT as ProteinBERT
-        language_model, encoder = ProteinBERT.get_proteinBERT_model_and_encoder(max_len = max_len+2, trainable=trainable)
+        language_model, encoder = ProteinBERT.get_proteinBERT_model_and_encoder(max_len = max_len+2, 
+                                                                                trainable=trainable, 
+                                                                                cache_dir=cache_dir)
     elif name == "esm2":
         import learnMSA.protein_language_models.ESM2 as ESM2
-        language_model, encoder = ESM2.ESM2LanguageModel(trainable=trainable), ESM2.ESM2InputEncoder()
+        language_model = ESM2.ESM2LanguageModel(trainable=trainable, cache_dir=cache_dir)
+        encoder = ESM2.ESM2InputEncoder(cache_dir=cache_dir)
     elif name == "esm2s":
         import learnMSA.protein_language_models.ESM2 as ESM2
-        language_model, encoder = ESM2.ESM2LanguageModel(trainable=trainable, small=True), ESM2.ESM2InputEncoder(small=True)
+        language_model = ESM2.ESM2LanguageModel(trainable=trainable, small=True, cache_dir=cache_dir)
+        encoder = ESM2.ESM2InputEncoder(small=True, cache_dir=cache_dir)
     elif name == "protT5":
         import learnMSA.protein_language_models.ProtT5 as ProtT5
-        language_model, encoder = ProtT5.ProtT5LanguageModel(trainable=trainable), ProtT5.ProtT5InputEncoder()
+        language_model = ProtT5.ProtT5LanguageModel(trainable=trainable, cache_dir=cache_dir)
+        encoder = ProtT5.ProtT5InputEncoder(cache_dir=cache_dir)
     else:
         raise ValueError(f"Language model {name} not supported.")
     return language_model, encoder
@@ -90,8 +95,6 @@ class LanguageModel(tf.keras.layers.Layer):
         return embeddings_no_start_stop 
         
         
-
-
 class InputEncoder():
     """ Base class for encoders that map proteins as strings to input tensors compatible with the specific language model.
         The output of the encoder should be the input to the corresponding language model.
@@ -112,7 +115,14 @@ class InputEncoder():
             elif ce:
                 x[i, lens[i]+1] = pad_id
                 
-    
+
+def make_cache_dir(path, model_id):
+    if path is None:
+        path = os.path.dirname(__file__)
+    elif not os.path.exists(path):
+        os.mkdir(path)
+    return os.path.join(path, model_id)
+
     
 # for convenience
 dims = {

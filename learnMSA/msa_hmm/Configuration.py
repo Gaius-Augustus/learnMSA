@@ -83,7 +83,8 @@ def make_default(default_num_models=5,
                  V2_full_covariance=False,
                  V2_temperature=3.,
                  inv_gamma_alpha=3.,
-                 inv_gamma_beta=3.):
+                 inv_gamma_beta=3.,
+                 plm_cache_dir=None):
     if use_language_model:
         if V2_emitter:
             emission_init = [AminoAcidPlusMvnEmissionInitializer(scoring_model_config=scoring_model_config,
@@ -185,7 +186,8 @@ def make_default(default_num_models=5,
             "conditionally_independent" : conditionally_independent,
             "V2_emitter" : V2_emitter,
             "V2_full_covariance" : V2_full_covariance,
-            "V2_temperature" : V2_temperature
+            "V2_temperature" : V2_temperature,
+            "plm_cache_dir" : plm_cache_dir,
         })
     return default
 
