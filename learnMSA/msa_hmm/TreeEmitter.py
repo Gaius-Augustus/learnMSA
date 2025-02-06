@@ -4,7 +4,6 @@ import learnMSA.msa_hmm.Initializers as initializers
 import numpy as np
 import sys
 import tensorflow as tf
-import copy
 
 # tmp include
 sys.path.insert(0, "../TensorTree")
@@ -52,8 +51,8 @@ class TreeEmitter(ProfileHMMEmitter):
                  tree_loss_weight = 0.1):
         super(TreeEmitter, self).__init__(emission_init, insertion_init, 
                                           prior, frozen_insertions=True)
-        self.tree_handler = tree_handler
-        self.ancestral_tree_handler = copy.deepcopy(tree_handler)
+        self.tree_handler = tensortree.TreeHandler.copy(tree_handler)
+        self.ancestral_tree_handler = tensortree.TreeHandler.copy(tree_handler)
         self.ancestral_tree_handler.prune()
         self.ancestral_tree_handler.update()
         # the tree handler defines both the mapping of the sequences (leaves) 
@@ -121,9 +120,8 @@ class TreeEmitter(ProfileHMMEmitter):
 
         # compute the likelihood of the ancestral tree with TensorTree
         leaves = self.B[..., 1:max(self.lengths)+1, :20] # only consider match positions and standard amino acids
-        leaves = tf.transpose(leaves, [2,0,1,3])
+        leaves = tf.transpose(leaves, [1,0,2,3])
         leaves /= tf.math.maximum(tf.reduce_sum(leaves, axis=-1, keepdims=True), 1e-16) #re-normalize
-
         anc_loglik = self._compute_anc_tree_loglik(leaves)
 
         loss = -self.tree_loss_weight * tf.reduce_mean(anc_loglik)
@@ -142,7 +140,6 @@ class TreeEmitter(ProfileHMMEmitter):
         tree_handler = self.ancestral_tree_handler
         branch_lengths = self.ancestral_tree_handler.branch_lengths
         anc_loglik = tensortree.model.loglik(leaf_probs, tree_handler, self.rate_matrix, branch_lengths, tf.math.log(self.equilibrium))
-        
         #mask out padding states and average over model length
         mask = tf.cast(tf.sequence_mask(self.lengths), anc_loglik.dtype)
         anc_loglik = tf.reduce_sum(anc_loglik * mask, axis=1) / tf.reduce_sum(mask, axis=1)
@@ -151,7 +148,7 @@ class TreeEmitter(ProfileHMMEmitter):
     
 
     def get_prior_log_density(self):
-        B_mod = tf.reshape(self.B, (self.num_models * self.num_clusters, self.num_states, self.emission_kernel.shape[-1]))
+        B_mod = tf.reshape(self.B, (self.num_models * self.num_clusters, self.B.shape[-2], self.B.shape[-1]))
         priors = self.prior(B_mod, lengths=self.lengths)
         priors = tf.reshape(priors, (self.num_models, self.num_clusters, priors.shape[-1]))
         return tf.reduce_mean(priors, axis=1) # average over clusters
@@ -178,10 +175,17 @@ class TreeEmitter(ProfileHMMEmitter):
     def get_config(self):
         config = super(TreeEmitter, self).get_config()
         config.update({
-        "tree_handler": self.tree_handler,
+        "tree": self.tree_handler.to_newick(),
         "tree_loss_weight": self.tree_loss_weight
         })
         return config
+    
+
+    @classmethod
+    def from_config(cls, config):
+        config["tree_handler"] = tensortree.TreeHandler.from_newick(config["tree"])
+        del config["tree"]
+        return super(TreeEmitter, cls).from_config(config)
     
 
     def __repr__(self):

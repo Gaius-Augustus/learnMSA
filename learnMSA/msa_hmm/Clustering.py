@@ -73,6 +73,7 @@ def cluster_tree(clustering, branch_length=1.):
 def star_tree(sequence_ids, branch_length=1.):
     tree = TreeHandler()
     tree.split("ROOT", len(sequence_ids), branch_length, sequence_ids)
+    tree.update()
     return tree
 
 

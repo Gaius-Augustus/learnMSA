@@ -128,13 +128,14 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
         return self.make_B()
         
 
-    def call(self, inputs, end_hints=None, training=False):
+    def call(self, inputs, indices=None, end_hints=None, training=False):
         """ 
         Args: 
-                inputs: A tensor of shape (k, ... , s) 
-                end_hints: A tensor of shape (num_models, batch_size, 2, num_states) that contains the correct state for the left and right ends of each chunk.
+                inputs: A tensor of shape (k, b, ... , s) 
+                indices: A tensor of shape (k, b) that contains the index of each input sequence.
+                end_hints: A tensor of shape (k, b, 2, num_states) that contains the correct state for the left and right ends of each chunk.
         Returns:
-                A tensor with emission probabilities of shape (k, ... , q) where "..." is identical to inputs.
+                A tensor with emission probabilities of shape (k, b, ... , q) where "..." is identical to inputs.
         """
         input_shape = tf.shape(inputs)
         inputs = tf.reshape(inputs, (tf.shape(inputs)[0], -1, input_shape[-1]))

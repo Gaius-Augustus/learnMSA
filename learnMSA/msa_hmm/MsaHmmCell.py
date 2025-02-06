@@ -74,16 +74,17 @@ class HmmCell(tf.keras.layers.Layer):
         return self.transitioner.make_initial_distribution()
         
     
-    def emission_probs(self, inputs, end_hints=None, training=False):
+    def emission_probs(self, inputs, indices=None, end_hints=None, training=False):
         """ Computes the probabilities of emission per state for the given observation. Multiple emitters
             are multiplied.
         Args:
-            inputs: A batch of sequence positions.
-            end_hints: A tensor of shape (..., 2, num_states) that contains the correct state for the left and right ends of each chunk.
+            inputs: A batch of sequence positions of shape (k, b, ... , s).
+            indices: A tensor of shape (k, b) that contains the index of each input sequence.
+            end_hints: A tensor of shape (k, b, 2, num_states) that contains the correct state for the left and right ends of each chunk.
         """
-        em_probs = self.emitter[0](inputs, end_hints=end_hints, training=training)
+        em_probs = self.emitter[0](inputs, indices=indices, end_hints=end_hints, training=training)
         for em in self.emitter[1:]:
-            em_probs *= em(inputs, end_hints=end_hints, training=training)
+            em_probs *= em(inputs, indices=indices, end_hints=end_hints, training=training)
         return em_probs
 
     
