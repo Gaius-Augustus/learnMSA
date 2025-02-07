@@ -29,7 +29,7 @@
 We provide a hassle-free docker image including GPU and pLM support.
 
 ```
-singularity build learnmsa.sif docker://felbecker/learnmsa:2.0.9
+singularity build learnmsa.sif docker://felbecker/learnmsa
 singularity run --nv learnmsa.sif learnMSA
 ```
 
@@ -71,19 +71,62 @@ python3 -c "import tensorflow as tf; print(tf.__version__, tf.config.list_physic
 learnMSA -h
 ```
 
+## bioconda (currently not recommended)
+
+`conda install -c bioconda -n learnMSA learnMSA`
+
+The additional installs (steps 3. and 4. above) are again highly recommended.
+
+Unfortunately, there are errors to be expected when installing learnMSA with bioconda.
+
+### ${\text{\color{red}Troubleshooting:}}$
+
+### Error:
+`tensorflow.python.framework.errors_impl.UnknownError: {{function_node __wrapped__Expm1_device_/job:localhost/replica:0/task:0/device:GPU:0}} JIT compilation failed.`
+
+Your root error is:
+`TensorFlow libdevice not found`
+
+Fix:
+
+Find `nvvm` directory:
+`find / -type d -name nvvm 2>/dev/null`
+
+Expected outputs:
+`<path>/nvvm`
+
+If there are multiple paths, choose the one matching your conda environment.
+
+Run:
+`export XLA_FLAGS=--xla_gpu_cuda_data_dir=<path>`
+
+
+### Error:
+`ERROR: Flag 'minloglevel' was defined more than once (...)`
+
+Fix:
+`pip install --no-deps --upgrade sentencepiece==0.1.99`
+
+
+
 ## Using learnMSA for alignment
 
-Recommended way to align proteins:
+Recommended way to align proteins **with learnMSA version >= 2.0.10**:
+
+<code>learnMSA -i INPUT_FILE -o OUTPUT_FILE --use_language_model</code>
+
+
+Recommended way to align proteins **with learnMSA version < 2.0.10**:
 
 <code>learnMSA -i INPUT_FILE -o OUTPUT_FILE --use_language_model --sequence_weights</code>
 
 Without language model support (recommended for speed and for proteins with very high sequence similarity):
 
-<code>learnMSA -i INPUT_FILE -o OUTPUT_FILE --sequence_weights</code>
+<code>learnMSA -i INPUT_FILE -o OUTPUT_FILE</code>
 
 Note: If you installed learnMSA via docker/singularity, you have to run `singularity run --nv learnmsa.sif learnMSA -i ...`
 
-We always recommend to run learnMSA with the `--sequence_weights` flag to improve accuracy. This requires `mmseqs2` to be installed (see above). Sequence weights (and thus the `mmseqs2` requirement) are turned off by default.
+Note 2: Since v2.0.10 **the default behavior changed**: Sequence weights are now used by default and the `--sequence_weights` option was removed. Instead, a `--no_sequence_weights` option exists to align without sequence weights (not recommended). Users that installed learnMSA via pip have to manually install mmseqs2 (conda is recommended, see above).
 
 To output a pdf with a sequence logo alongside the msa, use `--logo`. For a fun gif that visualizes the training process, you can use `--logo_gif` (attention, slows down training and should not be used for real alignments).
   
