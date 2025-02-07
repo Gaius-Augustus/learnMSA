@@ -71,6 +71,44 @@ python3 -c "import tensorflow as tf; print(tf.__version__, tf.config.list_physic
 learnMSA -h
 ```
 
+## bioconda (currently not recommended)
+
+`conda install -c bioconda -n learnMSA learnMSA`
+
+The additional installs (steps 3. and 4. above) are again highly recommended.
+
+Unfortunately, there are errors to be expected when installing learnMSA with bioconda.
+
+### ${\text{\color{red}Troubleshooting:}}$
+
+### Error:
+`tensorflow.python.framework.errors_impl.UnknownError: {{function_node __wrapped__Expm1_device_/job:localhost/replica:0/task:0/device:GPU:0}} JIT compilation failed.`
+
+Your root error is:
+`TensorFlow libdevice not found`
+
+Fix:
+
+Find `nvvm` directory:
+`find / -type d -name nvvm 2>/dev/null`
+
+Expected outputs:
+`<path>/nvvm`
+
+If there are multiple paths, choose the one matching your conda environment.
+
+Run:
+`export XLA_FLAGS=--xla_gpu_cuda_data_dir=<path>`
+
+
+### Error:
+`ERROR: Flag 'minloglevel' was defined more than once (...)`
+
+Fix:
+`pip install --no-deps --upgrade sentencepiece==0.1.99`
+
+
+
 ## Using learnMSA for alignment
 
 Recommended way to align proteins **with learnMSA version >= 2.0.10**:
