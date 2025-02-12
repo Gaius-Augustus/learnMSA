@@ -95,7 +95,8 @@ def plot_hmm(am,
                spacing=1.0,
                path_colors=[],
                active_transition_color="#000000",
-               inactive_transition_color="#E0E0E0"
+               inactive_transition_color="#E0E0E0",
+               path_width=6.0
                 ):
     hmm_cell = am.msa_hmm_layer.cell
     hmm_cell.recurrent_init()
@@ -215,7 +216,7 @@ def plot_hmm(am,
                                 edgelist=edgelist, 
                                 edge_color = path_color, 
                                 node_size=10, 
-                                width=6, 
+                                width=path_width, 
                                 min_target_margin=5,
                                 ax=ax)
         
@@ -289,7 +290,9 @@ def print_and_plot(am,
                    show_logo=True,
                    model_filename="", 
                    anc_probs_filename="",
-                   logo_filename=""):
+                   logo_filename="",
+                   path_colors=["#FF0000", "#00FF00", "#0000FF"],
+                   path_width=6.):
     if model_index is None:
         model_index = am.best_model
     # print the alignment
@@ -318,7 +321,8 @@ def print_and_plot(am,
         ax = fig.add_axes([0, 0, 1, 1])
         plot_hmm(am, model_index, ax, 
                  seq_indices=am.indices[seqs_to_plot],
-                 path_colors=["#CC6600", "#0000cc", "#00cccc"])   
+                 path_colors=path_colors,
+                 path_width=path_width)   
         if model_filename != "":
             plt.savefig(model_filename, bbox_inches='tight')
     if show_anc_probs:
