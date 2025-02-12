@@ -115,16 +115,22 @@ class TreeEmitter(ProfileHMMEmitter):
         return self._compute_emission_probs(inputs, B, input_shape, B_contains_batch=True)
     
 
-    # computes the likelihood of the ancestral tree
-    def get_aux_loss(self):
+    # computes the tree loss
+    def get_aux_loss(self, loss_type="likelihood"):
 
-        # compute the likelihood of the ancestral tree with TensorTree
-        leaves = self.B[..., 1:max(self.lengths)+1, :20] # only consider match positions and standard amino acids
-        leaves = tf.transpose(leaves, [1,0,2,3])
-        leaves /= tf.math.maximum(tf.reduce_sum(leaves, axis=-1, keepdims=True), 1e-16) #re-normalize
-        anc_loglik = self._compute_anc_tree_loglik(leaves)
+        if loss_type == "leaf-edge validation":
 
-        loss = -self.tree_loss_weight * tf.reduce_mean(anc_loglik)
+            pass
+
+        elif loss_type == "likelihood":
+
+            # compute the likelihood of the ancestral tree with TensorTree
+            leaves = self.B[..., 1:max(self.lengths)+1, :20] # only consider match positions and standard amino acids
+            leaves = tf.transpose(leaves, [1,0,2,3])
+            leaves /= tf.math.maximum(tf.reduce_sum(leaves, axis=-1, keepdims=True), 1e-16) #re-normalize
+            anc_loglik = self._compute_anc_tree_loglik(leaves)
+
+            loss = -self.tree_loss_weight * tf.reduce_mean(anc_loglik)
 
         return loss
     
