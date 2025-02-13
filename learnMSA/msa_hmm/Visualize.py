@@ -96,7 +96,7 @@ def plot_hmm(am,
                path_colors=[],
                active_transition_color="#000000",
                inactive_transition_color="#E0E0E0",
-               path_width=6.0
+               path_width=6
                 ):
     hmm_cell = am.msa_hmm_layer.cell
     hmm_cell.recurrent_init()
@@ -174,7 +174,7 @@ def plot_hmm(am,
     for k, (seq_i, path_color) in enumerate(zip(seq_indices, path_colors)):
         ds = msa_hmm.Training.make_dataset(np.array([seq_i]), am.batch_generator, batch_size=1, shuffle=False)
         for x, _ in ds:
-            sequence = am.encoder_model(x)  
+            sequence = am.encoder_model(x) 
         hidden_seq = msa_hmm.Viterbi.viterbi(sequence, hmm_cell).numpy()[model_index]
         hidden_seq = list(hidden_seq[0])
         for i in range(len(hidden_seq)):
@@ -244,17 +244,14 @@ def plot_anc_probs(am,
                                     shuffle=False)
     for x,_ in ds:
         ancs = am.encoder_model(x).numpy()[model_index]
-    i = [l.name for l in am.encoder_model.layers].index("anc_probs_layer")
-    anc_probs_layer = am.encoder_model.layers[i]
-    indices = np.stack([am.indices]*am.msa_hmm_layer.cell.num_models)
-    indices = np.expand_dims(indices, -1)
-    tau = anc_probs_layer.make_tau(indices)[model_index]
+    indices = np.stack([am.indices]*am.msa_hmm_layer.cell.num_models, axis=1)
+    tau = am.anc_probs_layer.make_tau(indices)[model_index]
     if rescale:
         ancs /= np.sum(ancs, -1, keepdims=True)
     f, axes = plt.subplots(n, m, sharey=True)
     axes = axes.flatten()
     f.set_size_inches(3+3*m, 2*n)
-    for a,(s,i) in enumerate(itertools.product(seqs, pos)):
+    for a,(s,i) in enumerate(itertools.product(range(n), pos)):
         sns.barplot(x=list(am.data.alphabet[:20]), y=ancs[s,i,:20], ax=axes[a]);
         if a % m == 0:
             axes[a].annotate(f"tau={'%.3f'%tau[s]} ->", (0.3,0.9*axes[a].get_ylim()[1]))
@@ -264,9 +261,7 @@ def plot_anc_probs(am,
 def plot_rate_matrices(am,
                        model_index,
                        title="normalized rate matrix (1 time unit = 1 expected mutation per site)"):
-    i = [l.name for l in am.encoder_model.layers].index("anc_probs_layer")
-    anc_probs_layer = am.encoder_model.layers[i]
-    Q = anc_probs_layer.make_Q()[model_index]
+    Q = am.anc_probs_layer.make_Q()[model_index]
     k = Q.shape[0]
     f, axes = plt.subplots(1, k, sharey=True)
     f.set_size_inches(10*k, 10.5)
@@ -284,30 +279,28 @@ def print_and_plot(am,
                    model_index = None,
                    max_seq = 20, 
                    seqs_to_plot = [0,1,2], 
+                   path_colors=["#CC6600", "#0000cc", "#00cccc"],
+                   path_width=6,
                    seq_ids = False, 
                    show_model=True, 
                    show_anc_probs=True,
                    show_logo=True,
                    model_filename="", 
                    anc_probs_filename="",
-                   logo_filename="",
-                   path_colors=["#FF0000", "#00FF00", "#0000FF"],
-                   path_width=6.):
+                   logo_filename=""):
     if model_index is None:
         model_index = am.best_model
     # print the alignment
     msa = am.to_string(model_index)
-    i = [l.name for l in am.encoder_model.layers].index("anc_probs_layer")
-    anc_probs_layer = am.encoder_model.layers[i]
     ds = msa_hmm.Training.make_dataset(am.indices, 
                             am.batch_generator,
                             am.batch_size, 
                             shuffle=False)
     ll = am.model.predict(ds)[0][:,model_index] 
     for i,s in enumerate(msa[:max_seq]):
-        indices = np.array([[am.indices[i]]]*am.msa_hmm_layer.cell.num_models)
-        tau = anc_probs_layer.make_tau(subset=indices)[model_index].numpy()
-        param_string = "l=%.2f" % (ll[i]) + "_t=%.2f" % tau
+        indices = np.array([[am.indices[i]]*am.msa_hmm_layer.cell.num_models])
+        tau = am.anc_probs_layer.make_tau(indices)[model_index].numpy()
+        param_string = "l=%.2f" % (ll[i]) + "_t=%.2f" % tau[am.indices[i]]
         if seq_ids:
             print(f">{am.data.seq_ids[am.indices[i]]} "+param_string)
         else:

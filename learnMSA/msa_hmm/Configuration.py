@@ -83,7 +83,7 @@ def make_default(default_num_models=5,
                  V2_full_covariance=False,
                  V2_temperature=3.,
                  inv_gamma_alpha=3.,
-                 inv_gamma_beta=3.,
+                 inv_gamma_beta=0.5,
                  plm_cache_dir=None):
     if use_language_model:
         if V2_emitter:

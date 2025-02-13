@@ -177,6 +177,8 @@ class AlignmentModel():
         #in the default learnMSA, the encoder model is only the Ancestral Probability layer.
         self.encoder_model = None
         for i, layer in enumerate(model.layers[1:]):
+            if layer.name.startswith("anc_probs_layer"):
+                self.anc_probs_layer = layer
             if layer.name.startswith("msa_hmm_layer"):
                 encoder_out = model.layers[i].output
                 self.msa_hmm_layer = layer
