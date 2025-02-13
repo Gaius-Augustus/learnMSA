@@ -150,27 +150,8 @@ def plot_hmm(am,
         node_labels[i+1] = label
 
     ax.figure.set_size_inches(length, 7)
-    
-    p = tf.math.sigmoid(hmm_cell.transitioner.flank_init_kernel[model_index])
-    #ax.text(-4*spacing, 0, "Init: \n (%.2f, %.2f)" % (p, 1-p), fontsize=12)
-    ax.text(-2.5*spacing, -spacing/2, "Insertions", fontsize=20)
-    ax.text(-2.5*spacing, -1.5*spacing, "Deletions", fontsize=20)
-    edge_colors = [G[u][v]['color'] for u,v in G.edges()]
-    nx.draw_networkx_edges(G, pos, 
-                            node_size=10, 
-                            width=1, 
-                            edge_color=edge_colors, 
-                            ax=ax) 
-    edge_label_pos = {n : (x,y-0.09) for n,(x,y) in pos.items()}
-    nx.draw_networkx_edge_labels(G, 
-                                edge_label_pos, 
-                                edge_labels=edge_labels, 
-                                label_pos=0.6,
-                                font_size=10, 
-                                ax=ax)
-    label_pos = {i : (x, y+0.1+0.05*num_aa) for i, (x,y) in pos.items()}
-    nx.draw_networkx_labels(G, label_pos, labels=node_labels, font_size=8)
-    
+
+    # draw Viterbi paths
     for k, (seq_i, path_color) in enumerate(zip(seq_indices, path_colors)):
         ds = msa_hmm.Training.make_dataset(np.array([seq_i]), am.batch_generator, batch_size=1, shuffle=False)
         for x, _ in ds:
@@ -219,6 +200,27 @@ def plot_hmm(am,
                                 width=path_width, 
                                 min_target_margin=5,
                                 ax=ax)
+    
+    # draw node and edge labels
+    p = tf.math.sigmoid(hmm_cell.transitioner.flank_init_kernel[model_index])
+    #ax.text(-4*spacing, 0, "Init: \n (%.2f, %.2f)" % (p, 1-p), fontsize=12)
+    ax.text(-2.5*spacing, -spacing/2, "Insertions", fontsize=20)
+    ax.text(-2.5*spacing, -1.5*spacing, "Deletions", fontsize=20)
+    edge_colors = [G[u][v]['color'] for u,v in G.edges()]
+    nx.draw_networkx_edges(G, pos, 
+                            node_size=10, 
+                            width=1, 
+                            edge_color=edge_colors, 
+                            ax=ax) 
+    edge_label_pos = {n : (x,y-0.09) for n,(x,y) in pos.items()}
+    nx.draw_networkx_edge_labels(G, 
+                                edge_label_pos, 
+                                edge_labels=edge_labels, 
+                                label_pos=0.6,
+                                font_size=10, 
+                                ax=ax)
+    label_pos = {i : (x, y+0.1+0.05*num_aa) for i, (x,y) in pos.items()}
+    nx.draw_networkx_labels(G, label_pos, labels=node_labels, font_size=8)
         
     #make a legend for the hidden paths
     if len(seq_indices) > 0:

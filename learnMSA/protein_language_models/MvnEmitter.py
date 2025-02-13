@@ -9,7 +9,7 @@ from learnMSA.protein_language_models.BilinearSymmetric import make_scoring_mode
 from learnMSA.protein_language_models.MvnMixture import MvnMixture
 from learnMSA.protein_language_models.MvnPrior import MvnPrior, InverseGammaPrior, get_expected_emb
 import learnMSA.protein_language_models.Common as Common
-from learnMSA.msa_hmm.Utility import DefaultDiagBijector
+from learnMSA.msa_hmm.Utility import DefaultDiagBijector, deserialize
 
 
 
@@ -206,6 +206,9 @@ class MvnEmitter(ProfileHMMEmitter):
 
     @classmethod
     def from_config(cls, config):
+        config["emission_init"] = [deserialize(e) for e in config["emission_init"]]
+        config["insertion_init"] = [deserialize(i) for i in config["insertion_init"]]
+        config["prior"] = deserialize(config["prior"])
         config["scoring_model_config"] = Common.ScoringModelConfig(**config["scoring_model_config"])
         lengths = config.pop("lengths")
         emitter = cls(**config)

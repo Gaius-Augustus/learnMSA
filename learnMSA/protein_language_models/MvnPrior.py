@@ -89,7 +89,7 @@ class InverseGammaPrior(tf.keras.layers.Layer):
 
 
     def get_config(self):
-        config = super(MvnPrior, self).get_config()
+        config = super(InverseGammaPrior, self).get_config()
         config.update({
              "alpha" : self.alpha,
             "beta" : self.beta
