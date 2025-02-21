@@ -96,7 +96,8 @@ def plot_hmm(am,
                path_colors=[],
                active_transition_color="#000000",
                inactive_transition_color="#E0E0E0",
-               path_width=6
+               path_width=6,
+               edge_label_pos=0.75
                 ):
     hmm_cell = am.msa_hmm_layer.cell
     hmm_cell.recurrent_init()
@@ -117,7 +118,7 @@ def plot_hmm(am,
     for i in range(1, length+1): #match-states
         pos[i] = (spacing*i, spacing/2)
     for i in range(length-1): #insertions
-        pos[length+1+i] = (1.75*spacing + spacing*i, -spacing/2)
+        pos[length+1+i] = (1.75*spacing + spacing*i, -spacing)
     pos[2*length] = (spacing*(length+2) / 2, 1.5*spacing) #unannotated-state
     pos[2*length+1] = (spacing*(length+6), spacing) #right flank state
     pos[2*length+2] = (spacing*(length+7), spacing) #terminal state
@@ -212,11 +213,11 @@ def plot_hmm(am,
                             width=1, 
                             edge_color=edge_colors, 
                             ax=ax) 
-    edge_label_pos = {n : (x,y-0.09) for n,(x,y) in pos.items()}
+    edge_label_pos_dict = {n : (x,y-0.09) for n,(x,y) in pos.items()}
     nx.draw_networkx_edge_labels(G, 
-                                edge_label_pos, 
+                                edge_label_pos_dict, 
                                 edge_labels=edge_labels, 
-                                label_pos=0.6,
+                                label_pos=edge_label_pos,
                                 font_size=10, 
                                 ax=ax)
     label_pos = {i : (x, y+0.1+0.05*num_aa) for i, (x,y) in pos.items()}
@@ -283,6 +284,7 @@ def print_and_plot(am,
                    seqs_to_plot = [0,1,2], 
                    path_colors=["#CC6600", "#0000cc", "#00cccc"],
                    path_width=6,
+                   edge_label_pos=0.75,
                    seq_ids = False, 
                    show_model=True, 
                    show_anc_probs=True,
@@ -317,7 +319,8 @@ def print_and_plot(am,
         plot_hmm(am, model_index, ax, 
                  seq_indices=am.indices[seqs_to_plot],
                  path_colors=path_colors,
-                 path_width=path_width)   
+                 path_width=path_width,
+                edge_label_pos=edge_label_pos)   
         if model_filename != "":
             plt.savefig(model_filename, bbox_inches='tight')
     if show_anc_probs:

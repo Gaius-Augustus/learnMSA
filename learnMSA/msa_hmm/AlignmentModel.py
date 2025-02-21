@@ -469,6 +469,8 @@ class AlignmentModel():
             "gap_symbol" : self.gap_symbol,
             "gap_symbol_insertions" : self.gap_symbol_insertions,
         }
+        if hasattr(self, "best_model"):
+            d["best_model"] = int(self.best_model)
         with open(filepath+"/meta.json", "w") as metafile:
             metafile.write(json.dumps(d, indent=4))
         #serialize indices
@@ -487,11 +489,18 @@ class AlignmentModel():
 
     
     @classmethod
-    def load_models_from_file(cls, filepath, data:SequenceDataset, from_packed=True, custom_batch_gen=None):
+    def load_models_from_file(cls, 
+                              filepath, 
+                              data:SequenceDataset, 
+                              from_packed=True, 
+                              custom_batch_gen=None,
+                              custom_config=None):
         """ Recreates an AlignmentModel instance with underlying models from file.
         Args:
             filepath: Path of the file to load.
             from_packed: Pass true or false depending on the pack argument used with write_models_to_file.
+            custom_batch_gen: A custom batch generator to use instead of the default one.
+            custom_config: A custom configuration to use instead of the default one.
         Returns:
             An AlignmentModel instance with equivalent behavior as the AlignmentModel instance used while saving the model.
         """
@@ -520,14 +529,18 @@ class AlignmentModel():
                 print("Error: %s - %s." % (e.filepath, e.strerror))
         #todo: this is currently a bit limited because it creates a default batch gen from a default config
         batch_gen = train.DefaultBatchGenerator() if custom_batch_gen is None else custom_batch_gen
-        batch_gen.configure(data, config.make_default(d["num_models"])) 
-        return cls(data, 
+        configuration = config.make_default(d["num_models"]) if custom_config is None else custom_config
+        batch_gen.configure(data, configuration) 
+        am = cls(data, 
                   batch_gen, 
                   indices,
                   d["batch_size"], 
                   model,
                   d["gap_symbol"], 
                   d["gap_symbol_insertions"])
+        if "best_model" in d:
+            am.best_model = d["best_model"]
+        return am
     
     
     @classmethod

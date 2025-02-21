@@ -128,6 +128,8 @@ def fit_and_align(data : SequenceDataset,
                 config["encoder_initializer"] = config["encoder_weight_extractor"](am.encoder_model)
         elif verbose:
             print("Re-initialized the encoder parameters.")
+        if verbose and surgery_converged:
+            print("Surgery converged.")
         last_iteration = surgery_converged or (i == config["max_surgery_runs"]-2)
     return am
 

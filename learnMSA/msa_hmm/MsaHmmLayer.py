@@ -202,6 +202,7 @@ class MsaHmmLayer(tf.keras.layers.Layer):
     @classmethod
     def from_config(cls, config):
         config["cell"] = deserialize(config["cell"])
+        config["sequence_weights"] = deserialize(config["sequence_weights"])
         return cls(**config)
 
 
