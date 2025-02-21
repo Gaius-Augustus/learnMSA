@@ -6,6 +6,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 import unittest
 import numpy as np
 import tensorflow as tf
+import pandas as pd
 #revert back to default and set the logger level individually per test case
 #globally omitting all warnings for the entire test suite should be avoided
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' 
@@ -2069,6 +2070,74 @@ class TestPretrainingUtilities(unittest.TestCase):
         loss_value = loss(self.y_true, self.y_pred)
         np.testing.assert_almost_equal(loss_value, -(3*np.log(0.6) / 9 + 6*np.log(0.6)/16)/2)
                    
+
+
+class TestClustering(unittest.TestCase):
+
+    def make_clustering(self):
+        #pandas DataFrame with the sequences as index and the columns: representative, cluster_size, cluster_index.
+        clustering = pd.DataFrame({"representative": ["A", "B", "A", "B", "B", "C", "A", "B"],
+                                    "cluster_size": [3, 4, 3, 4, 4, 1, 3, 4],
+                                    "cluster_index": [0, 1, 0, 1, 1, 2, 0, 1]},
+                                    index = ["A", "B", "C", "D", "E", "F", "G", "H"])
+        return clustering
         
+    def test_cluster_tree(self):
+        from learnMSA.msa_hmm import Clustering
+        clustering = self.make_clustering()
+        tree = Clustering.cluster_tree(clustering, branch_length=0.123)
+        self.assertEqual(tree.height, 2) #measures unit height
+        self.assertEqual(tree.num_leaves, 8)
+        self.assertEqual(tree.num_nodes, 12)
+        # the tree swaps the order of the leaves, check via df.loc if the internal nodes are correct
+        clusters = tree.get_parent_indices_by_height(0)
+        cluster_node_names = [tree.node_names[i] for i in clusters]
+        leaf_names = tree.node_names[:tree.num_leaves]
+        rep_names = ["rep_" + clustering.loc[n, "representative"] for n in leaf_names]
+        self.assertListEqual(cluster_node_names, rep_names)
+        np.testing.assert_equal(tree.branch_lengths, 0.123)
+        
+
+    def test_create_cluster_sets(self):
+        from learnMSA.msa_hmm import Clustering
+        clustering = self.make_clustering()
+        tree = Clustering.cluster_tree(clustering)
+        data = SequenceDataset("test/data/test_clustering.fa")
+        clusters, leaves, cluster_nodes  = Clustering.create_cluster_sets(data, tree)
+        np.testing.assert_equal(clusters, [0, 1, 0, 1, 1, 2, 0, 1])
+        np.testing.assert_equal(leaves, [tree.node_names.index(n) for n in data.seq_ids])
+        np.testing.assert_equal(cluster_nodes, [tree.node_names.index(n) for n in ["rep_A", "rep_B", "rep_C"]])
+
+
+    def test_faulty_tree(self):
+        from learnMSA.msa_hmm import Clustering
+        clustering = self.make_clustering()
+        tree = Clustering.cluster_tree(clustering)
+        tree.collapse("A")
+        tree.update()
+        data = SequenceDataset("test/data/test_clustering.fa")
+        faulty_tree_error = False
+        # this should throw, since the tree has no leaf matching to sequence "A"
+        try: 
+            _=Clustering.create_cluster_sets(data, tree)
+        except Exception:
+            faulty_tree_error = True
+        self.assertTrue(faulty_tree_error)
+
+
+    def test_faulty_seqs(self):
+        from learnMSA.msa_hmm import Clustering
+        clustering = self.make_clustering()
+        tree = Clustering.cluster_tree(clustering)
+        data = SequenceDataset("test/data/faulty_clustering.fa")
+        faulty_seqs_error = False
+        # this should throw, since the tree has no leaf matching to sequence "A"
+        try: 
+            _=Clustering.create_cluster_sets(data, tree)
+        except Exception:
+            faulty_seqs_error = True
+        self.assertTrue(faulty_seqs_error)
+
+
 if __name__ == '__main__':
     unittest.main()

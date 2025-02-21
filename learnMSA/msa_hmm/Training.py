@@ -185,7 +185,7 @@ def default_model_generator(num_seq,
     return model
 
 
-
+""" Generates model inputs for training and inference. """
 class DefaultBatchGenerator():
     def __init__(self, 
                 return_only_sequences=False, 
@@ -197,9 +197,12 @@ class DefaultBatchGenerator():
         self.shuffle = shuffle
         self.configured = False
         
-    def configure(self, data : SequenceDataset, config, verbose=False):
+
+    def configure(self, data : SequenceDataset, config, cluster_indices=None, verbose=False):
         self.data = data
         self.config = config
+        self.cluster_indices = cluster_indices
+        self.use_clusters = cluster_indices is not None
         self.num_models = config["num_models"] if "num_models" in config else 1
         self.crop_long_seqs = config["crop_long_seqs"] if "crop_long_seqs" in config else math.inf
         self.permutations = [np.arange(data.num_seq) for _ in range(self.num_models)]
@@ -207,14 +210,27 @@ class DefaultBatchGenerator():
             np.random.shuffle(p)
         self.configured = True
         
+
+    """
+    Args: indices: A vector of indices in range(0, data.num_seq). If self.shuffle if False, these indices map directly 
+                     to the sequences in the dataset. If self.shuffle is True, the indices are permuted for each model.
+    Returns:
+        A uint8 batch of padded sequences of shape (b, num_models, L) where b is the number of sequences in indices.
+        If return_only_sequences is False, the permuted indices and cluster indices are returned as well. 
+        The cluster indices will be all zeros if no tree is used. Other wise each leaf/sequence is mapped its parent node.
+        If return_crop_boundaries is True, the start and end indices of the cropped sequences are returned.
+    """
     def __call__(self, indices, return_crop_boundaries=False):
+
         if not self.configured:
             raise ValueError("A batch generator must be configured with the configure(data, config) method.") 
+        
         #use a different permutation of the sequences per trained model
         if self.shuffle:
             permutated_indices = np.stack([perm[indices] for perm in self.permutations], axis=1)
         else:
             permutated_indices = np.stack([indices]*self.num_models, axis=1)
+
         max_len = np.max(self.data.seq_lens[permutated_indices])
         max_len = min(max_len, self.crop_long_seqs)
         batch = np.zeros((indices.shape[0], self.num_models, max_len+1), dtype=np.uint8) 
@@ -229,24 +245,27 @@ class DefaultBatchGenerator():
                 else:
                     seq = self.data.get_encoded_seq(j, crop_to_length=self.crop_long_seqs, return_crop_boundaries=False)
                 batch[i, k, :min(self.data.seq_lens[j], self.crop_long_seqs)] = seq
-        if self.return_only_sequences:
-            if return_crop_boundaries:
-                return batch, start, end
-            else: 
-                return batch
-        else:
-            if return_crop_boundaries:
-                return batch, permutated_indices, start, end 
-            else: 
-                return batch, permutated_indices
+
+        output = (batch, )
+        if self.use_clusters:
+            output += (self.cluster_indices[permutated_indices],)
+        if not self.return_only_sequences:
+            output += (permutated_indices,)
+        if return_crop_boundaries:
+            output += (start, end)
+        return output[0] if len(output) == 1 else output
     
+
     def get_out_types(self):
-        if self.return_only_sequences:
-            return (tf.uint8, )
-        else:
-            return (tf.uint8, tf.int64) 
-        
+        types = (tf.uint8, )
+        if self.use_clusters:
+            types += (tf.int32,)
+        if not self.return_only_sequences:
+            types += (tf.int64, )
+        return types
+
     
+
 # batch_generator is a callable object that maps a vector of sequence indices to
 # inputs compatible with the model
 def make_dataset(indices, batch_generator, batch_size=512, shuffle=True, bucket_by_seq_length=False, model_lengths=[0]): 
@@ -328,7 +347,7 @@ def fit_model(model_generator,
     assert_config(config)
     tf.keras.backend.clear_session() #frees occupied memory 
     tf.get_logger().setLevel('ERROR')
-    batch_generator.configure(data, config, verbose)
+    batch_generator.configure(data, config, verbose=verbose)
     optimizer = tf.keras.optimizers.Adam(config["learning_rate"])
     if verbose:
         print("Fitting models of lengths", model_lengths, "on", indices.shape[0], "sequences.")

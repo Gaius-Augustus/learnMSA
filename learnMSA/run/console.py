@@ -116,7 +116,7 @@ def run_main():
     #before importing tensorflow
     if not args.cuda_visible_devices == "default":
         os.environ["CUDA_VISIBLE_DEVICES"] = args.cuda_visible_devices  
-    from ..msa_hmm import Configuration, Initializers, Align, Emitter, Training, Visualize
+    from ..msa_hmm import Configuration, Initializers, Align, Clustering, Training, Visualize
     from ..msa_hmm.SequenceDataset import SequenceDataset
     from ..msa_hmm.AncProbsLayer import inverse_softplus
     import tensorflow as tf
@@ -188,7 +188,7 @@ def run_main():
     if not args.no_sequence_weights:
         os.makedirs(args.cluster_dir, exist_ok = True) 
         try:
-            sequence_weights, clusters = Align.compute_sequence_weights(args.input_file, args.cluster_dir, config["cluster_seq_id"], return_clusters=True)
+            sequence_weights, clusters = Clustering.compute_sequence_weights(args.input_file, args.cluster_dir, config["cluster_seq_id"], return_clusters=True)
         except Exception as e:
             print("Error while computing sequence weights.")
             raise SystemExit(e) 
