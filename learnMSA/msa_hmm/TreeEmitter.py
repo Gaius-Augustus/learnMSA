@@ -77,8 +77,8 @@ class TreeEmitter(ProfileHMMEmitter):
         
         # relies on assumption 2
         # todo: make this more general; allow connections to internal ancestral nodes
-        self.cluster_indices = tree_handler.get_parent_indices_by_height(0)
-        self.cluster_indices -= tree_handler.num_leaves # indices are sorted by height
+        self.cluster_indices = self.tree_handler.get_parent_indices_by_height(0)
+        self.cluster_indices -= self.tree_handler.num_leaves # indices are sorted by height
         self.num_clusters = np.unique(self.cluster_indices).size
         self.tree_loss_weight = tree_loss_weight
         self.rate_matrix, self.equilibrium = _make_default_rate_matrix()
@@ -135,18 +135,16 @@ class TreeEmitter(ProfileHMMEmitter):
     # computes the tree loss
     def get_aux_loss(self):
 
-        return 0.
+        # compute the likelihood of the ancestral tree with TensorTree
+        leaves = self.B[..., 1:max(self.lengths)+1, :20] # only consider match positions and standard amino acids
+        leaves = tf.transpose(leaves, [1,0,2,3])
+        leaves /= tf.math.maximum(tf.reduce_sum(leaves, axis=-1, keepdims=True), 1e-16) #re-normalize
+        anc_loglik = self.compute_anc_tree_loglik(leaves)
 
-        # # compute the likelihood of the ancestral tree with TensorTree
-        # leaves = self.B[..., 1:max(self.lengths)+1, :20] # only consider match positions and standard amino acids
-        # leaves = tf.transpose(leaves, [1,0,2,3])
-        # leaves /= tf.math.maximum(tf.reduce_sum(leaves, axis=-1, keepdims=True), 1e-16) #re-normalize
-        # anc_loglik = self.compute_anc_tree_loglik(leaves)
+        # weight and average the loglikelihood over all models
+        loss = -self.tree_loss_weight * tf.reduce_mean(anc_loglik)
 
-        # # weight and average the loglikelihood over all models
-        # loss = -self.tree_loss_weight * tf.reduce_mean(anc_loglik)
-
-        # return loss
+        return loss
     
 
     def compute_anc_tree_loglik(self, leaf_probs):
@@ -172,6 +170,12 @@ class TreeEmitter(ProfileHMMEmitter):
         priors = self.prior(B_mod, lengths=self.lengths)
         priors = tf.reshape(priors, (self.num_models, self.num_clusters, priors.shape[-1]))
         return tf.reduce_mean(priors, axis=1) # average over clusters
+
+
+    def make_B_amino(self):
+        """ A variant of make_B used for plotting the HMM. Can be overridden for more complex emissions. Per default this is equivalent to make_B
+        """
+        return self.make_B()[:,0] # currently only the first cluster is used for plotting
     
 
     def duplicate(self, model_indices=None, share_kernels=False):

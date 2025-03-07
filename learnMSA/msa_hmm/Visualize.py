@@ -156,7 +156,7 @@ def plot_hmm(am,
     for k, (seq_i, path_color) in enumerate(zip(seq_indices, path_colors)):
         ds = msa_hmm.Training.make_dataset(np.array([seq_i]), am.batch_generator, batch_size=1, shuffle=False)
         for x, _ in ds:
-            sequence = am.encoder_model(x) 
+            sequence = am.encoder_model(x)[0]
         hidden_seq = msa_hmm.Viterbi.viterbi(sequence, hmm_cell).numpy()[model_index]
         hidden_seq = list(hidden_seq[0])
         for i in range(len(hidden_seq)):
@@ -304,7 +304,7 @@ def print_and_plot(am,
     for i,s in enumerate(msa[:max_seq]):
         indices = np.array([[am.indices[i]]*am.msa_hmm_layer.cell.num_models])
         tau = am.anc_probs_layer.make_times(indices)[:,model_index].numpy()
-        param_string = "l=%.2f" % (ll[i]) + "_t=%.2f" % tau[am.indices[i]]
+        param_string = "l=%.2f" % (ll[i]) + "_t=%.2f" % tau
         if seq_ids:
             print(f">{am.data.seq_ids[am.indices[i]]} "+param_string)
         else:

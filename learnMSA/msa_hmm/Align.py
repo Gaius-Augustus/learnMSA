@@ -389,14 +389,17 @@ def apply_mods(x, pos_expand, expansion_lens, pos_discard, insert_value, del_mar
     #mark discard positions with del_marker, expand thereafter 
     #and eventually remove the marked positions
     x = np.copy(x)
-    if len(x.shape) >= 2:
+    shape = x.shape
+    multi_dim = len(shape) >= 2
+    if multi_dim:
         x[..., pos_discard, :] = del_marker
     else:
         x[pos_discard] = del_marker
     rep_expand_pos = np.repeat(pos_expand, expansion_lens)
-    x = np.insert(x, rep_expand_pos, insert_value, axis=-2 if len(x.shape) >= 2 else -1)
-    if len(x.shape) >= 2:
+    x = np.insert(x, rep_expand_pos, insert_value, axis=-2 if multi_dim else -1)
+    if multi_dim:
         x = x[..., np.any(x != del_marker, -1), :]
+        x = np.reshape(x, shape[:-2] + (-1, shape[-1]))
     else:
         x = x[x != del_marker]
     return x
@@ -478,7 +481,7 @@ def extend_mods(pos_expand, expansion_lens, pos_discard, L, k=0):
     return new_pos_expand, new_expansion_lens, new_pos_discard
 
 
-#applies expansions and discards to emission and transition kernels
+#applies expansions and discards to emission and transition kernelsf
 def update_kernels(am,
                    model_index, 
                     pos_expand, 
@@ -634,7 +637,7 @@ def do_model_surgery(iteration, am : AlignmentModel, config, emission_dummy, tra
         config["transitioner"].transition_init[i] = {key : initializers.ConstantInitializer(t) 
                                      for key,t in transition_init.items()}
         config["transitioner"].flank_init[i] = initializers.ConstantInitializer(flank_init)
-        model_lengths.append(emission_init[0].shape[0])
+        model_lengths.append(emission_init[0].shape[-2])
         if model_lengths[-1] < 3: 
             raise SystemExit("A problem occured during model surgery: A pHMM is too short (length <= 2).") 
     return config, model_lengths, surgery_converged

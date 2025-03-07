@@ -1364,6 +1364,7 @@ class TestModelSurgery(unittest.TestCase):
         
         
     def test_apply_mods(self):
+        # base checks
         x1 = Align.apply_mods(x=list(range(10)), 
                                        pos_expand=[0,4,7,10], 
                                        expansion_lens=[2,1,2,1], 
@@ -1376,6 +1377,16 @@ class TestModelSurgery(unittest.TestCase):
                                        pos_discard=[], 
                                        insert_value=[4,5,6])
         self.assert_vec(x2, [[1,2,3],[4,5,6],[1,2,3]])
+
+        # check 3D kernel
+        x3 = Align.apply_mods(x=[[[1,2,3],[1,2,3]],
+                                 [[1,2,3],[1,2,3]]],
+                                        pos_expand=[1], 
+                                        expansion_lens=[2], 
+                                        pos_discard=[0], 
+                                        insert_value=[4,5,6])
+        self.assert_vec(x3, [[[4,5,6], [4,5,6], [1,2,3]], 
+                             [[4,5,6], [4,5,6], [1,2,3]]])
         
         #remark: This was a special solution that failed under practical circumstances
         #I added the scenario to the tests and reduced it to the problem core below
