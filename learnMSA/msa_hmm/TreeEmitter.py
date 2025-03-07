@@ -4,22 +4,28 @@ import learnMSA.msa_hmm.Initializers as initializers
 import numpy as np
 import sys
 import tensorflow as tf
-
-# tmp include
-sys.path.insert(0, "../TensorTree")
 import tensortree 
+from tensortree import model as tree_model
 
 tensortree.set_backend("tensorflow")
 
 
-r""" A special emitter when the observations are related by a tree.
-    The tree contains each input sequence as a leaf and assumes that there are no other leaves.
-    The ancestral tree is the remaining tree when pruning all leaves. Its nodes are the ancestral nodes.
+class TreeEmitter(ProfileHMMEmitter): 
+    r""" A special emitter when the observations are related by a tree.
+    The tree is specified by a TreeHandler object.
+    Each input sequence to be aligned must map bijectively to tree leaves.
+    Otherwise the tree topology is not constrained.
+
+    We'll denote the remaining tree when pruning all (sequence-)leaves
+    from the input tree as the ancestral tree. Its nodes are the ancestral nodes.
 
     Current assumptions/limitations:
-    1 Only full leaf sets are supported (no backbone support).
+    1 All input sequences must be already represented in the tree. There is no automatic mapping mechanism 
+        to incorporate new sequences into the tree.
     2 Sequences are only allowed to connect to the leaves of the ancestral tree ("cluster trees"). 
-    3 The topology is fixed during the whole alignment process. 
+    3 The full ancestral tree will be processed by the tree emitter. There is no reduction mechanism
+        to handle large trees, so the ancestral topology must be relatively small.
+    4 The topology is fixed during the whole alignment process. 
 
     E.g.
 
@@ -33,30 +39,41 @@ r""" A special emitter when the observations are related by a tree.
     >D
     ..
 
-    Then the tree U - R - V is the ancestral tree.
+    Then the tree U <- R -> V is the ancestral tree.
     
-    The tree emitter models amino acid distributions at the leaves of the ancestral tree.
+    The tree emitter models amino acid distributions at the leaves of the ancestral tree explicitly
+    and infers the rest using the tree topology, branch lengths.
     The emission probabilities are computed based on which ancestral leaf each sequence is connected to.
 
     Auxiliary loss:
     The tree emitter adds an auxiliary loss that maximizes the likelihood of the ancestral tree.
 """
-class TreeEmitter(ProfileHMMEmitter): 
 
     def __init__(self, 
                  tree_handler : tensortree.TreeHandler,
                  emission_init = initializers.make_default_emission_init(),
                  insertion_init = initializers.make_default_insertion_init(),
                  prior = None,
-                 tree_loss_weight = 0.1):
+                 tree_loss_weight = 1.0):
+        """
+        Args:
+            tree_handler: A TreeHandler object that defines the full tree topology with the sequences as leaves.
+            emission_init: Initializer for the emission kernel. Should be a list when
+            insertion_init: A list of initializers for the insertion kernels.
+            prior: A prior object that defines a prior distribution over the emission probabilities.
+            tree_loss_weight: A scalar that weights the tree loss in the total loss. 
+        """
         super(TreeEmitter, self).__init__(emission_init, insertion_init, 
                                           prior, frozen_insertions=True)
+        
+        # the tree handler defines both the mapping of the sequences (leaves) 
+        # to the ancestral nodes and the ancestral topology
         self.tree_handler = tensortree.TreeHandler.copy(tree_handler)
+
+        # prune all leaves from the input tree to get the ancestral tree
         self.ancestral_tree_handler = tensortree.TreeHandler.copy(tree_handler)
         self.ancestral_tree_handler.prune()
         self.ancestral_tree_handler.update()
-        # the tree handler defines both the mapping of the sequences (leaves) 
-        # to the ancestral nodes and the ancestral topology
         
         # relies on assumption 2
         # todo: make this more general; allow connections to internal ancestral nodes
@@ -116,26 +133,23 @@ class TreeEmitter(ProfileHMMEmitter):
     
 
     # computes the tree loss
-    def get_aux_loss(self, loss_type="likelihood"):
+    def get_aux_loss(self):
 
-        if loss_type == "leaf-edge validation":
+        return 0.
 
-            pass
+        # # compute the likelihood of the ancestral tree with TensorTree
+        # leaves = self.B[..., 1:max(self.lengths)+1, :20] # only consider match positions and standard amino acids
+        # leaves = tf.transpose(leaves, [1,0,2,3])
+        # leaves /= tf.math.maximum(tf.reduce_sum(leaves, axis=-1, keepdims=True), 1e-16) #re-normalize
+        # anc_loglik = self.compute_anc_tree_loglik(leaves)
 
-        elif loss_type == "likelihood":
+        # # weight and average the loglikelihood over all models
+        # loss = -self.tree_loss_weight * tf.reduce_mean(anc_loglik)
 
-            # compute the likelihood of the ancestral tree with TensorTree
-            leaves = self.B[..., 1:max(self.lengths)+1, :20] # only consider match positions and standard amino acids
-            leaves = tf.transpose(leaves, [1,0,2,3])
-            leaves /= tf.math.maximum(tf.reduce_sum(leaves, axis=-1, keepdims=True), 1e-16) #re-normalize
-            anc_loglik = self._compute_anc_tree_loglik(leaves)
-
-            loss = -self.tree_loss_weight * tf.reduce_mean(anc_loglik)
-
-        return loss
+        # return loss
     
 
-    def _compute_anc_tree_loglik(self, leaf_probs):
+    def compute_anc_tree_loglik(self, leaf_probs):
         """ 
         Args:
             leaf_probs: A tensor of shape (num_leaves, num_models, model_length, 20) that contains the 
@@ -145,7 +159,7 @@ class TreeEmitter(ProfileHMMEmitter):
         """
         tree_handler = self.ancestral_tree_handler
         branch_lengths = self.ancestral_tree_handler.branch_lengths
-        anc_loglik = tensortree.model.loglik(leaf_probs, tree_handler, self.rate_matrix, branch_lengths, tf.math.log(self.equilibrium))
+        anc_loglik = tree_model.loglik(leaf_probs, tree_handler, self.rate_matrix, branch_lengths, tf.math.log(self.equilibrium))
         #mask out padding states and average over model length
         mask = tf.cast(tf.sequence_mask(self.lengths), anc_loglik.dtype)
         anc_loglik = tf.reduce_sum(anc_loglik * mask, axis=1) / tf.reduce_sum(mask, axis=1)

@@ -5,9 +5,6 @@ from shutil import which
 import pandas as pd
 import numpy as np
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
-
-# tmp include
-sys.path.insert(0, "../TensorTree")
 from tensortree import TreeHandler
 
 
@@ -19,7 +16,7 @@ Args:
 Returns:
     A pandas DataFrame with the sequences as index and the columns: representative, cluster_size, cluster_index.
 """
-def compute_clustering(fasta_filename, directory="tmp", cluster_seq_id=0.5, linear=True):
+def compute_clustering(fasta_filename, directory="tmp", cluster_seq_id=0.5, linear=True) -> pd.DataFrame:
     assert which("mmseqs") is not None, "Unable to find mmseqs2."
     cluster_files = directory+"/"+os.path.splitext(os.path.basename(fasta_filename))[0]
     # mmseqs2 settings are those recommended to cluster protein fragments (cov-mode 1),

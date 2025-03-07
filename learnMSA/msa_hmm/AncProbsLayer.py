@@ -4,9 +4,6 @@ import learnMSA.msa_hmm.Initializers as initializers
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 from learnMSA.msa_hmm.Utility import inverse_softplus
 
-# tmp include
-import sys
-sys.path.insert(0, "../TensorTree")
 import tensortree 
 
 tensortree.set_backend("tensorflow")

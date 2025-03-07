@@ -248,7 +248,7 @@ def plot_anc_probs(am,
     for x,_ in ds:
         ancs = am.encoder_model(x).numpy()[model_index]
     indices = np.stack([am.indices]*am.msa_hmm_layer.cell.num_models, axis=1)
-    tau = am.anc_probs_layer.make_tau(indices)[model_index]
+    tau = am.anc_probs_layer.make_times(indices)[:,model_index]
     if rescale:
         ancs /= np.sum(ancs, -1, keepdims=True)
     f, axes = plt.subplots(n, m, sharey=True)
@@ -303,7 +303,7 @@ def print_and_plot(am,
     ll = am.model.predict(ds)[0][:,model_index] 
     for i,s in enumerate(msa[:max_seq]):
         indices = np.array([[am.indices[i]]*am.msa_hmm_layer.cell.num_models])
-        tau = am.anc_probs_layer.make_tau(indices)[model_index].numpy()
+        tau = am.anc_probs_layer.make_times(indices)[:,model_index].numpy()
         param_string = "l=%.2f" % (ll[i]) + "_t=%.2f" % tau[am.indices[i]]
         if seq_ids:
             print(f">{am.data.seq_ids[am.indices[i]]} "+param_string)

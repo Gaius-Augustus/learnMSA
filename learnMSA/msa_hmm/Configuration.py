@@ -85,7 +85,8 @@ def make_default(default_num_models=5,
                  V2_temperature=3.,
                  inv_gamma_alpha=0.5,
                  inv_gamma_beta=3.,
-                 tree_handler=None):
+                 tree_handler=None,
+                 plm_cache_dir=None):
     if use_language_model:
         if V2_emitter:
             emission_init = [AminoAcidPlusMvnEmissionInitializer(scoring_model_config=scoring_model_config,

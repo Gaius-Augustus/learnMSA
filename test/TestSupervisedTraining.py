@@ -80,7 +80,7 @@ class CasinoHMMEmitter(tf.keras.layers.Layer):
     def make_B(self):
         return tf.nn.softmax(self.emission_kernel, name="B")
         
-    def call(self, inputs, end_hints=None, training=False):
+    def call(self, inputs, indices=None, end_hints=None, training=False):
         """ 
         Args: 
                 inputs: A tensor of shape (num_models, batch_size, length, alphabet_size) 
