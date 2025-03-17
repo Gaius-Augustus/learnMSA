@@ -34,6 +34,7 @@ class AminoAcidPrior(tf.keras.layers.Layer):
         Args:
         B: A stack of k emission matrices. Assumes that the 20 std amino acids are the first 20 positions of the last dimension
             and that the states are ordered the standard way as seen in MsaHmmCell. Shape: (k, q, s)
+        lengths: A tensor of shape (k,) that contains the length of each model.
         Returns:
             A tensor with the log pdf values of this Dirichlet mixture. The models can vary in length. 
             Shorter models will have a zero padding in the output. Shape: (k, max_model_length)

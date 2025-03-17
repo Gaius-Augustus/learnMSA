@@ -167,7 +167,7 @@ class TreeEmitter(ProfileHMMEmitter):
 
     def get_prior_log_density(self):
         B_mod = tf.reshape(self.B, (self.num_models * self.num_clusters, self.B.shape[-2], self.B.shape[-1]))
-        priors = self.prior(B_mod, lengths=self.lengths)
+        priors = self.prior(B_mod, lengths=np.repeat(self.lengths, self.num_clusters).astype(np.int32))
         priors = tf.reshape(priors, (self.num_models, self.num_clusters, priors.shape[-1]))
         return tf.reduce_mean(priors, axis=1) # average over clusters
 
