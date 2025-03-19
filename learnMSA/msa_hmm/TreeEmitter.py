@@ -175,7 +175,7 @@ class TreeEmitter(ProfileHMMEmitter):
     def make_B_amino(self):
         """ A variant of make_B used for plotting the HMM. Can be overridden for more complex emissions. Per default this is equivalent to make_B
         """
-        return self.make_B()[:,0] # currently only the first cluster is used for plotting
+        return self.make_B() # currently only the first cluster is used for plotting
     
 
     def duplicate(self, model_indices=None, share_kernels=False):

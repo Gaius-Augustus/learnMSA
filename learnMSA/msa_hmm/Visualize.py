@@ -13,7 +13,17 @@ import imageio
 import os
 
 
-def plot_logo(am, model_index, ax):
+
+def plot_logo(am, model_index, ax, cluster_index=0):
+    """
+    Plot a logo of the emission probabilities of the HMM model.
+    Args:
+        am: AlignmentModel object
+        model_index: index of the model to plot
+        ax: matplotlib axis to plot on
+        cluster_index: index of the cluster to plot (optional, when emitter.make_B_amino() 
+                        returns a 4D tensor of shape (num_models, num_clusters, length, num_aa))
+    """
     hmm_cell = am.msa_hmm_layer.cell
     hmm_cell.recurrent_init()
     length = hmm_cell.length[model_index]
@@ -22,8 +32,13 @@ def plot_logo(am, model_index, ax):
     logomaker_perm = np.array([am.data.alphabet.index(aa) for aa in logomaker_alphabet], dtype=int)
 
     #reduce to std AA alphabet 
-    emissions = hmm_cell.emitter[0].make_B_amino().numpy()[model_index, 1:length+1,:20][:,logomaker_perm]
-    background = hmm_cell.emitter[0].make_B_amino().numpy()[model_index, 0, :20][logomaker_perm]
+    B_amino = hmm_cell.emitter[0].make_B_amino().numpy()
+    if len(B_amino.shape) == 4:
+        emissions = B_amino[model_index, cluster_index, 1:length+1,:20][:,logomaker_perm]
+        background = B_amino[model_index, cluster_index, 0, :20][logomaker_perm]
+    else:
+        emissions = B_amino[model_index, 1:length+1,:20][:,logomaker_perm]
+        background = B_amino[model_index, 0, :20][logomaker_perm]
     #background = hmm_cell.emitter[0].emission_init[model_index]((length,25), dtype=am.msa_hmm_layer.dtype)[0, :20]
     information_content = tf.keras.losses.KLDivergence(reduction=tf.keras.losses.Reduction.NONE)(
                                                          emissions,

@@ -86,7 +86,8 @@ def make_default(default_num_models=5,
                  inv_gamma_alpha=0.5,
                  inv_gamma_beta=3.,
                  tree_handler=None,
-                 plm_cache_dir=None):
+                 plm_cache_dir=None, 
+                 tree_loss_weight=1.0):
     if use_language_model:
         if V2_emitter:
             emission_init = [AminoAcidPlusMvnEmissionInitializer(scoring_model_config=scoring_model_config,
@@ -127,7 +128,8 @@ def make_default(default_num_models=5,
                               emission_init=[initializers.make_default_emission_init()
                                                                          for _ in range(default_num_models)],
                               insertion_init=[initializers.make_default_insertion_init()
-                                                                         for _ in range(default_num_models)])
+                                                                         for _ in range(default_num_models)],
+                              tree_loss_weight=tree_loss_weight)
     else:
         emitter = emit.ProfileHMMEmitter(emission_init=[initializers.make_default_emission_init()
                                                                          for _ in range(default_num_models)],
