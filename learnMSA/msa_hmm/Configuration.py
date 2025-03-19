@@ -8,8 +8,8 @@ import learnMSA.msa_hmm.Priors as priors
 import learnMSA.protein_language_models.Common as Common
 from learnMSA.protein_language_models.MvnEmitter import MvnEmitter, AminoAcidPlusMvnEmissionInitializer, make_joint_prior
 from learnMSA.msa_hmm.TreeEmitter import TreeEmitter
-import learnMSA.msa_hmm.Clustering as clustering
 import subprocess as sp
+from learnMSA.msa_hmm.Utility import inverse_softplus
 
 def as_str(config, items_per_line=1, prefix="", sep=""):
     return "\n"+prefix+"{" + sep.join(("\n"+prefix)*(i%items_per_line==0) + key + " : " + str(val) for i,(key,val) in enumerate(config.items())) + "\n"+prefix+"}"
@@ -135,6 +135,14 @@ def make_default(default_num_models=5,
                                                                          for _ in range(default_num_models)],
                                            insertion_init=[initializers.make_default_insertion_init()
                                                                          for _ in range(default_num_models)])
+        
+    if tree_handler is not None:
+        initial_branch_length_kernel = inverse_softplus(tree_handler.branch_lengths[:tree_handler.num_leaves])
+        encoder_initializer = ([initializers.ConstantInitializer(initial_branch_length_kernel)]+
+                                    initializers.make_LG_init(default_num_models))
+    else:
+        encoder_initializer = ([initializers.ConstantInitializer(-3.)]+
+                                    initializers.make_LG_init(default_num_models))
 
     transitioner = trans.ProfileHMMTransitioner([initializers.make_default_transition_init() 
                                                                         for _ in range(default_num_models)],
@@ -170,7 +178,7 @@ def make_default(default_num_models=5,
         "trainable_distances" : True,
         "surgery_del" : 0.5,
         "surgery_ins" : 0.5,
-        "encoder_initializer" : [initializers.ConstantInitializer(-3.)]+initializers.make_LG_init(default_num_models),
+        "encoder_initializer" : encoder_initializer,
         "model_criterion" : "AIC", #AIC is slightly better than loglik on average over multiple benchmarks
         "encoder_weight_extractor" : None,
         "experimental_evolve_upper_half" : False,
