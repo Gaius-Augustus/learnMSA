@@ -120,9 +120,9 @@ def fit_and_align(data : SequenceDataset,
             if config["experimental_evolve_upper_half"]:
                 print("Warning: The option experimental_evolve_upper_half is currently not compatible with encoder_weight_extractor. The weight extractor will be ignore.")
             else:
+                config["encoder_initializer"] = config["encoder_weight_extractor"](am.encoder_model)
                 if verbose:
                     print("Used the encoder_weight_extractor callback to pass the encoder parameters to the next iteration.")
-                config["encoder_initializer"] = config["encoder_weight_extractor"](am.encoder_model)
         elif verbose:
             print("Re-initialized the encoder parameters.")
         if verbose and surgery_converged:

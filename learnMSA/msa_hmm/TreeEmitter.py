@@ -1,6 +1,7 @@
 from learnMSA.msa_hmm.Emitter import ProfileHMMEmitter
 from learnMSA.msa_hmm.Utility import get_num_states
 import learnMSA.msa_hmm.Initializers as initializers
+from learnMSA.msa_hmm.Utility import inverse_softplus
 import numpy as np
 import sys
 import tensorflow as tf
@@ -53,6 +54,7 @@ class TreeEmitter(ProfileHMMEmitter):
                  tree_handler : tensortree.TreeHandler,
                  emission_init = initializers.make_default_emission_init(),
                  insertion_init = initializers.make_default_insertion_init(),
+                 branch_lengths_init = None,
                  prior = None,
                  tree_loss_weight = 1.0):
         """
@@ -74,6 +76,12 @@ class TreeEmitter(ProfileHMMEmitter):
         self.ancestral_tree_handler = tensortree.TreeHandler.copy(tree_handler)
         self.ancestral_tree_handler.prune()
         self.ancestral_tree_handler.update()
+
+        if branch_lengths_init is None:
+            # if no branch initializer is provided, infer from tree
+            W = inverse_softplus(tree_handler.branch_lengths[tree_handler.num_leaves:])
+            branch_lengths_init = initializers.ConstantInitializer(W)
+        self.branch_lengths_init = branch_lengths_init
         
         # relies on assumption 2
         # todo: make this more general; allow connections to internal ancestral nodes
@@ -105,6 +113,10 @@ class TreeEmitter(ProfileHMMEmitter):
                                     name="insertion_kernel_"+str(i),
                                     trainable=not self.frozen_insertions) 
                                 for i,init in enumerate(self.insertion_init)]
+        self.branch_lengths_kernel = self.add_weight(
+                                    shape=(self.ancestral_tree_handler.num_nodes-1, self.num_models),
+                                    initializer=self.branch_lengths_init,
+                                    name="branch_lengths_kernel")
         if self.prior is not None:
             self.prior.build()
         self.built = True
@@ -156,7 +168,7 @@ class TreeEmitter(ProfileHMMEmitter):
             loglik per model, averaged over model length
         """
         tree_handler = self.ancestral_tree_handler
-        branch_lengths = self.ancestral_tree_handler.branch_lengths
+        branch_lengths = tensortree.backend.make_branch_lengths(self.branch_lengths_kernel)
         anc_loglik = tree_model.loglik(leaf_probs, tree_handler, self.rate_matrix, branch_lengths, tf.math.log(self.equilibrium))
         #mask out padding states and average over model length
         mask = tf.cast(tf.sequence_mask(self.lengths), anc_loglik.dtype)
@@ -183,6 +195,11 @@ class TreeEmitter(ProfileHMMEmitter):
             model_indices = range(len(self.emission_init))
         sub_emission_init = [initializers.ConstantInitializer(self.emission_kernel[i].numpy()) for i in model_indices]
         sub_insertion_init = [initializers.ConstantInitializer(self.insertion_kernel[i].numpy()) for i in model_indices]
+
+        if self.tree_handler.branch_lengths.shape[-1] == 1:
+            self.tree_handler.set_branch_lengths(np.repeat(self.tree_handler.branch_lengths, self.num_models, axis=1))
+        self.tree_handler.branch_lengths[self.tree_handler.num_leaves:] = self.branch_lengths_kernel.numpy()
+
         emitter_copy = TreeEmitter(
                              tree_handler = self.tree_handler,
                              emission_init = sub_emission_init,
