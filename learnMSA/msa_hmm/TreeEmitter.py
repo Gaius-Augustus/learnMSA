@@ -198,7 +198,7 @@ class TreeEmitter(ProfileHMMEmitter):
 
         if self.tree_handler.branch_lengths.shape[-1] == 1:
             self.tree_handler.set_branch_lengths(np.repeat(self.tree_handler.branch_lengths, self.num_models, axis=1))
-        self.tree_handler.branch_lengths[self.tree_handler.num_leaves:] = self.branch_lengths_kernel.numpy()
+        self.tree_handler.branch_lengths[self.tree_handler.num_leaves:] = tf.math.softplus(self.branch_lengths_kernel).numpy()
 
         emitter_copy = TreeEmitter(
                              tree_handler = self.tree_handler,
