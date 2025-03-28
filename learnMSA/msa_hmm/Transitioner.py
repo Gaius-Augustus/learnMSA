@@ -63,6 +63,7 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
         for init, parts in zip(self.transition_init, self.explicit_transition_kernel_parts):
             _assert_transition_init_kernel(init, parts)
         
+        
     def build(self, input_shape=None):
         if self.built:
             return

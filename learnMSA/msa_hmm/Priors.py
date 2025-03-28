@@ -270,16 +270,19 @@ class ProfileHMMTransitionPrior(tf.keras.layers.Layer):
             #match state transitions
             p_match = tf.stack([probs["match_to_match"],
                                 probs["match_to_insert"],
-                                probs["match_to_delete"][1:]], axis=-1) + 1e-16
+                                probs["match_to_delete"][...,1:]], axis=-1) + 1e-16
             p_match_sum = tf.reduce_sum(p_match, axis=-1, keepdims=True)
-            match_dirichlet.append( tf.reduce_sum(self.match_dirichlet.log_pdf(p_match / p_match_sum)) )
+            p_match = tf.reshape(p_match / p_match_sum, (-1, p_match.shape[-1]))
+            match_dirichlet.append( tf.reduce_sum(self.match_dirichlet.log_pdf(p_match), -1) )
             #insert state transitions
             p_insert = tf.stack([probs["insert_to_match"],
                                probs["insert_to_insert"]], axis=-1)
+            p_insert = tf.reshape(p_insert, (-1, p_insert.shape[-1]))
             insert_dirichlet.append( tf.reduce_sum(self.insert_dirichlet.log_pdf(p_insert)) )
             #delete state transitions
-            p_delete = tf.stack([probs["delete_to_match"][:-1],
+            p_delete = tf.stack([probs["delete_to_match"][...,:-1],
                                probs["delete_to_delete"]], axis=-1)
+            p_delete = tf.reshape(p_delete, (-1, p_delete.shape[-1]))
             delete_dirichlet.append( tf.reduce_sum(self.delete_dirichlet.log_pdf(p_delete)) )
             #other transitions
             flank = (self.alpha_flank - 1) * log_probs["unannotated_segment_loop"] #todo: handle as extra case?
@@ -292,22 +295,23 @@ class ProfileHMMTransitionPrior(tf.keras.layers.Layer):
             flank += (self.alpha_flank_compl - 1) * log_probs["left_flank_exit"]
             flank += (self.alpha_flank_compl - 1) * tf.math.log(probs["end_to_unannotated_segment"] + probs["end_to_terminal"])
             flank += (self.alpha_flank_compl - 1) * tf.math.log(1-flank_init_prob[i])
-            flank_prior.append(tf.squeeze(flank))
+            flank_prior.append(tf.reduce_sum(flank))
             #uni-hit
             hit = (self.alpha_single - 1) * tf.math.log(probs["end_to_right_flank"] + probs["end_to_terminal"]) 
             hit += (self.alpha_single_compl - 1) * tf.math.log(probs["end_to_unannotated_segment"]) 
-            hit_prior.append(tf.squeeze(hit))
+            hit_prior.append(tf.reduce_sum(hit))
             #uniform entry/exit prior
             #rescale begin_to_match to sum to 1
-            div = tf.math.maximum(self.epsilon, 1- probs["match_to_delete"][0]) 
+            div = tf.math.maximum(self.epsilon, 1- probs["match_to_delete"][...,:1]) 
             btm = probs["begin_to_match"] / div
-            enex = tf.expand_dims(btm, 1) * tf.expand_dims(probs["match_to_end"], 0)
+            enex = tf.expand_dims(btm, -1) * tf.expand_dims(probs["match_to_end"], -2)
             enex = tf.linalg.band_part(enex, 0, -1)
             log_enex = tf.math.log(tf.math.maximum(self.epsilon, 1 - enex))
             log_enex_compl = tf.math.log(tf.math.maximum(self.epsilon, enex))
-            glob = (self.alpha_global - 1) * (tf.reduce_sum(log_enex) - log_enex[0, -1])
-            glob += (self.alpha_global_compl - 1) * (tf.reduce_sum(log_enex_compl) - log_enex_compl[0, -1])
+            glob = (self.alpha_global - 1) * (tf.reduce_sum(log_enex) - tf.reduce_sum(log_enex[..., 0, -1]))
+            glob += (self.alpha_global_compl - 1) * (tf.reduce_sum(log_enex_compl) - tf.reduce_sum(log_enex_compl[..., 0, -1]))
             global_prior.append( glob )
+
         prior_val = {
             "match_prior" : match_dirichlet,
             "insert_prior" : insert_dirichlet,
@@ -316,6 +320,7 @@ class ProfileHMMTransitionPrior(tf.keras.layers.Layer):
             "hit_prior" : hit_prior,
             "global_prior" : global_prior
             }
+
         prior_val = {k : tf.stack(v) for k,v in prior_val.items()}
         return prior_val
     

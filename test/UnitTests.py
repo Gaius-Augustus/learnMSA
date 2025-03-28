@@ -1714,6 +1714,53 @@ class TestPriors(unittest.TestCase):
         self.assertEqual(pdf.shape, (num_models, max_len))
         for i,l in enumerate(model_lengths):
             np.testing.assert_equal(pdf[i,l:].numpy(), 0.)
+
+
+    def test_profile_hmm_transition_prior(self):
+
+        # create a transitioner that computes probability dictionaries for 
+        # two models of the same length but with different parameters
+        transition_init = [Initializers.make_default_transition_init(),
+                            Initializers.make_default_transition_init(MM=7, 
+                                                                    MI=-5, 
+                                                                    MD=2, 
+                                                                    II=5, 
+                                                                    IM=12, 
+                                                                    DM=3, 
+                                                                    DD=22,
+                                                                    FC=6, 
+                                                                    FE=7,
+                                                                    R=8, 
+                                                                    RF=-2, 
+                                                                    T=-10)]
+        flank_init = [Initializers.make_default_flank_init()]*2
+        transitioner = Transitioner.ProfileHMMTransitioner(transition_init, flank_init)
+        transitioner.set_lengths([5,5])
+        transitioner.build()
+
+        probs = transitioner.make_probs()
+        flank_init_prob = transitioner.make_flank_init_prob()
+
+        # create a prior and apply it
+        prior = Priors.ProfileHMMTransitionPrior()
+
+        log_prior_vals = prior(probs, flank_init_prob)
+         
+        for k,v in log_prior_vals.items():
+            self.assertEqual(v[0].shape, ())
+            self.assertEqual(v[1].shape, ())
+
+        # when we have models of the same length, we can also stack the probs 
+        # instead of passing multiple dicts
+        stacked_probs = [{k : tf.stack([v, probs[1][k]], axis=0) for k,v in probs[0].items()}]
+        stacked_flank_init_prob = [tf.stack([flank_init_prob[0], flank_init_prob[1]], axis=0)]
+
+        stacked_log_prior_vals = prior(stacked_probs, stacked_flank_init_prob)
+         
+        for k,v in stacked_log_prior_vals.items():
+            self.assertEqual(v[0].shape, ())
+            self.assertAlmostEqual(v[0].numpy(), np.sum(log_prior_vals[k]), places=2)
+
         
         
         
@@ -2206,6 +2253,9 @@ class TestTree(unittest.TestCase):
 
         test_inputs(inputs, indices)
             
+
+    def test_tree_transitioner(self):
+        pass
 
 
     def test_tree_loss(self):
