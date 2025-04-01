@@ -86,10 +86,12 @@ def make_default_insertion_init():
 
 class EntryInitializer(tf.keras.initializers.Initializer):
     def __call__(self, shape, dtype=None, **kwargs):
-        #choose such that entry[0] will always be ~0.5 independent of model length
-        p0 = tf.zeros([1]+[d for d in shape[1:]], dtype=dtype)
-        p = tf.cast(tf.repeat(tf.math.log(1/(shape[0]-1)), shape[0]-1), dtype=dtype)
-        return tf.concat([p0, p], axis=0)
+        #choose such that entry[..., 0] will always be ~0.5 independent of model length
+        p0 = tf.zeros([d for d in shape[:-1]] + [1], dtype=dtype)
+        p = tf.zeros([d for d in shape[:-1]] + [shape[-1]-1], dtype=dtype)
+        p += tf.cast(tf.math.log(1./(shape[-1]-1)), dtype=dtype)
+        x = tf.concat([p0, p], axis=-1)
+        return x
     
     def __repr__(self):
         return f"DefaultEntry()"
@@ -98,7 +100,7 @@ class EntryInitializer(tf.keras.initializers.Initializer):
 class ExitInitializer(tf.keras.initializers.Initializer):
     def __call__(self, shape, dtype=None, **kwargs):
         #choose such that all exit probs equal the probs entry[i] for i > 0 
-        return tf.zeros(shape, dtype=dtype) + tf.cast(tf.math.log(0.5/(shape[0]-1)), dtype=dtype)
+        return tf.zeros(shape, dtype=dtype) + tf.cast(tf.math.log(0.5/(shape[-1]-1)), dtype=dtype)
     
     def __repr__(self):
         return f"DefaultExit()"
@@ -111,11 +113,12 @@ class MatchTransitionInitializer(tf.keras.initializers.Initializer):
         self.scale = scale
     
     def __call__(self, shape, dtype=None, **kwargs):
-        val = tf.constant(self.val, dtype=dtype)[tf.newaxis,:]
-        z = tf.random.normal(shape, stddev=self.scale, dtype=dtype)[:,tf.newaxis]
+        val = tf.expand_dims(tf.constant(self.val, dtype=dtype), -2)
+        z = tf.random.normal(shape, stddev=self.scale, dtype=dtype)
+        z = tf.expand_dims(z, -1)
         val_z = val + z
-        p_exit_desired = 0.5 / (shape[0]-1)
-        prob = (tf.nn.softmax(val_z) * (1-p_exit_desired))[:,self.i]
+        p_exit_desired = 0.5 / (shape[-1]-1)
+        prob = (tf.nn.softmax(val_z) * (1-p_exit_desired))[...,self.i]
         return tf.math.log(prob)
     
     def __repr__(self):

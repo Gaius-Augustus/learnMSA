@@ -436,7 +436,6 @@ class TestMsaHmmCell(unittest.TestCase):
         viterbi_path_100 = Viterbi.viterbi(seq, hmm_cell, parallel_factor=100)
         np.testing.assert_equal(viterbi_path_1.numpy(), viterbi_path_100.numpy())
 
-
                 
 def string_to_one_hot(s):
     i = [SequenceDataset.alphabet.index(aa) for aa in s]
@@ -2255,7 +2254,58 @@ class TestTree(unittest.TestCase):
             
 
     def test_tree_transitioner(self):
-        pass
+        from learnMSA.msa_hmm.Transitioner import ProfileHMMTransitioner
+        from learnMSA.msa_hmm.TreeTransitioner import TreeTransitioner
+        
+        transition_init = [Initializers.make_default_transition_init(scale=0.),
+                            Initializers.make_default_transition_init(MM=2, scale=0.)]
+        flank_init = [Initializers.make_default_flank_init()]*2
+
+        transitioner = TreeTransitioner(num_clusters=3, 
+                                        transition_init=transition_init,
+                                        flank_init=flank_init)
+        transitioner.set_lengths([7, 11])
+        transitioner.build()
+        transitioner.recurrent_init()
+        q = transitioner.max_num_states
+        self.assertEqual(transitioner.A.shape, (2, 3, q, q))
+        for i in range(2):
+            A_model_no_padding = transitioner.A[i,..., :transitioner.num_states[i], :]
+            np.testing.assert_almost_equal(np.sum(A_model_no_padding, axis=-1), 1.)
+
+        # test if clsuter parameters are the same 
+        # when comparing to two individual transitioners
+        val_transitioner = ProfileHMMTransitioner(transition_init=transition_init,
+                                                    flank_init=flank_init)
+        val_transitioner.set_lengths([7, 11])
+        val_transitioner.build()
+        val_transitioner.recurrent_init()
+        np.testing.assert_almost_equal(transitioner.A.numpy()[:,0], 
+                                       val_transitioner.A.numpy())
+        np.testing.assert_almost_equal(transitioner.A.numpy()[:,1], 
+                                       val_transitioner.A.numpy())
+
+        
+    def test_tree_transitioner_equality_to_normal_transitioner(self):
+        from learnMSA.msa_hmm.Transitioner import ProfileHMMTransitioner
+        from learnMSA.msa_hmm.TreeTransitioner import TreeTransitioner
+
+        transition_init = [Initializers.make_default_transition_init(MM=7,scale=0.),
+                           Initializers.make_default_transition_init(scale=0.)]
+        flank_init = [Initializers.make_default_flank_init()]*2
+        transitioner = ProfileHMMTransitioner(transition_init=transition_init,
+                                              flank_init=flank_init)
+        tree_transitioner = TreeTransitioner(num_clusters=1, 
+                                             transition_init=transition_init,
+                                             flank_init=flank_init)
+        transitioner.set_lengths([7, 11])
+        transitioner.build()
+        transitioner.recurrent_init()
+        tree_transitioner.set_lengths([7, 11])
+        tree_transitioner.build()
+        tree_transitioner.recurrent_init()
+        np.testing.assert_almost_equal(transitioner.A.numpy(), 
+                                       tree_transitioner.A.numpy()[:,0])
 
 
     def test_tree_loss(self):

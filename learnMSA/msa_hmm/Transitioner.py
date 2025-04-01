@@ -63,7 +63,7 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
         for init, parts in zip(self.transition_init, self.explicit_transition_kernel_parts):
             _assert_transition_init_kernel(init, parts)
         
-        
+
     def build(self, input_shape=None):
         if self.built:
             return
@@ -77,7 +77,7 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
             for i, (part_name, length, init, frozen, shared_with) in enumerate(model_kernel_parts):
                 if (shared_with is None 
                     or all(s not in model_transition_kernel for s in shared_with)):
-                    k = self.add_weight(shape=[length], 
+                    k = self.add_weight(shape=self.get_kernel_shape((length,)), 
                                         initializer = init,
                                         name="transition_kernel_"+part_name+"_"+str(i),
                                         trainable=not frozen)
@@ -90,12 +90,20 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
             self.transition_kernel.append(model_transition_kernel)
         
         # closely related to the initial probability of the left flank state
-        self.flank_init_kernel = [self.add_weight(shape=[1],
+        self.flank_init_kernel = [self.add_weight(shape=self.get_kernel_shape((1,)),
                                          initializer=init,
                                          name="init_logit_"+str(i))
                                       for i,init in enumerate(self.flank_init)]
         self.prior.build()
         self.built = True
+
+    
+    def get_kernel_shape(self, base_shape):
+        """ Can be overridden in subclasses to change the kernel shape. 
+        Might append any number of additional dimensions to the left of base shape.
+        """
+        return base_shape
+
         
 
     def recurrent_init(self):
@@ -104,7 +112,8 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
         """
         self.A_sparse, self.implicit_log_probs, self.log_probs, self.probs = self.make_A_sparse(return_probs = True)
         self.A = tf.sparse.to_dense(self.A_sparse)
-        self.A_t = tf.transpose(self.A, (0,2,1))
+        s = len(self.get_kernel_shape(()))
+        self.A_t = tf.transpose(self.A, (0,) + tuple(i+1 for i in range(s)) + (s+2,s+1))
         
 
     def make_flank_init_prob(self):
@@ -158,7 +167,8 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
         """
         concat_transition_kernels = []
         for part_names, kernel in zip(self.explicit_transition_kernel_parts, self.transition_kernel):
-            concat_kernel = tf.concat([kernel[part_name] for part_name,_ in part_names], axis=0)
+            kernels = [kernel[part_name] for part_name,_ in part_names]
+            concat_kernel = tf.concat(kernels, axis=-1)
             concat_transition_kernels.append( concat_kernel )
         return concat_transition_kernels
               
@@ -177,11 +187,17 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
             probs_dict = {}
             indices_explicit = np.concatenate([indices_explicit[part_name] 
                                                     for part_name,_ in parts], axis=0)
-            dense_probs = make_transition_matrix_from_indices(indices_explicit, kernel, num_states)
-            probs_vec = tf.gather_nd(dense_probs, indices_explicit)
+            dense_probs = self.make_transition_matrix_from_indices(indices_explicit, 
+                                                                   kernel, 
+                                                                   num_states)
+            indices_explicit = np.broadcast_to(indices_explicit, 
+                                               self.get_kernel_shape(indices_explicit.shape))
+            probs_vec = tf.gather_nd(dense_probs, 
+                                     indices_explicit, 
+                                     batch_dims=len(self.get_kernel_shape(())))
             lsum = 0
             for part_name, length in parts:
-                probs_dict[part_name] = probs_vec[lsum : lsum+length]
+                probs_dict[part_name] = probs_vec[..., lsum : lsum+length]
                 lsum += length
             model_prob_dicts.append(probs_dict)
         return model_prob_dicts
@@ -204,16 +220,25 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
             #compute match_skip(i,j) = P(Mj+2 | Mi)  , L x L
             #considers "begin" as M0 and "end" as ML
             MD = tf.expand_dims(p["match_to_delete"], -1)
-            DD = tf.concat([[0], p["delete_to_delete"]], axis=0)
-            DD_cumsum = tf.math.cumsum(DD)
-            DD = tf.expand_dims(DD_cumsum, 0) - tf.expand_dims(DD_cumsum, 1)
-            DM = tf.expand_dims(p["delete_to_match"], 0)
+            # add zero padding to the beginning of the delete-to-delete kernel
+            # account for any additional dimensions in the kernel shape
+            paddings = tf.constant([[0,0]]*len(self.get_kernel_shape(())) + [[1,0]])
+            DD = tf.pad(p["delete_to_delete"], paddings, constant_values=0.)
+            DD_cumsum = tf.math.cumsum(DD, axis=-1)
+            DD = tf.expand_dims(DD_cumsum, -2) - tf.expand_dims(DD_cumsum, -1)
+            DM = tf.expand_dims(p["delete_to_match"], -2)
             M_skip = MD + DD + DM 
-            upper_triangle = tf.linalg.band_part(tf.ones([length-2]*2, dtype=self.dtype), 0, -1)
             entry_add = _logsumexp(p["begin_to_match"], 
-                                   tf.concat([[self.approx_log_zero], M_skip[0, :-1]], axis=0))
+                                   tf.pad(M_skip[..., 0, :-1],
+                                          [[0,0]]*len(self.get_kernel_shape(())) + [[1,0]],
+                                            constant_values=self.approx_log_zero))
             exit_add = _logsumexp(p["match_to_end"], 
-                                  tf.concat([M_skip[1:,-1], [self.approx_log_zero]], axis=0))
+                                   tf.pad(M_skip[..., 1:, -1],
+                                          [[0,0]]*len(self.get_kernel_shape(())) + [[0,1]],
+                                            constant_values=self.approx_log_zero))
+            upper_triangle = tf.linalg.band_part(tf.ones([length-2]*2, dtype=self.dtype), 0, -1)
+            upper_triangle = tf.broadcast_to(upper_triangle, self.get_kernel_shape(upper_triangle.shape))
+            
             imp_probs = {}
             imp_probs["match_to_match"] = p["match_to_match"]
             imp_probs["match_to_insert"] = p["match_to_insert"]
@@ -222,14 +247,16 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
             imp_probs["left_flank_loop"] = p["left_flank_loop"]
             imp_probs["right_flank_loop"] = p["right_flank_loop"]
             imp_probs["right_flank_exit"] = p["right_flank_exit"]
-            imp_probs["match_skip"] = tf.boolean_mask(M_skip[1:-1, 1:-1], 
+            imp_probs["match_skip"] = tf.boolean_mask(M_skip[..., 1:-1, 1:-1], 
                                      mask=tf.cast(upper_triangle, dtype=tf.bool)) 
+            imp_probs["match_skip"] = tf.reshape(imp_probs["match_skip"], 
+                                                 self.get_kernel_shape((int((length-1)*(length-2)/2),)))
             imp_probs["left_flank_to_match"] = p["left_flank_exit"] + entry_add
-            imp_probs["left_flank_to_right_flank"] = (p["left_flank_exit"] + M_skip[0, -1] 
+            imp_probs["left_flank_to_right_flank"] = (p["left_flank_exit"] + M_skip[..., :1, -1] 
                                                       + p["end_to_right_flank"])
-            imp_probs["left_flank_to_unannotated_segment"] = (p["left_flank_exit"] + M_skip[0, -1] 
+            imp_probs["left_flank_to_unannotated_segment"] = (p["left_flank_exit"] + M_skip[..., :1, -1] 
                                                               + p["end_to_unannotated_segment"])
-            imp_probs["left_flank_to_terminal"] = (p["left_flank_exit"] + M_skip[0, -1] 
+            imp_probs["left_flank_to_terminal"] = (p["left_flank_exit"] + M_skip[..., :1, -1] 
                                                    + p["end_to_terminal"])
             imp_probs["match_to_unannotated"] = exit_add + p["end_to_unannotated_segment"]
             imp_probs["match_to_right_flank"] = exit_add + p["end_to_right_flank"]
@@ -237,15 +264,15 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
             imp_probs["unannotated_segment_to_match"] = p["unannotated_segment_exit"] + entry_add
             imp_probs["unannotated_segment_loop"] = _logsumexp(p["unannotated_segment_loop"], 
                                                                (p["unannotated_segment_exit"] 
-                                                                    + M_skip[0, -1] 
+                                                                    + M_skip[..., :1, -1] 
                                                                     + p["end_to_unannotated_segment"]))
             imp_probs["unannotated_segment_to_right_flank"] = (p["unannotated_segment_exit"] 
-                                                               + M_skip[0, -1] 
+                                                               + M_skip[..., :1, -1] 
                                                                + p["end_to_right_flank"])
             imp_probs["unannotated_segment_to_terminal"] = (p["unannotated_segment_exit"] 
-                                                            + M_skip[0, -1] 
+                                                            + M_skip[..., :1, -1] 
                                                             + p["end_to_terminal"])
-            imp_probs["terminal_self_loop"] = tf.zeros((1), dtype=self.dtype)
+            imp_probs["terminal_self_loop"] = tf.zeros(self.get_kernel_shape((1,)), dtype=self.dtype)
             implicit_log_probs.append(imp_probs)
         return implicit_log_probs, log_probs, probs
     
@@ -256,28 +283,42 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
             A 3D sparse tensor of dense shape (k, q, q) representing 
             the logarithmic transition matricies for k models.
         """
+        
         implicit_log_probs, log_probs, probs = self.make_implicit_log_probs()
         values_all_models, indices_all_models = [], []
+
         for i, (p, parts, indices, num_states) in enumerate(zip(implicit_log_probs, 
                                                            self.implicit_transition_parts, 
                                                            self.sparse_transition_indices_implicit,
                                                            self.num_states_implicit)):
+
             #obtain values and indices in model order
-            values = tf.concat([p[part_name] for part_name,_ in parts], axis=0)
+            values = tf.concat([p[part_name] for part_name,_ in parts], axis=-1)
             indices_concat = np.concatenate([indices[part_name] for part_name,_ in parts], axis=0)
+
             #reorder row-major
             row_major_order = np.argsort([i*num_states+j for i,j in indices_concat])
-            indices_concat = indices_concat[row_major_order]
-            values = tf.gather(values, row_major_order)
-            indices_concat = np.pad(indices_concat, ((0,0), (1,0)), constant_values=i)
+
+            values = tf.gather(values, row_major_order, axis=-1)
+            values = tf.reshape(values, (-1,)) #concat requires flat array
             values_all_models.append(values)
+
+            indices_concat = indices_concat[row_major_order]
+            indices_concat = self._broadcast_indices(indices_concat)
+            indices_concat = np.pad(indices_concat, ((0,0), (1,0)), constant_values=i)
             indices_all_models.append(indices_concat)
+
         values_all_models = tf.concat(values_all_models, axis=0) #"model major" order
+        values_all_models = tf.reshape(values_all_models, (-1,)) #flatten for sparse call
+
         indices_all_models = np.concatenate(indices_all_models, axis=0)
+
+        full_dense_shape = ((self.num_models,) + 
+                            self.get_kernel_shape((self.max_num_states, self.max_num_states)))
         log_A_sparse = tf.sparse.SparseTensor(
                             indices=indices_all_models, 
                             values=values_all_models, 
-                            dense_shape=[self.num_models] + [self.max_num_states]*2)
+                            dense_shape=full_dense_shape)
         if return_probs:
             return log_A_sparse, implicit_log_probs, log_probs, probs
         else:
@@ -344,6 +385,43 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
         return self.prior(self.make_probs(), self.make_flank_init_prob())
     
 
+    def make_transition_matrix_from_indices(self, indices : np.array, kernel, num_states, approx_log_zero = -1000.):
+        """Constructs a dense probabilistic transition matrix from a sparse index list and a kernel.
+        Args:
+            indices: A 2D numpy array of shape (num_transitions, 2) that specifies the indices of the kernel.
+            kernel: A 1D tensor of shape 'transitioner.get_kernel_shape((num_transitions,))' that contains the kernel values.
+            num_states: The number of states in the model. 
+        Returns:
+            A dense probabilistic transition matrix of shape get_kernel_shape((num_states, num_states)).
+        """
+
+        # tf.sparse requires a strict row-major ordering of the indices
+        row_major_order = np.argsort([i*num_states+j for i,j in indices])
+
+        #reorder row-major
+        indices_row_major = indices[row_major_order]
+        kernel_row_major = tf.gather(kernel, row_major_order, axis=-1)
+        kernel_row_major = tf.reshape(kernel_row_major, (-1,)) #flatten for sparse call
+        kernel_row_major = tf.maximum(kernel_row_major, approx_log_zero+1) #numeric stability
+
+        sparse_kernel =  tf.sparse.SparseTensor(
+                                    indices=self._broadcast_indices(indices_row_major),
+                                    values=kernel_row_major, 
+                                    dense_shape=self.get_kernel_shape((num_states, num_states)))
+        dense_kernel = tf.sparse.to_dense(sparse_kernel, default_value=approx_log_zero)
+
+        #softmax that ignores non-existing transitions
+        dense_probs = tf.nn.softmax(dense_kernel, axis=-1)
+
+        #mask out non-existing transitions and rescale for numerical stability
+        mask = tf.cast(dense_kernel > approx_log_zero, dense_probs.dtype)
+        dense_probs += 1e-16
+        dense_probs = dense_probs * mask
+        dense_probs /= tf.reduce_sum(dense_probs, axis=-1, keepdims=True)
+        
+        return dense_probs
+    
+
     def duplicate(self, model_indices=None, share_kernels=False):
         if model_indices is None:
             model_indices = range(len(self.transition_init))
@@ -408,6 +486,37 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
         return padded_and_stacked
     
 
+    def _broadcast_indices(self, indices : np.array):
+        """
+        Broadcasts the indices of a sparse kernel to the shape of the kernel.
+        This generalizes the sparse indexing:
+        Let the dense_shape be get_kernel_shape((q,q)) = (d1, d2, ..., dk, q, q).
+        If indices have shape (n,2), then the new indices have shape (n*d1*..*dk, k+2) and
+        new_indices[i * j1 * ... * jk, :] = [j1, ..., jk, indices[i, 0], indices[i, 1]].
+        Args:
+            indices: A 2D numpy array of shape (num_transitions, 2) that specifies the 
+            indices of the kernel.
+        Returns:
+            A 2D numpy array of shape (num_transitions * d1 * ... * dk, k+2) that 
+            specifies the indices of the kernel.
+        """
+        base_shape = self.get_kernel_shape(())
+
+        if len(base_shape) > 0:
+            extra_indices = _cartesian_product(*[np.arange(s) for s in base_shape])
+
+            extra_indices_repeated = np.repeat(extra_indices, len(indices), axis=0)
+
+            # Tile indices_row_major to match the extra_indices
+            tiled_indices = np.tile(indices, (len(extra_indices), 1))
+
+            # Combine extra_indices and tiled_indices
+            new_indices = np.concatenate([extra_indices_repeated, tiled_indices], axis=-1)
+        else:
+            new_indices = indices
+        return new_indices
+    
+
     def get_config(self):
         config = super(ProfileHMMTransitioner, self).get_config()
         if self.built:
@@ -442,37 +551,6 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
     def __repr__(self):
         return f"ProfileHMMTransitioner(\n transition_init={config.as_str(self.transition_init[0], 2, '    ', ' , ')},\n flank_init={self.flank_init[0]},\n prior={self.prior},\n frozen_kernels={self.frozen_kernels})"
     
-
-
-def make_transition_matrix_from_indices(indices, kernel, num_states, approx_log_zero = -1000.):
-    """Constructs a dense probabilistic transition matrix from a sparse index list and a kernel.
-    Args:
-        indices: A 2D tensor of shape (num_transitions, 2) that specifies the indices of the kernel.
-        kernel: A 1D tensor of shape (num_transitions) that contains the kernel values.
-        num_states: The number of states in the model. 
-    Returns:
-        A dense probabilistic transition matrix of shape (num_states, num_states).
-    """
-    # tf.sparse requires a strict row-major ordering of the indices
-    row_major_order = np.argsort([i*num_states+j for i,j in indices])
-    #reorder row-major
-    indices_row_major = indices[row_major_order]
-    kernel_row_major = tf.gather(kernel, row_major_order)
-    #don't allow too small values in the kernel
-    kernel_row_major = tf.maximum(kernel_row_major, approx_log_zero+1)
-    sparse_kernel =  tf.sparse.SparseTensor(
-                                indices=indices_row_major, 
-                                values=kernel_row_major, 
-                                dense_shape=[num_states]*2)
-    dense_kernel = tf.sparse.to_dense(sparse_kernel, default_value=approx_log_zero)
-    #softmax that ignores non-existing transitions
-    dense_probs = tf.nn.softmax(dense_kernel, axis=-1)
-    #mask out non-existing transitions and rescale for numerical stability
-    mask = tf.cast(dense_kernel > approx_log_zero, dense_probs.dtype)
-    dense_probs += 1e-16
-    dense_probs = dense_probs * mask
-    dense_probs /= tf.reduce_sum(dense_probs, axis=-1, keepdims=True)
-    return dense_probs
 
 
 def _make_explicit_transition_kernel_parts(length): 
@@ -604,6 +682,14 @@ def _assert_transition_init_kernel(kernel_init, parts):
         
 def _logsumexp(x, y):
     return tf.math.log(tf.math.exp(x) +  tf.math.exp(y))
+
+def _cartesian_product(*arrays):
+    la = len(arrays)
+    dtype = np.result_type(*arrays)
+    arr = np.empty([len(a) for a in arrays] + [la], dtype=dtype)
+    for i, a in enumerate(np.ix_(*arrays)):
+        arr[...,i] = a
+    return arr.reshape(-1, la)
 
 
 
