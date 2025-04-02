@@ -193,3 +193,13 @@ def deserialize(obj):
         return obj
     else:
         return tf.keras.utils.deserialize_keras_object(obj)
+    
+    
+def as_str(config, items_per_line=1, prefix="", sep=""):
+    return ("\n"+prefix
+            +"{" + 
+            sep.join(("\n"+prefix)*(i%items_per_line==0) 
+                     + key + " : " 
+                     + str(val) 
+                     for i,(key,val) in enumerate(config.items())) 
+            + "\n"+prefix+"}")

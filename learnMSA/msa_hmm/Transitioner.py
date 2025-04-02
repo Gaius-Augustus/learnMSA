@@ -2,8 +2,7 @@ import tensorflow as tf
 import numpy as np
 import learnMSA.msa_hmm.Initializers as initializers
 import learnMSA.msa_hmm.Priors as priors
-import learnMSA.msa_hmm.Configuration as config
-from learnMSA.msa_hmm.Utility import get_num_states, get_num_states_implicit, deserialize
+from learnMSA.msa_hmm.Utility import get_num_states, get_num_states_implicit, deserialize, as_str
 from packaging import version
 if version.parse(tf.__version__) < version.parse("2.10.0"):
     from tensorflow.python.training.tracking.data_structures import NoDependency #see https://github.com/tensorflow/tensorflow/issues/36916
@@ -549,7 +548,7 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
     
 
     def __repr__(self):
-        return f"ProfileHMMTransitioner(\n transition_init={config.as_str(self.transition_init[0], 2, '    ', ' , ')},\n flank_init={self.flank_init[0]},\n prior={self.prior},\n frozen_kernels={self.frozen_kernels})"
+        return f"ProfileHMMTransitioner(\n transition_init={as_str(self.transition_init[0], 2, '    ', ' , ')},\n flank_init={self.flank_init[0]},\n prior={self.prior},\n frozen_kernels={self.frozen_kernels})"
     
 
 

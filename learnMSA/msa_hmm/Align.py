@@ -9,8 +9,10 @@ from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 import learnMSA.msa_hmm.Training as train
 import learnMSA.msa_hmm.Initializers as initializers
 from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
-from learnMSA.msa_hmm.Configuration import as_str, assert_config
+from learnMSA.msa_hmm.Configuration import assert_config
 from learnMSA.msa_hmm.AlignInsertions import make_aligned_insertions
+from learnMSA.msa_hmm.Utility import as_str
+
 
 #experimental, only used for ablation studies
 #decreases accuracy slightly!

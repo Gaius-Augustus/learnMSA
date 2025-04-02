@@ -2253,22 +2253,25 @@ class TestTree(unittest.TestCase):
         test_inputs(inputs, indices)
             
 
-    def test_tree_transitioner(self):
+    def test_cluster_transitioner(self):
         from learnMSA.msa_hmm.Transitioner import ProfileHMMTransitioner
-        from learnMSA.msa_hmm.TreeTransitioner import TreeTransitioner
+        from learnMSA.msa_hmm.TreeTransitioner import ClusterTransitioner
         
         transition_init = [Initializers.make_default_transition_init(scale=0.),
-                            Initializers.make_default_transition_init(MM=2, scale=0.)]
-        flank_init = [Initializers.make_default_flank_init()]*2
+                            Initializers.make_default_transition_init(MM=2, scale=0.),
+                            Initializers.make_default_transition_init(MM=3, scale=0.)]
+        flank_init = [Initializers.make_default_flank_init()]*3
+        cluster_indices = [0,1,2,0,1,2,2,1,0,1,2,0]
 
-        transitioner = TreeTransitioner(num_clusters=3, 
-                                        transition_init=transition_init,
-                                        flank_init=flank_init)
-        transitioner.set_lengths([7, 11])
+        transitioner = ClusterTransitioner(num_clusters=3,
+                                            cluster_indices=cluster_indices, 
+                                            transition_init=transition_init,
+                                            flank_init=flank_init)
+        transitioner.set_lengths([7, 11, 5])
         transitioner.build()
         transitioner.recurrent_init()
         q = transitioner.max_num_states
-        self.assertEqual(transitioner.A.shape, (2, 3, q, q))
+        self.assertEqual(transitioner.A.shape, (3, 3, q, q))
         for i in range(2):
             A_model_no_padding = transitioner.A[i,..., :transitioner.num_states[i], :]
             np.testing.assert_almost_equal(np.sum(A_model_no_padding, axis=-1), 1.)
@@ -2277,25 +2280,44 @@ class TestTree(unittest.TestCase):
         # when comparing to two individual transitioners
         val_transitioner = ProfileHMMTransitioner(transition_init=transition_init,
                                                     flank_init=flank_init)
-        val_transitioner.set_lengths([7, 11])
+        val_transitioner.set_lengths([7, 11, 5])
         val_transitioner.build()
         val_transitioner.recurrent_init()
         np.testing.assert_almost_equal(transitioner.A.numpy()[:,0], 
                                        val_transitioner.A.numpy())
         np.testing.assert_almost_equal(transitioner.A.numpy()[:,1], 
                                        val_transitioner.A.numpy())
+        
+        # test inputs
+        T_ind = np.array([[0, 1, 2, 3], 
+                          [4, 5, 6, 7], 
+                          [8, 9, 10, 11]])
+        T = np.eye(transitioner.max_num_states)[T_ind]
+        indices = np.array([[0, 1, 2, 3], 
+                            [4, 5, 6, 7], 
+                            [8, 9, 10, 11]])
+        T_plus_one = transitioner(T, indices)
+
+        for i in range(3):
+            for j in range(4):
+                c = cluster_indices[indices[i,j]]
+                q = T_ind[i,j]
+                ref = transitioner.A[i, c, q]
+                np.testing.assert_equal(T_plus_one[i,j,:].numpy(), ref)
+
 
         
-    def test_tree_transitioner_equality_to_normal_transitioner(self):
+    def test_cluster_transitioner_equality_to_normal_transitioner(self):
         from learnMSA.msa_hmm.Transitioner import ProfileHMMTransitioner
-        from learnMSA.msa_hmm.TreeTransitioner import TreeTransitioner
+        from learnMSA.msa_hmm.TreeTransitioner import ClusterTransitioner
 
         transition_init = [Initializers.make_default_transition_init(MM=7,scale=0.),
                            Initializers.make_default_transition_init(scale=0.)]
         flank_init = [Initializers.make_default_flank_init()]*2
         transitioner = ProfileHMMTransitioner(transition_init=transition_init,
                                               flank_init=flank_init)
-        tree_transitioner = TreeTransitioner(num_clusters=1, 
+        tree_transitioner = ClusterTransitioner(num_clusters=1, 
+                                                cluster_indices=[],
                                              transition_init=transition_init,
                                              flank_init=flank_init)
         transitioner.set_lengths([7, 11])

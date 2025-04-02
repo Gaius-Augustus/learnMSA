@@ -8,11 +8,11 @@ import learnMSA.msa_hmm.Priors as priors
 import learnMSA.protein_language_models.Common as Common
 from learnMSA.protein_language_models.MvnEmitter import MvnEmitter, AminoAcidPlusMvnEmissionInitializer, make_joint_prior
 from learnMSA.msa_hmm.TreeEmitter import TreeEmitter
+from learnMSA.msa_hmm.TreeTransitioner import TreeTransitioner
 import subprocess as sp
 from learnMSA.msa_hmm.Utility import inverse_softplus
 
-def as_str(config, items_per_line=1, prefix="", sep=""):
-    return "\n"+prefix+"{" + sep.join(("\n"+prefix)*(i%items_per_line==0) + key + " : " + str(val) for i,(key,val) in enumerate(config.items())) + "\n"+prefix+"}"
+
 
 #simple adpative batch size depending on sequence- length and model length
 #longer models and sequences require much more memory
@@ -140,14 +140,21 @@ def make_default(default_num_models=5,
         initial_branch_length_kernel = inverse_softplus(tree_handler.branch_lengths[:tree_handler.num_leaves])
         encoder_initializer = ([initializers.ConstantInitializer(initial_branch_length_kernel)]+
                                     initializers.make_LG_init(default_num_models))
+
+        transitioner = trans.TreeTransitioner(tree_handler.num_anc-1,
+                                                transition_init=[initializers.make_default_transition_init() 
+                                                        for _ in range(default_num_models)],
+                                                flank_init=[initializers.make_default_flank_init() 
+                                                        for _ in range(default_num_models)])
     else:
         encoder_initializer = ([initializers.ConstantInitializer(-3.)]+
                                     initializers.make_LG_init(default_num_models))
 
-    transitioner = trans.ProfileHMMTransitioner([initializers.make_default_transition_init() 
-                                                                        for _ in range(default_num_models)],
-                                                    [initializers.make_default_flank_init() 
-                                                                        for _ in range(default_num_models)])
+        transitioner = trans.ProfileHMMTransitioner([initializers.make_default_transition_init() 
+                                                                            for _ in range(default_num_models)],
+                                                        [initializers.make_default_flank_init() 
+                                                                            for _ in range(default_num_models)])
+        
     #automaticall scale to a memory friendly version, if the GPU has less than 32GB     
     small_gpu = False
     if len([x.name for x in tf.config.list_logical_devices() if x.device_type == 'GPU']) > 0:     

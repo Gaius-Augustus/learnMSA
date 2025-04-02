@@ -137,8 +137,7 @@ class TreeEmitter(ProfileHMMEmitter):
         """
         input_shape = tf.shape(inputs)
         B = self.B_transposed[..., :input_shape[-1],:]
-        # we have to select the correct entry from the second dimension of B
-        # for each input sequence
+        # we have to select the correct parameters for each input sequence
         cluster_indices = tf.gather(self.cluster_indices, indices)
         B = tf.gather(B, cluster_indices, batch_dims=1)
         return self._compute_emission_probs(inputs, B, input_shape, B_contains_batch=True)
