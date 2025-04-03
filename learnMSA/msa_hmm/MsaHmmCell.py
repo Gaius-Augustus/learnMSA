@@ -66,19 +66,21 @@ class HmmCell(tf.keras.layers.Layer):
         for em in self.emitter:
             em.recurrent_init(indices)
         self.log_A_dense = self.transitioner.make_log_A()
-        self.log_A_dense_t = tf.transpose(self.log_A_dense, [0,2,1])
-        self.init_dist = self.make_initial_distribution()
+        self.log_A_dense_t = self.transitioner.transpose_transition_matrix(self.log_A_dense)
         if not self.reverse and self.use_step_counter:
             self.step_counter.assign(-1)
     
     
-    def make_initial_distribution(self):
+    def make_initial_distribution(self, indices=None):
         """Constructs the initial state distribution which depends on the transition probabilities.
             See ProfileHMMTransitioner.
+        Args:
+            indices: A tensor of shape (num_model, b) that contains the index of each input sequence.
         Returns:
-            A probability distribution of shape: (1, num_model, q)
+            A probability distribution per model. Shape: (num_model,) + get_kernel_shape((q,)) if indices is None
+            or (num_model, b, q) if indices is not None.
         """
-        return self.transitioner.make_initial_distribution()
+        return self.transitioner.make_initial_distribution(indices)
         
     
     def emission_probs(self, inputs, end_hints=None, training=False):
@@ -131,7 +133,7 @@ class HmmCell(tf.keras.layers.Layer):
         return (output, new_state)
 
     
-    def get_initial_state(self, inputs=None, batch_size=None, dtype=None, parallel_factor=1):
+    def get_initial_state(self, inputs=None, indices=None, batch_size=None, dtype=None, parallel_factor=1):
         """ Returns the initial recurrent state which is a pair of tensors: the scaled 
             forward probabilities of shape (num_models*batch, num_states) 
             and the log likelihood (num_models*batch, 1).
@@ -143,8 +145,9 @@ class HmmCell(tf.keras.layers.Layer):
             if self.reverse:
                 init_dist = tf.ones((self.num_models*batch_size, self.max_num_states), dtype=self.dtype)
             else:
-                init_dist = tf.repeat(self.make_initial_distribution(), repeats=batch_size, axis=0)
-                init_dist = tf.transpose(init_dist, (1,0,2))
+                init_dist = self.make_initial_distribution(indices)
+                init_dist = tf.expand_dims(init_dist, 1)
+                init_dist = tf.repeat(init_dist, repeats=batch_size, axis=1)
                 init_dist = tf.reshape(init_dist, (-1, self.max_num_states))
             loglik = tf.zeros((self.num_models*batch_size, 1), dtype=self.dtype)
             return [init_dist, loglik]

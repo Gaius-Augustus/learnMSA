@@ -141,11 +141,11 @@ def make_default(default_num_models=5,
         encoder_initializer = ([initializers.ConstantInitializer(initial_branch_length_kernel)]+
                                     initializers.make_LG_init(default_num_models))
 
-        transitioner = trans.TreeTransitioner(tree_handler.num_anc-1,
-                                                transition_init=[initializers.make_default_transition_init() 
-                                                        for _ in range(default_num_models)],
-                                                flank_init=[initializers.make_default_flank_init() 
-                                                        for _ in range(default_num_models)])
+        transitioner = TreeTransitioner(tree_handler,
+                                        transition_init=[initializers.make_default_transition_init() 
+                                                for _ in range(default_num_models)],
+                                        flank_init=[initializers.make_default_flank_init() 
+                                                for _ in range(default_num_models)])
     else:
         encoder_initializer = ([initializers.ConstantInitializer(-3.)]+
                                     initializers.make_LG_init(default_num_models))

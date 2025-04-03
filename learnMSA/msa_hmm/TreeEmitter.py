@@ -122,7 +122,8 @@ class TreeEmitter(ProfileHMMEmitter):
         self.built = True
 
 
-    def recurrent_init(self):
+    def recurrent_init(self, indices):
+        self.indices = indices
         self.B = self.make_B()
         self.B_transposed = tf.transpose(self.B, [0,1,3,2])
 

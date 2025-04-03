@@ -43,8 +43,9 @@ class TotalProbabilityCell(tf.keras.layers.Layer):
             loglik = tf.zeros((batch_size), dtype=self.dtype)
             S = [init_dist, loglik]
         else:
-            init_dist = tf.repeat(self.make_initial_distribution(), repeats=batch_size//self.cell.num_models, axis=0)
-            init_dist = tf.transpose(init_dist, (1,0,2))
+            init_dist = self.make_initial_distribution()
+            init_dist = tf.expand_dims(init_dist, 1)
+            init_dist = tf.repeat(init_dist, repeats=batch_size//self.cell.num_models, axis=1)
             init_dist = tf.reshape(init_dist, (-1, self.cell.max_num_states))
             loglik = tf.zeros((batch_size), dtype=self.dtype)
             S = [tf.math.log(init_dist), loglik]

@@ -116,18 +116,25 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
         self.indices = indices
         self.A_sparse, self.implicit_log_probs, self.log_probs, self.probs = self.make_A_sparse(return_probs = True)
         self.A = tf.sparse.to_dense(self.A_sparse)
+        self.A_t = self.transpose_transition_matrix(self.A)
+
+
+    def transpose_transition_matrix(self, A):
         s = len(self.get_kernel_shape(()))
-        self.A_t = tf.transpose(self.A, (0,) + tuple(i+1 for i in range(s)) + (s+2,s+1))
+        return tf.transpose(A, (0,) + tuple(i+1 for i in range(s)) + (s+2,s+1))
         
 
     def make_flank_init_prob(self):
         return tf.math.sigmoid(tf.stack([tf.identity(k) for k in self.flank_init_kernel]))
         
 
-    def make_initial_distribution(self):
+    def make_initial_distribution(self, indices=None):
         """Constructs the initial state distribution per model which depends on the transition probabilities.
+        Args:
+            indices: A tensor of shape (k, b) that contains the index of each input sequence.
         Returns:
-            A probability distribution per model. Shape: (1, k, q)
+            A probability distribution per model. Shape: (k,) + get_kernel_shape((q,)) if indices is None
+            or (k, b, q) if indices is not None.
         """
         #state order: LEFT_FLANK, MATCH x length, INSERT x length-1, UNANNOTATED_SEGMENT, RIGHT_FLANK, TERMINAL
         init_flank_probs = self.make_flank_init_prob()
@@ -147,19 +154,20 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
             log_init_terminal = (self.implicit_log_probs[i]["left_flank_to_terminal"] 
                              + log_complement_init_flank_probs[i] 
                              - self.log_probs[i]["left_flank_exit"] )
-            log_init_insert = tf.zeros((self.lengths[i]-1), dtype=self.dtype) + self.approx_log_zero
+            log_init_insert = tf.zeros(self.get_kernel_shape((self.lengths[i]-1,)), dtype=self.dtype) 
+            log_init_insert += self.approx_log_zero
             log_init_dist = tf.concat([log_init_flank_probs[i], 
                                         log_init_match, 
                                         log_init_insert, 
                                         log_init_unannotated_segment, 
                                         log_init_right_flank, 
-                                        log_init_terminal], axis=0)
+                                        log_init_terminal], axis=-1)
             log_init_dist = tf.pad(log_init_dist, 
-                                   [[0, self.max_num_states - self.num_states[i]]], 
+                                    [[0,0]]*len(self.get_kernel_shape(())) + 
+                                    [[0, self.max_num_states - self.num_states[i]]], 
                                    constant_values = self.approx_log_zero)
             log_init_dists.append(log_init_dist)
         log_init_dists = tf.stack(log_init_dists, axis=0)
-        log_init_dists = tf.expand_dims(log_init_dists, 0)
         init_dists = tf.math.exp(log_init_dists)
         return init_dists
     

@@ -142,7 +142,7 @@ class CasinoHMMTransitioner(tf.keras.layers.Layer):
         return tf.math.log(self.make_A())
 
 
-    def make_initial_distribution(self):
+    def make_initial_distribution(self, indices=None):
         return tf.nn.softmax(self.starting_distribution_kernel)
         
         
@@ -163,6 +163,11 @@ class CasinoHMMTransitioner(tf.keras.layers.Layer):
          # Can be used for regularization in the future.
         return 0.
     
+
+    def transpose_transition_matrix(self, A):
+        return tf.transpose(A, (0,2,1))
+    
+
     def duplicate(self, model_indices=None, share_kernels=False):
         init = ConstantInitializer(self.transition_kernel.numpy())
         starting_distribution_init = ConstantInitializer(self.starting_distribution_kernel.numpy())

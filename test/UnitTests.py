@@ -198,7 +198,7 @@ class TestMsaHmmCell(unittest.TestCase):
             B = hmm_cell.emitter[0].make_B()
             np.testing.assert_almost_equal(A[0], self.A_ref[i], decimal=5) #allow some decimal errors from softmaxes
             np.testing.assert_almost_equal(B[0], self.B_ref[i], decimal=5) 
-            np.testing.assert_almost_equal(init[0,0], self.init_ref[i], decimal=5) 
+            np.testing.assert_almost_equal(init[0], self.init_ref[i], decimal=5) 
             imp_log_probs = hmm_cell.transitioner.make_implicit_log_probs()[0][0]
             for part_name in imp_log_probs.keys():
                 self.assertTrue(part_name in [part[0] for part in hmm_cell.transitioner.implicit_transition_parts[0]], 
@@ -220,7 +220,7 @@ class TestMsaHmmCell(unittest.TestCase):
             q = hmm_cell.num_states[i]
             np.testing.assert_almost_equal(A[i, :q, :q], self.A_ref[i], decimal=5) #allow some decimal errors from softmaxes
             np.testing.assert_almost_equal(B[i, :q], self.B_ref[i], decimal=5) 
-            np.testing.assert_almost_equal(init[0,i,:q], self.init_ref[i], decimal=5) 
+            np.testing.assert_almost_equal(init[i,:q], self.init_ref[i], decimal=5) 
         
     def test_single_model_forward(self):
         seq = tf.one_hot([[0,1,0,2]], 3)
@@ -2220,13 +2220,14 @@ class TestTree(unittest.TestCase):
                                                     decimal=5)
         
         # computes B, which could also be computed manually via make_B()
-        emitter.recurrent_init()
+        emitter.recurrent_init(None)
         
         q = max(lengths)*2+3 # number of states
 
         self.assertEqual(emitter.B.shape, (n, k, q, d+1))
 
         def test_inputs(inputs, indices):
+            emitter.recurrent_init(indices)
             num_leaves = indices.shape[-1]
             emission_probs = emitter(inputs, indices)
             self.assertEqual(emission_probs.shape, (n, num_leaves, 10, q))
@@ -2257,7 +2258,7 @@ class TestTree(unittest.TestCase):
         from learnMSA.msa_hmm.Transitioner import ProfileHMMTransitioner
         from learnMSA.msa_hmm.TreeTransitioner import ClusterTransitioner
         
-        # test inputs
+        # some inputs
         T_ind = np.array([[0, 1, 2, 3], 
                           [4, 5, 6, 7], 
                           [8, 9, 10, 11]])
@@ -2265,6 +2266,7 @@ class TestTree(unittest.TestCase):
                             [4, 5, 6, 7], 
                             [8, 9, 10, 11]])
         
+        # construct the transitioner
         transition_init = [Initializers.make_default_transition_init(scale=0.),
                             Initializers.make_default_transition_init(MM=2, scale=0.),
                             Initializers.make_default_transition_init(MM=3, scale=0.)]
@@ -2283,6 +2285,9 @@ class TestTree(unittest.TestCase):
         for i in range(2):
             A_model_no_padding = transitioner.A[i,..., :transitioner.num_states[i], :]
             np.testing.assert_almost_equal(np.sum(A_model_no_padding, axis=-1), 1.)
+        init_dist = transitioner.make_initial_distribution(indices)
+        self.assertEqual(init_dist.shape, (3, 4, q))
+        np.testing.assert_almost_equal(np.sum(init_dist, axis=-1), 1.)
 
         # test if clsuter parameters are the same 
         # when comparing to two individual transitioners
@@ -2291,10 +2296,12 @@ class TestTree(unittest.TestCase):
         val_transitioner.set_lengths([7, 11, 5])
         val_transitioner.build()
         val_transitioner.recurrent_init(indices)
-        np.testing.assert_almost_equal(transitioner.A.numpy()[:,0], 
-                                       val_transitioner.A.numpy())
-        np.testing.assert_almost_equal(transitioner.A.numpy()[:,1], 
-                                       val_transitioner.A.numpy())
+        for i in range(3):
+            np.testing.assert_almost_equal(transitioner.A.numpy()[:,i], 
+                                        val_transitioner.A.numpy())
+            # initial distribution currently the same for all clusters
+            np.testing.assert_almost_equal(init_dist.numpy(), 
+                                        tf.repeat(val_transitioner.make_initial_distribution()[:,tf.newaxis], 4, axis=1).numpy())
 
         # call the transitioner
         T = np.eye(transitioner.max_num_states)[T_ind]

@@ -51,12 +51,25 @@ class ClusterTransitioner(ProfileHMMTransitioner):
         return tf.linalg.matvec(A, inputs)
 
 
+    def make_initial_distribution(self, indices=None):
+        """Constructs the initial state distribution per model which depends on the transition probabilities.
+        Args:
+            indices: A tensor of shape (k, b) that contains the index of each input sequence.
+        Returns:
+            A probability distribution per model. Shape: (k,) + get_kernel_shape((q,)) if indices is None
+            or (k, b, q) if indices is not None.
+        """
+        init_dists = super(ClusterTransitioner, self).make_initial_distribution(indices)
+        cluster_indices = tf.gather(self.cluster_indices, self.indices)
+        init_dists = tf.gather(init_dists, cluster_indices, batch_dims=1)
+        return init_dists
+
+
 class TreeTransitioner(ClusterTransitioner):
     """
     A transitioner that allows different cluster of transitioners within one model.
     """
     def __init__(self,
-                 num_clusters,
                  tree_handler : tensortree.TreeHandler,
                 transition_init = initializers.make_default_transition_init(),
                 flank_init = initializers.make_default_flank_init(),

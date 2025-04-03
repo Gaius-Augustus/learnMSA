@@ -261,9 +261,11 @@ def viterbi(sequences, hmm_cell, indices=None, end_hints=None, parallel_factor=1
     #compute max probabilities of chunks given all possible starting states in parallel
     chunk_size = seq_len // parallel_factor
     emission_probs = tf.reshape(emission_probs, (num_model, b*parallel_factor, chunk_size, q))
-    init_dist = tf.transpose(hmm_cell.init_dist, (1,0,2)) #(num_models, 1, q)
+    init_dist = hmm_cell.make_initial_distribution(indices)
+    if indices is None:
+        init_dist = tf.expand_dims(init_dist, axis=1) #add batch dimension
     init = init_dist if parallel_factor == 1 else tf.eye(q, dtype=hmm_cell.dtype)[tf.newaxis] 
-    z = tf.shape(init)[1] #1 if parallel_factor == 1, q otherwise
+    z = 1 if parallel_factor == 1 else q
     A = hmm_cell.log_A_dense
     At = hmm_cell.log_A_dense_t
     if non_homogeneous_mask_func is not None:
