@@ -71,7 +71,7 @@ class CasinoHMMEmitter(tf.keras.layers.Layer):
                                         name="emission_kernel")
         self.built = True
         
-    def recurrent_init(self):
+    def recurrent_init(self, indices=None):
         """ Automatically called before each recurrent run. Should be used for setups that
             are only required once per application of the recurrent layer.
         """
@@ -126,7 +126,7 @@ class CasinoHMMTransitioner(tf.keras.layers.Layer):
         self.built = True
         
 
-    def recurrent_init(self):
+    def recurrent_init(self, indices=None):
         """ Automatically called before each recurrent run. Should be used for setups that
             are only required once per application of the recurrent layer.
         """

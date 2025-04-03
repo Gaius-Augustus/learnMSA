@@ -54,10 +54,17 @@ class HmmCell(tf.keras.layers.Layer):
         self.recurrent_init()
 
         
-    def recurrent_init(self):
-        self.transitioner.recurrent_init()
+    def recurrent_init(self, indices=None):
+        """ 
+        Args: 
+                indices: A tensor of shape (k, b) that contains the index of each input sequence.
+                
+            Automatically called before each recurrent run. Should be used for setups that
+            are only required once per application of the recurrency.
+        """
+        self.transitioner.recurrent_init(indices)
         for em in self.emitter:
-            em.recurrent_init()
+            em.recurrent_init(indices)
         self.log_A_dense = self.transitioner.make_log_A()
         self.log_A_dense_t = tf.transpose(self.log_A_dense, [0,2,1])
         self.init_dist = self.make_initial_distribution()
@@ -74,17 +81,16 @@ class HmmCell(tf.keras.layers.Layer):
         return self.transitioner.make_initial_distribution()
         
     
-    def emission_probs(self, inputs, indices=None, end_hints=None, training=False):
+    def emission_probs(self, inputs, end_hints=None, training=False):
         """ Computes the probabilities of emission per state for the given observation. Multiple emitters
             are multiplied.
         Args:
             inputs: A batch of sequence positions of shape (k, b, ... , s).
-            indices: A tensor of shape (k, b) that contains the index of each input sequence.
             end_hints: A tensor of shape (k, b, 2, num_states) that contains the correct state for the left and right ends of each chunk.
         """
-        em_probs = self.emitter[0](inputs, indices=indices, end_hints=end_hints, training=training)
+        em_probs = self.emitter[0](inputs, end_hints=end_hints, training=training)
         for em in self.emitter[1:]:
-            em_probs *= em(inputs, indices=indices, end_hints=end_hints, training=training)
+            em_probs *= em(inputs, end_hints=end_hints, training=training)
         return em_probs
 
     

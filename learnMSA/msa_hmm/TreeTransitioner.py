@@ -28,17 +28,16 @@ class ClusterTransitioner(ProfileHMMTransitioner):
         return (self.num_clusters,) + base_shape
     
 
-    def call(self, inputs, indices):
+    def call(self, inputs):
         """ 
         Args: 
                 inputs: A tensor of shape (k, b, q) 
-                indices: A tensor of shape (k, b) that contains the index of each input sequence.
         Returns:
                 Shape (k, b, q)
         """
 
         tf.debugging.assert_equal(tf.shape(inputs)[:2], 
-                                  tf.shape(indices)[:2],
+                                  tf.shape(self.indices)[:2],
                                  message=("The first two dimensions of inputs and "
                                            + "indices must be equal."))
 
@@ -46,7 +45,7 @@ class ClusterTransitioner(ProfileHMMTransitioner):
         A = self.A if self.reverse else self.A_t
 
         # we have to select the correct parameters for each input sequence
-        cluster_indices = tf.gather(self.cluster_indices, indices)
+        cluster_indices = tf.gather(self.cluster_indices, self.indices)
         A = tf.gather(A, cluster_indices, batch_dims=1)
 
         return tf.linalg.matvec(A, inputs)

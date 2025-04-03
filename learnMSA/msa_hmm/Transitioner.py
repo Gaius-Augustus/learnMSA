@@ -105,10 +105,15 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
 
         
 
-    def recurrent_init(self):
-        """ Automatically called before each recurrent run. Should be used for setups that
-            are only required once per application of the recurrent layer.
+    def recurrent_init(self, indices=None):
+        """ 
+        Args: 
+                indices: A tensor of shape (k, b) that contains the index of each input sequence.
+                
+            Automatically called before each recurrent run. Should be used for setups that
+            are only required once per application of the recurrency.
         """
+        self.indices = indices
         self.A_sparse, self.implicit_log_probs, self.log_probs, self.probs = self.make_A_sparse(return_probs = True)
         self.A = tf.sparse.to_dense(self.A_sparse)
         s = len(self.get_kernel_shape(()))

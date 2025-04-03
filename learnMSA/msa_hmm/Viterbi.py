@@ -247,13 +247,14 @@ def viterbi(sequences, hmm_cell, indices=None, end_hints=None, parallel_factor=1
     Returns:
         State sequences. Shape (num_models, b, L)
     """
+    hmm_cell.recurrent_init(indices)
     if len(sequences.shape) == 3:
         sequences = tf.one_hot(sequences, hmm_cell.dim, dtype=hmm_cell.dtype)
     else:
         sequences = tf.cast(sequences, hmm_cell.dtype)
     seq_lens = tf.reduce_sum(tf.cast(sequences[..., -1]==0, tf.int32), axis=-1)
     #compute all emission probabilities in parallel
-    emission_probs = hmm_cell.emission_probs(sequences, indices=indices, end_hints=end_hints, training=False)
+    emission_probs = hmm_cell.emission_probs(sequences, end_hints=end_hints, training=False)
     num_model, b, seq_len, q = tf.unstack(tf.shape(emission_probs))
     tf.debugging.assert_equal(seq_len % parallel_factor, 0, 
         f"The sequence length ({seq_len}) has to be divisible by the parallel factor ({parallel_factor}).")
@@ -320,7 +321,6 @@ def get_state_seqs_max_lik(data : SequenceDataset,
     num_gpu = len([x.name for x in tf.config.list_logical_devices() if x.device_type == 'GPU']) 
     num_devices = num_gpu + int(num_gpu==0) #account for the CPU-only case 
     batch_size = int(batch_size / num_devices)
-    hmm_cell.recurrent_init()
     old_crop_long_seqs = batch_generator.crop_long_seqs
     batch_generator.crop_long_seqs = math.inf #do not crop sequences
     ds = train.make_dataset(indices, 

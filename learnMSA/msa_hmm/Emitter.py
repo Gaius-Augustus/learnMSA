@@ -77,10 +77,15 @@ class ProfileHMMEmitter(tf.keras.layers.Layer):
         self.built = True
         
 
-    def recurrent_init(self):
-        """ Automatically called before each recurrent run. Should be used for setups that
+    def recurrent_init(self, indices):
+        """ 
+        Args: 
+                indices: A tensor of shape (k, b) that contains the index of each input sequence.
+                
+            Automatically called before each recurrent run. Should be used for setups that
             are only required once per application of the recurrent layer.
         """
+        self.indices = indices
         self.B = self.make_B()
         self.B_transposed = tf.transpose(self.B, [0,2,1])
         

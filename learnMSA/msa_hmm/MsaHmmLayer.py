@@ -153,7 +153,9 @@ class MsaHmmLayer(tf.keras.layers.Layer):
     
     #compute the prior, scale it depending on seq weights
     def compute_prior(self, scaled=True):
-        self.cell.recurrent_init() #initialize all relevant tensors
+        #initialize all relevant tensors
+        #this will not call the cell, so we don't need to pass any sequence indices
+        self.cell.recurrent_init(indices=None) 
         prior = self.cell.get_prior_log_density()
         if scaled:
             prior = self._scale_prior(prior)
@@ -236,12 +238,12 @@ def _forward_recursion_impl(inputs, cell, rnn, total_prob_rnn,
         forward variables: Shape: (num_model, b, seq_len, q)
         log-likelihoods: Shape: (num_model, b)
     """
-    cell.recurrent_init()
+    cell.recurrent_init(indices=indices)
     #initialize transition- and emission-matricies
     _, b, seq_len, s = tf.unstack(tf.shape(inputs))
     num_model = cell.num_models
     q = cell.max_num_states
-    emission_probs = cell.emission_probs(inputs, indices=indices, end_hints=end_hints, training=training)
+    emission_probs = cell.emission_probs(inputs, end_hints=end_hints, training=training)
     #reshape to 3D inputs for RNN (cell will reshape back in each step)
     #if parallel_factor > 1, reshape to equally sized chunks
     chunk_size = seq_len // parallel_factor
@@ -319,12 +321,12 @@ def _backward_recursion_impl(inputs, cell, reverse_cell,
     Returns:
         backward variables: Shape: (num_model, b, seq_len, q)
     """
-    cell.recurrent_init()
-    reverse_cell.recurrent_init()
+    cell.recurrent_init(indices=indices)
+    reverse_cell.recurrent_init(indices=indices)
     _, b, seq_len, s = tf.unstack(tf.shape(inputs))
     num_model = cell.num_models
     q = cell.max_num_states
-    emission_probs = reverse_cell.emission_probs(inputs, indices=indices, end_hints=end_hints, training=training)
+    emission_probs = reverse_cell.emission_probs(inputs, end_hints=end_hints, training=training)
     #reshape to 3D inputs for RNN (cell will reshape back in each step)
     #if parallel_factor > 1, reshape to equally sized chunks
     chunk_size = seq_len // parallel_factor
@@ -409,12 +411,12 @@ def _state_posterior_log_probs_impl(inputs, cell, reverse_cell,
     Returns:
         state posterior probbabilities: Shape: (num_model, b, seq_len, q)
     """
-    cell.recurrent_init()
-    reverse_cell.recurrent_init()
+    cell.recurrent_init(indices=indices)
+    reverse_cell.recurrent_init(indices=indices)
     _, b, seq_len, s = tf.unstack(tf.shape(inputs))
     num_model = cell.num_models
     q = cell.max_num_states
-    emission_probs = cell.emission_probs(inputs, indices=indices, end_hints=end_hints, training=training)
+    emission_probs = cell.emission_probs(inputs, end_hints=end_hints, training=training)
     #reshape to equally sizes chunks according to parallel factor
     chunk_size = seq_len // parallel_factor
     emission_probs = tf.reshape(emission_probs, (num_model*b*parallel_factor, chunk_size, q))

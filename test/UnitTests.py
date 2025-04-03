@@ -2257,6 +2257,14 @@ class TestTree(unittest.TestCase):
         from learnMSA.msa_hmm.Transitioner import ProfileHMMTransitioner
         from learnMSA.msa_hmm.TreeTransitioner import ClusterTransitioner
         
+        # test inputs
+        T_ind = np.array([[0, 1, 2, 3], 
+                          [4, 5, 6, 7], 
+                          [8, 9, 10, 11]])
+        indices = np.array([[0, 1, 2, 3], 
+                            [4, 5, 6, 7], 
+                            [8, 9, 10, 11]])
+        
         transition_init = [Initializers.make_default_transition_init(scale=0.),
                             Initializers.make_default_transition_init(MM=2, scale=0.),
                             Initializers.make_default_transition_init(MM=3, scale=0.)]
@@ -2269,7 +2277,7 @@ class TestTree(unittest.TestCase):
                                             flank_init=flank_init)
         transitioner.set_lengths([7, 11, 5])
         transitioner.build()
-        transitioner.recurrent_init()
+        transitioner.recurrent_init(indices)
         q = transitioner.max_num_states
         self.assertEqual(transitioner.A.shape, (3, 3, q, q))
         for i in range(2):
@@ -2282,21 +2290,15 @@ class TestTree(unittest.TestCase):
                                                     flank_init=flank_init)
         val_transitioner.set_lengths([7, 11, 5])
         val_transitioner.build()
-        val_transitioner.recurrent_init()
+        val_transitioner.recurrent_init(indices)
         np.testing.assert_almost_equal(transitioner.A.numpy()[:,0], 
                                        val_transitioner.A.numpy())
         np.testing.assert_almost_equal(transitioner.A.numpy()[:,1], 
                                        val_transitioner.A.numpy())
-        
-        # test inputs
-        T_ind = np.array([[0, 1, 2, 3], 
-                          [4, 5, 6, 7], 
-                          [8, 9, 10, 11]])
+
+        # call the transitioner
         T = np.eye(transitioner.max_num_states)[T_ind]
-        indices = np.array([[0, 1, 2, 3], 
-                            [4, 5, 6, 7], 
-                            [8, 9, 10, 11]])
-        T_plus_one = transitioner(T, indices)
+        T_plus_one = transitioner(T)
 
         for i in range(3):
             for j in range(4):
