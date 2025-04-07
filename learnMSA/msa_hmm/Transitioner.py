@@ -124,6 +124,11 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
         return tf.transpose(A, (0,) + tuple(i+1 for i in range(s)) + (s+2,s+1))
         
 
+    def make_sample_A(self, indices, A):
+        """ For subclasses. The default case does not use indices."""
+        return A
+
+
     def make_flank_init_prob(self):
         return tf.math.sigmoid(tf.stack([tf.identity(k) for k in self.flank_init_kernel]))
         
@@ -133,8 +138,7 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
         Args:
             indices: A tensor of shape (k, b) that contains the index of each input sequence.
         Returns:
-            A probability distribution per model. Shape: (k,) + get_kernel_shape((q,)) if indices is None
-            or (k, b, q) if indices is not None.
+            A probability distribution per model. Shape: (k, 1, q).
         """
         #state order: LEFT_FLANK, MATCH x length, INSERT x length-1, UNANNOTATED_SEGMENT, RIGHT_FLANK, TERMINAL
         init_flank_probs = self.make_flank_init_prob()
@@ -169,6 +173,7 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
             log_init_dists.append(log_init_dist)
         log_init_dists = tf.stack(log_init_dists, axis=0)
         init_dists = tf.math.exp(log_init_dists)
+        init_dists = tf.expand_dims(init_dists, axis=1)
         return init_dists
     
 
@@ -415,7 +420,6 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
         kernel_row_major = tf.gather(kernel, row_major_order, axis=-1)
         kernel_row_major = tf.reshape(kernel_row_major, (-1,)) #flatten for sparse call
         kernel_row_major = tf.maximum(kernel_row_major, approx_log_zero+1) #numeric stability
-
         sparse_kernel =  tf.sparse.SparseTensor(
                                     indices=self._broadcast_indices(indices_row_major),
                                     values=kernel_row_major, 

@@ -140,6 +140,10 @@ class CasinoHMMTransitioner(tf.keras.layers.Layer):
 
     def make_log_A(self):
         return tf.math.log(self.make_A())
+    
+
+    def make_sample_A(self, indices, A):
+        return A
 
 
     def make_initial_distribution(self, indices=None):

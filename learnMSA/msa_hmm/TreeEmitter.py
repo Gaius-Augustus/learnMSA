@@ -128,18 +128,17 @@ class TreeEmitter(ProfileHMMEmitter):
         self.B_transposed = tf.transpose(self.B, [0,1,3,2])
 
 
-    def call(self, inputs, indices, end_hints=None, training=False):
+    def call(self, inputs, end_hints=None, training=False):
         """ 
         Args: 
                 inputs: A tensor of shape (num_models, b, L , s) 
-                indices: A tensor of shape (num_models, b) that contains the index of each input sequence.
         Returns:
                 A tensor with emission probabilities of shape (num_models, b, L, q) where "..." is identical to inputs.
         """
         input_shape = tf.shape(inputs)
         B = self.B_transposed[..., :input_shape[-1],:]
         # we have to select the correct parameters for each input sequence
-        cluster_indices = tf.gather(self.cluster_indices, indices)
+        cluster_indices = tf.gather(self.cluster_indices, self.indices)
         B = tf.gather(B, cluster_indices, batch_dims=1)
         return self._compute_emission_probs(inputs, B, input_shape, B_contains_batch=True)
     

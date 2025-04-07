@@ -24,12 +24,16 @@ def viterbi_step(gamma_prev, emission_probs_i, transition_matrix, non_homogeneou
     Args:
         gamma_prev: Viterbi values of the previous recursion. Shape (num_models, b, z, q)
         emission_probs_i: Emission probabilities of the i-th vertical input slice. Shape (num_models, b, q)
-        transition_matrix: Logarithmic transition matricies describing the Markov chain. Shape (num_models, q, q)
+        transition_matrix: Logarithmic transition matricies describing the Markov chain. Shape (num_models, q, q) or (num_models, b, q, q)
         non_homogeneous_mask: Optional mask of shape (num_models, b, q, q) that specifies which transitions are allowed.
     Returns:
         Viterbi values of the current recursion (gamma_next). Shape (num_models, b, z, q)
     """
-    gamma_next = transition_matrix[:,tf.newaxis,tf.newaxis] + tf.expand_dims(gamma_prev, -1) #(n,b,z,q,q)
+    if len(transition_matrix.shape) == 4:
+        transition_matrix = transition_matrix[:,:,tf.newaxis] #expand to (num_models, b, 1, q, q)
+    else:
+        transition_matrix = transition_matrix[:,tf.newaxis,tf.newaxis]
+    gamma_next = tf.expand_dims(gamma_prev, -1) + transition_matrix #(n,b,z,q,q)
     if non_homogeneous_mask is not None:
         gamma_next += safe_log(non_homogeneous_mask[:,:,tf.newaxis])
     gamma_next = tf.reduce_max(gamma_next, axis=-2)
@@ -42,14 +46,14 @@ def viterbi_dyn_prog(emission_probs, init, transition_matrix, use_first_position
     z is a helper dimension for parallelization and not used in the final result.
     Args:
         emission_probs: Tensor. Shape (num_models, b, L, q).
-        init: Initial state distribution. Shape (num_models, z, q).
-        transition_matrix: Logarithmic transition matricies describing the Markov chain. Shape (num_models, q, q)
+        init: Initial state distribution. Shape (num_models, b, z, q).
+        transition_matrix: Logarithmic transition matricies describing the Markov chain. Shape (num_models, q, q) or (num_models, b, q, q)
         use_first_position_emission: If True, the first position of the sequence is considered to have an emission.
         non_homogeneous_mask_func: Optional function that maps a sequence index i to a num_models x q x q mask that specifies which transitions are allowed.
     Returns:
         Viterbi values (gamma) per model. Shape (num_models, b, z, L, q)
     """
-    gamma_val = safe_log(init)[:,tf.newaxis] 
+    gamma_val = safe_log(init)
     gamma_val = tf.cast(gamma_val, dtype=transition_matrix.dtype) 
     b0 = emission_probs[:,:,0]
     if use_first_position_emission:
@@ -61,9 +65,11 @@ def viterbi_dyn_prog(emission_probs, init, transition_matrix, use_first_position
     gamma = tf.TensorArray(transition_matrix.dtype, size=L)
     gamma = gamma.write(0, gamma_val)
     for i in tf.range(1, L):
-        gamma_val = viterbi_step(gamma_val, emission_probs[:,:,i], transition_matrix,
+        gamma_val = viterbi_step(gamma_val, 
+                                 emission_probs[:,:,i], 
+                                 transition_matrix,
                                  non_homogeneous_mask_func(i) if non_homogeneous_mask_func is not None else None)
-        gamma = gamma.write(i, gamma_val) 
+        gamma = gamma.write(i, gamma_val)
     gamma = tf.transpose(gamma.stack(), [1,2,3,0,4])
     return gamma
 
@@ -261,16 +267,19 @@ def viterbi(sequences, hmm_cell, indices=None, end_hints=None, parallel_factor=1
     #compute max probabilities of chunks given all possible starting states in parallel
     chunk_size = seq_len // parallel_factor
     emission_probs = tf.reshape(emission_probs, (num_model, b*parallel_factor, chunk_size, q))
-    init_dist = hmm_cell.make_initial_distribution(indices)
-    if indices is None:
-        init_dist = tf.expand_dims(init_dist, axis=1) #add batch dimension
-    init = init_dist if parallel_factor == 1 else tf.eye(q, dtype=hmm_cell.dtype)[tf.newaxis] 
-    z = 1 if parallel_factor == 1 else q
+    init_dist = hmm_cell.make_initial_distribution(indices) #(num_model, b, q)
+    if parallel_factor == 1:
+        init = tf.expand_dims(init_dist, -2) 
+    else:
+        init = tf.eye(q, dtype=hmm_cell.dtype)[tf.newaxis, tf.newaxis] 
+    z = init.shape[-2] #1 if parallel_factor == 1 else q
     A = hmm_cell.log_A_dense
     At = hmm_cell.log_A_dense_t
     if non_homogeneous_mask_func is not None:
         non_homogeneous_mask_func = partial(non_homogeneous_mask_func, seq_lens=seq_lens, hmm_cell=hmm_cell)
-    gamma = viterbi_dyn_prog(emission_probs, init, A, 
+    gamma = viterbi_dyn_prog(emission_probs, 
+                             init, 
+                             A, 
                              use_first_position_emission=parallel_factor==1, 
                              non_homogeneous_mask_func=non_homogeneous_mask_func)
     gamma = tf.reshape(gamma, (num_model, b*parallel_factor*z, chunk_size, q))

@@ -51,7 +51,6 @@ class HmmCell(tf.keras.layers.Layer):
             self.step_counter = self.add_weight(shape=(), initializer=tf.constant_initializer(-1), 
                                                 trainable=False, name="step_counter", dtype=tf.int32)
         self.built = True
-        self.recurrent_init()
 
         
     def recurrent_init(self, indices=None):
@@ -65,8 +64,16 @@ class HmmCell(tf.keras.layers.Layer):
         self.transitioner.recurrent_init(indices)
         for em in self.emitter:
             em.recurrent_init(indices)
+        
+        # make the full matrix stacks
         self.log_A_dense = self.transitioner.make_log_A()
         self.log_A_dense_t = self.transitioner.transpose_transition_matrix(self.log_A_dense)
+
+        if indices is not None:
+            # may use indices to select the correct transition matrix per sample
+            self.log_A_dense = self.transitioner.make_sample_A(indices, self.log_A_dense)
+            self.log_A_dense_t = self.transitioner.make_sample_A(indices, self.log_A_dense_t)
+
         if not self.reverse and self.use_step_counter:
             self.step_counter.assign(-1)
     
@@ -145,9 +152,10 @@ class HmmCell(tf.keras.layers.Layer):
             if self.reverse:
                 init_dist = tf.ones((self.num_models*batch_size, self.max_num_states), dtype=self.dtype)
             else:
-                init_dist = self.make_initial_distribution(indices)
-                init_dist = tf.expand_dims(init_dist, 1)
-                init_dist = tf.repeat(init_dist, repeats=batch_size, axis=1)
+                #may return (k, 1, q) or (k, b, q)
+                init_dist = self.make_initial_distribution(indices) 
+                # may broadcast if batch size of init_dist is 1, otherwise this does nothing
+                init_dist = tf.broadcast_to(init_dist, (self.num_models, batch_size, self.max_num_states))
                 init_dist = tf.reshape(init_dist, (-1, self.max_num_states))
             loglik = tf.zeros((self.num_models*batch_size, 1), dtype=self.dtype)
             return [init_dist, loglik]
@@ -157,7 +165,7 @@ class HmmCell(tf.keras.layers.Layer):
             init_dist = tf.one_hot(indices, self.max_num_states)
             if self.reverse:
                 init_dist_chunk = tf.reshape(init_dist, (self.num_models*batch_size, self.max_num_states, self.max_num_states))
-                #inputs shape =  (num_model*b*parallel_factor, chunk_size, q)
+                #inputs shape: (num_model*b*parallel_factor, chunk_size, q)
                 first_emissions = inputs[:, 0, :]
                 first_emissions = tf.reshape(first_emissions, (self.num_models, batch_size//parallel_factor, parallel_factor, self.max_num_states))
                 first_emissions = tf.roll(first_emissions, shift=-1, axis=2)
@@ -210,7 +218,6 @@ class HmmCell(tf.keras.layers.Layer):
         reverse_cell = self.duplicate(shared_kernels=True)
         reverse_cell.reverse_direction()
         reverse_cell.built = True
-        reverse_cell.recurrent_init()
         return reverse_cell
 
 

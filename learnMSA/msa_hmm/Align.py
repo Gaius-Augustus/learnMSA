@@ -286,7 +286,6 @@ def get_state_expectations(data : SequenceDataset,
     indices = np.reshape(indices, (-1))
     num_indices = indices.shape[0]
     sorted_indices = np.array([[i,j] for l,i,j in sorted(zip(data.seq_lens[indices], indices, range(num_indices)))])
-    msa_hmm_layer.cell.recurrent_init()
     cell = msa_hmm_layer.cell
     old_crop_long_seqs = batch_generator.crop_long_seqs
     batch_generator.crop_long_seqs = math.inf #do not crop sequences
@@ -387,23 +386,23 @@ def get_discard_or_expand_positions(am,
 #replicates insert_value for the expansions
 #assumes that del_marker is a value that does no occur in x
 #returns a new vector with all modifications applied
-def apply_mods(x, pos_expand, expansion_lens, pos_discard, insert_value, del_marker=-9999):
+def apply_mods(x, pos_expand, expansion_lens, pos_discard, insert_value, is_emission=False, del_marker=-9999):
     #mark discard positions with del_marker, expand thereafter 
     #and eventually remove the marked positions
     x = np.copy(x)
     shape = x.shape
-    multi_dim = len(shape) >= 2
-    if multi_dim:
+    if is_emission:
         x[..., pos_discard, :] = del_marker
     else:
-        x[pos_discard] = del_marker
+        x[..., pos_discard] = del_marker
     rep_expand_pos = np.repeat(pos_expand, expansion_lens)
-    x = np.insert(x, rep_expand_pos, insert_value, axis=-2 if multi_dim else -1)
-    if multi_dim:
+    x = np.insert(x, rep_expand_pos, insert_value, axis=-2 if is_emission else -1)
+    if is_emission:
         x = x[..., np.any(x != del_marker, -1), :]
         x = np.reshape(x, shape[:-2] + (-1, shape[-1]))
     else:
         x = x[x != del_marker]
+        x = np.reshape(x, shape[:-1] + (-1,))
     return x
 
 
@@ -483,7 +482,7 @@ def extend_mods(pos_expand, expansion_lens, pos_discard, L, k=0):
     return new_pos_expand, new_expansion_lens, new_pos_discard
 
 
-#applies expansions and discards to emission and transition kernelsf
+#applies expansions and discards to emission and transition kernels
 def update_kernels(am,
                    model_index, 
                     pos_expand, 
@@ -505,39 +504,42 @@ def update_kernels(am,
             noise = np.random.normal(scale=0.2, size=transitions[key].shape)
             transitions[key] += noise
     dtype = am.msa_hmm_layer.cell.dtype
-    emission_dummy = [d((1, em.shape[-1]), dtype).numpy() for d,em in zip(emission_dummy, emissions)]
-    transition_dummy = { key : transition_dummy[key](t.shape, dtype).numpy() for key, t in transitions.items()}
-    init_flank_dummy = init_flank_dummy((1), dtype).numpy()
+    transitioner = am.msa_hmm_layer.cell.transitioner
+    emission_dummy = [d((1, em.shape[-1]), dtype).numpy() 
+                      for d,em in zip(emission_dummy, emissions)]
+    transition_dummy = { key : transition_dummy[key](t.shape, dtype).numpy() 
+                        for key, t in transitions.items()}
+    init_flank_dummy = init_flank_dummy(transitioner.get_kernel_shape((1,)), dtype).numpy()
     emissions_new = [ apply_mods(k, 
                                  pos_expand, 
                                  expansion_lens, 
                                  pos_discard, 
-                                 d) for k,d in zip(emissions, emission_dummy) ]
+                                 d, is_emission=True) for k,d in zip(emissions, emission_dummy) ]
     transitions_new = {}
     args1 = extend_mods(pos_expand,expansion_lens,pos_discard,L)
     transitions_new["match_to_match"] = apply_mods(transitions["match_to_match"], 
                                                       *args1,
-                                                      transition_dummy["match_to_match"][0])
+                                                      transition_dummy["match_to_match"][..., :1])
     transitions_new["match_to_insert"] = apply_mods(transitions["match_to_insert"], 
                                                       *args1,
-                                                      transition_dummy["match_to_insert"][0])
+                                                      transition_dummy["match_to_insert"][..., :1])
     transitions_new["insert_to_match"] = apply_mods(transitions["insert_to_match"], 
                                                       *args1,
-                                                      transition_dummy["insert_to_match"][0])
+                                                      transition_dummy["insert_to_match"][..., :1])
     transitions_new["insert_to_insert"] = apply_mods(transitions["insert_to_insert"], 
                                                       *args1,
-                                                      transition_dummy["insert_to_insert"][0])
+                                                      transition_dummy["insert_to_insert"][..., :1])
     args2 = extend_mods(pos_expand,expansion_lens,pos_discard,L+1,k=1)
     transitions_new["match_to_delete"] = apply_mods(transitions["match_to_delete"],
                                                      *args2,
-                                                      transition_dummy["match_to_delete"][0])
+                                                      transition_dummy["match_to_delete"][..., :1])
     args3 = extend_mods(pos_expand,expansion_lens,pos_discard,L+1)
     transitions_new["delete_to_match"] = apply_mods(transitions["delete_to_match"],
                                                      *args3,
-                                                      transition_dummy["delete_to_match"][0])
+                                                      transition_dummy["delete_to_match"][..., :1])
     transitions_new["delete_to_delete"] = apply_mods(transitions["delete_to_delete"],
                                                      *args1,
-                                                      transition_dummy["delete_to_delete"][0])
+                                                      transition_dummy["delete_to_delete"][..., :1])
     
     #always reset the multi-hit transitions:
     transitions_new["left_flank_loop"] = transition_dummy["left_flank_loop"] 
@@ -563,17 +565,17 @@ def update_kernels(am,
                                                       pos_expand, 
                                                       expansion_lens, 
                                                       pos_discard, 
-                                                      transition_dummy["begin_to_match"][1])
+                                                      transition_dummy["begin_to_match"][..., 1:2])
     if 0 in pos_expand:
-        transitions_new["begin_to_match"][0] = transition_dummy["begin_to_match"][0]
+        transitions_new["begin_to_match"][..., 0] = transition_dummy["begin_to_match"][..., 0]
         
     if L in pos_expand:
-        transitions["match_to_end"][-1] = transition_dummy["match_to_end"][0]
+        transitions["match_to_end"][..., -1] = transition_dummy["match_to_end"][..., 0]
     transitions_new["match_to_end"] = apply_mods(transitions["match_to_end"], 
                                                   pos_expand, 
                                                   expansion_lens, 
                                                   pos_discard, 
-                                                  transition_dummy["match_to_end"][0])
+                                                  transition_dummy["match_to_end"][..., :1])
     return transitions_new, emissions_new, init_flank_new
 
     

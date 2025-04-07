@@ -45,24 +45,72 @@ class ClusterTransitioner(ProfileHMMTransitioner):
         A = self.A if self.reverse else self.A_t
 
         # we have to select the correct parameters for each input sequence
-        cluster_indices = tf.gather(self.cluster_indices, self.indices)
-        A = tf.gather(A, cluster_indices, batch_dims=1)
+        A = self.make_sample_A(self.indices, A)
 
         return tf.linalg.matvec(A, inputs)
+    
+
+    def make_sample_A(self, indices, A):
+        """Constructs the transition probabilities per model and sample which depends on the cluster indices.
+        Args:
+            indices: A tensor of shape (k, b) that contains the index of each sample.
+            A: A tensor of shape (k, c, q, q) that contains the transition probabilities 
+                of each of c clusters in each of the k models.
+        Returns:
+            A transition matrix per model and sample. Shape: (k,b,q,q)
+        """
+        cluster_indices = tf.gather(self.cluster_indices, indices)
+        A = tf.gather(A, cluster_indices, batch_dims=1)
+        return A
 
 
-    def make_initial_distribution(self, indices=None):
+    def make_initial_distribution(self, indices):
         """Constructs the initial state distribution per model which depends on the transition probabilities.
         Args:
             indices: A tensor of shape (k, b) that contains the index of each input sequence.
         Returns:
-            A probability distribution per model. Shape: (k,) + get_kernel_shape((q,)) if indices is None
-            or (k, b, q) if indices is not None.
+            A probability distribution per model. Shape: (k,b,q)
         """
         init_dists = super(ClusterTransitioner, self).make_initial_distribution(indices)
-        cluster_indices = tf.gather(self.cluster_indices, self.indices)
+        init_dists = init_dists[:,0]
+        cluster_indices = tf.gather(self.cluster_indices, indices)
         init_dists = tf.gather(init_dists, cluster_indices, batch_dims=1)
         return init_dists
+    
+
+    def duplicate(self, model_indices=None, share_kernels=False):
+        if model_indices is None:
+            model_indices = range(len(self.transition_init))
+        sub_transition_init = []
+        sub_flank_init = []
+        for i in model_indices:
+            transition_init_dict = {key : tf.constant_initializer(kernel.numpy())
+                                       for key, kernel in self.transition_kernel[i].items()}
+            sub_transition_init.append(transition_init_dict)
+            sub_flank_init.append(tf.constant_initializer(self.flank_init_kernel[i].numpy()))
+        transitioner_copy = ClusterTransitioner(
+                                        num_clusters=self.num_clusters,
+                                        cluster_indices=self.cluster_indices,
+                                        transition_init = sub_transition_init,
+                                        flank_init = sub_flank_init,
+                                        prior = self.prior,
+                                        frozen_kernels = self.frozen_kernels,
+                                        dtype = self.dtype) 
+        if share_kernels:
+            transitioner_copy.transition_kernel = self.transition_kernel
+            transitioner_copy.flank_init_kernel = self.flank_init_kernel
+            transitioner_copy.built = True
+        return transitioner_copy
+    
+
+    def get_config(self):
+        config = super(ClusterTransitioner, self).get_config()
+        config.update({
+            'num_clusters': self.num_clusters,
+            'cluster_indices': self.cluster_indices,
+        })
+        return config
+    
 
 
 class TreeTransitioner(ClusterTransitioner):
@@ -86,4 +134,3 @@ class TreeTransitioner(ClusterTransitioner):
                                                 prior, 
                                                 frozen_kernels, 
                                                 **kwargs)
-        

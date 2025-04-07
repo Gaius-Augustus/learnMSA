@@ -187,6 +187,7 @@ class TestMsaHmmCell(unittest.TestCase):
         hmm_cell = MsaHmmCell.MsaHmmCell(length, dim=3, emitter=emitter, 
                                         transitioner=transitioner, use_step_counter=True)
         hmm_cell.build((None,None,3))
+        hmm_cell.recurrent_init()
         return hmm_cell, length
    
     def test_single_models(self):
@@ -198,7 +199,7 @@ class TestMsaHmmCell(unittest.TestCase):
             B = hmm_cell.emitter[0].make_B()
             np.testing.assert_almost_equal(A[0], self.A_ref[i], decimal=5) #allow some decimal errors from softmaxes
             np.testing.assert_almost_equal(B[0], self.B_ref[i], decimal=5) 
-            np.testing.assert_almost_equal(init[0], self.init_ref[i], decimal=5) 
+            np.testing.assert_almost_equal(init[0,0], self.init_ref[i], decimal=5) 
             imp_log_probs = hmm_cell.transitioner.make_implicit_log_probs()[0][0]
             for part_name in imp_log_probs.keys():
                 self.assertTrue(part_name in [part[0] for part in hmm_cell.transitioner.implicit_transition_parts[0]], 
@@ -220,7 +221,7 @@ class TestMsaHmmCell(unittest.TestCase):
             q = hmm_cell.num_states[i]
             np.testing.assert_almost_equal(A[i, :q, :q], self.A_ref[i], decimal=5) #allow some decimal errors from softmaxes
             np.testing.assert_almost_equal(B[i, :q], self.B_ref[i], decimal=5) 
-            np.testing.assert_almost_equal(init[i,:q], self.init_ref[i], decimal=5) 
+            np.testing.assert_almost_equal(init[i,0,:q], self.init_ref[i], decimal=5) 
         
     def test_single_model_forward(self):
         seq = tf.one_hot([[0,1,0,2]], 3)
@@ -1374,7 +1375,8 @@ class TestModelSurgery(unittest.TestCase):
                                        pos_expand=[1], 
                                        expansion_lens=[1], 
                                        pos_discard=[], 
-                                       insert_value=[4,5,6])
+                                       insert_value=[4,5,6],
+                                       is_emission=True)
         self.assert_vec(x2, [[1,2,3],[4,5,6],[1,2,3]])
 
         # check 3D kernel
@@ -1383,7 +1385,8 @@ class TestModelSurgery(unittest.TestCase):
                                         pos_expand=[1], 
                                         expansion_lens=[2], 
                                         pos_discard=[0], 
-                                        insert_value=[4,5,6])
+                                        insert_value=[4,5,6],
+                                       is_emission=True)
         self.assert_vec(x3, [[[4,5,6], [4,5,6], [1,2,3]], 
                              [[4,5,6], [4,5,6], [1,2,3]]])
         
@@ -2301,7 +2304,7 @@ class TestTree(unittest.TestCase):
                                         val_transitioner.A.numpy())
             # initial distribution currently the same for all clusters
             np.testing.assert_almost_equal(init_dist.numpy(), 
-                                        tf.repeat(val_transitioner.make_initial_distribution()[:,tf.newaxis], 4, axis=1).numpy())
+                                        tf.repeat(val_transitioner.make_initial_distribution(), 4, axis=1).numpy())
 
         # call the transitioner
         T = np.eye(transitioner.max_num_states)[T_ind]

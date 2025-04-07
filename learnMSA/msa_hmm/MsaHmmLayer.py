@@ -250,7 +250,7 @@ def _forward_recursion_impl(inputs, cell, rnn, total_prob_rnn,
     emission_probs = tf.reshape(emission_probs, (num_model*b*parallel_factor, chunk_size, q))
     #do one initialization step
     #this way, tf will compile two versions of the cell call, one with init=True and one without
-    initial_state = cell.get_initial_state(batch_size=b*parallel_factor, parallel_factor=parallel_factor)
+    initial_state = cell.get_initial_state(indices=indices, batch_size=b*parallel_factor, parallel_factor=parallel_factor)
     forward_1, step_1_state = cell(emission_probs[:,0], initial_state, training=training, init=True)
     #run forward with the output of the first step as initial state
     forward, _, loglik = rnn(emission_probs[:,1:], initial_state=step_1_state, training=training)
@@ -264,7 +264,7 @@ def _forward_recursion_impl(inputs, cell, rnn, total_prob_rnn,
         forward_result = forward_scaled + forward_scaling_factors
         loglik = tf.reshape(loglik, (num_model, b))
     else:
-        forward_result, loglik = _get_total_forward_from_chunks(forward, cell, total_prob_rnn, b, seq_len, parallel_factor=parallel_factor)
+        forward_result, loglik = _get_total_forward_from_chunks(forward, indices, cell, total_prob_rnn, b, seq_len, parallel_factor=parallel_factor)
     if return_prior:
         prior = cell.get_prior_log_density()
         aux_loss = cell.get_aux_loss()
@@ -273,7 +273,7 @@ def _forward_recursion_impl(inputs, cell, rnn, total_prob_rnn,
         return forward_result, loglik
 
 
-def _get_total_forward_from_chunks(forward, cell, total_prob_rnn, b, seq_len, parallel_factor=1):
+def _get_total_forward_from_chunks(forward, indices, cell, total_prob_rnn, b, seq_len, parallel_factor=1):
     #utility method that computes the actual forward probabilities from the chunked forward variables
     #returns the forward probabilities and the log-likelihood
     q = cell.max_num_states
@@ -288,7 +288,7 @@ def _get_total_forward_from_chunks(forward, cell, total_prob_rnn, b, seq_len, pa
     forward_chunks_last = forward_chunks[:,:,-1]  #(num_model*b, factor, q, q)
     forward_chunks_last = tf.reshape(forward_chunks_last, (num_model*b, parallel_factor, q*q))
     forward_total, _, loglik = total_prob_rnn(forward_chunks_last) #(num_model*b, factor, q)
-    init, _ = cell.get_initial_state(batch_size=b, parallel_factor=1)
+    init, _ = cell.get_initial_state(indices=indices, batch_size=b, parallel_factor=1)
     init = tf.math.log(init + cell.epsilon)
     T = tf.concat([init[:,tf.newaxis], forward_total[:,:-1]], axis=1)
     T = T[:, :, tf.newaxis, :, tf.newaxis]
@@ -333,7 +333,10 @@ def _backward_recursion_impl(inputs, cell, reverse_cell,
     emission_probs = tf.reshape(emission_probs, (num_model*b*parallel_factor, chunk_size, q))
     #do one initialization step
     #this way, tf will compile two versions of the cell call, one with init=True and one without
-    initial_state = reverse_cell.get_initial_state(inputs=emission_probs, batch_size=b*parallel_factor, parallel_factor=parallel_factor)
+    initial_state = reverse_cell.get_initial_state(inputs=emission_probs, 
+                                                   indices=indices,
+                                                   batch_size=b*parallel_factor, 
+                                                   parallel_factor=parallel_factor)
     backward_1, step_1_state = reverse_cell(emission_probs[:,-1], initial_state, training=training, init=True)
     backward, _, _ = rnn_backward(emission_probs[:,:-1], initial_state=step_1_state, training=training)
     backward = tf.concat([backward_1[:,tf.newaxis], backward], axis=1) 
@@ -344,7 +347,7 @@ def _backward_recursion_impl(inputs, cell, reverse_cell,
         backward_result = backward_scaled + backward_scaling_factors
         backward_result = tf.reverse(backward_result, [-2])
     else:
-        backward_result = _get_total_backward_from_chunks(backward, cell, reverse_cell, total_prob_rnn_rev, b, seq_len, parallel_factor=parallel_factor)
+        backward_result = _get_total_backward_from_chunks(backward, indices, cell, reverse_cell, total_prob_rnn_rev, b, seq_len, parallel_factor=parallel_factor)
     if return_prior:
         prior = cell.get_prior_log_density()
         aux_loss = cell.get_aux_loss()
@@ -353,7 +356,7 @@ def _backward_recursion_impl(inputs, cell, reverse_cell,
         return backward_result
 
 
-def _get_total_backward_from_chunks(backward, cell, reverse_cell, total_prob_rnn_rev, b, seq_len, revert_chunks=True, parallel_factor=1):
+def _get_total_backward_from_chunks(backward, indices, cell, reverse_cell, total_prob_rnn_rev, b, seq_len, revert_chunks=True, parallel_factor=1):
     #utility method that computes the actual backward probabilities from the chunked backward variables
     q = cell.max_num_states
     num_model = cell.num_models
@@ -370,7 +373,7 @@ def _get_total_backward_from_chunks(backward, cell, reverse_cell, total_prob_rnn
     backward_chunks_last = tf.reshape(backward_chunks_last, (num_model*b, parallel_factor, q*q))
     backward_total, _, _ = total_prob_rnn_rev(backward_chunks_last) #(num_model*b, factor, q)
     backward_total = tf.reverse(backward_total, [1])
-    init, _ = reverse_cell.get_initial_state(batch_size=b, parallel_factor=1)
+    init, _ = reverse_cell.get_initial_state(indices=indices, batch_size=b, parallel_factor=1)
     init = tf.math.log(init + reverse_cell.epsilon)
     T = tf.concat([backward_total[:,1:], init[:,tf.newaxis]], axis=1)
     T = T[:, :, tf.newaxis, :, tf.newaxis]
@@ -421,8 +424,13 @@ def _state_posterior_log_probs_impl(inputs, cell, reverse_cell,
     chunk_size = seq_len // parallel_factor
     emission_probs = tf.reshape(emission_probs, (num_model*b*parallel_factor, chunk_size, q))
     #make the initial states for both passes
-    initial_state = cell.get_initial_state(batch_size=b*parallel_factor, parallel_factor=parallel_factor)
-    rev_initial_state = reverse_cell.get_initial_state(inputs=emission_probs, batch_size=b*parallel_factor, parallel_factor=parallel_factor)
+    initial_state = cell.get_initial_state(indices=indices, 
+                                           batch_size=b*parallel_factor, 
+                                           parallel_factor=parallel_factor)
+    rev_initial_state = reverse_cell.get_initial_state(inputs=emission_probs, 
+                                                       indices=indices,
+                                                       batch_size=b*parallel_factor, 
+                                                       parallel_factor=parallel_factor)
     #handle the first observation separately to let tf compile a version of the cell call with init=True
     forward_1, forward_step_1_state = cell(emission_probs[:,0], initial_state, training=training, init=True)
     backward_1, backward_step_1_state = reverse_cell(emission_probs[:,-1], rev_initial_state, training=training, init=True)
@@ -450,8 +458,8 @@ def _state_posterior_log_probs_impl(inputs, cell, reverse_cell,
         loglik = tf.reshape(final_state[1], (num_model, b))
         posterior = posterior[...,:-1] + posterior[..., -1:] 
     else:
-        forward_result, loglik = _get_total_forward_from_chunks(posterior[...,0, :], cell, total_prob_rnn, b, seq_len, parallel_factor=parallel_factor)
-        backward_result = _get_total_backward_from_chunks(posterior[...,1, :], cell, reverse_cell, total_prob_rnn_rev, 
+        forward_result, loglik = _get_total_forward_from_chunks(posterior[...,0, :], indices, cell, total_prob_rnn, b, seq_len, parallel_factor=parallel_factor)
+        backward_result = _get_total_backward_from_chunks(posterior[...,1, :], indices, cell, reverse_cell, total_prob_rnn_rev, 
                                                             b, seq_len, revert_chunks=False, parallel_factor=parallel_factor)
         posterior = forward_result + backward_result
     if not no_loglik:
