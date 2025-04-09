@@ -87,7 +87,8 @@ def make_default(default_num_models=5,
                  inv_gamma_beta=3.,
                  tree_handler=None,
                  plm_cache_dir=None, 
-                 tree_loss_weight=1.0):
+                 tree_loss_weight=1.0,
+                 use_tree_transitioner=True):
     if use_language_model:
         if V2_emitter:
             emission_init = [AminoAcidPlusMvnEmissionInitializer(scoring_model_config=scoring_model_config,
@@ -126,17 +127,17 @@ def make_default(default_num_models=5,
     elif tree_handler is not None:
         emitter = TreeEmitter(tree_handler, 
                               emission_init=[initializers.make_default_emission_init()
-                                                                         for _ in range(default_num_models)],
+                                                    for _ in range(default_num_models)],
                               insertion_init=[initializers.make_default_insertion_init()
-                                                                         for _ in range(default_num_models)],
+                                                    for _ in range(default_num_models)],
                               tree_loss_weight=tree_loss_weight)
     else:
         emitter = emit.ProfileHMMEmitter(emission_init=[initializers.make_default_emission_init()
-                                                                         for _ in range(default_num_models)],
+                                                    for _ in range(default_num_models)],
                                            insertion_init=[initializers.make_default_insertion_init()
-                                                                         for _ in range(default_num_models)])
+                                                    for _ in range(default_num_models)])
         
-    if tree_handler is not None:
+    if tree_handler is not None and use_tree_transitioner:
         initial_branch_length_kernel = inverse_softplus(tree_handler.branch_lengths[:tree_handler.num_leaves])
         encoder_initializer = ([initializers.ConstantInitializer(initial_branch_length_kernel)]+
                                     initializers.make_LG_init(default_num_models))

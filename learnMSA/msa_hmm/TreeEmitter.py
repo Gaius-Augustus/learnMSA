@@ -70,7 +70,7 @@ class TreeEmitter(ProfileHMMEmitter):
         
         # the tree handler defines both the mapping of the sequences (leaves) 
         # to the ancestral nodes and the ancestral topology
-        self.tree_handler = tensortree.TreeHandler.copy(tree_handler)
+        self.tree_handler = tree_handler
 
         # prune all leaves from the input tree to get the ancestral tree
         self.ancestral_tree_handler = tensortree.TreeHandler.copy(tree_handler)
@@ -85,8 +85,8 @@ class TreeEmitter(ProfileHMMEmitter):
         
         # relies on assumption 2
         # todo: make this more general; allow connections to internal ancestral nodes
-        self.cluster_indices = self.tree_handler.get_parent_indices_by_height(0)
-        self.cluster_indices -= self.tree_handler.num_leaves # indices are sorted by height
+        self.cluster_indices = self.tree_handler.get_parent_indices_by_height(0).copy()
+        self.cluster_indices -= self.tree_handler.num_leaves # convert to range 0..num_ancestral_nodes-1
         self.num_clusters = np.unique(self.cluster_indices).size
         self.tree_loss_weight = tree_loss_weight
         self.rate_matrix, self.equilibrium = _make_default_rate_matrix()
@@ -95,7 +95,7 @@ class TreeEmitter(ProfileHMMEmitter):
     def set_lengths(self, lengths):
         super(TreeEmitter, self).set_lengths(lengths)
         branch_lengths = np.concatenate([self.ancestral_tree_handler.branch_lengths]*self.num_models, axis=1)
-        self.ancestral_tree_handler.set_branch_lengths(branch_lengths)
+        self.ancestral_tree_handler.set_branch_lengths(branch_lengths, update_phylo_tree=False)
 
     
     def build(self, input_shape):
@@ -158,6 +158,10 @@ class TreeEmitter(ProfileHMMEmitter):
         return loss
     
 
+    def get_branch_lengths(self):
+        return tensortree.backend.make_branch_lengths(self.branch_lengths_kernel)
+    
+
     def compute_anc_tree_loglik(self, leaf_probs):
         """ 
         Args:
@@ -167,7 +171,7 @@ class TreeEmitter(ProfileHMMEmitter):
             loglik per model, averaged over model length
         """
         tree_handler = self.ancestral_tree_handler
-        branch_lengths = tensortree.backend.make_branch_lengths(self.branch_lengths_kernel)
+        branch_lengths = self.get_branch_lengths()
         anc_loglik = tree_model.loglik(leaf_probs, tree_handler, self.rate_matrix, branch_lengths, tf.math.log(self.equilibrium))
         #mask out padding states and average over model length
         mask = tf.cast(tf.sequence_mask(self.lengths), anc_loglik.dtype)
@@ -196,7 +200,8 @@ class TreeEmitter(ProfileHMMEmitter):
         sub_insertion_init = [initializers.ConstantInitializer(self.insertion_kernel[i].numpy()) for i in model_indices]
 
         if self.tree_handler.branch_lengths.shape[-1] == 1:
-            self.tree_handler.set_branch_lengths(np.repeat(self.tree_handler.branch_lengths, self.num_models, axis=1))
+            self.tree_handler.set_branch_lengths(np.repeat(self.tree_handler.branch_lengths, self.num_models, axis=1),
+                                                 update_phylo_tree=False)
         self.tree_handler.branch_lengths[self.tree_handler.num_leaves:] = tf.math.softplus(self.branch_lengths_kernel).numpy()
 
         emitter_copy = TreeEmitter(

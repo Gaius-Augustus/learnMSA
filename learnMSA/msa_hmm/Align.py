@@ -33,7 +33,7 @@ def get_initial_model_lengths(data : SequenceDataset, config, random=True):
         lens = np.maximum(lens, 3)
         return lens
     else:
-        return [model_length] * config["num_models"]
+        return [int(model_length)] * config["num_models"]
     
     
 """ Trains k independent models on the sequences in a dataset and returns k "lazy" alignments, where "lazy" means 
