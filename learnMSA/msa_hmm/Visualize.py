@@ -25,7 +25,8 @@ def plot_logo(am, model_index, ax, cluster_index=0):
                         returns a 4D tensor of shape (num_models, num_clusters, length, num_aa))
     """
     hmm_cell = am.msa_hmm_layer.cell
-    hmm_cell.recurrent_init()
+    index = np.argmin(hmm_cell.transitioner.cluster_indices == cluster_index, axis=0)
+    hmm_cell.recurrent_init(indices=np.array([[index]]*am.msa_hmm_layer.cell.num_models))
     length = hmm_cell.length[model_index]
     
     logomaker_alphabet = ["A", "C", "D", "E", "F", "G", "H", "I", "K", "L", "M", "N", "P", "Q", "R", "S", "T", "V", "W", "Y"]

@@ -28,6 +28,15 @@ class ClusterTransitioner(ProfileHMMTransitioner):
         return (self.num_clusters,) + base_shape
     
 
+    def recurrent_init(self, indices=None):
+        super(ClusterTransitioner, self).recurrent_init(indices)
+
+        if indices is not None:
+            # we have to select the correct parameters for each input sequence
+            self.A = self.make_sample_A(self.indices, self.A)
+            self.A_t = self.make_sample_A(self.indices, self.A_t)
+    
+
     def call(self, inputs):
         """ 
         Args: 
@@ -41,13 +50,10 @@ class ClusterTransitioner(ProfileHMMTransitioner):
                                  message=("The first two dimensions of inputs and "
                                            + "indices must be equal."))
 
-        # get A_t or A of shape (k, num_clusters, q, q)
-        A = self.A if self.reverse else self.A_t
+        A = self.A_t if self.reverse else self.A
 
-        # we have to select the correct parameters for each input sequence
-        A = self.make_sample_A(self.indices, A)
-
-        return tf.linalg.matvec(A, inputs)
+        return tf.einsum("kbq,kbqz->kbz", inputs, A)
+        #return tf.linalg.matvec(A, inputs)
     
 
     def make_sample_A(self, indices, A):
