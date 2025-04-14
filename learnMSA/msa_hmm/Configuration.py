@@ -193,7 +193,10 @@ def make_default(default_num_models=5,
         "cluster_seq_id" : 0.5 if use_language_model else 0.9,
         "use_language_model" : use_language_model,
         "frozen_insertions" : frozen_insertions,
-        "allow_user_keys_in_config" : allow_user_keys_in_config
+        "allow_user_keys_in_config" : allow_user_keys_in_config,
+        "emission_kernel_dummy" : None,
+        "transition_kernel_dummy" : None,
+        "flank_init_kernel_dummy" : None
     }
     if use_language_model:
         default.update({

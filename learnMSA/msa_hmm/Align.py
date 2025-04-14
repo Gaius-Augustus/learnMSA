@@ -70,12 +70,25 @@ def fit_and_align(data : SequenceDataset,
         subset = np.arange(data.num_seq)
     full_length_estimate = get_full_length_estimate(data, config) 
     model_lengths = initial_model_length_callback(data, config)
-    if hasattr(config["emitter"], '__iter__'):
-        emission_dummy = [em.emission_init[0] for em in config["emitter"]]
+
+    if "emission_kernel_dummy" in config:
+        emission_dummy = [config["emission_kernel_dummy"]]
     else:
-        emission_dummy = [config["emitter"].emission_init[0]]
-    transition_dummy = config["transitioner"].transition_init[0]
-    flank_init_dummy = config["transitioner"].flank_init[0]
+        if hasattr(config["emitter"], '__iter__'):
+            emission_dummy = [em.emission_init[0] for em in config["emitter"]]
+        else:
+            emission_dummy = [config["emitter"].emission_init[0]]
+
+    if "transition_kernel_dummy" in config:
+        transition_dummy = config["transition_kernel_dummy"]
+    else:
+        transition_dummy = config["transitioner"].transition_init[0]
+
+    if "flank_init_kernel_dummy" in config:
+        flank_init_dummy = config["flank_init_kernel_dummy"]
+    else:
+        flank_init_dummy = config["transitioner"].flank_init[0]
+
     last_iteration=config["max_surgery_runs"]==1
     # 2 staged main loop: Fits model parameters with GD and optimized model architecture with surgery
     for i in range(config["max_surgery_runs"]):
