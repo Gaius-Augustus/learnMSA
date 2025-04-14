@@ -203,3 +203,21 @@ def as_str(config, items_per_line=1, prefix="", sep=""):
                      + str(val) 
                      for i,(key,val) in enumerate(config.items())) 
             + "\n"+prefix+"}")
+
+
+def perturbate(cluster_indices, prob, num_clusters):
+    """ 
+    Args: 
+            cluster_indices: A tensor of shape (k, b) that contains the cluster index of each input sequence.
+            prob: A float that indicates the probability of perturbating.
+            num_clusters: An integer that indicates the number of clusters.
+    Returns:
+            A tensor of shape (k, b) that contains the perturbed cluster indices.
+    """
+    if prob > 0:
+        # perturbate the cluster index with a certain probability
+        perturbate = tf.random.uniform(tf.shape(cluster_indices), 0, 1) < prob
+        perturbate = tf.cast(perturbate, tf.int64)
+        random_clusters = tf.random.uniform(tf.shape(cluster_indices), 0, num_clusters, dtype=tf.int64)
+        cluster_indices = perturbate * random_clusters + (1-perturbate) * cluster_indices
+    return cluster_indices

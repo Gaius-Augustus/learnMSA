@@ -103,6 +103,7 @@ def fit_and_align(data : SequenceDataset,
                                           epochs=epochs_this_iteration,
                                           sequence_weights=sequence_weights,
                                           clusters=clusters,
+                                          train_callbacks=config["train_callbacks"],
                                           verbose=verbose)
         if verbose:
             print("Creating alignment model...")

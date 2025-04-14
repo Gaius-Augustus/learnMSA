@@ -28,7 +28,7 @@ def compute_clustering(fasta_filename, directory="tmp", cluster_seq_id=0.5, line
                 cluster_files,
                 cluster_files+"_tmp",
                 "--cov-mode", "1",
-                "--cluster-mode", "2",
+                "--cluster-mode", "2" if linear else "1",
                 "--alignment-mode", "3",
                 "--kmer-per-seq", "100",
                 "--min-seq-id", str(cluster_seq_id),

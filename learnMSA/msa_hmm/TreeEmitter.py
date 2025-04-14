@@ -1,7 +1,7 @@
 from learnMSA.msa_hmm.Emitter import ProfileHMMEmitter
 from learnMSA.msa_hmm.Utility import get_num_states
 import learnMSA.msa_hmm.Initializers as initializers
-from learnMSA.msa_hmm.Utility import inverse_softplus
+from learnMSA.msa_hmm.Utility import inverse_softplus, perturbate
 import numpy as np
 import sys
 import tensorflow as tf
@@ -56,7 +56,8 @@ class TreeEmitter(ProfileHMMEmitter):
                  insertion_init = initializers.make_default_insertion_init(),
                  branch_lengths_init = None,
                  prior = None,
-                 tree_loss_weight = 1.0):
+                 tree_loss_weight = 1.0,
+                 perturbate_cluster_index_prob=0.0):
         """
         Args:
             tree_handler: A TreeHandler object that defines the full tree topology with the sequences as leaves.
@@ -64,6 +65,8 @@ class TreeEmitter(ProfileHMMEmitter):
             insertion_init: A list of initializers for the insertion kernels.
             prior: A prior object that defines a prior distribution over the emission probabilities.
             tree_loss_weight: A scalar that weights the tree loss in the total loss. 
+            perturbate_cluster_index_prob: A scalar that defines the probability of randomly
+                                        perturbating the cluster index in each step.
         """
         super(TreeEmitter, self).__init__(emission_init, insertion_init, 
                                           prior, frozen_insertions=True)
@@ -88,8 +91,11 @@ class TreeEmitter(ProfileHMMEmitter):
         self.cluster_indices = self.tree_handler.get_parent_indices_by_height(0).copy()
         self.cluster_indices -= self.tree_handler.num_leaves # convert to range 0..num_ancestral_nodes-1
         self.num_clusters = np.unique(self.cluster_indices).size
-        self.tree_loss_weight = tree_loss_weight
+        self.tree_loss_weight = tf.Variable(tree_loss_weight, trainable=False)
         self.rate_matrix, self.equilibrium = _make_default_rate_matrix()
+
+        self.perturbate_cluster_index_prob = perturbate_cluster_index_prob
+                                                         
 
 
     def set_lengths(self, lengths):
@@ -123,6 +129,7 @@ class TreeEmitter(ProfileHMMEmitter):
 
 
     def recurrent_init(self, indices):
+
         self.indices = indices
         self.B = self.make_B()
         self.B_transposed = tf.transpose(self.B, [0,1,3,2])
@@ -139,6 +146,8 @@ class TreeEmitter(ProfileHMMEmitter):
         B = self.B_transposed[..., :input_shape[-1],:]
         # we have to select the correct parameters for each input sequence
         cluster_indices = tf.gather(self.cluster_indices, self.indices)
+        if training:
+            cluster_indices = perturbate(cluster_indices, self.perturbate_cluster_index_prob, self.num_clusters)
         B = tf.gather(B, cluster_indices, batch_dims=1)
         return self._compute_emission_probs(inputs, B, input_shape, B_contains_batch=True)
     
@@ -162,20 +171,22 @@ class TreeEmitter(ProfileHMMEmitter):
         return tensortree.backend.make_branch_lengths(self.branch_lengths_kernel)
     
 
-    def compute_anc_tree_loglik(self, leaf_probs):
+    def compute_anc_tree_loglik(self, leaf_probs, average_over_length=False):
         """ 
         Args:
             leaf_probs: A tensor of shape (num_leaves, num_models, model_length, 20) that contains the 
                         amino acid emission probabilities at the leaves of the ancestral tree.
         Returns: 
-            loglik per model, averaged over model length
+            loglik per model, summed or averaged over model length
         """
         tree_handler = self.ancestral_tree_handler
         branch_lengths = self.get_branch_lengths()
         anc_loglik = tree_model.loglik(leaf_probs, tree_handler, self.rate_matrix, branch_lengths, tf.math.log(self.equilibrium))
         #mask out padding states and average over model length
         mask = tf.cast(tf.sequence_mask(self.lengths), anc_loglik.dtype)
-        anc_loglik = tf.reduce_sum(anc_loglik * mask, axis=1) / tf.reduce_sum(mask, axis=1)
+        anc_loglik = tf.reduce_sum(anc_loglik * mask, axis=1) 
+        if average_over_length:
+            anc_loglik /= tf.reduce_sum(mask, axis=1)
         
         return anc_loglik
     
@@ -247,3 +258,27 @@ def _make_default_rate_matrix(num_models=1):
     p = p[tf.newaxis]
     Q = tensortree.backend.make_rate_matrix(R, p)
     return Q, p
+
+
+
+class PerturbationProbCallback(tf.keras.callbacks.Callback):
+
+    def __init__(self, tree_layer, decay = 0.05, init_prob=0.8):
+        super(PerturbationProbCallback, self).__init__()
+        self.tree_layer = tree_layer
+        self.decay = decay
+        self.init_prob = init_prob
+
+    def on_train_begin(self, logs=None):
+        self.tree_layer.perturbate_cluster_index_prob = self.init_prob
+        # if hasattr(self.tree_layer, "tree_loss_weight"):
+        #     self.tree_layer.tree_loss_weight.assign(0.0)
+
+    def on_train_batch_end(self, batch, logs=None):
+        self.tree_layer.perturbate_cluster_index_prob -= self.decay
+        if self.tree_layer.perturbate_cluster_index_prob < 0:
+            self.tree_layer.perturbate_cluster_index_prob = 0
+        # if hasattr(self.tree_layer, "tree_loss_weight"):
+        #     self.tree_layer.tree_loss_weight.assign_add(0.05)
+        #     if self.tree_layer.tree_loss_weight > 1.0:
+        #         self.tree_layer.tree_loss_weight.assign(1.0)
