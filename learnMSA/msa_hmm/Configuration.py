@@ -7,7 +7,7 @@ import learnMSA.msa_hmm.Initializers as initializers
 import learnMSA.msa_hmm.Priors as priors
 import learnMSA.protein_language_models.Common as Common
 from learnMSA.protein_language_models.MvnEmitter import MvnEmitter, AminoAcidPlusMvnEmissionInitializer, make_joint_prior
-from learnMSA.msa_hmm.TreeEmitter import TreeEmitter
+from learnMSA.msa_hmm.TreeEmitter import TreeEmitter, PerturbationProbCallback
 from learnMSA.msa_hmm.TreeTransitioner import TreeTransitioner
 import subprocess as sp
 from learnMSA.msa_hmm.Utility import inverse_softplus
@@ -89,6 +89,9 @@ def make_default(default_num_models=5,
                  plm_cache_dir=None, 
                  tree_loss_weight=1.0,
                  use_tree_transitioner=True):
+    
+    train_callbacks = []
+
     if use_language_model:
         if V2_emitter:
             emission_init = [AminoAcidPlusMvnEmissionInitializer(scoring_model_config=scoring_model_config,
@@ -131,6 +134,7 @@ def make_default(default_num_models=5,
                               insertion_init=[initializers.make_default_insertion_init()
                                                     for _ in range(default_num_models)],
                               tree_loss_weight=tree_loss_weight)
+        train_callbacks.append(PerturbationProbCallback(emitter))
     else:
         emitter = emit.ProfileHMMEmitter(emission_init=[initializers.make_default_emission_init()
                                                     for _ in range(default_num_models)],
@@ -147,6 +151,7 @@ def make_default(default_num_models=5,
                                                 for _ in range(default_num_models)],
                                         flank_init=[initializers.make_default_flank_init() 
                                                 for _ in range(default_num_models)])
+        train_callbacks.append(PerturbationProbCallback(transitioner))
     else:
         encoder_initializer = ([initializers.ConstantInitializer(-3.)]+
                                     initializers.make_LG_init(default_num_models))
@@ -196,7 +201,8 @@ def make_default(default_num_models=5,
         "allow_user_keys_in_config" : allow_user_keys_in_config,
         "emission_kernel_dummy" : None,
         "transition_kernel_dummy" : None,
-        "flank_init_kernel_dummy" : None
+        "flank_init_kernel_dummy" : None,
+        "train_callbacks" : train_callbacks
     }
     if use_language_model:
         default.update({

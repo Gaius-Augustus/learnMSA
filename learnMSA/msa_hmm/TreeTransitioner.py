@@ -1,5 +1,6 @@
 from learnMSA.msa_hmm.Transitioner import ProfileHMMTransitioner
 import learnMSA.msa_hmm.Initializers as initializers
+from learnMSA.msa_hmm.Utility import perturbate
 import tensorflow as tf
 import numpy as np
 import tensortree 
@@ -18,10 +19,12 @@ class ClusterTransitioner(ProfileHMMTransitioner):
                 flank_init = initializers.make_default_flank_init(),
                 prior = None,
                 frozen_kernels={},
+                perturbate_cluster_index_prob=0.0,
                 **kwargs):
         super(ClusterTransitioner, self).__init__(transition_init, flank_init, prior, frozen_kernels, **kwargs)
         self.num_clusters = num_clusters
         self.cluster_indices = cluster_indices
+        self.perturbate_cluster_index_prob = perturbate_cluster_index_prob
 
     
     def get_kernel_shape(self, base_shape):
@@ -33,8 +36,11 @@ class ClusterTransitioner(ProfileHMMTransitioner):
 
         if indices is not None:
             # we have to select the correct parameters for each input sequence
-            self.A = self.make_sample_A(self.indices, self.A)
-            self.A_t = self.make_sample_A(self.indices, self.A_t)
+            self.A = self.make_sample_A(self.indices, self.A, perturbate_clusters=False)
+            self.A_t = self.make_sample_A(self.indices, self.A_t, perturbate_clusters=False)
+
+            self.A_perturbated = self.make_sample_A(self.indices, self.A, perturbate_clusters=True)
+            self.A_t_perturbated = self.make_sample_A(self.indices, self.A_t, perturbate_clusters=True)
     
 
     def call(self, inputs):
@@ -50,22 +56,24 @@ class ClusterTransitioner(ProfileHMMTransitioner):
                                  message=("The first two dimensions of inputs and "
                                            + "indices must be equal."))
 
-        A = self.A_t if self.reverse else self.A
+        A = self.A_t_perturbated if self.reverse else self.A_perturbated
 
-        return tf.einsum("kbq,kbqz->kbz", inputs, A)
-        #return tf.linalg.matvec(A, inputs)
+        return tf.einsum("kbq,kbqz->kbz", inputs, A) #alternative: tf.linalg.matvec(A, inputs)
     
 
-    def make_sample_A(self, indices, A):
+    def make_sample_A(self, indices, A, perturbate_clusters=False):
         """Constructs the transition probabilities per model and sample which depends on the cluster indices.
         Args:
             indices: A tensor of shape (k, b) that contains the index of each sample.
             A: A tensor of shape (k, c, q, q) that contains the transition probabilities 
                 of each of c clusters in each of the k models.
+            perturbate_clusters: A boolean that indicates whether to perturbate the cluster indices.
         Returns:
             A transition matrix per model and sample. Shape: (k,b,q,q)
         """
         cluster_indices = tf.gather(self.cluster_indices, indices)
+        if perturbate_clusters:
+            cluster_indices = perturbate(cluster_indices, self.perturbate_cluster_index_prob, self.num_clusters)
         A = tf.gather(A, cluster_indices, batch_dims=1)
         return A
 
