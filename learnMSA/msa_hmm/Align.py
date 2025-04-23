@@ -669,17 +669,15 @@ def compute_sequence_weights(fasta_filename, directory, cluster_seq_id=0.5, retu
 
         with SequenceDataset(fasta_filename, "fasta") as data:
             data.validate_dataset()
-            ids = data.seq_ids
-            #mmseqs2 omits database names and database specific accession numbers, we have to omit them too
-            #i.e. from ">database|accession|name" mmseqs only keeps ">name"
-            for i in range(len(ids)):
-                if "|" in ids[i]:
-                    pos = ids[i].rfind("|")
-                    if pos != -1:
-                        ids[i] = ids[i][pos+1:]
-            sequence_weights = np.array(clustering.loc[ids].weight, dtype=np.float32)
+            sequence_weights = np.array(
+                clustering.loc[data.seq_ids].weight, 
+                dtype=np.float32
+            )
         if return_clusters:
-            clusters = np.array(clustering.loc[ids].cluster_index, dtype=np.int32)
+            clusters = np.array(
+                clustering.loc[data.seq_ids].cluster_index, 
+                dtype=np.int32
+            )
             return sequence_weights, clusters
         else:
             return sequence_weights
