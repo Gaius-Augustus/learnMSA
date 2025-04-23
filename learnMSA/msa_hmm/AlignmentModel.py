@@ -401,6 +401,18 @@ class AlignmentModel():
         loglik /= ll_subset.size
         return loglik
     
+
+    def compute_tree_loss(self, max_seq=200000):
+        """ Computes the logarithmic tree loss.
+        Args:
+            max_seq: Threshold for the number of sequences used to compute the loglik. If
+                    the dataset has more sequences, a random subset is drawn.
+        """
+        #compute the tree loss
+        self.msa_hmm_layer.cell.emitter[0].recurrent_init(indices=None)
+        return self.msa_hmm_layer.cell.emitter[0].get_aux_loss(aggregate_models=False).numpy()
+
+    
     def compute_log_prior(self):
         """ Computes the logarithmic prior value of each underlying model.
         """

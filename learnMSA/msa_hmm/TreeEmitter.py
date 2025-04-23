@@ -153,7 +153,7 @@ class TreeEmitter(ProfileHMMEmitter):
     
 
     # computes the tree loss
-    def get_aux_loss(self):
+    def get_aux_loss(self, aggregate_models=True):
 
         # compute the likelihood of the ancestral tree with TensorTree
         leaves = self.B[..., 1:max(self.lengths)+1, :20] # only consider match positions and standard amino acids
@@ -162,7 +162,10 @@ class TreeEmitter(ProfileHMMEmitter):
         anc_loglik = self.compute_anc_tree_loglik(leaves)
 
         # weight and average the loglikelihood over all models
-        loss = -self.tree_loss_weight * tf.reduce_mean(anc_loglik)
+        if aggregate_models:
+            loss = -self.tree_loss_weight * tf.reduce_mean(anc_loglik)
+        else:
+            loss = -self.tree_loss_weight * anc_loglik
 
         return loss
     

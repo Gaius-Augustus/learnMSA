@@ -67,6 +67,18 @@ def get_adaptive_batch_size_with_language_model(model_lengths, max_seq_len, embe
     return batch_size
 
 
+# extract the kernel from the encoder model
+# this is used to initialize subsequent model surgery runs
+def encoder_weight_extractor(encoder_model : tf.keras.Model):
+   K = -3.0 # default value if no kernel is found
+   num_models = 1
+   for layer in encoder_model.layers:
+      if layer.name.startswith("anc_probs_layer"):
+         K = layer.time_kernel.numpy()
+         num_models = layer.num_models
+   return [initializers.ConstantInitializer(K)] + initializers.make_LG_init(num_models)
+
+
 #the configuration can be changed by experienced users
 #proper command line support for these parameters will be added in the future
 def make_default(default_num_models=5, 
@@ -218,6 +230,12 @@ def make_default(default_num_models=5,
             "V2_temperature" : V2_temperature,
             "plm_cache_dir" : plm_cache_dir,
         })
+
+    if tree_handler is not None:
+        default.update({
+            "encoder_weight_extractor" : encoder_weight_extractor
+        })
+
     return default
 
 def _make_assert_text(message, current_value):

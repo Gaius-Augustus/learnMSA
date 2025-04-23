@@ -666,7 +666,8 @@ def get_model_scores(am, model_criterion, verbose):
         "posterior": select_model_posterior,
         "loglik": select_model_loglik,
         "AIC": select_model_AIC,
-        "consensus": select_model_consensus
+        "consensus": select_model_consensus,
+        "loglik_with_tree": select_model_loglik_with_tree,
     }
     if model_criterion not in selection_criteria:
         raise SystemExit(f"Invalid model selection criterion. Valid criteria are: {list(selection_criteria.keys())}.") 
@@ -712,6 +713,14 @@ def select_model_loglik(am, verbose=False, use_prior=True):
             print("Likelihoods: ", likelihoods)
             print("Mean likelihood: ", np.mean(loglik))
     return score
+
+
+def select_model_loglik_with_tree(am, verbose=False):
+    loglik = select_model_loglik(am, verbose, use_prior=False)
+    tree_loglik = -am.compute_tree_loss()
+    if verbose:
+        print("Likelihoods of the HMM parameters given the tree: ", ["%.4f" % ll for ll in tree_loglik])
+    return loglik + tree_loglik
 
 
 def select_model_AIC(am, verbose=False):
