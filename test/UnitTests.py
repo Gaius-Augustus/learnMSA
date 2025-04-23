@@ -1540,7 +1540,6 @@ class TestModelSurgery(unittest.TestCase):
     def test_whole_surgery(self):
         pass
         
-        
 
 class TestAlignment(unittest.TestCase):
     
@@ -1738,7 +1737,6 @@ class DirichletTest(unittest.TestCase):
         np.testing.assert_almost_equal(mean_log_pdf2, np.mean(expected2), decimal=3)
         
         
-        
 class TestPriors(unittest.TestCase):
         
     def test_amino_acid_match_prior(self):
@@ -1754,7 +1752,6 @@ class TestPriors(unittest.TestCase):
         self.assertEqual(pdf.shape, (num_models, max_len))
         for i,l in enumerate(model_lengths):
             np.testing.assert_equal(pdf[i,l:].numpy(), 0.)
-        
         
         
 class TestModelToFile(unittest.TestCase):
@@ -2070,5 +2067,17 @@ class TestPretrainingUtilities(unittest.TestCase):
         np.testing.assert_almost_equal(loss_value, -(3*np.log(0.6) / 9 + 6*np.log(0.6)/16)/2)
                    
         
+class ClusteringTest(unittest.TestCase):
+
+    def test_clustering_with_ids(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            sequence_weights = Align.compute_sequence_weights(
+                "test/data/failing_ids.fasta",
+                temp_dir,
+            )
+
+
 if __name__ == '__main__':
     unittest.main()
