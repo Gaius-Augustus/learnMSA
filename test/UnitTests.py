@@ -2284,7 +2284,7 @@ class TestTree(unittest.TestCase):
         transitioner.build()
         transitioner.recurrent_init(indices)
         q = transitioner.max_num_states
-        self.assertEqual(transitioner.A.shape, (3, 3, q, q))
+        self.assertEqual(transitioner.A.shape, (3, 4, q, q))
         for i in range(2):
             A_model_no_padding = transitioner.A[i,..., :transitioner.num_states[i], :]
             np.testing.assert_almost_equal(np.sum(A_model_no_padding, axis=-1), 1.)
@@ -2379,11 +2379,11 @@ class TestTree(unittest.TestCase):
 
         expected_model_0_loglik = (_compute_column_loglik(0, 1) + 
                                    _compute_column_loglik(1, 2) + 
-                                   _compute_column_loglik(2, 3)) / 3
+                                   _compute_column_loglik(2, 3))
         expected_model_1_loglik = (_compute_column_loglik(2, 3) +
                                       _compute_column_loglik(3, 4) +
                                       _compute_column_loglik(4, 5) +
-                                      _compute_column_loglik(5, 6)) / 4
+                                      _compute_column_loglik(5, 6)) 
 
         self.assertAlmostEqual(tree_loglik[0], expected_model_0_loglik, places=5)
         self.assertAlmostEqual(tree_loglik[1], expected_model_1_loglik, places=5)

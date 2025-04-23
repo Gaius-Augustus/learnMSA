@@ -71,7 +71,8 @@ def fit_and_align(data : SequenceDataset,
     full_length_estimate = get_full_length_estimate(data, config) 
     model_lengths = initial_model_length_callback(data, config)
 
-    if "emission_kernel_dummy" in config:
+    if ("emission_kernel_dummy" in config 
+        and config["emission_kernel_dummy"] is not None):
         emission_dummy = [config["emission_kernel_dummy"]]
     else:
         if hasattr(config["emitter"], '__iter__'):
@@ -79,12 +80,14 @@ def fit_and_align(data : SequenceDataset,
         else:
             emission_dummy = [config["emitter"].emission_init[0]]
 
-    if "transition_kernel_dummy" in config:
+    if ("transition_kernel_dummy" in config
+        and config["transition_kernel_dummy"] is not None):
         transition_dummy = config["transition_kernel_dummy"]
     else:
         transition_dummy = config["transitioner"].transition_init[0]
 
-    if "flank_init_kernel_dummy" in config:
+    if ("flank_init_kernel_dummy" in config
+        and config["flank_init_kernel_dummy"] is not None):
         flank_init_dummy = config["flank_init_kernel_dummy"]
     else:
         flank_init_dummy = config["transitioner"].flank_init[0]
