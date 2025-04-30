@@ -24,7 +24,11 @@ class ClusterTransitioner(ProfileHMMTransitioner):
         super(ClusterTransitioner, self).__init__(transition_init, flank_init, prior, frozen_kernels, **kwargs)
         self.num_clusters = num_clusters
         self.cluster_indices = cluster_indices
-        self.perturbate_cluster_index_prob = perturbate_cluster_index_prob
+
+        # make this a variable and change it manually during training
+        self.perturbate_cluster_index_prob = tf.Variable(
+            perturbate_cluster_index_prob, trainable=False
+        )
 
     
     def get_kernel_shape(self, base_shape):

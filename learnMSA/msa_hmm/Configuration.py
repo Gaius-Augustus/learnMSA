@@ -81,26 +81,31 @@ def encoder_weight_extractor(encoder_model : tf.keras.Model):
 
 #the configuration can be changed by experienced users
 #proper command line support for these parameters will be added in the future
-def make_default(default_num_models=5, 
-                 use_language_model=False, 
-                 allow_user_keys_in_config=False,
-                 use_l2=False,
-                 scoring_model_config=Common.ScoringModelConfig(),
-                 num_prior_components=Common.PRIOR_DEFAULT_COMPONENTS,
-                 frozen_insertions=True,
-                 L2_match=10.,
-                 L2_insert=0.,
-                 temperature_mode="trainable",
-                 conditionally_independent=True,
-                 V2_emitter=True,
-                 V2_full_covariance=False,
-                 V2_temperature=3.,
-                 inv_gamma_alpha=0.5,
-                 inv_gamma_beta=3.,
-                 tree_handler=None,
-                 plm_cache_dir=None, 
-                 tree_loss_weight=1.0,
-                 use_tree_transitioner=True):
+def make_default(
+    default_num_models=5, 
+    use_language_model=False, 
+    allow_user_keys_in_config=False,
+    use_l2=False,
+    scoring_model_config=Common.ScoringModelConfig(),
+    num_prior_components=Common.PRIOR_DEFAULT_COMPONENTS,
+    frozen_insertions=True,
+    L2_match=10.,
+    L2_insert=0.,
+    temperature_mode="trainable",
+    conditionally_independent=True,
+    V2_emitter=True,
+    V2_full_covariance=False,
+    V2_temperature=3.,
+    inv_gamma_alpha=0.5,
+    inv_gamma_beta=3.,
+    tree_handler=None,
+    plm_cache_dir=None, 
+    tree_loss_weight=1.0,
+    use_tree_transitioner=True,
+    perturbation_prob_min=0.,
+    perturbation_prob_init=0.,
+    perturbation_prob_decay=0.1
+):
     
     train_callbacks = []
 
@@ -146,7 +151,12 @@ def make_default(default_num_models=5,
                               insertion_init=[initializers.make_default_insertion_init()
                                                     for _ in range(default_num_models)],
                               tree_loss_weight=tree_loss_weight)
-        train_callbacks.append(PerturbationProbCallback(emitter))
+        train_callbacks.append(PerturbationProbCallback(
+            emitter,
+            decay=perturbation_prob_decay,
+            init_prob=perturbation_prob_init,
+            min_prob=perturbation_prob_min
+        ))
     else:
         emitter = emit.ProfileHMMEmitter(emission_init=[initializers.make_default_emission_init()
                                                     for _ in range(default_num_models)],
@@ -163,7 +173,12 @@ def make_default(default_num_models=5,
                                                 for _ in range(default_num_models)],
                                         flank_init=[initializers.make_default_flank_init() 
                                                 for _ in range(default_num_models)])
-        train_callbacks.append(PerturbationProbCallback(transitioner))
+        train_callbacks.append(PerturbationProbCallback(
+            transitioner,
+            decay=perturbation_prob_decay,
+            init_prob=perturbation_prob_init,
+            min_prob=perturbation_prob_min
+        ))
     else:
         encoder_initializer = ([initializers.ConstantInitializer(-3.)]+
                                     initializers.make_LG_init(default_num_models))

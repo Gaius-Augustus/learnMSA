@@ -94,7 +94,10 @@ class TreeEmitter(ProfileHMMEmitter):
         self.tree_loss_weight = tf.Variable(tree_loss_weight, trainable=False)
         self.rate_matrix, self.equilibrium = _make_default_rate_matrix()
 
-        self.perturbate_cluster_index_prob = perturbate_cluster_index_prob
+        # make this a variable and change it manually during training
+        self.perturbate_cluster_index_prob = tf.Variable(
+            perturbate_cluster_index_prob, trainable=False
+        )
                                                          
 
 
@@ -266,22 +269,17 @@ def _make_default_rate_matrix(num_models=1):
 
 class PerturbationProbCallback(tf.keras.callbacks.Callback):
 
-    def __init__(self, tree_layer, decay = 0.05, init_prob=0.8):
+    def __init__(self, tree_layer, decay = 0.02, init_prob=0.0, min_prob=0.0):
         super(PerturbationProbCallback, self).__init__()
         self.tree_layer = tree_layer
         self.decay = decay
         self.init_prob = init_prob
+        self.min_prob = min_prob
 
     def on_train_begin(self, logs=None):
-        self.tree_layer.perturbate_cluster_index_prob = self.init_prob
-        # if hasattr(self.tree_layer, "tree_loss_weight"):
-        #     self.tree_layer.tree_loss_weight.assign(0.0)
+        self.tree_layer.perturbate_cluster_index_prob.assign(self.init_prob)
 
     def on_train_batch_end(self, batch, logs=None):
-        self.tree_layer.perturbate_cluster_index_prob -= self.decay
-        if self.tree_layer.perturbate_cluster_index_prob < 0:
-            self.tree_layer.perturbate_cluster_index_prob = 0
-        # if hasattr(self.tree_layer, "tree_loss_weight"):
-        #     self.tree_layer.tree_loss_weight.assign_add(0.05)
-        #     if self.tree_layer.tree_loss_weight > 1.0:
-        #         self.tree_layer.tree_loss_weight.assign(1.0)
+        self.tree_layer.perturbate_cluster_index_prob.assign_add(-self.decay)
+        if self.tree_layer.perturbate_cluster_index_prob < self.min_prob:
+            self.tree_layer.perturbate_cluster_index_prob.assign(self.min_prob)
