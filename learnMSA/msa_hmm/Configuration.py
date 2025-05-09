@@ -76,7 +76,7 @@ def encoder_weight_extractor(encoder_model : tf.keras.Model):
       if layer.name.startswith("anc_probs_layer"):
          K = layer.time_kernel.numpy()
          num_models = layer.num_models
-   return [initializers.ConstantInitializer(K)] + initializers.make_LG_init(num_models)
+   return [initializers.ConstantInitializer(K)] + initializers.make_LG_init()
 
 
 #the configuration can be changed by experienced users
@@ -104,7 +104,8 @@ def make_default(
     use_tree_transitioner=True,
     perturbation_prob_min=0.,
     perturbation_prob_init=0.,
-    perturbation_prob_decay=0.1
+    perturbation_prob_decay=0.1,
+    propagate_root=False
 ):
     
     train_callbacks = []
@@ -150,7 +151,8 @@ def make_default(
                                                     for _ in range(default_num_models)],
                               insertion_init=[initializers.make_default_insertion_init()
                                                     for _ in range(default_num_models)],
-                              tree_loss_weight=tree_loss_weight)
+                              tree_loss_weight=tree_loss_weight, 
+                              propagate_root=propagate_root)
         train_callbacks.append(PerturbationProbCallback(
             emitter,
             decay=perturbation_prob_decay,
@@ -166,7 +168,7 @@ def make_default(
     if tree_handler is not None and use_tree_transitioner:
         initial_branch_length_kernel = inverse_softplus(tree_handler.branch_lengths[:tree_handler.num_leaves])
         encoder_initializer = ([initializers.ConstantInitializer(initial_branch_length_kernel)]+
-                                    initializers.make_LG_init(default_num_models))
+                                    initializers.make_LG_init())
 
         transitioner = TreeTransitioner(tree_handler,
                                         transition_init=[initializers.make_default_transition_init() 
@@ -181,7 +183,7 @@ def make_default(
         ))
     else:
         encoder_initializer = ([initializers.ConstantInitializer(-3.)]+
-                                    initializers.make_LG_init(default_num_models))
+                                    initializers.make_LG_init())
 
         transitioner = trans.ProfileHMMTransitioner([initializers.make_default_transition_init() 
                                                                             for _ in range(default_num_models)],

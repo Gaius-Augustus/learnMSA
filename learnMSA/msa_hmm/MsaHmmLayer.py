@@ -182,17 +182,14 @@ class MsaHmmLayer(tf.keras.layers.Layer):
             aux_loss: Shape: ()
         """
         inputs = tf.cast(inputs, self.dtype)
-        if self.use_prior:
-            _, loglik, prior, aux_loss = self.forward_recursion(inputs, indices=indices, return_prior=True, training=training)
-            prior = self._scale_prior(prior)
-        else:
-            _, loglik = self.forward_recursion(inputs, indices=indices, return_prior=False, training=training)
+        _, loglik, prior, aux_loss = self.forward_recursion(inputs, indices=indices, return_prior=True, training=training)
         loglik_mean = self.apply_sequence_weights(loglik, indices, aggregate=True)
         loglik_mean = tf.squeeze(loglik_mean)
         if self.use_prior:
+            prior = self._scale_prior(prior)
             return loglik, loglik_mean, prior, aux_loss
         else:
-            return loglik, loglik_mean
+            return loglik, loglik_mean, tf.zeros_like(prior), aux_loss
         
         
     def get_config(self):

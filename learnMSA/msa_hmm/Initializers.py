@@ -68,10 +68,10 @@ background_distribution /= np.sum(background_distribution)
 
 
 
-def make_LG_init(num_models):
+def make_LG_init():
     R, p = tensortree.substitution_models.LG(alphabet = SequenceDataset.alphabet[:20])
-    R_init = np.stack([inverse_softplus(R).numpy()]*num_models, axis=0)
-    p_init = np.stack([np.log(p)]*num_models, axis=0)
+    R_init = inverse_softplus(R).numpy()
+    p_init = np.log(p)
     return [ConstantInitializer(R_init), 
             ConstantInitializer(p_init)]
 

@@ -112,7 +112,7 @@ def generic_model_generator(encoder_layers,
     forward_seq = PermuteSeqs([1,0,2,3], name="permute_seqs")(forward_seq)
     transposed_indices = PermuteSeqs([1,0], name="permute_indices")(indices)
 
-    if msa_hmm_layer.use_prior:
+    if True:#msa_hmm_layer.use_prior:
         loglik, aggregated_loglik, prior, aux_loss = msa_hmm_layer(forward_seq, transposed_indices)
         #transpose back to make model.predict work correctly
         loglik = PermuteSeqs([1,0], name="loglik")(loglik)

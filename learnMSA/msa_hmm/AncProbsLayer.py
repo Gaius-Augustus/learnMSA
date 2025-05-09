@@ -129,11 +129,16 @@ class AncProbsLayer(tf.keras.layers.Layer):
         """
         # omit non-standard amino acids and traverse the evolutionary times
         std_inputs = inputs[..., :20]
-        Q = self.make_rate_matrix()
+        Q = self.make_rate_matrix()[tf.newaxis] # add batch dimension
         B = self.make_times(indices)
-        P = tensortree.model.traverse_branches(std_inputs, Q, B, 
-                                               transposed=self.transposed,
-                                               logarithmic=False)
+        T = tensortree.backend.make_transition_probs(Q, B)
+        T = T[:, :, tf.newaxis] # add length dimensions
+        P = tensortree.backend.traverse_branch(
+            std_inputs, 
+            T, 
+            transposed=self.transposed,
+            logarithmic=False
+        )
         # add non-standard amino acids back
         if inputs.shape[-1] > 20:
             z = inputs.shape[-1] - 21
