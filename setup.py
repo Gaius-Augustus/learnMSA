@@ -21,7 +21,7 @@ setup(
         ]
     ),
     install_requires=[
-        "tensorflow==2.19",
+        "tensorflow[and-cuda]==2.19",
         "networkx",
         "logomaker", 
         "seaborn",
@@ -29,13 +29,9 @@ setup(
         "pyfamsa", 
         "transformers",
         "imageio",
-        "torch==2.6",
         "tf-keras==2.19",
         "SentencePiece"
     ],
-    extras_require={
-        "gpu": ["tensorflow[and-cuda]==2.19"],
-    },
     include_package_data=True,
     package_data={'': [
         "msa_hmm/trained_prior/*", 
