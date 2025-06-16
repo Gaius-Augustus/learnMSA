@@ -13,26 +13,39 @@ setup(
     description="learnMSA: Learning and Aligning large Protein Families",
     packages=find_packages(
         where=".",
-        include=["learnMSA", "learnMSA.run", "learnMSA.msa_hmm", "learnMSA.protein_language_models"]
+        include=[
+            "learnMSA", 
+            "learnMSA.run", 
+            "learnMSA.msa_hmm", 
+            "learnMSA.protein_language_models"
+        ]
     ),
-    install_requires=["tensorflow[and-cuda]<2.18",
-                      "networkx",
-                      "logomaker", 
-                      "seaborn",
-                      "biopython>=1.69",
-                      "pyfamsa", 
-                      "transformers",
-                      "imageio",
-                      "SentencePiece",
-                      "numpy<2.0"],
+    install_requires=[
+        "tensorflow==2.19",
+        "networkx",
+        "logomaker", 
+        "seaborn",
+        "biopython>=1.69",
+        "pyfamsa", 
+        "transformers",
+        "imageio",
+        "torch==2.6",
+        "tf-keras==2.19",
+        "SentencePiece"
+    ],
+    extras_require={
+        "gpu": ["tensorflow[and-cuda]==2.19"],
+    },
     include_package_data=True,
-    package_data={'': ["msa_hmm/trained_prior/*", 
-                        "msa_hmm/trained_prior/transition_priors/*",
-                        "protein_language_models/new_scoring_models_frozen/*",
-                        "protein_language_models/priors_V3/*"]},
+    package_data={'': [
+        "msa_hmm/trained_prior/*", 
+        "msa_hmm/trained_prior/transition_priors/*",
+        "protein_language_models/new_scoring_models_frozen/*",
+        "protein_language_models/priors_V3/*"
+    ]},
     license="MIT",
     license_files = ("LICENSE.md"),
     entry_points={
-        "console_scripts": [
-            "learnMSA = learnMSA.run:run_main", ] }
+        "console_scripts": ["learnMSA = learnMSA.run:run_main", ] 
+    }
 )

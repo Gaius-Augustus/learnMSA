@@ -21,6 +21,8 @@ USE_VITERBI_SURGERY = False
 if USE_VITERBI_SURGERY:
     from learnMSA.msa_hmm.Viterbi import get_state_seqs_max_lik
 
+np.set_printoptions(legacy='1.25')
+
 
 def get_initial_model_lengths(data : SequenceDataset, config, random=True):
     #initial model length
