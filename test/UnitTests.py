@@ -1275,40 +1275,52 @@ class TestModelSurgery(unittest.TestCase):
     def make_test_alignment(self, data : SequenceDataset):
         config = Configuration.make_default(1)
         emission_init = string_to_one_hot("FELIC").numpy()*10
-        insert_init= np.squeeze(string_to_one_hot("A") + string_to_one_hot("N"))*10
-        transition_init = Initializers.make_default_transition_init(MM = 0, 
-                                                                            MI = 0,
-                                                                            MD = -1,
-                                                                            II = 1,
-                                                                            IM = 0,
-                                                                            DM = 1,
-                                                                            DD = 0,
-                                                                            FC = 0,
-                                                                            FE = 0,
-                                                                            R = 0,
-                                                                            RF = 0, 
-                                                                            T = 0, 
-                                                                           scale = 0)
+        insert_init= np.squeeze(
+            string_to_one_hot("A") + string_to_one_hot("N")
+        )*10
+        transition_init = Initializers.make_default_transition_init(
+            MM = 0, 
+            MI = 0,
+            MD = -1,
+            II = 1,
+            IM = 0,
+            DM = 1,
+            DD = 0,
+            FC = 0,
+            FE = 0,
+            R = 0,
+            RF = 0, 
+            T = 0, 
+            scale = 0
+        )
         transition_init["match_to_match"] = Initializers.ConstantInitializer(0)
         transition_init["match_to_insert"] = Initializers.ConstantInitializer(0)
         transition_init["match_to_delete"] = Initializers.ConstantInitializer(-1)
         transition_init["begin_to_match"] = Initializers.ConstantInitializer([1,0,0,0,0])
         transition_init["match_to_end"] = Initializers.ConstantInitializer(0)
-        config["emitter"] = Emitter.ProfileHMMEmitter(emission_init = Initializers.ConstantInitializer(emission_init), 
-                                                           insertion_init = Initializers.ConstantInitializer(insert_init))
-        config["transitioner"] = Transitioner.ProfileHMMTransitioner(transition_init = transition_init)
-        model = Training.default_model_generator(num_seq=10, 
-                                                      effective_num_seq=10, 
-                                                      model_lengths=[5],
-                                                      config=config,
-                                                      data=data)
+        config["emitter"] = Emitter.ProfileHMMEmitter(
+            emission_init = Initializers.ConstantInitializer(emission_init), 
+            insertion_init = Initializers.ConstantInitializer(insert_init)
+        )
+        config["transitioner"] = Transitioner.ProfileHMMTransitioner(
+            transition_init = transition_init
+        )
+        model = Training.default_model_generator(
+            num_seq=10, 
+            effective_num_seq=10, 
+            model_lengths=[5],
+            config=config,
+            data=data
+        )
         batch_gen = Training.DefaultBatchGenerator()
         batch_gen.configure(data, config)
-        am = AlignmentModel(data, 
-                                      batch_gen,
-                                      np.arange(data.num_seq),
-                                      32, 
-                                      model)
+        am = AlignmentModel(
+            data, 
+            batch_gen,
+            np.arange(data.num_seq),
+            32, 
+            model
+        )
         return am
         
     def test_discard_or_expand_positions(self):
@@ -1321,6 +1333,7 @@ class TestModelSurgery(unittest.TestCase):
                 "..........F.-LnnnI-aaaFELnICnnn",             
                 "nnnnnnnnnn-.-Lnn.I-aaaF--.ICnnn",
                 "..........-.-Lnn.I-...---.--nnn",
+                "..........-.-Lnn.I-...---.--nnn",
                 "..........-.--...ICaaaF--.I-nnn",
                 "..........FnE-...ICaaaF-LnI-nnn"
             ]
@@ -1328,23 +1341,33 @@ class TestModelSurgery(unittest.TestCase):
             for s, ref_s in zip(aligned_sequences, ref_seqs):
                 self.assertEqual(s, ref_s)
             self.assertTrue(0 in am.metadata)
+            self.assertEqual(am.metadata[0].alignment_len, len(ref_seqs[0]))
             #shape: [number of domain hits, length]
             deletions = np.sum(am.metadata[0].consensus == -1, axis=1)
-            self.assert_vec(deletions, [[3,4,2,0,3], [1,4,3,1,3]]) 
+            self.assert_vec(deletions, [[4,5,2,0,4], [2,5,4,2,4]]) 
             #shape: [number of domain hits, num seq]
-            self.assert_vec(am.metadata[0].finished, [[False,False,True,False,False], [True,True,True,True,True]]) 
+            self.assert_vec(
+                am.metadata[0].finished, 
+                [[False,False,True,True,False,False], 
+                [True,True,True,True,True,True]]
+            ) 
             #shape: [number of domain hits, num seq, L-1 inner positions]
-            self.assert_vec(am.metadata[0].insertion_lens, [[[0, 0, 3, 0],
-                                                    [0, 0, 2, 0],
-                                                    [0, 0, 2, 0],
-                                                    [0, 0, 0, 0],
-                                                    [1, 0, 0, 0]],
+            self.assert_vec(
+                am.metadata[0].insertion_lens, 
+                [[[0, 0, 3, 0],
+                [0, 0, 2, 0],
+                [0, 0, 2, 0],
+                [0, 0, 2, 0],
+                [0, 0, 0, 0],
+                [1, 0, 0, 0]],
 
-                                                    [[0, 0, 1, 0],
-                                                    [0, 0, 0, 0],
-                                                    [0, 0, 0, 0],
-                                                    [0, 0, 0, 0],
-                                                    [0, 0, 1, 0]]]) 
+                [[0, 0, 1, 0],
+                [0, 0, 0, 0],
+                [0, 0, 0, 0],
+                [0, 0, 0, 0],
+                [0, 0, 0, 0],
+                [0, 0, 1, 0]]]
+            ) 
             pos_expand, expansion_lens, pos_discard = Align.get_discard_or_expand_positions(am)
             pos_expand = pos_expand[0]
             expansion_lens = expansion_lens[0]

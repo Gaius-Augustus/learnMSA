@@ -36,7 +36,10 @@ class SequenceDataset:
                 if indexed:
                     self.record_dict = SeqIO.index(filename, fmt)
                 else:
-                    self.record_dict = SeqIO.to_dict(SeqIO.parse(filename, fmt))
+                    with open(filename, "rt", encoding="utf-8") as handle:
+                        self.record_dict = SeqIO.to_dict(
+                            SeqIO.parse(handle, fmt)
+                        )
                 self.parsing_ok = True
             except ValueError as err:
                 self.parsing_ok = False
