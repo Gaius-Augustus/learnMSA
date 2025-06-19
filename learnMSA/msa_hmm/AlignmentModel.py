@@ -946,15 +946,15 @@ class AlignmentModel():
             i += 1
             #insertion
             if custom_columns is None:
-                custom_columns = None
+                custom_column = None
             else:
-                custom_columns = custom_columns[c]
+                custom_column = custom_columns[c]
             block[:,i:i+ins_l_total] = cls.get_insertion_block(
                 sequences,
                 ins_l,
                 ins_l_total, 
                 ins_s, 
-                custom_columns=custom_columns
+                custom_columns=custom_column
             )
             i += ins_l_total
         #final column
