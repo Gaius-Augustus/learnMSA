@@ -2,7 +2,7 @@ import tensorflow as tf
 import numpy as np
 import learnMSA.msa_hmm.Initializers as initializers
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
-from learnMSA.msa_hmm.Utility import inverse_softplus
+from learnMSA.msa_hmm.Utility import inverse_softplus, deserialize
 
 """Ancestral Probability Layer
 Learn one or several rate matrices jointly with a downstream model. Amino acid sequences can be smeared towards expected amino acid distributions after
@@ -308,3 +308,8 @@ class AncProbsLayer(tf.keras.layers.Layer):
              "use_lstm" : self.use_lstm
         })
         return config
+
+    @classmethod
+    def from_config(cls, config):
+        config["clusters"] = deserialize(config["clusters"])
+        return cls(**config)
