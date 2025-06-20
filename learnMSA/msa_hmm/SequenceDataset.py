@@ -77,7 +77,7 @@ class SequenceDataset:
         return self.record_dict[self.seq_ids[i]]
 
     
-    def get_header(self, i):
+    def get_header(self, i) -> str:
         return self.get_record(i).description
 
 
