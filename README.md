@@ -6,27 +6,29 @@
 
 ## Features
 
-- Aligns large numbers of protein sequences with above state-of-the-art accuracy
-- Can utilize protein language models (`--use_language_model`) for significantly improved accuracy
-- Enables ultra-large alignment of millions of sequences 
-- GPU acceleration, multi-GPU support
-- Scales linear in the number of sequences (does not require a guide tree)
-- Memory efficient (depending on sequence length, aligning millions of sequences on a laptop is possible)
-- Visualize a profile HMM or a sequence logo of the consensus motif
+- aligns large numbers of protein sequences with state-of-the-art accuracy
+- can utilize protein language models (`--use_language_model`) for significantly improved accuracy compared to state-of-the-art tools
+- enables ultra-large alignment of millions of sequences 
+- GPU acceleration
+- linear scaling with sequence count, does not require or build a guide tree
+- memory efficient (depending on sequence length, aligning millions of sequences on a laptop is possible)
+- visualize a profile HMM or a sequence logo of the consensus motif
 
 ## Current limitations
 
-- Requires many sequences (in most cases starting at 1000, a few 100 might still be enough) to achieve high accuracy
-- Only for protein sequences
-- Increasingly slow for long proteins with a length > 1000 residues
+- requires many sequences (in most cases starting at 1000, a few 100 might still be enough) to achieve high accuracy
+- only for proteins
+- increasingly slow for long proteins with a length > 1000 residues
 
 # Installation
 
-*Recommended ways to install learnMSA along with Tensorflow + GPU:*
+You have 3 options to install learnMSA. 
 
-## Singularity/Docker
+### Option 1: Singularity/Docker
 
-We provide a hassle-free docker image including GPU and pLM support.
+We provide a hassle-free Docker image including everything you need to align on GPU with protein language model support.
+
+This is the recommended and most stable way to install learnMSA.
 
 ```
 singularity build learnmsa.sif docker://felbecker/learnmsa
@@ -35,7 +37,7 @@ singularity run --nv learnmsa.sif learnMSA
 
 Running the container with `--nv` is required for GPU support.
 
-## conda/mamba and pip
+### Option 2: Conda/mamba and pip
 
 1. Create a conda environment:
 
@@ -44,7 +46,7 @@ conda create -n learnMSA python=3.12
 conda activate learnMSA
 ```
 
-2. Install learnMSA (cuda toolkit included):
+2. Install learnMSA (CUDA toolkit included):
 
 ```
 pip install learnMSA
@@ -61,7 +63,7 @@ You may have to set up [Bioconda channels](https://bioconda.github.io/).
 4. Additional installs for language model support (recommended!):
    
 ```
-pip install torch==2.2.1 tf-keras==2.17.0
+pip install torch==2.6
 ```
 
 5. (optional) Verify that TensorFlow and learnMSA are correctly installed:
@@ -71,41 +73,17 @@ python3 -c "import tensorflow as tf; print(tf.__version__, tf.config.list_physic
 learnMSA -h
 ```
 
-## bioconda (currently not recommended)
+### Option 3: Bioconda 
 
 `conda install -c bioconda -n learnMSA learnMSA`
 
-The additional installs (steps 3. and 4. above) are again highly recommended.
+This installs everything you need in a conda environment, however due to the way TensorFlow is distributed via conda, currently no GPU support is provided out of the box.
 
-Unfortunately, there are errors to be expected when installing learnMSA with bioconda.
+Therefore, a post install fix is needed if you use Bioconda
 
-### ${\text{\color{red}Troubleshooting:}}$
-
-### Error:
-`tensorflow.python.framework.errors_impl.UnknownError: {{function_node __wrapped__Expm1_device_/job:localhost/replica:0/task:0/device:GPU:0}} JIT compilation failed.`
-
-Your root error is:
-`TensorFlow libdevice not found`
-
-Fix:
-
-Find `nvvm` directory:
-`find / -type d -name nvvm 2>/dev/null`
-
-Expected outputs:
-`<path>/nvvm`
-
-If there are multiple paths, choose the one matching your conda environment.
-
-Run:
-`export XLA_FLAGS=--xla_gpu_cuda_data_dir=<path>`
+`conda activate learnMSA && pip install tensorflow=="$(pip list | grep tensorflow | awk '{print $2}')" `
 
 
-### Error:
-`ERROR: Flag 'minloglevel' was defined more than once (...)`
-
-Fix:
-`pip install --no-deps --upgrade sentencepiece==0.1.99`
 
 
 
@@ -143,3 +121,32 @@ Run the notebooks <code>learnMSA_demo.ipynb</code> or <code>learnMSA_with_langua
 Becker F, Stanke M. **learnMSA2: deep protein multiple alignments with large language and hidden Markov models**. *Bioinformatics*. 2024
 
 Becker F, Stanke M. **learnMSA: learning and aligning large protein families**. *GigaScience*. 2022
+
+
+# ${\text{\color{red}Troubleshooting:}}$
+
+### Error:
+`tensorflow.python.framework.errors_impl.UnknownError: {{function_node __wrapped__Expm1_device_/job:localhost/replica:0/task:0/device:GPU:0}} JIT compilation failed.`
+
+Your root error is:
+`TensorFlow libdevice not found`
+
+Fix:
+
+Find `nvvm` directory:
+`find / -type d -name nvvm 2>/dev/null`
+
+Expected outputs:
+`<path>/nvvm`
+
+If there are multiple paths, choose the one matching your conda environment.
+
+Run:
+`export XLA_FLAGS=--xla_gpu_cuda_data_dir=<path>`
+
+
+### Error:
+`ERROR: Flag 'minloglevel' was defined more than once (...)`
+
+Fix:
+`pip install --no-deps --upgrade sentencepiece==0.1.99`
