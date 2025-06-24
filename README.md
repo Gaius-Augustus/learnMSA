@@ -75,13 +75,19 @@ learnMSA -h
 
 ### Option 3: Bioconda 
 
-`conda install -c bioconda -n learnMSA learnMSA`
 
-This installs everything you need in a conda environment, however due to the way TensorFlow is distributed via conda, currently no GPU support is provided out of the box.
+```
+conda create -c bioconda -n learnMSA learnMSA
+```
 
-Therefore, a post install fix is needed if you use Bioconda
+This installs everything you need in a conda environment. 
+However, due to the way TensorFlow is distributed via conda currently no GPU support is provided out of the box.
 
-`conda activate learnMSA && pip install tensorflow=="$(pip list | grep tensorflow | awk '{print $2}')" `
+Therefore, a post install fix is needed:
+
+```
+conda activate learnMSA && pip install tensorflow[and-cuda]=="$(pip show tensorflow | grep ^Version: | awk '{print $2}')"
+```
 
 
 
