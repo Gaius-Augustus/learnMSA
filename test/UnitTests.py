@@ -2104,3 +2104,32 @@ class ClusteringTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class MaximumExpectedAccuracyTest(unittest.TestCase):
+
+    def test_maximum_expected_accuracy(self):
+        from test.TestMea import TestMeaHMMLayer
+        hmm_layer = TestMeaHMMLayer(num_states=4, p=0.4, q=0.6)
+        hmm_layer.build([None, 2])
+        x = [0, 0, 0, 0, 0, 1]
+        x = np.eye(2)[x]
+        x = x[np.newaxis, np.newaxis]
+        mea = hmm_layer.mea(x).numpy()[0]
+        viterbi = hmm_layer.viterbi(x).numpy()[0]
+        np.testing.assert_equal(mea, [0, 0, 1, 1, 2, 3])
+        np.testing.assert_equal(viterbi, [0, 0, 0, 1, 2, 3])
+
+    def test_parallel_maximum_expected_accuracy(self):
+        from test.TestMea import TestMeaHMMLayer
+        hmm_layer = TestMeaHMMLayer(
+            num_states=4, p=0.4, q=0.6, parallel_factor=3
+        )
+        hmm_layer.build([None, 2])
+        x = [0, 0, 0, 0, 0, 1]
+        x = np.eye(2)[x]
+        x = x[np.newaxis, np.newaxis]
+        mea = hmm_layer.mea(x).numpy()[0]
+        viterbi = hmm_layer.viterbi(x).numpy()[0]
+        np.testing.assert_equal(mea, [0, 0, 1, 1, 2, 3])
+        np.testing.assert_equal(viterbi, [0, 0, 0, 1, 2, 3])
