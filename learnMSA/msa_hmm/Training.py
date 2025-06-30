@@ -118,7 +118,7 @@ def make_msa_hmm_layer(effective_num_seq,
                         model_lengths, 
                         config,
                         sequence_weights=None,
-                        alphabet_size=len(SequenceDataset.alphabet)-1):
+                        alphabet_size=len(SequenceDataset.standard_alphabet)-1):
     """Constructs a cell and a MSA HMM layer given a config.
     """
     assert_config(config)
@@ -161,7 +161,7 @@ def default_model_generator(num_seq,
                             data : SequenceDataset = None,
                             sequence_weights=None,
                             clusters=None,
-                            alphabet_size=len(SequenceDataset.alphabet)-1,
+                            alphabet_size=len(SequenceDataset.standard_alphabet)-1,
                             generic_gen=generic_model_generator):
     """A callback that constructs the default learnMSA model. Can be used as a template for custom generators.
     Args:
@@ -183,68 +183,6 @@ def default_model_generator(num_seq,
     anc_probs_layer = make_anc_probs_layer(num_seq, config, clusters)
     model = generic_gen([anc_probs_layer], msa_hmm_layer)
     return model
-
-
-
-class DefaultBatchGenerator():
-    def __init__(self, 
-                return_only_sequences=False, 
-                shuffle=True, 
-                alphabet_size=len(SequenceDataset.alphabet)-1):
-        #generate a unique permutation of the sequence indices for each model to train
-        self.return_only_sequences = return_only_sequences
-        self.alphabet_size = alphabet_size
-        self.shuffle = shuffle
-        self.configured = False
-        
-    def configure(self, data : SequenceDataset, config, verbose=False):
-        self.data = data
-        self.config = config
-        self.num_models = config["num_models"] if "num_models" in config else 1
-        self.crop_long_seqs = config["crop_long_seqs"] if "crop_long_seqs" in config else math.inf
-        self.permutations = [np.arange(data.num_seq) for _ in range(self.num_models)]
-        for p in self.permutations:
-            np.random.shuffle(p)
-        self.configured = True
-        
-    def __call__(self, indices, return_crop_boundaries=False):
-        if not self.configured:
-            raise ValueError("A batch generator must be configured with the configure(data, config) method.") 
-        #use a different permutation of the sequences per trained model
-        if self.shuffle:
-            permutated_indices = np.stack([perm[indices] for perm in self.permutations], axis=1)
-        else:
-            permutated_indices = np.stack([indices]*self.num_models, axis=1)
-        max_len = np.max(self.data.seq_lens[permutated_indices])
-        max_len = min(max_len, self.crop_long_seqs)
-        batch = np.zeros((indices.shape[0], self.num_models, max_len+1), dtype=np.uint8) 
-        if return_crop_boundaries:
-            start = np.zeros((indices.shape[0], self.num_models), dtype=np.int32)
-            end = np.zeros((indices.shape[0], self.num_models), dtype=np.int32)
-        batch += self.alphabet_size #initialize with terminal symbols
-        for i,perm_ind in enumerate(permutated_indices):
-            for k,j in enumerate(perm_ind):
-                if return_crop_boundaries:
-                    seq, start[i, k], end[i, k] = self.data.get_encoded_seq(j, crop_to_length=self.crop_long_seqs, return_crop_boundaries=True)
-                else:
-                    seq = self.data.get_encoded_seq(j, crop_to_length=self.crop_long_seqs, return_crop_boundaries=False)
-                batch[i, k, :min(self.data.seq_lens[j], self.crop_long_seqs)] = seq
-        if self.return_only_sequences:
-            if return_crop_boundaries:
-                return batch, start, end
-            else: 
-                return batch
-        else:
-            if return_crop_boundaries:
-                return batch, permutated_indices, start, end 
-            else: 
-                return batch, permutated_indices
-    
-    def get_out_types(self):
-        if self.return_only_sequences:
-            return (tf.uint8, )
-        else:
-            return (tf.uint8, tf.int64) 
         
     
 # batch_generator is a callable object that maps a vector of sequence indices to

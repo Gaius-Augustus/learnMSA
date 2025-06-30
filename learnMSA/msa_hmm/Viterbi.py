@@ -228,7 +228,14 @@ def viterbi_full_chunk_backtracking(viterbi_chunk_borders, local_gamma, transiti
     return state_seqs_max_lik
 
 
-def viterbi(sequences, hmm_cell, end_hints=None, parallel_factor=1, return_variables=False, non_homogeneous_mask_func=None):
+def viterbi(
+    sequences, 
+    hmm_cell, 
+    end_hints=None, 
+    parallel_factor=1, 
+    return_variables=False, 
+    non_homogeneous_mask_func=None
+):
     """ Computes the most likely sequence of hidden states given unaligned sequences and a number of models.
         The implementation is logarithmic (underflow safe) and capable of decoding many sequences in parallel 
         on the GPU. Optionally the function can also parallelize over the sequence length at the cost of memory usage.
@@ -290,78 +297,3 @@ def viterbi(sequences, hmm_cell, end_hints=None, parallel_factor=1, return_varia
         return viterbi_paths, variables_out
     else:
         return viterbi_paths
-
-
-def get_state_seqs_max_lik(data : SequenceDataset,
-                           batch_generator,
-                           indices,
-                           batch_size,
-                           hmm_cell, 
-                           model_ids,
-                           encoder=None,
-                           non_homogeneous_mask_func=None,
-                           parallel_factor=1):
-    """ Runs batch-wise viterbi on all sequences in the dataset as specified by indices.
-    Args:
-        data: The sequence dataset.
-        batch_generator: Batch generator.
-        indices: Indices that specify which sequences in the dataset should be decoded. 
-        batch_size: Specifies how many sequences will be decoded in parallel. 
-        hmm_cell: MsaHmmCell object. 
-        encoder: Optional encoder model that is applied to the sequences before Viterbi.
-        non_homogeneous_mask_func: Optional function that maps a sequence index i to a num_model x batch x q x q mask that specifies which transitions are allowed.
-        parallel_factor: Increasing this number allows computing likelihoods and posteriors chunk-wise in parallel at the cost of memory usage.
-                        The parallel factor has to be a divisor of the sequence length.
-    Returns:
-        A dense integer representation of the most likely state sequences. Shape: (num_model, num_seq, L)
-    """
-    #does currently not support multi-GPU, scale the batch size to account for that and prevent overflow
-    num_gpu = len([x.name for x in tf.config.list_logical_devices() if x.device_type == 'GPU']) 
-    num_devices = num_gpu + int(num_gpu==0) #account for the CPU-only case 
-    batch_size = int(batch_size / num_devices)
-    hmm_cell.recurrent_init()
-    old_crop_long_seqs = batch_generator.crop_long_seqs
-    batch_generator.crop_long_seqs = math.inf #do not crop sequences
-    ds = train.make_dataset(indices, 
-                            batch_generator, 
-                            batch_size,
-                            shuffle=False,
-                            bucket_by_seq_length=True,
-                            model_lengths=hmm_cell.length)
-    seq_len = np.amax(data.seq_lens[indices]+1)
-    #initialize with terminal states
-    state_seqs_max_lik = np.zeros((hmm_cell.num_models, indices.size, seq_len), 
-                                  dtype=np.uint32) 
-    if encoder:
-        @tf.function(input_signature=[[tf.TensorSpec(x.shape, dtype=x.dtype) for x in encoder.inputs]])
-        def call_viterbi(inputs):
-            encoded_seq = encoder(inputs)
-            #todo: this can be improved by encoding only for required models, not all
-            encoded_seq = tf.gather(encoded_seq, model_ids, axis=0)
-            viterbi_seq = viterbi(encoded_seq, hmm_cell, parallel_factor=parallel_factor, non_homogeneous_mask_func=non_homogeneous_mask_func)
-            return viterbi_seq
-    
-    @tf.function(input_signature=(tf.TensorSpec(shape=[None, hmm_cell.num_models, None], dtype=tf.uint8),))
-    def call_viterbi_single(inputs):
-        if encoder is None:
-            seq = tf.transpose(inputs, [1,0,2])
-        else:
-            seq = encoder(inputs) 
-        #todo: this can be improved by encoding only for required models, not all
-        seq = tf.gather(seq, model_ids, axis=0)
-        return viterbi(seq, hmm_cell, parallel_factor=parallel_factor, non_homogeneous_mask_func=non_homogeneous_mask_func)
-    
-    for i,q in enumerate(hmm_cell.num_states):
-        state_seqs_max_lik[i] = q-1 #terminal state
-    for (*inputs, batch_indices), _ in ds:
-        if hasattr(batch_generator, "return_only_sequences") and batch_generator.return_only_sequences:
-            state_seqs_max_lik_batch = call_viterbi_single(inputs[0]).numpy()
-        else:
-            state_seqs_max_lik_batch = call_viterbi(inputs).numpy()
-        _,b,l = state_seqs_max_lik_batch.shape
-        state_seqs_max_lik[:, batch_indices, :l] = state_seqs_max_lik_batch
-
-    # revert batch generator state
-    batch_generator.crop_long_seqs = old_crop_long_seqs
-
-    return state_seqs_max_lik

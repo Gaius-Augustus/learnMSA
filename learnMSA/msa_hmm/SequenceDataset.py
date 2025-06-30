@@ -1,6 +1,7 @@
 import numpy as np
 import copy
 import math
+from typing import overload
 from Bio import SeqIO, SeqRecord, Seq
 import re
 from functools import partial
@@ -9,25 +10,35 @@ from functools import partial
 class SequenceDataset:
     """ Contains a set of sequences and their corresponding labels.
     """
-    #alphabet[:20] corresponds to the traditional aminoacid alphabet
-    #for future changes in the alphabet: all learnMSA related code assumes that the standard amino acids occur at the first 20 positions
-    #any special symbols should be added after that and the gap character comes last
-    alphabet = "ARNDCQEGHILKMFPSTWYVXUO-"
+    # alphabet[:20] corresponds to the traditional aminoacid alphabet
+    # for future changes in the alphabet: all learnMSA related code assumes 
+    # that the standard amino acids occur at the first 20 positions
+    # any special symbols should be added after that and the gap character 
+    # comes last
+    standard_alphabet : str = "ARNDCQEGHILKMFPSTWYVXUO-"
     
-
-
-    def __init__(self, filename=None, fmt="fasta", sequences=None, indexed=False, threads=None):
+    def __init__(
+        self, 
+        filename=None, 
+        fmt="fasta", 
+        sequences=None, 
+        alphabet:str=standard_alphabet,
+        indexed=False, 
+        threads=None
+    ):
         """
         Args:
             filename: Path to a sequence file in any supported format.
             fmt: Format of the file. Can be any format supported by Biopython's SeqIO.
             sequences: A list of id/sequence pairs as strings. If given, filename and fmt arguments are ignored.
+            alphabet: A string containing the alphabet used in the sequences.
             indexed: If True, Biopython's index method is used to avoid loading the whole file into memory at once. Otherwise 
                     regular parsing is used. Setting this to True will allow constant memory training at the cost of per-step performance.
             threads: Number of threads to use for metadata computation.
         """
         if sequences is None and filename is None:
             raise ValueError("Either filename or sequences must be given.")
+        self.alphabet = alphabet
         if sequences is None:
             self.filename = filename
             self.fmt = fmt
@@ -59,15 +70,28 @@ class SequenceDataset:
         self.seq_lens = np.array([sum([1 for x in str(self.get_record(i).seq) if x.isalpha()]) for i in range(self.num_seq)])
         self.max_len = np.amax(self.seq_lens) if self.seq_lens.size > 0 else 0
 
-
-    def __enter__(self):
+    def __enter__(self) -> "SequenceDataset":
         return self
 
-
-    def __exit__(self, exc_type, exc_value, traceback):
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
         self.close()
 
-
+    def __len__(self) -> int:
+        """ Returns the number of sequences in the dataset. """
+        return self.num_seq
+    
+    @overload
+    def seq_len(self, i : int) -> int: ...
+    @overload
+    def seq_len(self, i : np.ndarray | list[int]) -> np.ndarray: ...
+    def seq_len(self, i : int | np.ndarray | list[int]) -> int | np.ndarray:
+        """ Returns the length of the sequence with index i. """
+        return self.seq_lens[i]
+    
+    def alphabet_size(self) -> int:
+        """ Returns the size of the alphabet used in the dataset. """
+        return len(self.alphabet)-1
+    
     def close(self):
         if self.indexed:
             self.record_dict.close()
@@ -82,7 +106,7 @@ class SequenceDataset:
 
 
     def get_alphabet_no_gap(self):
-        return type(self).alphabet[:-1]
+        return self.alphabet[:-1]
 
 
     def get_standardized_seq(self, i,
@@ -120,9 +144,9 @@ class SequenceDataset:
         seq_str = self.get_standardized_seq(i, remove_gaps, gap_symbols, ignore_symbols, replace_with_x)
         # make sure the sequences do not contain any other symbols
         if validate_alphabet:
-            if bool(re.compile(rf"[^{type(self).alphabet}]").search(seq_str)):
-                raise ValueError(f"Found unknown character(s) in sequence {self.seq_ids[i]}. Allowed alphabet: {type(self).alphabet}.")
-        seq = np.array([type(self).alphabet.index(aa) for aa in seq_str], dtype=dtype)
+            if bool(re.compile(rf"[^{self.alphabet}]").search(seq_str)):
+                raise ValueError(f"Found unknown character(s) in sequence {self.seq_ids[i]}. Allowed alphabet: {self.alphabet}.")
+        seq = np.array([self.alphabet.index(aa) for aa in seq_str], dtype=dtype)
         if seq.shape[0] > crop_to_length:
             #crop randomly
             start = np.random.randint(0, seq.shape[0] - crop_to_length + 1)
@@ -165,15 +189,24 @@ class AlignedDataset(SequenceDataset):
     Args:
         See SequenceDataset.
     """
-    def __init__(self, filename=None, fmt="fasta", aligned_sequences=None, indexed=False, threads=None, single_seq_ok=False):
-        super().__init__(filename, fmt, aligned_sequences, indexed, threads)
+    def __init__(
+            self, 
+            filename=None, 
+            fmt="fasta", 
+            aligned_sequences=None, 
+            alphabet:str=SequenceDataset.standard_alphabet,
+            indexed=False, 
+            threads=None, 
+            single_seq_ok=False
+        ):
+        super().__init__(filename, fmt, aligned_sequences, alphabet, indexed, threads)
         self.single_seq_ok = single_seq_ok
         self.validate_dataset()
         self.msa_matrix = np.zeros((self.num_seq, len(self.get_record(0))), dtype=np.int16)
         for i in range(self.num_seq):
             self.msa_matrix[i,:] = self.get_encoded_seq(i, remove_gaps=False, dtype=np.int16)
         # compute a mapping from sequence positions to MSA-column index
-        cumsum = np.cumsum(self.msa_matrix != type(self).alphabet.index('-'), axis=1)  #A-B--C -> 112223
+        cumsum = np.cumsum(self.msa_matrix != self.alphabet.index('-'), axis=1)  #A-B--C -> 112223
         diff = np.diff(np.insert(cumsum, 0, 0.0, axis=1), axis=1) #112223 -> 0112223 -> [[(i+1) - i]] -> 101001
         diff_where = [np.argwhere(diff[i,:]).flatten() for i in range(diff.shape[0])]
         self.column_map = np.concatenate(diff_where).flatten()

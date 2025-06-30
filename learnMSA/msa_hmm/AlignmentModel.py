@@ -1,21 +1,24 @@
-import tensorflow as tf
-import numpy as np
-import learnMSA.msa_hmm.AncProbsLayer as anc_probs
-import learnMSA.msa_hmm.MsaHmmLayer as msa_hmm_layer
-import learnMSA.msa_hmm.MsaHmmCell as msa_hmm_cell
-from learnMSA.msa_hmm.SequenceDataset import SequenceDataset, AlignedDataset
-import learnMSA.msa_hmm.Configuration as config
-import learnMSA.msa_hmm.Training as train
-import learnMSA.msa_hmm.Viterbi as viterbi
-import learnMSA.msa_hmm.Priors as priors
-import learnMSA.msa_hmm.Transitioner as trans
-import learnMSA.msa_hmm.Emitter as emit
 import json
 import shutil
-from packaging import version
 from pathlib import Path
 
-        
+import numpy as np
+import tensorflow as tf
+from packaging import version
+
+import learnMSA.msa_hmm.AncProbsLayer as anc_probs
+import learnMSA.msa_hmm.Configuration as config
+import learnMSA.msa_hmm.Emitter as emit
+import learnMSA.msa_hmm.MsaHmmCell as msa_hmm_cell
+import learnMSA.msa_hmm.MsaHmmLayer as msa_hmm_layer
+import learnMSA.msa_hmm.Priors as priors
+import learnMSA.msa_hmm.Training as train
+import learnMSA.msa_hmm.Transitioner as trans
+import learnMSA.msa_hmm.Viterbi as viterbi
+from learnMSA.msa_hmm.SequenceDataset import AlignedDataset, SequenceDataset
+from learnMSA.msa_hmm.BatchGenerator import BatchGenerator
+
+
 # utility class used in AlignmentModel storing useful information on a 
 # specific alignment
 class AlignmentMetaData():
@@ -98,7 +101,7 @@ class AlignedInsertions():
                 
         
         if aligned_insertions is None:
-            self.ext_insertions = 0
+            self.ext_insertions = np.array([])
         else:
             self.custom_columns_insertions = []
             for repeat in aligned_insertions:
@@ -119,23 +122,28 @@ class AlignedInsertions():
             self.ext_left_flank = 0
         else:
             self.custom_columns_left_flank = _process(aligned_left_flank[1])
-            self.ext_left_flank = np.amax(self.custom_columns_left_flank)+1
+            self.ext_left_flank = int(
+                np.amax(self.custom_columns_left_flank)+1
+            )
         
         if aligned_right_flank is None:
             self.ext_right_flank = 0
         else:
             self.custom_columns_right_flank = _process(aligned_right_flank[1])
-            self.ext_right_flank = np.amax(self.custom_columns_right_flank)+1
+            self.ext_right_flank = int(
+                np.amax(self.custom_columns_right_flank)+1
+            )
             
         if aligned_unannotated_segments is None:
-            self.ext_unannotated = 0
+            self.custom_columns_unannotated_segments = []
+            self.ext_unannotated = []
         else:
             self.custom_columns_unannotated_segments = [
                 _process(x[1]) if x is not None else None 
                 for x in aligned_unannotated_segments
             ]
             self.ext_unannotated = np.array([
-                np.amax(x)+1 if x is not None else 0 
+                np.amax(x)+1 if x is not None else np.array([]) 
                 for x in self.custom_columns_unannotated_segments
             ])
     
@@ -274,6 +282,7 @@ class AlignmentModel():
         self.metadata = {}
         self.num_models = self.msa_hmm_layer.cell.num_models
         self.length = self.msa_hmm_layer.cell.length
+        self.best_model = -1
         
     #computes an implicit alignment (without storing gaps)
     #eventually, an alignment with explicit gaps can be written 
@@ -559,14 +568,17 @@ class AlignmentModel():
             ll_subset = np.array(
                 [i for l,i in sorted(zip(self.data.seq_lens, range(n)))]
             )
-        ds = train.make_dataset(ll_subset, 
-                                self.batch_generator,
-                                self.batch_size, 
-                                shuffle=False)
+        ds = train.make_dataset(
+            ll_subset, 
+            self.batch_generator,
+            self.batch_size, 
+            shuffle=False
+        )
         loglik = np.zeros((self.msa_hmm_layer.cell.num_models))
         for x, _ in ds:
             loglik += np.sum(self.model(x)[0], axis=0)
         loglik /= ll_subset.size
+
         return loglik
     
     def compute_log_prior(self):
@@ -726,7 +738,7 @@ class AlignmentModel():
         # todo: this is currently a bit limited because it creates a default 
         # batch gen from a default config
         if custom_batch_gen is None:
-            batch_gen = train.DefaultBatchGenerator() 
+            batch_gen = BatchGenerator() 
         else:
             batch_gen = custom_batch_gen
         if custom_config is None:

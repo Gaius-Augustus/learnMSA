@@ -12,6 +12,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 tf.get_logger().setLevel('WARNING')
 from learnMSA.msa_hmm import Align, Emitter, Transitioner, Initializers, MsaHmmCell, MsaHmmLayer, Training, Configuration, Viterbi, AncProbsLayer, Priors, DirichletMixture, Utility
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset, AlignedDataset
+from learnMSA.msa_hmm.BatchGenerator import BatchGenerator
 from learnMSA.msa_hmm.AlignmentModel import AlignmentModel, non_homogeneous_mask_func, find_faulty_sequences
 from learnMSA.protein_language_models import Common, DataPipeline, TrainingUtil, MvnMixture, EmbeddingCache
 import itertools
@@ -59,8 +60,8 @@ class TestDataset(unittest.TestCase):
             with SequenceDataset("test/data/egf.ref", "fasta", indexed=ind) as data:
                 ref = "GTSHLVKCAEKEKTFCVNGGECFMVKDLSNPSRYLCKCQPGFTG----ARCTENVPMKVQNQEKAEELYQK"
                 np.testing.assert_equal(str(data.get_record(5).seq), ref)
-                np.testing.assert_equal(data.get_encoded_seq(5), [SequenceDataset.alphabet.index(a) for a in ref.replace('-', '')])
-                np.testing.assert_equal(data.get_encoded_seq(5, remove_gaps=False), [SequenceDataset.alphabet.index(a) for a in ref])
+                np.testing.assert_equal(data.get_encoded_seq(5), [SequenceDataset.standard_alphabet.index(a) for a in ref.replace('-', '')])
+                np.testing.assert_equal(data.get_encoded_seq(5, remove_gaps=False), [SequenceDataset.standard_alphabet.index(a) for a in ref])
 
 
     def test_invalid_symbol(self):
@@ -149,6 +150,174 @@ class TestDataset(unittest.TestCase):
             self.assertEqual(data.get_header(2), "QED42866.1 ORF1 [Anemone nepovirus A]")
             self.assertEqual(data.get_header(3), "QZQ78639.1 polyprotein [Potato black ringspot virus]")
             self.assertEqual(data.get_header(4), "Supergroup001--NEW-Clstr134_soil_ORF36_ERR2562197_k141_13787_flag1_multi16_len6988")
+
+
+class TestBatchGenerator(unittest.TestCase):
+        
+    alphabet = "FELIKAHC-"
+
+    def _s2i(self, s: str):
+        """ Converts a string to indices based on the provided alphabet. """
+        return np.array([type(self).alphabet.index(c) for c in s], dtype=np.uint8)
+    
+    def test_not_configured(self):
+        batch_gen = BatchGenerator()
+        error_catched = False
+        try:
+            batch_gen([0,1,2])
+        except ValueError:
+            error_catched = True
+        self.assertTrue(
+            error_catched, 
+            "BatchGenerator should raise an error if not configured."
+        )
+
+    def test_default(self):
+        batch_gen = BatchGenerator()
+        with SequenceDataset(
+            "test/data/felix.fa", alphabet=type(self).alphabet
+        ) as data:
+            data.validate_dataset() # check for errors in the test data
+            batch_gen.data = data
+            self.assertTrue(
+                batch_gen.is_valid(),
+                "A BatchGenerator should be valid if it has a dataset."
+            )
+            self.assertTrue(
+                not batch_gen.is_shuffled(),
+                "BatchGenerator should not be shuffled by default."
+            )
+            np.testing.assert_array_equal(
+                batch_gen([0])[0], self._s2i("FELIK"),
+            )
+            np.testing.assert_array_equal(
+                batch_gen([1])[0], self._s2i("AHCFELIK"),
+            )
+            np.testing.assert_array_equal(
+                batch_gen([2])[0], self._s2i("FELIKHAC"),
+            )
+            np.testing.assert_array_equal(
+                batch_gen([-1])[0], self._s2i("FELAHCIKAHC"),
+            )
+
+    def test_crop_long_seqs(self):
+        batch_gen = BatchGenerator(crop_long_seqs=5)
+        with SequenceDataset(
+            "test/data/felix.fa", alphabet=type(self).alphabet
+        ) as data:
+            data.validate_dataset()
+            batch_gen.data = data
+            np.testing.assert_array_equal(
+                batch_gen([0])[0], [0,1,2,3,4],
+                err_msg="This should not be cropped (< 5)."
+            )
+            self.assertEqual(
+                batch_gen([1])[0].size, 5,
+                "This should be cropped to 5."
+            )
+
+    def test_shuffled(self):
+        #TODO: add shuffle seed argument
+        batch_gen = BatchGenerator(shuffle_batches=2)
+        with SequenceDataset(
+            "test/data/felix.fa", alphabet=type(self).alphabet
+        ) as data:
+            data.validate_dataset()
+            batch_gen.data = data
+            perm = batch_gen.permutations
+            self.assertTrue(
+                batch_gen.is_shuffled(),
+                "BatchGenerator should be shuffled if shuffle_batches is True."
+            )
+            for i in range(len(data)):
+                batch = batch_gen([i])[0]
+                for j in range(2):
+                    seq = data.get_standardized_seq(perm[j][i])
+                    np.testing.assert_array_equal(
+                        batch[j, :len(seq)], 
+                        self._s2i(seq)
+                    )
+
+    def test_closing_terminal(self):
+        # TODO: index of terminal symbol should be defined safely in some way
+        batch_gen = BatchGenerator(closing_terminal=True)
+        with SequenceDataset(
+            "test/data/felix.fa", alphabet=type(self).alphabet
+        ) as data:
+            batch_gen.data = data
+            np.testing.assert_array_equal(
+                batch_gen([0,1])[0][-1], 
+                data.alphabet_size(), 
+                "The last symbol should be the terminal symbol."
+            )
+
+    def test_return_indices(self):
+        batch_gen = BatchGenerator(return_indices=True)
+        with SequenceDataset(
+            "test/data/felix.fa", alphabet=type(self).alphabet
+        ) as data:
+            batch_gen.data = data
+            _, indices = batch_gen([0,1])
+            np.testing.assert_array_equal(
+                indices, 
+                np.array([[0],[1]], dtype=np.int64),
+                err_msg="BatchGenerator should return the indices of the "\
+                    "sequences."
+            )
+
+    def test_return_indices_with_shuffle(self):
+        batch_gen = BatchGenerator(return_indices=True, shuffle_batches=2)
+        with SequenceDataset(
+            "test/data/felix.fa", alphabet=type(self).alphabet
+        ) as data:
+            batch_gen.data = data
+            perm = batch_gen.permutations
+            _, indices = batch_gen([0])
+            np.testing.assert_array_equal(
+                indices, 
+                np.array([[perm[0][0], perm[1][0]]], dtype=np.int64),
+                err_msg="BatchGenerator should return the indices of the "\
+                    "sequences."
+            )
+    
+    def test_return_crop_boundaries(self):
+        batch_gen = BatchGenerator(
+            crop_long_seqs=5, return_crop_boundaries=True
+        )
+        with SequenceDataset(
+            "test/data/felix.fa", alphabet=type(self).alphabet
+        ) as data:
+            batch_gen.data = data
+            batch, start, end = batch_gen([0, 1])
+            self.assertEqual(start[0], 0)
+            self.assertEqual(end[0], 5)
+            np.testing.assert_array_equal(
+                batch[1], self._s2i("AHCFELIK")[start[1,0]:end[1,0]]
+            )
+    
+    def test_all(self):
+        batch_gen = BatchGenerator( 
+            shuffle_batches=2,
+            crop_long_seqs=4, 
+            return_indices=True,
+            return_crop_boundaries=True,
+            closing_terminal=True
+        )
+        with SequenceDataset(
+            "test/data/felix.fa", alphabet=type(self).alphabet
+        ) as data:
+            batch_gen.data = data
+            perm = batch_gen.permutations
+            batch, indices, start, end = batch_gen([0,1])
+            for i in range(batch.shape[0]):
+                for j in range(batch.shape[1]):
+                    seq = data.get_standardized_seq(perm[j][i])
+                    np.testing.assert_array_equal(
+                        batch[i,j,:4], 
+                        self._s2i(seq)[start[i,j]:end[i,j]],
+                    )
+
+
 
 
 class TestMsaHmmCell(unittest.TestCase):
@@ -437,13 +606,13 @@ class TestMsaHmmCell(unittest.TestCase):
 
                 
 def string_to_one_hot(s):
-    i = [SequenceDataset.alphabet.index(aa) for aa in s]
-    return tf.one_hot(i, len(SequenceDataset.alphabet)-1)
+    i = [SequenceDataset.standard_alphabet.index(aa) for aa in s]
+    return tf.one_hot(i, len(SequenceDataset.standard_alphabet)-1)
 
 
 def get_all_seqs(data : SequenceDataset, num_models):
     indices = np.arange(data.num_seq)
-    batch_generator = Training.DefaultBatchGenerator()
+    batch_generator = BatchGenerator()
     config = Configuration.make_default(num_models)
     batch_generator.configure(data, config)
     ds = Training.make_dataset(indices, 
@@ -463,7 +632,7 @@ class TestMSAHMM(unittest.TestCase):
     def test_matrices(self):
         length=32
         hmm_cell = MsaHmmCell.MsaHmmCell(length=length)
-        hmm_cell.build((None, None, len(SequenceDataset.alphabet)))
+        hmm_cell.build((None, None, len(SequenceDataset.standard_alphabet)))
         A = hmm_cell.transitioner.make_A()
         A_sum = np.sum(A, -1)
         for a in A_sum:
@@ -495,13 +664,13 @@ class TestMSAHMM(unittest.TestCase):
         transitioner = Transitioner.ProfileHMMTransitioner(transition_init = transition_init, 
                                                             flank_init = tf.keras.initializers.Zeros())
         hmm_cell = MsaHmmCell.MsaHmmCell(length, emitter=emitter, transitioner=transitioner)
-        hmm_cell.build((None, None, len(SequenceDataset.alphabet)))
+        hmm_cell.build((None, None, len(SequenceDataset.standard_alphabet)))
         hmm_cell.recurrent_init()
         filename = os.path.dirname(__file__)+"/data/simple.fa"
         with SequenceDataset(filename) as data:
             sequences = get_all_seqs(data, 1)
-        sequences = tf.one_hot(sequences, len(SequenceDataset.alphabet))
-        self.assertEqual(sequences.shape, (2,1,5,len(SequenceDataset.alphabet)))
+        sequences = tf.one_hot(sequences, len(SequenceDataset.standard_alphabet))
+        self.assertEqual(sequences.shape, (2,1,5,len(SequenceDataset.standard_alphabet)))
         forward, loglik = hmm_cell.get_initial_state(batch_size=2)
         self.assertEqual(loglik[0], 0)
         #next match state should always yield highest probability
@@ -519,8 +688,8 @@ class TestMSAHMM(unittest.TestCase):
         filename = os.path.dirname(__file__)+"/data/length_diff.fa"
         with SequenceDataset(filename) as data:
             sequences = get_all_seqs(data, 1)
-        sequences = tf.one_hot(sequences, len(SequenceDataset.alphabet))
-        self.assertEqual(sequences.shape, (2,1,10,len(SequenceDataset.alphabet)))
+        sequences = tf.one_hot(sequences, len(SequenceDataset.standard_alphabet))
+        self.assertEqual(sequences.shape, (2,1,10,len(SequenceDataset.standard_alphabet)))
         forward, loglik = hmm_cell.get_initial_state(batch_size=2)
         sequences = tf.transpose(sequences, [1,0,2,3])
         emission_probs = hmm_cell.emission_probs(sequences)
@@ -567,7 +736,7 @@ class TestMSAHMM(unittest.TestCase):
         transitioner = Transitioner.ProfileHMMTransitioner(transition_init = transition_init, 
                                                             flank_init = [tf.keras.initializers.Zeros()]*2)
         hmm_cell = MsaHmmCell.MsaHmmCell(length, emitter=emitter, transitioner=transitioner)
-        hmm_cell.build((None, None, len(SequenceDataset.alphabet)))
+        hmm_cell.build((None, None, len(SequenceDataset.standard_alphabet)))
         hmm_cell.recurrent_init()
         with SequenceDataset(os.path.dirname(__file__)+"/data/felix.fa") as data:
             ref_seqs = np.array([#model 1
@@ -690,23 +859,23 @@ class TestMSAHMM(unittest.TestCase):
             ref_right_flank_start = np.array([[5,8,5,13,4,8,11,8],  #model 1
                                         [5,3,8,14,5,5,10,11]]) #model 2
             
-            s = len(SequenceDataset.alphabet)
-            A = SequenceDataset.alphabet.index("A")
-            H = SequenceDataset.alphabet.index("H")
-            C = SequenceDataset.alphabet.index("C")
-            a = SequenceDataset.alphabet.index("A")+s
-            h = SequenceDataset.alphabet.index("H")+s
-            c = SequenceDataset.alphabet.index("C")+s
-            F = SequenceDataset.alphabet.index("F")
-            E = SequenceDataset.alphabet.index("E")
-            L = SequenceDataset.alphabet.index("L")
-            I = SequenceDataset.alphabet.index("I")
-            X = SequenceDataset.alphabet.index("K")
-            f = SequenceDataset.alphabet.index("F")+s
-            e = SequenceDataset.alphabet.index("E")+s
-            l = SequenceDataset.alphabet.index("L")+s
-            i = SequenceDataset.alphabet.index("I")+s
-            x = SequenceDataset.alphabet.index("K")+s
+            s = len(SequenceDataset.standard_alphabet)
+            A = SequenceDataset.standard_alphabet.index("A")
+            H = SequenceDataset.standard_alphabet.index("H")
+            C = SequenceDataset.standard_alphabet.index("C")
+            a = SequenceDataset.standard_alphabet.index("A")+s
+            h = SequenceDataset.standard_alphabet.index("H")+s
+            c = SequenceDataset.standard_alphabet.index("C")+s
+            F = SequenceDataset.standard_alphabet.index("F")
+            E = SequenceDataset.standard_alphabet.index("E")
+            L = SequenceDataset.standard_alphabet.index("L")
+            I = SequenceDataset.standard_alphabet.index("I")
+            X = SequenceDataset.standard_alphabet.index("K")
+            f = SequenceDataset.standard_alphabet.index("F")+s
+            e = SequenceDataset.standard_alphabet.index("E")+s
+            l = SequenceDataset.standard_alphabet.index("L")+s
+            i = SequenceDataset.standard_alphabet.index("I")+s
+            x = SequenceDataset.standard_alphabet.index("K")+s
             GAP = s-1
             gap = 2*s-1
                 
@@ -897,7 +1066,7 @@ class TestMSAHMM(unittest.TestCase):
         transitioner = Transitioner.ProfileHMMTransitioner(transition_init = transition_init, 
                                                             flank_init = [tf.keras.initializers.Zeros()]*2)
         hmm_cell = MsaHmmCell.MsaHmmCell(length, emitter=emitter, transitioner=transitioner)
-        hmm_cell.build((None, None, len(SequenceDataset.alphabet)))
+        hmm_cell.build((None, None, len(SequenceDataset.standard_alphabet)))
         hmm_cell.recurrent_init()
         with SequenceDataset(os.path.dirname(__file__)+"/data/felix.fa") as data:
             ref_seqs = np.array([#model 1
@@ -945,7 +1114,7 @@ class TestMSAHMM(unittest.TestCase):
         expected_block = np.array([[1,  2,  3,  4,  5,  23],
                                    [7,  8,  23, 23, 9,  10 ],
                                    [23, 23, 13, 14, 15, 23]])
-        self.assert_vec(block, expected_block+len(SequenceDataset.alphabet))
+        self.assert_vec(block, expected_block+len(SequenceDataset.standard_alphabet))
                
         
     def test_backward(self):
@@ -980,13 +1149,13 @@ class TestMSAHMM(unittest.TestCase):
         with SequenceDataset(train_filename) as data:
             hmm_cell = MsaHmmCell.MsaHmmCell(32)
             hmm_layer = MsaHmmLayer.MsaHmmLayer(hmm_cell, 1)
-            hmm_layer.build((1, None, None, len(SequenceDataset.alphabet)))
-            batch_gen = Training.DefaultBatchGenerator()
+            hmm_layer.build((1, None, None, len(SequenceDataset.standard_alphabet)))
+            batch_gen = BatchGenerator()
             batch_gen.configure(data, Configuration.make_default(1))
             indices = tf.range(data.num_seq, dtype=tf.int64)
             ds = Training.make_dataset(indices, batch_gen, batch_size=data.num_seq, shuffle=False)
             for x,_ in ds:
-                seq = tf.one_hot(x[0], len(SequenceDataset.alphabet))
+                seq = tf.one_hot(x[0], len(SequenceDataset.standard_alphabet))
                 seq = tf.transpose(seq, [1,0,2,3])
                 p = hmm_layer.state_posterior_log_probs(seq)
             p = np.exp(p)
@@ -998,13 +1167,13 @@ class TestMSAHMM(unittest.TestCase):
         with SequenceDataset(train_filename) as data:
             hmm_cell = MsaHmmCell.MsaHmmCell(32)
             hmm_layer = MsaHmmLayer.MsaHmmLayer(hmm_cell, 1)
-            hmm_layer.build((1, None, None, len(SequenceDataset.alphabet)))
-            batch_gen = Training.DefaultBatchGenerator()
+            hmm_layer.build((1, None, None, len(SequenceDataset.standard_alphabet)))
+            batch_gen = BatchGenerator()
             batch_gen.configure(data, Configuration.make_default(1))
             indices = tf.range(data.num_seq, dtype=tf.int64)
             ds = Training.make_dataset(indices, batch_gen, batch_size=data.num_seq, shuffle=False)
             for x,_ in ds:
-                seq = tf.one_hot(x[0], len(SequenceDataset.alphabet))
+                seq = tf.one_hot(x[0], len(SequenceDataset.standard_alphabet))
                 seq = tf.transpose(seq, [1,0,2,3])
                 p = hmm_layer.state_posterior_log_probs(seq)
             p = np.exp(p)
@@ -1026,7 +1195,7 @@ class TestAncProbs(unittest.TestCase):
     def __init__(self, *args, **kwargs):
         super(TestAncProbs, self).__init__(*args, **kwargs)
         self.paml_all = [Utility.LG_paml] + Utility.LG4X_paml
-        self.A = SequenceDataset.alphabet[:20]
+        self.A = SequenceDataset.standard_alphabet[:20]
     
     def assert_vec(self, x, y, almost=False):
         for i,(a,b) in enumerate(zip(x.shape, y.shape)):
@@ -1136,11 +1305,11 @@ class TestAncProbs(unittest.TestCase):
                                                      config["encoder_initializer"][1:])
                     case["config"] = config 
                     if rate_init == -100.:
-                        case["expected_anc_probs"] = tf.one_hot(sequences, len(SequenceDataset.alphabet)).numpy()
+                        case["expected_anc_probs"] = tf.one_hot(sequences, len(SequenceDataset.standard_alphabet)).numpy()
                     elif rate_init == 100.:
-                        anc = np.concatenate([p, np.zeros((1,1,len(SequenceDataset.alphabet)-20), dtype=np.float32)], axis=-1)
+                        anc = np.concatenate([p, np.zeros((1,1,len(SequenceDataset.standard_alphabet)-20), dtype=np.float32)], axis=-1)
                         anc = np.concatenate([anc] * sequences.shape[0] * sequences.shape[1] * sequences.shape[2], axis=1)
-                        anc = np.reshape(anc, (sequences.shape[0], sequences.shape[1], sequences.shape[2], len(SequenceDataset.alphabet)))
+                        anc = np.reshape(anc, (sequences.shape[0], sequences.shape[1], sequences.shape[2], len(SequenceDataset.standard_alphabet)))
                         case["expected_anc_probs"] = anc 
                     if equilibrium_sample:
                         expected_freq = tf.linalg.matvec(p, oh_sequences).numpy()
@@ -1169,7 +1338,7 @@ class TestAncProbs(unittest.TestCase):
             anc_probs_layer = Training.make_anc_probs_layer(n, case["config"])
             self.assert_anc_probs_layer(anc_probs_layer, case["config"])
             anc_prob_seqs = anc_probs_layer(sequences, np.arange(n)[np.newaxis, :]).numpy()
-            shape = (case["config"]["num_models"], n, sequences.shape[2], case["config"]["num_rate_matrices"], len(SequenceDataset.alphabet))
+            shape = (case["config"]["num_models"], n, sequences.shape[2], case["config"]["num_rate_matrices"], len(SequenceDataset.standard_alphabet))
             anc_prob_seqs = np.reshape(anc_prob_seqs, shape)
             if "expected_anc_probs" in case:
                 self.assert_anc_probs(anc_prob_seqs, case["expected_freq"], case["expected_anc_probs"])
@@ -1185,7 +1354,7 @@ class TestAncProbs(unittest.TestCase):
             n = sequences.shape[1]
             ind = np.arange(n)
             model_length = 10
-            batch_gen = Training.DefaultBatchGenerator()
+            batch_gen = BatchGenerator()
             batch_gen.configure(data, Configuration.make_default(1))
             ds = Training.make_dataset(ind, batch_gen, batch_size=n, shuffle=False)
             for case in self.get_test_configs(sequences):
@@ -1206,7 +1375,7 @@ class TestAncProbs(unittest.TestCase):
                 self.assert_anc_probs_layer(am.encoder_model.layers[-1], case["config"])
                 for x,_ in ds:
                     anc_prob_seqs = am.encoder_model(x).numpy()[:,:,:-1]
-                    shape = (case["config"]["num_models"], n, sequences.shape[2], case["config"]["num_rate_matrices"], len(SequenceDataset.alphabet))
+                    shape = (case["config"]["num_models"], n, sequences.shape[2], case["config"]["num_rate_matrices"], len(SequenceDataset.standard_alphabet))
                     anc_prob_seqs = np.reshape(anc_prob_seqs, shape)
                 if "expected_anc_probs" in case:
                     self.assert_anc_probs(anc_prob_seqs,  case["expected_freq"], case["expected_anc_probs"])
@@ -1221,12 +1390,12 @@ class TestAncProbs(unittest.TestCase):
         config = Configuration.make_default(1)
         anc_probs_layer = Training.make_anc_probs_layer(1, config)
         msa_hmm_layer = Training.make_msa_hmm_layer(n, 10, config)
-        msa_hmm_layer.build((1, None, None, len(SequenceDataset.alphabet)))
+        msa_hmm_layer.build((1, None, None, len(SequenceDataset.standard_alphabet)))
         B = msa_hmm_layer.cell.emitter[0].make_B()[0]
         config["transposed"] = True
         anc_probs_layer_transposed = Training.make_anc_probs_layer(n, config)
         anc_prob_seqs = anc_probs_layer_transposed(sequences, np.arange(n)[np.newaxis, :]).numpy()
-        shape = (config["num_models"], n, sequences.shape[2], config["num_rate_matrices"], len(SequenceDataset.alphabet))
+        shape = (config["num_models"], n, sequences.shape[2], config["num_rate_matrices"], len(SequenceDataset.standard_alphabet))
         anc_prob_seqs = np.reshape(anc_prob_seqs, shape)
         anc_prob_seqs = tf.cast(anc_prob_seqs, B.dtype)
         anc_prob_B = anc_probs_layer(B[tf.newaxis,tf.newaxis,:,:20], rate_indices=[[0]])
@@ -1251,7 +1420,7 @@ class TestData(unittest.TestCase):
             batch_gen = Training.DefaultBatchGenerator(shuffle=False)
             batch_gen.configure(data, Configuration.make_default(1))
             test_batches = [[0], [1], [4], [0,2], [0,1,2,3,4], [2,3,4]]
-            alphabet = np.array(list(SequenceDataset.alphabet))
+            alphabet = np.array(list(SequenceDataset.standard_alphabet))
             for ind in test_batches:
                 ind = np.array(ind)
                 ref = [str(data.get_record(i).seq).upper() for i in ind]
@@ -1312,7 +1481,7 @@ class TestModelSurgery(unittest.TestCase):
             config=config,
             data=data
         )
-        batch_gen = Training.DefaultBatchGenerator()
+        batch_gen = BatchGenerator()
         batch_gen.configure(data, config)
         am = AlignmentModel(
             data, 
@@ -1596,7 +1765,7 @@ class TestAlignment(unittest.TestCase):
                                                       data=fasta_file)
         #subalignment
         subset = np.array([0,2,5])
-        batch_gen = Training.DefaultBatchGenerator()
+        batch_gen = BatchGenerator()
         batch_gen.configure(fasta_file, Configuration.make_default(1))
         #create alignment after building model
         sub_am = AlignmentModel(fasta_file, batch_gen, subset, 32, model)
@@ -1692,7 +1861,7 @@ class ConsoleTest(unittest.TestCase):
         single_seq_expected_err = f"File {single_seq} contains only a single sequence."
         faulty_format_expected_err = f"Could not parse any sequences from {faulty_format}."
         empty_seq_expected_err = f"{empty_seq} contains empty sequences."
-        unknown_symbol_expected_err = f"Found unknown character(s) in sequence ersteSequenz. Allowed alphabet: {SequenceDataset.alphabet}."
+        unknown_symbol_expected_err = f"Found unknown character(s) in sequence ersteSequenz. Allowed alphabet: {SequenceDataset.standard_alphabet}."
         
         test = subprocess.Popen(["python", "learnMSA.py", "--no_sequence_weights", "--silent", "-o", "test.out", "-i", single_seq], stderr=subprocess.PIPE)
         output = test.communicate()[1].strip().decode('ascii')
@@ -1801,10 +1970,10 @@ class TestModelToFile(unittest.TestCase):
                                                                                      RF=-2, 
                                                                                      T=-10)
         custom_flank_init = Initializers.ConstantInitializer(2)
-        em_init_np = np.random.rand(model_len, len(SequenceDataset.alphabet)-1)
+        em_init_np = np.random.rand(model_len, len(SequenceDataset.standard_alphabet)-1)
         em_init_np[2:6] = string_to_one_hot("ACGT").numpy()*20.
         custom_emission_init = Initializers.ConstantInitializer(em_init_np)
-        custom_insertion_init = Initializers.ConstantInitializer(np.random.rand(len(SequenceDataset.alphabet)-1))
+        custom_insertion_init = Initializers.ConstantInitializer(np.random.rand(len(SequenceDataset.standard_alphabet)-1))
         encoder_initializer = Initializers.make_default_anc_probs_init(1)
         encoder_initializer[0] = Initializers.ConstantInitializer(np.random.rand(1, 2))
         config = Configuration.make_default(1)
@@ -1837,7 +2006,7 @@ class TestModelToFile(unittest.TestCase):
         
         #make alignment and save
         with SequenceDataset("test/data/simple.fa") as data:
-            batch_gen = Training.DefaultBatchGenerator()
+            batch_gen = BatchGenerator()
             batch_gen.configure(data, config)
             ind = np.array([0,1])
             batch_size = 2

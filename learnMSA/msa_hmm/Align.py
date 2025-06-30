@@ -14,6 +14,7 @@ import learnMSA.msa_hmm.Initializers as initializers
 from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
 from learnMSA.msa_hmm.Configuration import as_str, assert_config
 from learnMSA.msa_hmm.AlignInsertions import make_aligned_insertions
+from learnMSA.msa_hmm.BatchGenerator import BatchGenerator
 
 #experimental, only used for ablation studies
 #decreases accuracy slightly!
@@ -769,7 +770,7 @@ def _make_defaults_if_none(model_generator, batch_generator):
     if model_generator is None:
         model_generator = train.default_model_generator
     if batch_generator is None:
-        batch_generator = train.DefaultBatchGenerator()
+        batch_generator = BatchGenerator()
     return model_generator, batch_generator
 
 
