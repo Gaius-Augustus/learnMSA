@@ -14,9 +14,9 @@ import learnMSA.msa_hmm.MsaHmmLayer as msa_hmm_layer
 import learnMSA.msa_hmm.Priors as priors
 import learnMSA.msa_hmm.Training as train
 import learnMSA.msa_hmm.Transitioner as trans
-import learnMSA.msa_hmm.Viterbi as viterbi
 from learnMSA.msa_hmm.SequenceDataset import AlignedDataset, SequenceDataset
-from learnMSA.msa_hmm.BatchGenerator import BatchGenerator
+from learnMSA.msa_hmm.BatchGenerator import DefaultBatchGenerator
+import learnMSA.msa_hmm.Decode as decode
 
 
 # utility class used in AlignmentModel storing useful information on a 
@@ -291,60 +291,53 @@ class AlignmentModel():
 
         assert len(models) == 1, "Not implemented for multiple models."
         
-        if tf.distribute.has_strategy():
-            with tf.distribute.get_strategy().scope():
-                cell_copy = self.msa_hmm_layer.cell.duplicate(models)
-        else:
-            cell_copy = self.msa_hmm_layer.cell.duplicate(models)
-            
-        cell_copy.build(
-            (self.num_models, None, None, self.msa_hmm_layer.cell.dim)
+        decoded_seqs = decode.decode(
+            indices=self.indices,
+            batch_generator=self.batch_generator,
+            msa_hmm_layer=self.msa_hmm_layer,
+            batch_size=self.batch_size,
+            model_ids=models,
+            encoder=self.encoder_model,
+            decode_algorithm=decode.DecodingAlgorithm.VITERBI
         )
-        state_seqs_max_lik = viterbi.get_state_seqs_max_lik(
-            self.data,
-            self.batch_generator,
-            self.indices,
-            self.batch_size,
-            cell_copy,
-            models,
-            self.encoder_model
-        )
-        state_seqs_max_lik = self._clean_up_viterbi_seqs(
-            state_seqs_max_lik, models, cell_copy
-        )
-        for i,l,max_lik_seqs in zip(models, cell_copy.length, state_seqs_max_lik):
+        decoded_seqs = self._clean_up_decoded_seqs(decoded_seqs, models)
+        for i,l,max_lik_seqs in zip(
+            models, self.msa_hmm_layer.cell.length, decoded_seqs
+        ):
             decoded_data = AlignmentModel.decode(l,max_lik_seqs)
             self.metadata[i] = AlignmentMetaData(*decoded_data)
 
-    def _clean_up_viterbi_seqs(self, state_seqs_max_lik, models, cell_copy):
+    def _clean_up_decoded_seqs(self, decoded_seqs, models):
         # state_seqs_max_lik has shape (num_model, num_seq, L)
         faulty_sequences = find_faulty_sequences(
-            state_seqs_max_lik, 
-            cell_copy.length[0], 
+            decoded_seqs, 
+            self.msa_hmm_layer.cell.length[0], 
             self.data.seq_lens[self.indices]
         )
         self.fixed_viterbi_seqs = faulty_sequences
         if faulty_sequences.size > 0:
-            # repeat Viterbi with a masking that prevents certain transitions 
+            # repeat decoding with a masking that prevents certain transitions 
             # that can cause problems
-            fixed_state_seqs = viterbi.get_state_seqs_max_lik(
-                self.data,
-                self.batch_generator,
-                faulty_sequences,
-                self.batch_size,
-                cell_copy,
-                models,
-                self.encoder_model,
-                non_homogeneous_mask_func
+            fixed_decoded_seqs = decode.decode(
+                indices=faulty_sequences,
+                batch_generator=self.batch_generator,
+                msa_hmm_layer=self.msa_hmm_layer,
+                batch_size=self.batch_size,
+                model_ids=models,
+                encoder=self.encoder_model,
+                non_homogeneous_mask_func=non_homogeneous_mask_func
             )
-            if state_seqs_max_lik.shape[-1] < fixed_state_seqs.shape[-1]:
-                state_seqs_max_like = np.pad(
-                    state_seqs_max_lik, 
-                    ((0,0),(0,0),(0,fixed_state_seqs.shape[-1]-state_seqs_max_lik.shape[-1])), 
-                    constant_values=2*cell_copy.length[0]+2
+            if decoded_seqs.shape[-1] < fixed_decoded_seqs.shape[-1]:
+                decoded_seqs = np.pad(
+                    decoded_seqs, 
+                    ((0,0),
+                     (0,0),
+                     (0,fixed_decoded_seqs.shape[-1]-decoded_seqs.shape[-1])
+                    ), 
+                    constant_values=2*self.msa_hmm_layer.cell.length[0]+2
                 )
-            state_seqs_max_lik[0,faulty_sequences,:fixed_state_seqs.shape[-1]] = fixed_state_seqs[0]
-        return state_seqs_max_lik
+            decoded_seqs[0,faulty_sequences,:fixed_decoded_seqs.shape[-1]] = fixed_decoded_seqs[0]
+        return decoded_seqs
         
     def to_string(
         self, 
@@ -738,7 +731,7 @@ class AlignmentModel():
         # todo: this is currently a bit limited because it creates a default 
         # batch gen from a default config
         if custom_batch_gen is None:
-            batch_gen = BatchGenerator() 
+            batch_gen = DefaultBatchGenerator() 
         else:
             batch_gen = custom_batch_gen
         if custom_config is None:
@@ -896,7 +889,7 @@ class AlignmentModel():
         """
         n = sequences.shape[0]
         A = np.arange(n)
-        s = len(SequenceDataset.alphabet)
+        s = len(SequenceDataset.standard_alphabet)
         block = np.zeros((n, maxlen), dtype=np.uint8) + s - 1
         count_down_lens = np.copy(lens)
         active = count_down_lens > 0
@@ -941,7 +934,7 @@ class AlignmentModel():
         A = np.arange(sequences.shape[0])
         length = consensus.shape[1] + np.sum(ins_len_total)
         block = np.zeros((sequences.shape[0], length), dtype=np.uint8) 
-        block += len(SequenceDataset.alphabet) - 1
+        block += len(SequenceDataset.standard_alphabet) - 1
         i = 0
         columns_to_remove = [] #track empty columns to be removed later
         for c in range(consensus.shape[1]-1):

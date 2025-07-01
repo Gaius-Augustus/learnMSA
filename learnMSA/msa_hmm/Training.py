@@ -8,6 +8,7 @@ from learnMSA.msa_hmm.AncProbsLayer import AncProbsLayer
 from learnMSA.msa_hmm.Configuration import assert_config
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 from learnMSA.msa_hmm.Utility import deserialize
+from learnMSA.msa_hmm.BatchGenerator import BatchGenerator
 
 
 
@@ -185,30 +186,60 @@ def default_model_generator(num_seq,
     return model
         
     
-# batch_generator is a callable object that maps a vector of sequence indices to
-# inputs compatible with the model
-def make_dataset(indices, batch_generator, batch_size=512, shuffle=True, bucket_by_seq_length=False, model_lengths=[0]): 
-    shuffle = shuffle and not bucket_by_seq_length
-    batch_generator.shuffle = shuffle
+# batch_generator is a callable object that maps a vector of sequence indices 
+# to inputs compatible with the model
+def make_dataset(
+    indices: np.ndarray, 
+    batch_generator: BatchGenerator, 
+    batch_size: int=512, 
+    shuffle: bool=True, 
+    bucket_by_seq_length: bool=False, 
+    model_lengths: list[int]=[0]
+) -> tf.data.Dataset: 
+    assert batch_generator.is_valid(), \
+        "Batch generator is not valid. Have you assigned a dataset?"
+    assert not batch_generator.return_crop_boundaries, \
+        "The batch generator return crop boundaries, but this is not "\
+        "supported in make_dataset."
+    assert not (shuffle and bucket_by_seq_length), \
+        "You can not shuffle the dataset if you are using bucketing by "\
+        "sequence length. "
+    assert shuffle or not batch_generator.is_shuffled(), \
+        "Your are trying to create a non shuffled dataset, but the "\
+        "batch generator is shuffled. Please set shuffle=True or "\
+        "disable shuffling in the batch generator."
+    
     ds = tf.data.Dataset.from_tensor_slices(indices)
-    adaptive_batch = batch_generator.config["batch_size"]
-    if bucket_by_seq_length and callable(adaptive_batch): #bucketing only usable if user has not set a fixed batch size
-        ds_len = tf.data.Dataset.from_tensor_slices(batch_generator.data.seq_lens[indices].astype(np.int32))
-        ds_ind =  tf.data.Dataset.from_tensor_slices(np.arange(indices.size))
+    #bucketing only usable if user has not set a fixed batch size
+    if bucket_by_seq_length and callable(batch_size): 
+        ds_len = tf.data.Dataset.from_tensor_slices(
+            batch_generator.data.seq_lens[indices].astype(np.int32)
+        )
+        ds_ind =  tf.data.Dataset.from_tensor_slices(
+            np.arange(indices.size)
+        )
         ds = tf.data.Dataset.zip((ds, ds_len, ds_ind))
         bucket_boundaries = [200, 520, 700, 850, 1200, 2000, 4000, math.inf]
-        bucket_batch_sizes = [adaptive_batch(model_lengths, b) for b in bucket_boundaries]
+        bucket_batch_sizes = [
+            batch_size(model_lengths, b) for b in bucket_boundaries
+        ]
         ds = ds.bucket_by_sequence_length(
-                                element_length_func=lambda i,L,j: L,
-                                bucket_boundaries=bucket_boundaries[:-1],
-                                bucket_batch_sizes=bucket_batch_sizes)
-
+            element_length_func=lambda i,L,j: L,
+            bucket_boundaries=bucket_boundaries[:-1],
+            bucket_batch_sizes=bucket_batch_sizes
+        )
         batch_func_out_types = batch_generator.get_out_types() + (tf.int64,)
-        func = (lambda i,j: (batch_generator(i), j)) if len(batch_func_out_types) == 2 else lambda i,j: (*batch_generator(i), j)
-        batch_func = lambda i,_,j: tf.numpy_function(func=func, inp=[i,j], Tout=batch_func_out_types)
+        if len(batch_func_out_types) == 2:
+            func = (lambda i,j: (batch_generator(i), j)) 
+        else:
+            lambda i,j: (*batch_generator(i), j)
+        batch_func = lambda i,_,j: \
+            tf.numpy_function(func=func, inp=[i,j], Tout=batch_func_out_types)
     else:
         if bucket_by_seq_length:
-            ds_arange = tf.data.Dataset.from_tensor_slices(np.arange(indices.size))
+            ds_arange = tf.data.Dataset.from_tensor_slices(
+                np.arange(indices.size)
+            )
             ds = tf.data.Dataset.zip((ds, ds_arange))
         if shuffle:
             ds = ds.shuffle(indices.size, reshuffle_each_iteration=True)
@@ -216,29 +247,70 @@ def make_dataset(indices, batch_generator, batch_size=512, shuffle=True, bucket_
         ds = ds.batch(batch_size)
         def _batch_func(i):
             if len(batch_generator.get_out_types()) == 2:
-                batch, ind = tf.numpy_function(batch_generator, [i], batch_generator.get_out_types())
-                #explicitly set output shapes or tf 2.17 will complain about unknown shapes
-                batch.set_shape(tf.TensorShape([None, batch_generator.num_models, None]))
-                ind.set_shape(tf.TensorShape([None, batch_generator.num_models]))
+                batch, ind = tf.numpy_function(
+                    batch_generator, [i], batch_generator.get_out_types()
+                )
+                # explicitly set output shapes or tf 2.17 will complain about 
+                # unknown shapes
+                batch.set_shape(tf.TensorShape(
+                    [None, batch_generator.shuffle_dim(), None]
+                    if batch_generator.is_shuffled() 
+                    else [None, None]
+                ))
+                ind.set_shape(tf.TensorShape(
+                    [None, batch_generator.shuffle_dim()]
+                    if batch_generator.is_shuffled() 
+                    else [None]
+                ))
                 return batch, ind
-            else:
-                batch, ind, emb = tf.numpy_function(batch_generator, [i], batch_generator.get_out_types())
-                #explicitly set output shapes or tf 2.17 will complain about unknown shapes
-                batch.set_shape(tf.TensorShape([None, batch_generator.num_models, None]))
-                ind.set_shape(tf.TensorShape([None, batch_generator.num_models]))
-                emb.set_shape(tf.TensorShape([None, batch_generator.num_models, None, batch_generator.scoring_model_config.dim+1]))
+            elif len(batch_generator.get_out_types()) == 3:
+                batch, ind, emb = tf.numpy_function(
+                    batch_generator, [i], batch_generator.get_out_types()
+                )
+                # explicitly set output shapes or tf 2.17 will complain about 
+                # unknown shapes
+                batch.set_shape(tf.TensorShape(
+                    [None, batch_generator.shuffle_dim(), None]
+                    if batch_generator.is_shuffled() 
+                    else [None, None]
+                ))
+                ind.set_shape(tf.TensorShape(
+                    [None, batch_generator.shuffle_dim()]
+                    if batch_generator.is_shuffled() 
+                    else [None]
+                ))
+                emb.set_shape(tf.TensorShape(
+                    [
+                        None, 
+                        batch_generator.shuffle_dim(), 
+                        None, 
+                        batch_generator.scoring_model_config.dim+1
+                    ]
+                    if batch_generator.is_shuffled() 
+                    else [
+                        None, 
+                        None, 
+                        batch_generator.scoring_model_config.dim+1
+                    ]
+                ))
                 return batch, ind, emb
+            else:
+                raise ValueError(
+                    "Batch generator returns " \
+                    f"{len(batch_generator.get_out_types())} outputs, but "\
+                    "expected 2 or 3."
+                )
         if bucket_by_seq_length:
             def batch_func(i,j):
                 return *_batch_func(i), j
         else:
             batch_func = _batch_func
-            
-
-    ds = ds.map(batch_func,
-                # no parallel processing if using an indexed dataset
-                num_parallel_calls=None if batch_generator.data.indexed else tf.data.AUTOTUNE,
-                deterministic=True)
+    ds = ds.map(
+        batch_func,
+        # no parallel processing if using an indexed dataset
+        num_parallel_calls=None if batch_generator.data.indexed else tf.data.AUTOTUNE,
+        deterministic=True
+    )
     if not batch_generator.data.indexed:
         ds = ds.prefetch(2) #preprocessings and training steps in parallel
     # get rid of a warning, see https://github.com/tensorflow/tensorflow/issues/42146

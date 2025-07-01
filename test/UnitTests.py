@@ -10,9 +10,9 @@ import tensorflow as tf
 #globally omitting all warnings for the entire test suite should be avoided
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' 
 tf.get_logger().setLevel('WARNING')
-from learnMSA.msa_hmm import Align, Emitter, Transitioner, Initializers, MsaHmmCell, MsaHmmLayer, Training, Configuration, Viterbi, AncProbsLayer, Priors, DirichletMixture, Utility
+from learnMSA.msa_hmm import Align, Emitter, Transitioner, Initializers, MsaHmmCell, MsaHmmLayer, Training, Configuration, Viterbi, AncProbsLayer, Priors, DirichletMixture, Utility, Decode
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset, AlignedDataset
-from learnMSA.msa_hmm.BatchGenerator import BatchGenerator
+from learnMSA.msa_hmm.BatchGenerator import DefaultBatchGenerator
 from learnMSA.msa_hmm.AlignmentModel import AlignmentModel, non_homogeneous_mask_func, find_faulty_sequences
 from learnMSA.protein_language_models import Common, DataPipeline, TrainingUtil, MvnMixture, EmbeddingCache
 import itertools
@@ -161,7 +161,7 @@ class TestBatchGenerator(unittest.TestCase):
         return np.array([type(self).alphabet.index(c) for c in s], dtype=np.uint8)
     
     def test_not_configured(self):
-        batch_gen = BatchGenerator()
+        batch_gen = DefaultBatchGenerator()
         error_catched = False
         try:
             batch_gen([0,1,2])
@@ -173,7 +173,7 @@ class TestBatchGenerator(unittest.TestCase):
         )
 
     def test_default(self):
-        batch_gen = BatchGenerator()
+        batch_gen = DefaultBatchGenerator()
         with SequenceDataset(
             "test/data/felix.fa", alphabet=type(self).alphabet
         ) as data:
@@ -201,7 +201,7 @@ class TestBatchGenerator(unittest.TestCase):
             )
 
     def test_crop_long_seqs(self):
-        batch_gen = BatchGenerator(crop_long_seqs=5)
+        batch_gen = DefaultBatchGenerator(crop_long_seqs=5)
         with SequenceDataset(
             "test/data/felix.fa", alphabet=type(self).alphabet
         ) as data:
@@ -218,7 +218,7 @@ class TestBatchGenerator(unittest.TestCase):
 
     def test_shuffled(self):
         #TODO: add shuffle seed argument
-        batch_gen = BatchGenerator(shuffle_batches=2)
+        batch_gen = DefaultBatchGenerator(shuffle_batches=2)
         with SequenceDataset(
             "test/data/felix.fa", alphabet=type(self).alphabet
         ) as data:
@@ -240,19 +240,19 @@ class TestBatchGenerator(unittest.TestCase):
 
     def test_closing_terminal(self):
         # TODO: index of terminal symbol should be defined safely in some way
-        batch_gen = BatchGenerator(closing_terminal=True)
+        batch_gen = DefaultBatchGenerator(closing_terminal=True)
         with SequenceDataset(
             "test/data/felix.fa", alphabet=type(self).alphabet
         ) as data:
             batch_gen.data = data
             np.testing.assert_array_equal(
-                batch_gen([0,1])[0][-1], 
-                data.alphabet_size(), 
+                batch_gen([0,1])[...,-1], 
+                data.alphabet_size()-1, 
                 "The last symbol should be the terminal symbol."
             )
 
     def test_return_indices(self):
-        batch_gen = BatchGenerator(return_indices=True)
+        batch_gen = DefaultBatchGenerator(return_indices=True)
         with SequenceDataset(
             "test/data/felix.fa", alphabet=type(self).alphabet
         ) as data:
@@ -260,13 +260,13 @@ class TestBatchGenerator(unittest.TestCase):
             _, indices = batch_gen([0,1])
             np.testing.assert_array_equal(
                 indices, 
-                np.array([[0],[1]], dtype=np.int64),
+                np.array([0,1], dtype=np.int64),
                 err_msg="BatchGenerator should return the indices of the "\
                     "sequences."
             )
 
     def test_return_indices_with_shuffle(self):
-        batch_gen = BatchGenerator(return_indices=True, shuffle_batches=2)
+        batch_gen = DefaultBatchGenerator(return_indices=True, shuffle_batches=2)
         with SequenceDataset(
             "test/data/felix.fa", alphabet=type(self).alphabet
         ) as data:
@@ -281,7 +281,7 @@ class TestBatchGenerator(unittest.TestCase):
             )
     
     def test_return_crop_boundaries(self):
-        batch_gen = BatchGenerator(
+        batch_gen = DefaultBatchGenerator(
             crop_long_seqs=5, return_crop_boundaries=True
         )
         with SequenceDataset(
@@ -296,7 +296,7 @@ class TestBatchGenerator(unittest.TestCase):
             )
     
     def test_all(self):
-        batch_gen = BatchGenerator( 
+        batch_gen = DefaultBatchGenerator( 
             shuffle_batches=2,
             crop_long_seqs=4, 
             return_indices=True,
@@ -612,13 +612,16 @@ def string_to_one_hot(s):
 
 def get_all_seqs(data : SequenceDataset, num_models):
     indices = np.arange(data.num_seq)
-    batch_generator = BatchGenerator()
-    config = Configuration.make_default(num_models)
-    batch_generator.configure(data, config)
-    ds = Training.make_dataset(indices, 
-                                batch_generator, 
-                                batch_size=data.num_seq,
-                                shuffle=False)
+    batch_generator = DefaultBatchGenerator(
+        closing_terminal=True, return_indices=True
+    )
+    batch_generator.data = data
+    ds = Training.make_dataset(
+        indices, 
+        batch_generator, 
+        batch_size=data.num_seq,
+        shuffle=False
+    )
     for (seq, _), _ in ds:
         return seq.numpy()
 
@@ -645,145 +648,202 @@ class TestMSAHMM(unittest.TestCase):
             
     def test_cell(self):
         length = 4
-        emission_init = Initializers.ConstantInitializer(string_to_one_hot("ACGT").numpy() * 10)
-        transition_init = Initializers.make_default_transition_init(MM = 2, 
-                                                                    MI = 0,
-                                                                    MD = 0,
-                                                                    II = 0,
-                                                                    IM = 0,
-                                                                    DM = 0,
-                                                                    DD = 0,
-                                                                    FC = 0,
-                                                                    FE = 3,
-                                                                    R = 0,
-                                                                    RF = -1, 
-                                                                    T = 0, 
-                                                                    scale = 0)
-        emitter = Emitter.ProfileHMMEmitter(emission_init = emission_init, 
-                                                 insertion_init = tf.keras.initializers.Zeros())
-        transitioner = Transitioner.ProfileHMMTransitioner(transition_init = transition_init, 
-                                                            flank_init = tf.keras.initializers.Zeros())
-        hmm_cell = MsaHmmCell.MsaHmmCell(length, emitter=emitter, transitioner=transitioner)
+        emission_init = Initializers.ConstantInitializer(
+            string_to_one_hot("ACGT").numpy() * 10
+        )
+        transition_init = Initializers.make_default_transition_init(
+            MM = 2, 
+            MI = 0,
+            MD = 0,
+            II = 0,
+            IM = 0,
+            DM = 0,
+            DD = 0,
+            FC = 0,
+            FE = 3,
+            R = 0,
+            RF = -1, 
+            T = 0, 
+            scale = 0
+        )
+        emitter = Emitter.ProfileHMMEmitter(
+            emission_init = emission_init, 
+            insertion_init = tf.keras.initializers.Zeros()
+        )
+        transitioner = Transitioner.ProfileHMMTransitioner(
+            transition_init = transition_init, 
+            flank_init = tf.keras.initializers.Zeros()
+        )
+        hmm_cell = MsaHmmCell.MsaHmmCell(
+            length, emitter=emitter, transitioner=transitioner
+        )
         hmm_cell.build((None, None, len(SequenceDataset.standard_alphabet)))
         hmm_cell.recurrent_init()
         filename = os.path.dirname(__file__)+"/data/simple.fa"
         with SequenceDataset(filename) as data:
             sequences = get_all_seqs(data, 1)
-        sequences = tf.one_hot(sequences, len(SequenceDataset.standard_alphabet))
-        self.assertEqual(sequences.shape, (2,1,5,len(SequenceDataset.standard_alphabet)))
+        sequences = tf.one_hot(
+            sequences, len(SequenceDataset.standard_alphabet)
+        )
+        self.assertEqual(
+            sequences.shape, (2,5,len(SequenceDataset.standard_alphabet))
+        )
         forward, loglik = hmm_cell.get_initial_state(batch_size=2)
         self.assertEqual(loglik[0], 0)
-        #next match state should always yield highest probability
-        sequences = tf.transpose(sequences, [1,0,2,3])
+        # add model dimension
+        sequences = sequences[tf.newaxis, ...]
         emission_probs = hmm_cell.emission_probs(sequences)
+        #next match state should always yield highest probability
         for i in range(length):
-            _, (forward, loglik) = hmm_cell(emission_probs[:,:,i], (forward, loglik))
+            _, (forward, loglik) = hmm_cell(
+                emission_probs[:,:,i], (forward, loglik)
+            )
             self.assertEqual(np.argmax(forward[0]), i+1)
         last_loglik = loglik
         #check correct end in match state
-        _, (forward, loglik) = hmm_cell(emission_probs[:,:,4], (forward, loglik))
+        _, (forward, loglik) = hmm_cell(
+            emission_probs[:,:,4], (forward, loglik)
+        )
         self.assertEqual(np.argmax(forward[0]), 2*length+2)
         
         hmm_cell.recurrent_init()
         filename = os.path.dirname(__file__)+"/data/length_diff.fa"
         with SequenceDataset(filename) as data:
             sequences = get_all_seqs(data, 1)
-        sequences = tf.one_hot(sequences, len(SequenceDataset.standard_alphabet))
-        self.assertEqual(sequences.shape, (2,1,10,len(SequenceDataset.standard_alphabet)))
+        sequences = tf.one_hot(
+            sequences, len(SequenceDataset.standard_alphabet)
+        )
+        self.assertEqual(
+            sequences.shape, (2,10,len(SequenceDataset.standard_alphabet))
+        )
         forward, loglik = hmm_cell.get_initial_state(batch_size=2)
-        sequences = tf.transpose(sequences, [1,0,2,3])
+        sequences = sequences[tf.newaxis, ...]
         emission_probs = hmm_cell.emission_probs(sequences)
         for i in range(length):
-            _, (forward, loglik) = hmm_cell(emission_probs[:,:,i], (forward, loglik))
+            _, (forward, loglik) = hmm_cell(
+                emission_probs[:,:,i], (forward, loglik)
+            )
             self.assertEqual(np.argmax(forward[0]), i+1)
             self.assertEqual(np.argmax(forward[1]), i+1)
-        _, (forward, loglik) = hmm_cell(emission_probs[:,:,length], (forward, loglik))
+        _, (forward, loglik) = hmm_cell(
+            emission_probs[:,:,length], (forward, loglik)
+        )
         self.assertEqual(np.argmax(forward[0]), 2*length+2)
         self.assertEqual(np.argmax(forward[1]), 2*length)
         for i in range(4):
             old_loglik = loglik
-            _, (forward, loglik) = hmm_cell(emission_probs[:,:,length+1+i], (forward, loglik))
+            _, (forward, loglik) = hmm_cell(
+                emission_probs[:,:,length+1+i], (forward, loglik)
+            )
             #the first sequence is shorter and padded with end-symbols
-            #the first end symbol in each sequence affects the likelihood, but this is the
-            #same constant for all sequences in the batch
+            #the first end symbol in each sequence affects the likelihood, but 
+            #this is the same constant for all sequences in the batch
             #further padding does not affect the likelihood
             self.assertEqual(old_loglik[0], loglik[0])
             #the second sequence has the motif of the first seq. repeated twice
             #check whether the model loops correctly 
-            #looping must yield larger probabilities than using the right flank state
+            #looping must yield larger probabilities than using the right flank 
+            #state
             self.assertEqual(np.argmax(forward[1]), i+1)
             
             
     def test_viterbi(self):
         length = [5, 3]
-        emission_init = [Initializers.ConstantInitializer(string_to_one_hot("FELIK").numpy()*20),
-                         Initializers.ConstantInitializer(string_to_one_hot("AHC").numpy()*20)]
-        transition_init = [Initializers.make_default_transition_init(MM = 0, 
-                                                                    MI = 0,
-                                                                    MD = 0,
-                                                                    II = 0,
-                                                                    IM = 0,
-                                                                    DM = 0,
-                                                                    DD = 0,
-                                                                    FC = 0,
-                                                                    FE = 0,
-                                                                    R = 0,
-                                                                    RF = -1, 
-                                                                    T = 0, 
-                                                                    scale = 0)]*2
-        emitter = Emitter.ProfileHMMEmitter(emission_init = emission_init, 
-                                                 insertion_init = [tf.keras.initializers.Zeros()]*2)
-        transitioner = Transitioner.ProfileHMMTransitioner(transition_init = transition_init, 
-                                                            flank_init = [tf.keras.initializers.Zeros()]*2)
-        hmm_cell = MsaHmmCell.MsaHmmCell(length, emitter=emitter, transitioner=transitioner)
-        hmm_cell.build((None, None, len(SequenceDataset.standard_alphabet)))
+        emission_init = [
+            Initializers.ConstantInitializer(
+                string_to_one_hot("FELIK").numpy()*20
+            ),
+            Initializers.ConstantInitializer(
+                string_to_one_hot("AHC").numpy()*20
+            )
+        ]
+        transition_init = [Initializers.make_default_transition_init(
+            MM = 0, 
+            MI = 0,
+            MD = 0,
+            II = 0,
+            IM = 0,
+            DM = 0,
+            DD = 0,
+            FC = 0,
+            FE = 0,
+            R = 0,
+            RF = -1, 
+            T = 0, 
+            scale = 0
+        )]*2
+        emitter = Emitter.ProfileHMMEmitter(
+            emission_init = emission_init, 
+            insertion_init = [tf.keras.initializers.Zeros()]*2
+        )
+        transitioner = Transitioner.ProfileHMMTransitioner(
+            transition_init = transition_init, 
+            flank_init = [tf.keras.initializers.Zeros()]*2
+        )
+        hmm_cell = MsaHmmCell.MsaHmmCell(
+            length, emitter=emitter, transitioner=transitioner
+        )
+        hmm_layer = MsaHmmLayer.MsaHmmLayer(hmm_cell)
+        hmm_layer.build((None, None, len(SequenceDataset.standard_alphabet)))
         hmm_cell.recurrent_init()
         with SequenceDataset(os.path.dirname(__file__)+"/data/felix.fa") as data:
-            ref_seqs = np.array([#model 1
-                                [[1,2,3,4,5,12,12,12,12,12,12,12,12,12,12],
-                                [0,0,0,1,2,3,4,5,12,12,12,12,12,12,12],
-                                [1,2,3,4,5,11,11,11,12,12,12,12,12,12,12],
-                                [1,2,3,4,5,10,10,10,1,2,3,4,5,11,12],
-                                [0,2,3,4,11,12,12,12,12,12,12,12,12,12,12],
-                                [1,2,7,7,7,3,4,5,12,12,12,12,12,12,12],
-                                [1,6,6,2,3,8,4,9,9,9,5,12,12,12,12],
-                                [1,2,3,8,8,8,4,5,11,11,11,12,12,12,12]], 
-                                #model 2
-                                [[0,0,0,0,0,8,8,8,8,8,8,8,8,8,8],
-                                [1,2,3,7,7,7,7,7,8,8,8,8,8,8,8],
-                                [0,0,0,0,0,0,1,3,8,8,8,8,8,8,8],
-                                [0,0,0,0,0,1,2,3,6,6,6,6,6,1,8],
-                                [1,4,4,4,2,8,8,8,8,8,8,8,8,8,8],
-                                [0,0,1,2,3,7,7,7,8,8,8,8,8,8,8],
-                                [0,1,2,6,6,1,6,1,2,3,7,8,8,8,8],
-                                [0,0,0,1,2,3,6,6,1,2,3,8,8,8,8]]])
+            ref_seqs = np.array([
+                #model 1
+                [[1,2,3,4,5,12,12,12,12,12,12,12,12,12,12],
+                [0,0,0,1,2,3,4,5,12,12,12,12,12,12,12],
+                [1,2,3,4,5,11,11,11,12,12,12,12,12,12,12],
+                [1,2,3,4,5,10,10,10,1,2,3,4,5,11,12],
+                [0,2,3,4,11,12,12,12,12,12,12,12,12,12,12],
+                [1,2,7,7,7,3,4,5,12,12,12,12,12,12,12],
+                [1,6,6,2,3,8,4,9,9,9,5,12,12,12,12],
+                [1,2,3,8,8,8,4,5,11,11,11,12,12,12,12]], 
+                #model 2
+                [[0,0,0,0,0,8,8,8,8,8,8,8,8,8,8],
+                [1,2,3,7,7,7,7,7,8,8,8,8,8,8,8],
+                [0,0,0,0,0,0,1,3,8,8,8,8,8,8,8],
+                [0,0,0,0,0,1,2,3,6,6,6,6,6,1,8],
+                [1,4,4,4,2,8,8,8,8,8,8,8,8,8,8],
+                [0,0,1,2,3,7,7,7,8,8,8,8,8,8,8],
+                [0,1,2,6,6,1,6,1,2,3,7,8,8,8,8],
+                [0,0,0,1,2,3,6,6,1,2,3,8,8,8,8]]
+            ])
             sequences = get_all_seqs(data, 2)
-            sequences = np.transpose(sequences, [1,0,2])
+            # add model dimension
+            sequences = np.stack([sequences]*2, axis=0)
             state_seqs_max_lik = Viterbi.viterbi(sequences, hmm_cell).numpy()
-            # states : [LEFT_FLANK, MATCH x length, INSERT x length-1, UNANNOTATED_SEGMENT, RIGHT_FLANK, END]
+            # states : [LEFT_FLANK, MATCH x length, INSERT x length-1, 
+            # UNANNOTATED_SEGMENT, RIGHT_FLANK, END]
             self.assert_vec(state_seqs_max_lik, ref_seqs)
-            #this produces a result identical to above, but runs viterbi batch wise 
-            #to avoid memory overflow  
-            batch_generator = Training.DefaultBatchGenerator(return_only_sequences=True)
-            batch_generator.configure(data, Configuration.make_default(2))
-            state_seqs_max_lik2 = Viterbi.get_state_seqs_max_lik(data,
-                                                                    batch_generator,
-                                                                    np.arange(data.num_seq),
-                                                                    batch_size=2,
-                                                                    model_ids=[0,1],
-                                                                    hmm_cell=hmm_cell)
+            # this produces a result identical to above, but runs viterbi 
+            # batch wise 
+            batch_generator = DefaultBatchGenerator(
+                closing_terminal=True, return_indices=True
+            )
+            batch_generator.data = data
+            state_seqs_max_lik2 = Decode.decode(
+                indices=np.arange(data.num_seq),
+                batch_generator=batch_generator,
+                msa_hmm_layer=hmm_layer,
+                batch_size=2,
+                model_ids=[0,1],
+                decode_algorithm=Decode.DecodingAlgorithm.VITERBI
+            )
             self.assert_vec(state_seqs_max_lik2, ref_seqs)
             indices = np.array([0,4,5])
-            state_seqs_max_lik3 = Viterbi.get_state_seqs_max_lik(data,
-                                                                    batch_generator,
-                                                                    indices, #try a subset
-                                                                    batch_size=2,
-                                                                    model_ids=[0,1],
-                                                                    hmm_cell=hmm_cell)
+            state_seqs_max_lik3 = Decode.decode(
+                indices=indices, #try a subset
+                batch_generator=batch_generator,
+                msa_hmm_layer=hmm_layer,
+                batch_size=2,
+                model_ids=[0,1],
+                decode_algorithm=Decode.DecodingAlgorithm.VITERBI
+            )
             max_len = np.amax(data.seq_lens[indices])+1
 
             for i,j in enumerate(indices):
-                self.assert_vec(state_seqs_max_lik3[:,i], ref_seqs[:,j, :max_len])
+                self.assert_vec(
+                    state_seqs_max_lik3[:,i], ref_seqs[:,j, :max_len]
+                )
                 
                 
             indices = np.array([[0,3,0,0,1,0,0,0], 
@@ -844,10 +904,12 @@ class TestMSAHMM(unittest.TestCase):
                                         [-1,-1],
                                         [-1,-1],
                                         [-1,-1]]) ]
-            ref_finished = np.array([#model 1
-                                    [True, True, True, False, True, True, True, True], 
-                                    #model 2
-                                    [True, True, True, False, True, True, False, False]])
+            ref_finished = np.array([
+                #model 1
+                [True, True, True, False, True, True, True, True], 
+                #model 2
+                [True, True, True, False, True, True, False, False]
+            ])
             ref_left_flank_lens = np.array([[0, 3, 0, 0, 1, 0, 0, 0], 
                                             [5, 0, 6, 5, 0, 2, 1, 3]])
             ref_segment_lens = np.array([[0,0,0,3,0,0,0,0],  #model 1
@@ -927,40 +989,46 @@ class TestMSAHMM(unittest.TestCase):
                                     [gap]*3, 
                                     [gap]*3, 
                                     [gap]*3]) ]
-            ref_core_blocks = [ #model 1
-                                [np.array([[F,gap,gap,E,gap,gap,gap,L,gap,gap,gap,I,gap,gap,gap,X],
-                                        [F,gap,gap,E,gap,gap,gap,L,gap,gap,gap,I,gap,gap,gap,X],
-                                        [F,gap,gap,E,gap,gap,gap,L,gap,gap,gap,I,gap,gap,gap,X],
-                                        [F,gap,gap,E,gap,gap,gap,L,gap,gap,gap,I,gap,gap,gap,X],
-                                        [GAP,gap,gap,E,gap,gap,gap,L,gap,gap,gap,I,gap,gap,gap,GAP],
-                                        [F,gap,gap,E,a,h,c,L,gap,gap,gap,I,gap,gap,gap,X],
-                                        [F,a,h,E,gap,gap,gap,L,a,gap,gap,I,a,h,c,X],
-                                        [F,gap,gap,E,gap,gap,gap,L,a,h,c,I,gap,gap,gap,X]]),
-                            np.array([[GAP]*5,
-                                        [GAP]*5,
-                                        [GAP]*5,
-                                        [F,E,L,I,X],
-                                        [GAP]*5,
-                                        [GAP]*5,
-                                        [GAP]*5,
-                                        [GAP]*5])], 
-                                #model 2
-                            [np.array([[GAP, gap, gap, gap, GAP, GAP],
-                                        [A,gap, gap, gap, H, C],
-                                        [A,gap, gap, gap, GAP, C],
-                                        [A,gap, gap, gap, H, C],
-                                        [A,e,l,i,H,GAP],
-                                        [A,gap, gap, gap, H, C],
-                                        [A, gap, gap, gap, H, GAP],
-                                        [A, gap, gap, gap, H, C]]),
-                            np.array([[GAP]*3,
-                                        [GAP]*3,
-                                        [GAP]*3,
-                                        [A,GAP,GAP],
-                                        [GAP]*3,
-                                        [GAP]*3,
-                                        [A,GAP,GAP],
-                                        [A,H,C]])] ]
+            ref_core_blocks = [ 
+                #model 1
+                [np.array([
+                    [F,gap,gap,E,gap,gap,gap,L,gap,gap,gap,I,gap,gap,gap,X],
+                    [F,gap,gap,E,gap,gap,gap,L,gap,gap,gap,I,gap,gap,gap,X],
+                    [F,gap,gap,E,gap,gap,gap,L,gap,gap,gap,I,gap,gap,gap,X],
+                    [F,gap,gap,E,gap,gap,gap,L,gap,gap,gap,I,gap,gap,gap,X],
+                    [GAP,gap,gap,E,gap,gap,gap,L,gap,gap,gap,I,gap,gap,gap,GAP],
+                    [F,gap,gap,E,a,h,c,L,gap,gap,gap,I,gap,gap,gap,X],
+                    [F,a,h,E,gap,gap,gap,L,a,gap,gap,I,a,h,c,X],
+                    [F,gap,gap,E,gap,gap,gap,L,a,h,c,I,gap,gap,gap,X]
+                ]),
+                np.array([[GAP]*5,
+                        [GAP]*5,
+                        [GAP]*5,
+                        [F,E,L,I,X],
+                        [GAP]*5,
+                        [GAP]*5,
+                        [GAP]*5,
+                        [GAP]*5])
+                ], 
+                #model 2
+                [np.array([[GAP, gap, gap, gap, GAP, GAP],
+                            [A,gap, gap, gap, H, C],
+                            [A,gap, gap, gap, GAP, C],
+                            [A,gap, gap, gap, H, C],
+                            [A,e,l,i,H,GAP],
+                            [A,gap, gap, gap, H, C],
+                            [A, gap, gap, gap, H, GAP],
+                            [A, gap, gap, gap, H, C]]),
+                np.array([[GAP]*3,
+                            [GAP]*3,
+                            [GAP]*3,
+                            [A,GAP,GAP],
+                            [GAP]*3,
+                            [GAP]*3,
+                            [A,GAP,GAP],
+                            [A,H,C]])
+                ] 
+            ]
             ref_num_blocks = [2, 3]
             #second domain hit
             ref_consensus_2 = [ #model 1
@@ -977,10 +1045,14 @@ class TestMSAHMM(unittest.TestCase):
                                     np.array([[0]*2]*8)] #model 2
             ref_insertion_start_2 = [ np.array([[-1]*4]*8), #model 1
                                     np.array([[-1]*2]*8) ] #model 2
-            ref_finished_2 = np.array([[True, True, True, True, True, True, True, True], 
-                                    [True, True, True, True, True, True, False, True]])
-            ref_left_flank_lens_2 = np.array([[0, 3, 0, 0, 1, 0, 0, 0],  #model 1
-                                            [5, 0, 6, 5, 0, 2, 1, 3]]) #model 2
+            ref_finished_2 = np.array(
+                [[True, True, True, True, True, True, True, True], 
+                [True, True, True, True, True, True, False, True]]
+            )
+            ref_left_flank_lens_2 = np.array(
+                [[0, 3, 0, 0, 1, 0, 0, 0],  #model 1
+                [5, 0, 6, 5, 0, 2, 1, 3]]   #model 2
+            ) 
             
             def assert_decoding_core_results(decoded, ref):
                 for i in range(data.num_seq):
@@ -990,28 +1062,49 @@ class TestMSAHMM(unittest.TestCase):
             for i in range(len(length)):
                 #test decoding
                 #test first core block isolated
-                decoding_core_results = AlignmentModel.decode_core(length[i], state_seqs_max_lik[i], indices[i])
-                assert_decoding_core_results(decoding_core_results, (ref_consensus[i], 
-                                                                    ref_insertion_lens[i],
-                                                                    ref_insertion_start[i],
-                                                                    ref_finished[i])) 
+                decoding_core_results = AlignmentModel.decode_core(
+                    length[i], state_seqs_max_lik[i], indices[i]
+                )
+                assert_decoding_core_results(
+                    decoding_core_results, 
+                    (
+                        ref_consensus[i], 
+                        ref_insertion_lens[i],
+                        ref_insertion_start[i],
+                        ref_finished[i]
+                    )
+                ) 
                 #test left flank insertions isolated
-                left_flank_lens, left_flank_start = AlignmentModel.decode_flank(state_seqs_max_lik[i], 
-                                                                            flank_state_id = 0, 
-                                                                            indices = np.array([0,0,0,0,0,0,0,0]))
+                left_flank_lens, left_flank_start = AlignmentModel.decode_flank(
+                    state_seqs_max_lik[i], 
+                    flank_state_id = 0, 
+                    indices = np.array([0,0,0,0,0,0,0,0])
+                )
                 self.assert_vec(left_flank_lens, ref_left_flank_lens[i])
                 self.assert_vec(left_flank_start, np.array([0,0,0,0,0,0,0,0]))
                 #test whole decoding
-                core_blocks, left_flank, right_flank, unannotated_segments = AlignmentModel.decode(length[i], state_seqs_max_lik[i])
+                core_blocks, left_flank, right_flank, unannotated_segments = AlignmentModel.decode(
+                    length[i], state_seqs_max_lik[i]
+                )
                 self.assertEqual(len(core_blocks), ref_num_blocks[i])
-                assert_decoding_core_results(core_blocks[0], (ref_consensus[i], 
-                                                            ref_insertion_lens[i],
-                                                            ref_insertion_start[i],
-                                                            ref_finished[i])) 
-                assert_decoding_core_results(core_blocks[1], (ref_consensus_2[i], 
-                                                            ref_insertion_lens_2[i],
-                                                            ref_insertion_start_2[i],
-                                                            ref_finished_2[i]))
+                assert_decoding_core_results(
+                    core_blocks[0], 
+                    (
+                        ref_consensus[i], 
+                        ref_insertion_lens[i],
+                        ref_insertion_start[i],
+                        ref_finished[i]
+                    )
+                ) 
+                assert_decoding_core_results(
+                    core_blocks[1], 
+                    (
+                        ref_consensus_2[i], 
+                        ref_insertion_lens_2[i],
+                        ref_insertion_start_2[i],
+                        ref_finished_2[i]
+                    )
+                )
                 self.assert_vec(left_flank[0], ref_left_flank_lens[i])
                 self.assert_vec(left_flank[1], np.array([0,0,0,0,0,0,0,0]))
                 self.assert_vec(unannotated_segments[0][0], ref_segment_lens[i])
@@ -1020,16 +1113,20 @@ class TestMSAHMM(unittest.TestCase):
                 self.assert_vec(right_flank[1], ref_right_flank_start[i])
                 
                 #test conversion of decoded data to an anctual alignment in table form
-                left_flank_block = AlignmentModel.get_insertion_block(sequences[i], 
-                                                                    left_flank[0], 
-                                                                    np.amax(left_flank[0]),
-                                                                    left_flank[1],
-                                                                    adjust_to_right=True)
+                left_flank_block = AlignmentModel.get_insertion_block(
+                    sequences[i], 
+                    left_flank[0], 
+                    np.amax(left_flank[0]),
+                    left_flank[1],
+                    adjust_to_right=True
+                )
                 self.assert_vec(left_flank_block, ref_left_flank_block[i])
-                right_flank_block = AlignmentModel.get_insertion_block(sequences[i], 
-                                                                    right_flank[0], 
-                                                                    np.amax(right_flank[0]),
-                                                                    right_flank[1])
+                right_flank_block = AlignmentModel.get_insertion_block(
+                    sequences[i], 
+                    right_flank[0], 
+                    np.amax(right_flank[0]),
+                    right_flank[1]
+                )
                 self.assert_vec(right_flank_block, ref_right_flank_block[i])
                 ins_lens = core_blocks[0][1][:,0] #just check the first insert for simplicity
                 ins_start = core_blocks[0][2][:,0]
@@ -1088,7 +1185,7 @@ class TestMSAHMM(unittest.TestCase):
                                 [0,1,2,6,6,1,6,1,2,3,7,8,8,8,8],
                                 [0,0,0,1,2,3,6,6,1,2,3,8,8,8,8]]])
             sequences = get_all_seqs(data, 2)
-            sequences = np.transpose(sequences, [1,0,2])
+            sequences = np.stack([sequences]*2, axis=0)
             state_seqs_max_lik_1, gamma_1 = Viterbi.viterbi(sequences, hmm_cell, parallel_factor=1, return_variables=True)
             #print("A", gamma_1[1,1,::5])
             state_seqs_max_lik_3, gamma_3 = Viterbi.viterbi(sequences, hmm_cell, parallel_factor=3, return_variables=True)
@@ -1150,8 +1247,12 @@ class TestMSAHMM(unittest.TestCase):
             hmm_cell = MsaHmmCell.MsaHmmCell(32)
             hmm_layer = MsaHmmLayer.MsaHmmLayer(hmm_cell, 1)
             hmm_layer.build((1, None, None, len(SequenceDataset.standard_alphabet)))
-            batch_gen = BatchGenerator()
-            batch_gen.configure(data, Configuration.make_default(1))
+            batch_gen = DefaultBatchGenerator(
+                shuffle_batches=1,
+                return_indices=True,
+                closing_terminal=True
+            )
+            batch_gen.data = data
             indices = tf.range(data.num_seq, dtype=tf.int64)
             ds = Training.make_dataset(indices, batch_gen, batch_size=data.num_seq, shuffle=False)
             for x,_ in ds:
@@ -1168,13 +1269,15 @@ class TestMSAHMM(unittest.TestCase):
             hmm_cell = MsaHmmCell.MsaHmmCell(32)
             hmm_layer = MsaHmmLayer.MsaHmmLayer(hmm_cell, 1)
             hmm_layer.build((1, None, None, len(SequenceDataset.standard_alphabet)))
-            batch_gen = BatchGenerator()
-            batch_gen.configure(data, Configuration.make_default(1))
+            batch_gen = DefaultBatchGenerator(
+                closing_terminal=True, return_indices=True
+            )
+            batch_gen.data = data
             indices = tf.range(data.num_seq, dtype=tf.int64)
             ds = Training.make_dataset(indices, batch_gen, batch_size=data.num_seq, shuffle=False)
             for x,_ in ds:
                 seq = tf.one_hot(x[0], len(SequenceDataset.standard_alphabet))
-                seq = tf.transpose(seq, [1,0,2,3])
+                seq = seq[tf.newaxis, ...]
                 p = hmm_layer.state_posterior_log_probs(seq)
             p = np.exp(p)
             np.testing.assert_almost_equal(np.sum(p, -1), 1., decimal=4)
@@ -1354,8 +1457,12 @@ class TestAncProbs(unittest.TestCase):
             n = sequences.shape[1]
             ind = np.arange(n)
             model_length = 10
-            batch_gen = BatchGenerator()
-            batch_gen.configure(data, Configuration.make_default(1))
+            batch_gen = DefaultBatchGenerator(
+                shuffle_batches=1,
+                return_indices=True,
+                closing_terminal=True
+            )
+            batch_gen.data = data
             ds = Training.make_dataset(ind, batch_gen, batch_size=n, shuffle=False)
             for case in self.get_test_configs(sequences):
                 # the default emitter initializers expect 25 as last dimension which is not compatible with num_matrix=3
@@ -1417,8 +1524,11 @@ class TestData(unittest.TestCase):
     def test_default_batch_gen(self):
         filename = os.path.dirname(__file__)+"/data/felix_insert_delete.fa"
         with SequenceDataset(filename) as data:
-            batch_gen = Training.DefaultBatchGenerator(shuffle=False)
-            batch_gen.configure(data, Configuration.make_default(1))
+            batch_gen = DefaultBatchGenerator(
+                return_indices=True,
+                closing_terminal=True
+            )
+            batch_gen.data = data
             test_batches = [[0], [1], [4], [0,2], [0,1,2,3,4], [2,3,4]]
             alphabet = np.array(list(SequenceDataset.standard_alphabet))
             for ind in test_batches:
@@ -1481,8 +1591,11 @@ class TestModelSurgery(unittest.TestCase):
             config=config,
             data=data
         )
-        batch_gen = BatchGenerator()
-        batch_gen.configure(data, config)
+        batch_gen = DefaultBatchGenerator(
+            return_indices=True,
+            closing_terminal=True
+        )
+        batch_gen.data = data
         am = AlignmentModel(
             data, 
             batch_gen,
@@ -1765,8 +1878,12 @@ class TestAlignment(unittest.TestCase):
                                                       data=fasta_file)
         #subalignment
         subset = np.array([0,2,5])
-        batch_gen = BatchGenerator()
-        batch_gen.configure(fasta_file, Configuration.make_default(1))
+        batch_gen = DefaultBatchGenerator(
+            shuffle_batches=1,
+            return_indices=True,
+            closing_terminal=True
+        )
+        batch_gen.data = data
         #create alignment after building model
         sub_am = AlignmentModel(fasta_file, batch_gen, subset, 32, model)
         subalignment_strings = sub_am.to_string(0, add_block_sep=False)
@@ -2006,8 +2123,12 @@ class TestModelToFile(unittest.TestCase):
         
         #make alignment and save
         with SequenceDataset("test/data/simple.fa") as data:
-            batch_gen = BatchGenerator()
-            batch_gen.configure(data, config)
+            batch_gen = DefaultBatchGenerator(
+                shuffle_batches=2,
+                return_indices=True,
+                closing_terminal=True
+            )
+            batch_gen.data
             ind = np.array([0,1])
             batch_size = 2
             am = AlignmentModel(data, batch_gen, ind, batch_size, model)

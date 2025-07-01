@@ -80,7 +80,7 @@ class L2Regularizer(tf.keras.layers.Layer):
         max_model_length = tf.reduce_max(lengths)
         length_mask = tf.cast(tf.sequence_mask(lengths), B.dtype)
         #square all parameters
-        B_sq = tf.math.square(B[...,len(SequenceDataset.alphabet)-1:-1])
+        B_sq = tf.math.square(B[...,len(SequenceDataset.standard_alphabet)-1:-1])
         #reduce the embedding dimension
         B_sq = tf.reduce_sum(B_sq, -1)
         #regularization per match is just the sum of the respective squares 

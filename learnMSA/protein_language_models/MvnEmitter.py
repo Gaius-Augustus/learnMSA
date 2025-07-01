@@ -20,7 +20,7 @@ def make_joint_prior(scoring_model_config : Common.ScoringModelConfig, num_prior
                 MvnPrior(scoring_model_config, num_prior_components, dtype=dtype),
                 InverseGammaPrior(inv_gamma_alpha, inv_gamma_beta),
                 priors.NullPrior()]
-    num_aa = len(SequenceDataset.alphabet)
+    num_aa = len(SequenceDataset.standard_alphabet)
     kernel_split = [num_aa, num_aa + scoring_model_config.dim, num_aa + 2*scoring_model_config.dim]
     return priors.JointEmissionPrior(prior_list, kernel_split, dtype=dtype)
 
@@ -67,7 +67,7 @@ class MvnEmitter(ProfileHMMEmitter):
         self.inv_gamma_alpha = inv_gamma_alpha
         self.inv_gamma_beta = inv_gamma_beta
         self.regularize_variances = regularize_variances
-        self.num_aa = len(SequenceDataset.alphabet)-1
+        self.num_aa = len(SequenceDataset.standard_alphabet)-1
 
 
     def build(self, input_shape):

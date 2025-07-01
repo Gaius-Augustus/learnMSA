@@ -206,9 +206,9 @@ class AncProbsLayer(tf.keras.layers.Layer):
                 num_model, b, L = tf.unstack(tf.shape(inputs))
             else:
                 num_model, b, L, _ = tf.unstack(tf.shape(inputs))
-            lstm_input = tf.one_hot(inputs, len(SequenceDataset.alphabet))
-            lstm_input = tf.reshape(lstm_input, (num_model*b, L, len(SequenceDataset.alphabet)))
-            lstm_mask = tf.reshape(inputs < len(SequenceDataset.alphabet)-1, (num_model*b, L))
+            lstm_input = tf.one_hot(inputs, len(SequenceDataset.standard_alphabet))
+            lstm_input = tf.reshape(lstm_input, (num_model*b, L, len(SequenceDataset.standard_alphabet)))
+            lstm_mask = tf.reshape(inputs < len(SequenceDataset.standard_alphabet)-1, (num_model*b, L))
             seq_lens = tf.reduce_sum(tf.cast(lstm_mask, lstm_input.dtype), axis=-1, keepdims=True)
             lstm_output = self.lstm(lstm_input, mask=lstm_mask)
             lstm_output = tf.reduce_sum(lstm_output, axis=-2) / (seq_lens * self.lstm_dim)
@@ -270,18 +270,18 @@ class AncProbsLayer(tf.keras.layers.Layer):
                                    self.transposed)
         if input_indices:
             anc_probs *= mask
-            anc_probs = tf.pad(anc_probs, [[0,0], [0,0], [0,0], [0,0], [0,len(SequenceDataset.alphabet)-20]])
+            anc_probs = tf.pad(anc_probs, [[0,0], [0,0], [0,0], [0,0], [0,len(SequenceDataset.standard_alphabet)-20]])
             if replace_rare_with_equilibrium:
-                rare_mask = _make_mask(tf.math.logical_and(inputs >= 20, inputs < len(SequenceDataset.alphabet)-1)) #do not count padding
-                padding_mask = _make_mask(inputs == len(SequenceDataset.alphabet)-1)
+                rare_mask = _make_mask(tf.math.logical_and(inputs >= 20, inputs < len(SequenceDataset.standard_alphabet)-1)) #do not count padding
+                padding_mask = _make_mask(inputs == len(SequenceDataset.standard_alphabet)-1)
                 equilibrium = tf.concat([equilibrium, tf.zeros_like(equilibrium)[..., :tf.shape(anc_probs)[-1]-20]], -1)
                 rest = (tf.zeros_like(anc_probs) + equilibrium[:,tf.newaxis,tf.newaxis]) * rare_mask
-                rest += tf.expand_dims(tf.one_hot(inputs, len(SequenceDataset.alphabet)), -2) * padding_mask
+                rest += tf.expand_dims(tf.one_hot(inputs, len(SequenceDataset.standard_alphabet)), -2) * padding_mask
             else:
-                rest = tf.expand_dims(tf.one_hot(inputs, len(SequenceDataset.alphabet)), -2) * (1-mask)
+                rest = tf.expand_dims(tf.one_hot(inputs, len(SequenceDataset.standard_alphabet)), -2) * (1-mask)
             anc_probs += rest
             num_model, b, L = tf.unstack(tf.shape(inputs))
-            anc_probs = tf.reshape(anc_probs, (num_model, b, L, self.num_matrices * len(SequenceDataset.alphabet)) )
+            anc_probs = tf.reshape(anc_probs, (num_model, b, L, self.num_matrices * len(SequenceDataset.standard_alphabet)) )
         else:
             num_model, b, L, _ = tf.unstack(tf.shape(inputs))
             anc_probs = tf.reshape(anc_probs, (num_model, b, L, self.num_matrices * 20) )

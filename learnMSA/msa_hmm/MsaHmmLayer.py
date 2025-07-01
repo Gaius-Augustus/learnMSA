@@ -3,6 +3,8 @@ import numpy as np
 from learnMSA.msa_hmm.TotalProbabilityCell import TotalProbabilityCell
 from learnMSA.msa_hmm.Utility import deserialize
 from learnMSA.msa_hmm.Bidirectional import Bidirectional
+from learnMSA.msa_hmm.Viterbi import viterbi
+from learnMSA.msa_hmm.MaximumExpectedAccuracy import maximum_expected_accuracy
 
 
 class MsaHmmLayer(tf.keras.layers.Layer):
@@ -132,6 +134,76 @@ class MsaHmmLayer(tf.keras.layers.Layer):
                                                 training=training, no_loglik=no_loglik, 
                                                 parallel_factor=self.parallel_factor)
     
+
+    def viterbi(
+        self, 
+        inputs, 
+        end_hints=None, 
+        return_variables=False, 
+        non_homogeneous_mask_func=None,
+        do_recurrent_init=True
+    ):
+        """ Computes the Viterbi path for each sequence in the batch.
+        Args:
+            inputs: Sequences. Shape: (num_model, b, seq_len, s)
+            end_hints: A tensor of shape (..., 2, num_states) that contains 
+                the correct state for the left and right ends of each chunk.
+            return_variables: If True, the function also returns the Viterbi 
+                variables (gamma). 
+                If parallel_factor > 1, the variables are returned only for 
+                the first and last chunk positions and are currently
+                not equivalent to a non-parallel call. Use for debugging only.
+            non_homogeneous_mask_func: Optional function that maps a sequence 
+                index i to a num_model x batch x q x q mask that specifies 
+                which transitions are allowed.
+            do_recurrent_init: If True, the cell is initialized before running 
+                the Viterbi algorithm.
+        Returns:
+            State sequences. Shape (num_models, b, L)
+        """
+        return _viterbi_impl(
+            inputs, 
+            self.cell, 
+            end_hints=end_hints, 
+            return_variables=return_variables, 
+            non_homogeneous_mask_func=non_homogeneous_mask_func,
+            do_recurrent_init=do_recurrent_init,
+            parallel_factor=self.parallel_factor
+        )
+    
+
+    def maximum_expected_accuracy(
+        self, 
+        inputs, 
+        non_homogeneous_mask_func=None,
+        do_recurrent_init=True
+    ):
+        """ Computes the state sequences with maximum expected accuracy (MEA).
+        Args:
+            inputs: Posterior state probabilities. 
+                Shape (num_models, b, L, q)
+            non_homogeneous_mask_func: Optional function that maps a sequence 
+                index i to a num_model x batch x q x q mask that specifies 
+                which transitions are allowed.
+            do_recurrent_init: If True, the cell is initialized before running 
+                the MEA algorithm.
+        Returns:
+            State sequences. Shape (num_models, b, L)
+        """
+        return _maximum_expected_accuracy_impl(
+            inputs, 
+            self.cell, 
+            self.reverse_cell, 
+            self.bidirectional_rnn, 
+            self.total_prob_rnn, 
+            self.total_prob_rnn_rev,
+            end_hints=None, 
+            return_variables=False, 
+            non_homogeneous_mask_func=non_homogeneous_mask_func,
+            do_recurrent_init=do_recurrent_init,
+            parallel_factor=self.parallel_factor
+        )
+    
     
     def apply_sequence_weights(self, loglik, indices, aggregate=False):
         if self.sequence_weights is not None:
@@ -206,7 +278,64 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         return cls(**config)
 
 
+@tf.function
+def _viterbi_impl(
+    inputs,
+    cell, 
+    end_hints=None,
+    return_variables=False, 
+    non_homogeneous_mask_func=None,
+    do_recurrent_init=True,
+    parallel_factor=1
+):
+    """
+    Computes the Viterbi path for each sequence in the batch.
+    """
+    if do_recurrent_init:
+        cell.recurrent_init()
+    return viterbi(
+        inputs, 
+        cell,
+        end_hints=end_hints, 
+        parallel_factor=parallel_factor,
+        return_variables=return_variables,
+        non_homogeneous_mask_func=non_homogeneous_mask_func
+    )
     
+
+@tf.function
+def _maximum_expected_accuracy_impl(
+    inputs,
+    cell,
+    reverse_cell, 
+    bidirectional_rnn, 
+    total_prob_rnn, 
+    total_prob_rnn_rev, 
+    end_hints=None,
+    return_variables=False, 
+    non_homogeneous_mask_func=None,
+    do_recurrent_init=True,
+    parallel_factor=1
+):
+    """ Computes the state sequences with maximum expected accuracy (MEA). """
+    if do_recurrent_init:
+        cell.recurrent_init()
+    posterior_log = _state_posterior_log_probs_impl(
+        inputs, 
+        cell, 
+        reverse_cell, 
+        bidirectional_rnn, 
+        total_prob_rnn, 
+        total_prob_rnn_rev,
+        end_hints=end_hints
+    )
+    posterior = tf.nn.softmax(posterior_log, axis=-1)
+    return maximum_expected_accuracy(
+        posterior, 
+        cell,
+        parallel_factor=parallel_factor,
+        non_homogeneous_mask_func=non_homogeneous_mask_func
+    )
     
         
 @tf.function

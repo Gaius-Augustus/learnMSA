@@ -90,7 +90,7 @@ class SequenceDataset:
     
     def alphabet_size(self) -> int:
         """ Returns the size of the alphabet used in the dataset. """
-        return len(self.alphabet)-1
+        return len(self.alphabet)
     
     def close(self):
         if self.indexed:

@@ -770,7 +770,7 @@ def _make_defaults_if_none(model_generator, batch_generator):
     if model_generator is None:
         model_generator = train.default_model_generator
     if batch_generator is None:
-        batch_generator = BatchGenerator()
+        batch_generator = DefaultBatchGenerator()
     return model_generator, batch_generator
 
 
