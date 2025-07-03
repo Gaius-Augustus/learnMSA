@@ -1,8 +1,6 @@
 import tensorflow as tf
 from learnMSA.msa_hmm.MsaHmmLayer import MsaHmmLayer
 from learnMSA.msa_hmm.MsaHmmCell import HmmCell
-from learnMSA.msa_hmm.MaximumExpectedAccuracy import maximum_expected_accuracy
-from learnMSA.msa_hmm.Viterbi import viterbi
 
 
 class TestMeaEmitter(tf.keras.layers.Layer):
@@ -46,7 +44,7 @@ class TestMeaTransitioner(tf.keras.layers.Layer):
         
     def recurrent_init(self):
         self.A = self.make_A()
-        self.A_transposed = tf.transpose(self.A, (0,2,1))
+        self.A_t = tf.transpose(self.A, (0,2,1))
 
     def make_A(self):
         p,q = self.p, self.q
@@ -65,7 +63,7 @@ class TestMeaTransitioner(tf.keras.layers.Layer):
         
     def call(self, inputs):
         if self.reverse:
-            return tf.matmul(inputs, self.A_transposed)
+            return tf.matmul(inputs, self.A_t)
         else:
             return tf.matmul(inputs, self.A)
     
@@ -124,27 +122,6 @@ class TestMeaHMMLayer(MsaHmmLayer):
             name="test_mea_hmm_cell"
         )
         super(TestMeaHMMLayer, self).build(input_shape)
-
-    def mea(self, inputs, use_loglik=True, training=False):
-        log_post = self.state_posterior_log_probs(
-            inputs, 
-            training=training, 
-            no_loglik=not use_loglik
-        )
-        post = tf.nn.softmax(log_post, axis=-1)
-        mea = maximum_expected_accuracy(
-            post, 
-            self.cell, 
-            parallel_factor=self.parallel_factor
-        )[0]
-        return mea
-    
-    def viterbi(self, inputs):
-        return viterbi(
-            inputs, 
-            self.cell, 
-            parallel_factor=self.parallel_factor
-        )[0]
     
     def call(self, inputs, use_loglik=True, training=False):
-        return self.mea(inputs, use_loglik=use_loglik, training=training)
+        return self.maximum_expected_accuracy(inputs)

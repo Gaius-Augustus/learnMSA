@@ -58,7 +58,15 @@ def run_main():
     parser.add_argument("--model_criterion", dest="model_criterion", type=str, default="AIC",
                        help="Criterion for model selection. (default: %(default)s)")
     parser.add_argument("--indexed_data", dest="indexed_data", action='store_true', help="Don't load all data into memory at once at the cost of training time.")
-    
+    parser.add_argument(
+        "--decode", 
+        dest="decode", 
+        type=str, 
+        default="viterbi",
+        help="The decoding algorithm used to compute the most likely state "\
+            "sequences. Possible values are: [viterbi, forward_backward]. "\
+            "(default: %(default)s)"                
+    )
     parser.add_argument("--unaligned_insertions", dest="unaligned_insertions", action='store_true', help="Insertions will be left unaligned.")
     parser.add_argument("--crop", dest="crop", type=str,  default="auto", help="""During training, sequences longer than the given value will be cropped randomly. 
     Reduces training runtime and memory usage, but might produce inaccurate results if too much of the sequences is cropped. The output alignment will not be cropped. 
@@ -167,6 +175,8 @@ def run_main():
     if not args.use_language_model:
         config["learning_rate"] = args.learning_rate
         config["epochs"] = args.epochs
+    decode_alg = Configuration.DecodingAlgorithm.from_string(args.decode)
+    config["decode_algorithm"] = decode_alg
     config["surgery_del"] = args.surgery_del
     config["surgery_ins"] = args.surgery_ins
     config["model_criterion"] = args.model_criterion

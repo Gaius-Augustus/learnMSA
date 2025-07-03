@@ -60,7 +60,13 @@ class LogoPlotterCallback(tf.keras.callbacks.Callback):
         self.frame_dir = self.logo_dir+"/frames/"
     
     def on_train_batch_end(self, batch, logs=None):
-        am = msa_hmm.AlignmentModel.AlignmentModel(self.data, self.batch_generator, self.decode_indices, batch_size=self.batch_size, model=self.model)
+        am = msa_hmm.AlignmentModel.AlignmentModel(
+            self.data, 
+            self.batch_generator, 
+            self.decode_indices, 
+            batch_size=self.batch_size, 
+            model=self.model
+        )
         fig, ax = plt.subplots(1, 1, figsize=(6, 4))
         plot_logo(am, 0, ax)
         plt.savefig(self.frame_dir+f"/{self.i}.png", format="png", bbox_inches="tight")

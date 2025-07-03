@@ -1,6 +1,6 @@
 import copy
 import sys
-from enum import Enum
+from functools import partial
 from typing import Callable
 
 import numpy as np
@@ -8,12 +8,9 @@ import tensorflow as tf
 
 import learnMSA.msa_hmm.Training as train
 from learnMSA.msa_hmm.BatchGenerator import BatchGenerator
+from learnMSA.msa_hmm.Configuration import DecodingAlgorithm
 from learnMSA.msa_hmm.MsaHmmLayer import MsaHmmLayer
 
-
-class DecodingAlgorithm(Enum):
-    VITERBI = 1
-    MEA = 2
 
 def decode(
     indices : np.ndarray,
@@ -104,7 +101,7 @@ def decode(
 
     # wrap everything in a tf function for speed
 
-    def _decode_template(inputs):
+    def _decode_template(inputs, mask_func=None):
         # TODO: this can be improved by encoding only for required models
         encoded_seq = tf.gather(inputs, model_ids, axis=0)
         if decode_algorithm == DecodingAlgorithm.VITERBI:
@@ -117,10 +114,27 @@ def decode(
             )
         decoded_seq = decode_fn(
             encoded_seq, 
-            non_homogeneous_mask_func=non_homogeneous_mask_func,
+            non_homogeneous_mask_func=mask_func,
             do_recurrent_init=False,  # already done before
         )
         return decoded_seq
+    
+    def _get_mask_func(inputs, transpose=False) -> Callable|None:
+        if non_homogeneous_mask_func is None:
+           return None
+        else:
+            seq_lens = tf.reduce_sum(
+                tf.cast(
+                    inputs==batch_generator.data.alphabet_size()-1, tf.int32
+                ), axis=-1
+            )
+            if transpose:
+                seq_lens = tf.transpose(seq_lens, [1,0])
+            return partial(
+                non_homogeneous_mask_func, 
+                seq_lens=seq_lens, 
+                hmm_cell=msa_hmm_layer.cell
+            )
     
     # TODO:
     # a note for later refactoring: a non-shuffled BatchGenerator 
@@ -158,7 +172,7 @@ def decode(
             seqs = tf.repeat(
                 seqs, repeats=msa_hmm_layer.cell.num_models, axis=0
             )
-            return _decode_template(seqs)
+            return _decode_template(seqs, _get_mask_func(inputs[0]))
     else:
         @tf.function(
             input_signature=[[
@@ -178,7 +192,10 @@ def decode(
             ]
             encoded_seq = encoder(inputs)
             #TODO: encoder transposes batch and model dimensions
-            return _decode_template(encoded_seq)
+            return _decode_template(
+                encoded_seq, 
+                _get_mask_func(inputs[0], transpose=True)
+            )
 
     # decode all batches
     # TODO: make this more performant, a lot of GPU -> CPU transfers

@@ -108,7 +108,15 @@ def fit_and_align(data : SequenceDataset,
                                           verbose=verbose)
         if verbose:
             print("Creating alignment model...")
-        am = AlignmentModel(data, batch_generator, decode_indices, batch_size=batch_size, model=model, A2M=A2M_output)
+        am = AlignmentModel(
+            data, 
+            batch_generator, 
+            decode_indices, 
+            batch_size=batch_size, 
+            model=model, 
+            A2M=A2M_output,
+            decode_algorithm=config["decode_algorithm"]
+        )
         if verbose:
             print("Successfully created alignment model.")
         if last_iteration:
@@ -163,7 +171,14 @@ def fit_and_align_with_logo_gif(data : SequenceDataset, config, initial_model_le
                                       verbose=True,
                                       train_callbacks=[logo_plotter_callback])
     make_logo_gif(logo_plotter_callback.frame_dir, logo_dir+"/training.gif")
-    am = AlignmentModel(data, batch_generator, indices, batch_size=batch_size, model=model)
+    am = AlignmentModel(
+        data, 
+        batch_generator, 
+        indices, 
+        batch_size=batch_size, 
+        model=model,
+        decode_algorithm=config["decode_algorithm"] 
+    )
     return am
 
 
@@ -247,6 +262,9 @@ def run_learnMSA(data : SequenceDataset,
         
     Path(os.path.dirname(out_filename)).mkdir(parents=True, exist_ok=True)
     t = time.time()
+
+    if verbose:
+        print("Decoding algorithm:", am.decode_algorithm)
     
     if align_insertions:
         aligned_insertions = make_aligned_insertions(

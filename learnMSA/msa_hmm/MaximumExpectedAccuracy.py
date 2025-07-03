@@ -1,6 +1,5 @@
 import tensorflow as tf
 import learnMSA.msa_hmm.Viterbi as viterbi
-from functools import partial
 
 
 
@@ -9,7 +8,8 @@ def maximum_expected_accuracy(
     posterior_probs,
     hmm_cell,
     parallel_factor=1,
-    non_homogeneous_mask_func=None
+    non_homogeneous_mask_func=None,
+    unify_epsilon=0.0
 ):
     """ Computes the state sequences with maximum expected accuracy (MEA).
         The implementation is logarithmic (underflow safe) and capable of 
@@ -27,13 +27,14 @@ def maximum_expected_accuracy(
         non_homogeneous_mask_func: Optional function that maps a sequence 
             index i to a num_model x batch x q x q mask that specifies which 
             transitions are allowed.
+        epsilon: Threshold above which a transition is considered valid. 
+            Can be set to > 0.0 when the transtion matrix can contain non-zero 
+            values for invalid transitions. 
     Returns:
         State sequences. Shape (num_models, b, L)
     """
-    hmm_cell.recurrent_init()
     posterior_probs = tf.exp(posterior_probs) # see docs for explanation
     num_model, b, seq_len, q = tf.unstack(tf.shape(posterior_probs))
-    seq_lens = None
     tf.debugging.assert_equal(
         seq_len % parallel_factor, 0, 
         f"The sequence length ({seq_len}) has to be divisible "
@@ -51,23 +52,23 @@ def maximum_expected_accuracy(
     else: 
         init = tf.eye(q, dtype=hmm_cell.dtype)[tf.newaxis] 
     z = tf.shape(init)[1] #1 if parallel_factor == 1, q otherwise
-    A = unify_tensor(hmm_cell.log_A_dense)
-    At = unify_tensor(hmm_cell.log_A_dense_t)
-    if non_homogeneous_mask_func is not None:
-        non_homogeneous_mask_func = partial(
-            non_homogeneous_mask_func, seq_lens=seq_lens, hmm_cell=hmm_cell
-        )
+    log_A_unified = log_unify_tensor(
+        hmm_cell.transitioner.A, epsilon=unify_epsilon
+    )
+    log_At_unified = log_unify_tensor(
+        hmm_cell.transitioner.A_t, epsilon=unify_epsilon
+    )
     gamma = viterbi.viterbi_dyn_prog(
         posterior_probs,
         init, 
-        A, 
+        log_A_unified, 
         use_first_position_emission=parallel_factor==1, 
         non_homogeneous_mask_func=non_homogeneous_mask_func
     )
     gamma = tf.reshape(gamma, (num_model, b*parallel_factor*z, chunk_size, q))
     if parallel_factor == 1:
         mea_paths = viterbi.viterbi_backtracking(
-            gamma, At, non_homogeneous_mask_func=non_homogeneous_mask_func
+            gamma, log_At_unified, non_homogeneous_mask_func=non_homogeneous_mask_func
         )
     else:
         #compute (global) Viterbi values at the chunk borders
@@ -81,7 +82,7 @@ def maximum_expected_accuracy(
         gamma_at_chunk_borders = viterbi.viterbi_chunk_dyn_prog(
             posterior_probs_at_chunk_start, 
             init_dist[:,0], 
-            A, 
+            log_A_unified, 
             gamma_local_at_chunk_end
         )
         #compute optimal states at the chunk borders
@@ -89,21 +90,26 @@ def maximum_expected_accuracy(
             gamma_local_at_chunk_end, [0,1,2,4,3]
         )
         mea_chunk_borders = viterbi.viterbi_chunk_backtracking(
-            gamma_at_chunk_borders, gamma_local_at_chunk_end, At
+            gamma_at_chunk_borders, gamma_local_at_chunk_end, log_At_unified
         )
         #compute full state sequences
         gamma = tf.reshape(
             gamma, (num_model, b, parallel_factor, z, chunk_size, q)
         )
         mea_paths = viterbi.viterbi_full_chunk_backtracking(
-            mea_chunk_borders, gamma, At
+            mea_chunk_borders, gamma, log_At_unified
         )
     return mea_paths
 
-
-def unify_tensor(A):
+def log_unify_tensor(A, epsilon=0.0, log_zero_value=-1000.0):
     """
     Unifies a tensor by replacing all non-zero elements with 1.
+
+    Args:
+        A: A tensor of any shape with probabilities.
+        epsilon: Threshold to consider a transition as valid. The output will
+        contain log(1) for all transitions with a probability greater than epsilon,
+        and log_zero_value otherwise.
+        log_zero_value: Value to use for log(0) transitions. Default is -1000.0.
     """
-    A = tf.where(A > 0, 1.0, 0.0)
-    return A
+    return tf.where(A > epsilon, 0.0, log_zero_value)

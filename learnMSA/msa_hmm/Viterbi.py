@@ -1,10 +1,5 @@
 import tensorflow as tf
 import numpy as np
-import learnMSA.msa_hmm.Training as train
-from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
-import time
-import math
-from functools import partial
 
 
 
@@ -61,8 +56,12 @@ def viterbi_dyn_prog(emission_probs, init, transition_matrix, use_first_position
     gamma = tf.TensorArray(transition_matrix.dtype, size=L)
     gamma = gamma.write(0, gamma_val)
     for i in tf.range(1, L):
-        gamma_val = viterbi_step(gamma_val, emission_probs[:,:,i], transition_matrix,
-                                 non_homogeneous_mask_func(i) if non_homogeneous_mask_func is not None else None)
+        gamma_val = viterbi_step(
+            gamma_val, 
+            emission_probs[:,:,i], 
+            transition_matrix,
+            non_homogeneous_mask_func(i) if non_homogeneous_mask_func is not None else None
+        )
         gamma = gamma.write(i, gamma_val) 
     gamma = tf.transpose(gamma.stack(), [1,2,3,0,4])
     return gamma
@@ -257,7 +256,6 @@ def viterbi(
         sequences = tf.one_hot(sequences, hmm_cell.dim, dtype=hmm_cell.dtype)
     else:
         sequences = tf.cast(sequences, hmm_cell.dtype)
-    seq_lens = tf.reduce_sum(tf.cast(sequences[..., -1]==0, tf.int32), axis=-1)
     #compute all emission probabilities in parallel
     emission_probs = hmm_cell.emission_probs(sequences, end_hints=end_hints, training=False)
     num_model, b, seq_len, q = tf.unstack(tf.shape(emission_probs))
@@ -271,8 +269,6 @@ def viterbi(
     z = tf.shape(init)[1] #1 if parallel_factor == 1, q otherwise
     A = hmm_cell.log_A_dense
     At = hmm_cell.log_A_dense_t
-    if non_homogeneous_mask_func is not None:
-        non_homogeneous_mask_func = partial(non_homogeneous_mask_func, seq_lens=seq_lens, hmm_cell=hmm_cell)
     gamma = viterbi_dyn_prog(emission_probs, init, A, 
                              use_first_position_emission=parallel_factor==1, 
                              non_homogeneous_mask_func=non_homogeneous_mask_func)

@@ -1,6 +1,6 @@
+import copy
 import json
 import shutil
-import copy
 from pathlib import Path
 
 import numpy as np
@@ -8,16 +8,16 @@ import tensorflow as tf
 from packaging import version
 
 import learnMSA.msa_hmm.AncProbsLayer as anc_probs
-import learnMSA.msa_hmm.Configuration as config
+import learnMSA.msa_hmm.Decode as decode
 import learnMSA.msa_hmm.Emitter as emit
 import learnMSA.msa_hmm.MsaHmmCell as msa_hmm_cell
 import learnMSA.msa_hmm.MsaHmmLayer as msa_hmm_layer
 import learnMSA.msa_hmm.Priors as priors
 import learnMSA.msa_hmm.Training as train
 import learnMSA.msa_hmm.Transitioner as trans
-from learnMSA.msa_hmm.SequenceDataset import AlignedDataset, SequenceDataset
 from learnMSA.msa_hmm.BatchGenerator import DefaultBatchGenerator
-import learnMSA.msa_hmm.Decode as decode
+from learnMSA.msa_hmm.Configuration import DecodingAlgorithm
+from learnMSA.msa_hmm.SequenceDataset import AlignedDataset, SequenceDataset
 
 
 # utility class used in AlignmentModel storing useful information on a 
@@ -234,15 +234,18 @@ class AlignmentModel():
             and "." indicates insertions in other sequences. If false, pure 
             fasta with all upper case amino acids and only "-" is used.
     """
-    def __init__(self, 
-                 data : SequenceDataset, 
-                 batch_generator,
-                 indices, 
-                 batch_size, 
-                 model,
-                 gap_symbol="-",
-                 gap_symbol_insertions=".",
-                 A2M=True):
+    def __init__(
+        self, 
+        data : SequenceDataset, 
+        batch_generator,
+        indices, 
+        batch_size, 
+        model,
+        gap_symbol="-",
+        gap_symbol_insertions=".",
+        A2M=True,
+        decode_algorithm=DecodingAlgorithm.VITERBI
+    ):
         self.data = data
         self.batch_generator = copy.copy(batch_generator)
         self.batch_generator.shuffle_batches = -1
@@ -285,6 +288,7 @@ class AlignmentModel():
         self.num_models = self.msa_hmm_layer.cell.num_models
         self.length = self.msa_hmm_layer.cell.length
         self.best_model = -1
+        self.decode_algorithm = decode_algorithm
         
     #computes an implicit alignment (without storing gaps)
     #eventually, an alignment with explicit gaps can be written 
@@ -309,7 +313,6 @@ class AlignmentModel():
         hmm_layer.build(
             (1, None, None, hmm_layer.cell.dim)
         )
-
         decoded_seqs = decode.decode(
             indices=self.indices,
             batch_generator=self.batch_generator,
@@ -317,7 +320,7 @@ class AlignmentModel():
             batch_size=self.batch_size,
             model_ids=models,
             encoder=self.encoder_model,
-            decode_algorithm=decode.DecodingAlgorithm.VITERBI,
+            decode_algorithm=self.decode_algorithm,
             num_encoder_models=self.num_models
         )
         decoded_seqs = self._clean_up_decoded_seqs(
@@ -348,6 +351,7 @@ class AlignmentModel():
                 model_ids=models,
                 encoder=self.encoder_model,
                 non_homogeneous_mask_func=non_homogeneous_mask_func,
+                decode_algorithm=self.decode_algorithm,
                 num_encoder_models=self.num_models
             )
             if decoded_seqs.shape[-1] < fixed_decoded_seqs.shape[-1]:
@@ -753,8 +757,6 @@ class AlignmentModel():
                 shutil.rmtree(filepath)
             except OSError as e:
                 print("Error: %s - %s." % (e.filepath, e.strerror))
-        # todo: this is currently a bit limited because it creates a default 
-        # batch gen from a default config
         if custom_batch_gen is None:
             batch_gen = DefaultBatchGenerator() 
         else:

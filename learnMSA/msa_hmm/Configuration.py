@@ -1,15 +1,32 @@
 import math
-import numpy as np
-import tensorflow as tf
+import os
+import subprocess as sp
+from enum import Enum
 from functools import partial
+
+import tensorflow as tf
+
 import learnMSA.msa_hmm.Emitter as emit
-import learnMSA.msa_hmm.Transitioner as trans
 import learnMSA.msa_hmm.Initializers as initializers
 import learnMSA.msa_hmm.Priors as priors
+import learnMSA.msa_hmm.Transitioner as trans
 import learnMSA.protein_language_models.Common as plm_common
-from learnMSA.protein_language_models.MvnEmitter import MvnEmitter, AminoAcidPlusMvnEmissionInitializer, make_joint_prior
-import subprocess as sp
-import os
+from learnMSA.protein_language_models.MvnEmitter import (
+    AminoAcidPlusMvnEmissionInitializer, MvnEmitter)
+
+
+class DecodingAlgorithm(Enum):
+    VITERBI = 1
+    MEA = 2
+
+    @classmethod
+    def from_string(cls, name):
+        if name.lower() == "viterbi":
+            return cls.VITERBI
+        elif name.lower() == "mea":
+            return cls.MEA
+        else:
+            raise ValueError(f"Unknown decoding algorithm: {name}")
 
 def as_str(config, items_per_line=1, prefix="", sep=""):
     return "\n"+prefix+"{" + sep.join(("\n"+prefix)*(i%items_per_line==0) + key + " : " + str(val) for i,(key,val) in enumerate(config.items())) + "\n"+prefix+"}"
@@ -152,6 +169,7 @@ def make_default(default_num_models=5,
         "batch_size" : batch_callback,
         "learning_rate" : 0.05 if use_language_model else 0.1,
         "epochs" : [10, 4, 20] if use_language_model else [10, 2, 10],
+        "decode_algorithm" : DecodingAlgorithm.VITERBI,
         "crop_long_seqs" : math.inf,
         "use_prior" : True,
         "dirichlet_mix_comp_count" : 1,

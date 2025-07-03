@@ -826,7 +826,7 @@ class TestMSAHMM(unittest.TestCase):
                 msa_hmm_layer=hmm_layer,
                 batch_size=2,
                 model_ids=[0,1],
-                decode_algorithm=Decode.DecodingAlgorithm.VITERBI
+                decode_algorithm=Configuration.DecodingAlgorithm.VITERBI
             )
             self.assert_vec(state_seqs_max_lik2, ref_seqs)
             indices = np.array([0,4,5])
@@ -836,7 +836,7 @@ class TestMSAHMM(unittest.TestCase):
                 msa_hmm_layer=hmm_layer,
                 batch_size=2,
                 model_ids=[0,1],
-                decode_algorithm=Decode.DecodingAlgorithm.VITERBI
+                decode_algorithm=Configuration.DecodingAlgorithm.VITERBI
             )
             max_len = np.amax(data.seq_lens[indices])+1
 
@@ -1473,11 +1473,13 @@ class TestAncProbs(unittest.TestCase):
                                                             model_lengths=[model_length], 
                                                             config=config,
                                                             data=data)
-                am = AlignmentModel(data, 
-                                    batch_gen, 
-                                    ind, 
-                                    batch_size=n, 
-                                    model=model)
+                am = AlignmentModel(
+                    data, 
+                    batch_gen, 
+                    ind, 
+                    batch_size=n, 
+                    model=model
+                )
                 self.assert_anc_probs_layer(am.encoder_model.layers[-1], case["config"])
                 for x,_ in ds:
                     x = [i[:, np.newaxis, ...] for i in x] # add model dimension
@@ -2396,10 +2398,6 @@ class ClusteringTest(unittest.TestCase):
             )
 
 
-if __name__ == '__main__':
-    unittest.main()
-
-
 class MaximumExpectedAccuracyTest(unittest.TestCase):
 
     def test_maximum_expected_accuracy(self):
@@ -2409,8 +2407,8 @@ class MaximumExpectedAccuracyTest(unittest.TestCase):
         x = [0, 0, 0, 0, 0, 1]
         x = np.eye(2)[x]
         x = x[np.newaxis, np.newaxis]
-        mea = hmm_layer.mea(x).numpy()[0]
-        viterbi = hmm_layer.viterbi(x).numpy()[0]
+        mea = hmm_layer.maximum_expected_accuracy(x).numpy()[0,0]
+        viterbi = hmm_layer.viterbi(x).numpy()[0,0]
         np.testing.assert_equal(mea, [0, 0, 1, 1, 2, 3])
         np.testing.assert_equal(viterbi, [0, 0, 0, 1, 2, 3])
 
@@ -2423,7 +2421,9 @@ class MaximumExpectedAccuracyTest(unittest.TestCase):
         x = [0, 0, 0, 0, 0, 1]
         x = np.eye(2)[x]
         x = x[np.newaxis, np.newaxis]
-        mea = hmm_layer.mea(x).numpy()[0]
-        viterbi = hmm_layer.viterbi(x).numpy()[0]
+        mea = hmm_layer.maximum_expected_accuracy(x).numpy()[0,0]
         np.testing.assert_equal(mea, [0, 0, 1, 1, 2, 3])
-        np.testing.assert_equal(viterbi, [0, 0, 0, 1, 2, 3])
+
+
+if __name__ == '__main__':
+    unittest.main()

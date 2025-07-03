@@ -371,8 +371,6 @@ def _maximum_expected_accuracy_impl(
     parallel_factor=1
 ):
     """ Computes the state sequences with maximum expected accuracy (MEA). """
-    if do_recurrent_init:
-        cell.recurrent_init()
     posterior_log = _state_posterior_log_probs_impl(
         inputs, 
         cell, 
@@ -380,9 +378,13 @@ def _maximum_expected_accuracy_impl(
         bidirectional_rnn, 
         total_prob_rnn, 
         total_prob_rnn_rev,
-        end_hints=end_hints
+        end_hints=end_hints,
+        do_recurrent_init=do_recurrent_init,
+        parallel_factor=parallel_factor
     )
     posterior = tf.nn.softmax(posterior_log, axis=-1)
+    if do_recurrent_init:
+        cell.recurrent_init()
     return maximum_expected_accuracy(
         posterior, 
         cell,
