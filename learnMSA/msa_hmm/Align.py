@@ -1,6 +1,7 @@
 import tensorflow as tf
 import numpy as np
 import time
+import copy
 import os
 import sys
 import math
@@ -14,13 +15,8 @@ import learnMSA.msa_hmm.Initializers as initializers
 from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
 from learnMSA.msa_hmm.Configuration import as_str, assert_config
 from learnMSA.msa_hmm.AlignInsertions import make_aligned_insertions
-from learnMSA.msa_hmm.BatchGenerator import BatchGenerator
+from learnMSA.msa_hmm.BatchGenerator import DefaultBatchGenerator
 
-#experimental, only used for ablation studies
-#decreases accuracy slightly!
-USE_VITERBI_SURGERY = False
-if USE_VITERBI_SURGERY:
-    from learnMSA.msa_hmm.Viterbi import get_state_seqs_max_lik
 
 np.set_printoptions(legacy='1.25')
 
@@ -67,7 +63,9 @@ def fit_and_align(data : SequenceDataset,
                   verbose=True,
                   A2M_output=True):
     assert_config(config)
-    model_generator, batch_generator = _make_defaults_if_none(model_generator, batch_generator)
+    model_generator, batch_generator = _make_defaults_if_none(
+        model_generator, batch_generator, config
+    )
     if verbose:
         _dataset_messages(data)
     if subset is None:
@@ -142,7 +140,7 @@ def fit_and_align_with_logo_gif(data : SequenceDataset, config, initial_model_le
     import matplotlib.pyplot as plt
     
     assert_config(config)
-    model_generator, batch_generator = _make_defaults_if_none(None, None)
+    model_generator, batch_generator = _make_defaults_if_none(None, None, config)
     indices = np.arange(data.num_seq)
     model_lengths = initial_model_length_callback(data, config)
     if callable(config["batch_size"]):
@@ -219,23 +217,30 @@ def run_learnMSA(data : SequenceDataset,
         try:
             t_a = time.time()
             if logo_gif_mode:
-                am = fit_and_align_with_logo_gif(data, config, initial_model_length_callback, logo_dir)
+                am = fit_and_align_with_logo_gif(
+                    data, config, initial_model_length_callback, logo_dir
+                )
             else:
-                am = fit_and_align(data, 
-                                    config=config,
-                                    model_generator=model_generator,
-                                    batch_generator=batch_generator,
-                                    subset=subset, 
-                                    initial_model_length_callback=initial_model_length_callback,
-                                    sequence_weights=sequence_weights,
-                                    clusters=clusters,
-                                    verbose=verbose,
-                                    A2M_output=A2M_output)
+                am = fit_and_align(
+                    data, 
+                    config=config,
+                    model_generator=model_generator,
+                    batch_generator=batch_generator,
+                    subset=subset, 
+                    initial_model_length_callback=initial_model_length_callback,
+                    sequence_weights=sequence_weights,
+                    clusters=clusters,
+                    verbose=verbose,
+                    A2M_output=A2M_output
+                )
             if verbose:
                 print("Time for alignment:", "%.4f" % (time.time()-t_a))
         except tf.errors.ResourceExhaustedError as e:
             print("Out of memory. A resource was exhausted.")
-            print("Try reducing the batch size (-b). The current batch size was: "+str(config["batch_size"])+".")
+            print(
+                "Try reducing the batch size (-b). "\
+                "The current batch size was: "+str(config["batch_size"])+"."
+            )
             sys.exit(e.error_code)
     tf.keras.backend.clear_session() #not sure if necessary
     am.best_model = select_model(am, config["model_criterion"], verbose)
@@ -244,16 +249,27 @@ def run_learnMSA(data : SequenceDataset,
     t = time.time()
     
     if align_insertions:
-        aligned_insertions = make_aligned_insertions(am, insertion_aligner, aligner_threads, verbose=verbose)
-        am.to_file(out_filename, am.best_model, aligned_insertions = aligned_insertions, format=output_format)
+        aligned_insertions = make_aligned_insertions(
+            am, insertion_aligner, aligner_threads, verbose=verbose
+        )
+        am.to_file(
+            out_filename, 
+            am.best_model, 
+            aligned_insertions = aligned_insertions, 
+            format=output_format
+        )
     else:
         am.to_file(out_filename, am.best_model, format=output_format)
     
     if verbose:
-        if am.fixed_viterbi_seqs.size > 0:
+        if hasattr(am, "fixed_viterbi_seqs") and \
+            am.fixed_viterbi_seqs.size > 0:
             max_show_seqs = 5
             print(f"Fixed {am.fixed_viterbi_seqs.size} Viterbi sequences:")
-            print("\n".join([am.data.seq_ids[i] for i in am.fixed_viterbi_seqs[:max_show_seqs]]))
+            print("\n".join([
+                am.data.seq_ids[i] 
+                for i in am.fixed_viterbi_seqs[:max_show_seqs]
+            ]))
             if am.fixed_viterbi_seqs.size > max_show_seqs:
                 print("...")
         print("time for generating output:", "%.4f" % (time.time()-t))
@@ -262,107 +278,143 @@ def run_learnMSA(data : SequenceDataset,
     return am
     
     
-def get_state_expectations(data : SequenceDataset,
-                           batch_generator,
-                           indices,
-                           batch_size,
-                           msa_hmm_layer, 
-                           encoder,
-                           reduce=True):
+def get_state_expectations(
+    data : SequenceDataset,
+    batch_generator,
+    indices,
+    batch_size,
+    msa_hmm_layer, 
+    encoder,
+    reduce=True
+):
     """ Computes the expected number of occurences per model and state.
     Args:
         data: The sequence dataset.
         batch_generator: Batch generator.
-        indices: Indices that specify which sequences in the dataset should be decoded. 
+        indices: Indices that specify which sequences in the dataset should be 
+            decoded. 
         batch_size: Specifies how many sequences will be decoded in parallel. 
         msa_hmm_layer: MsaHmmLayer object. 
         encoder: Encoder model that is applied to the sequences before Viterbi.
-        reduce: If true (default), the posterior state probs are summed up over the dataset size. 
+        reduce: If true (default), the posterior state probs are summed up over 
+            the dataset size. 
             Otherwise the posteriors for each sequence are returned.
     Returns:
-        The expected number of occurences per model state. Shape (num_model, max_num_states)
+        The expected number of occurences per model state. 
+        Shape (num_model, max_num_states)
     """
-    #does currently not support multi-GPU, scale the batch size to account for that and prevent overflow
-    num_gpu = len([x.name for x in tf.config.list_logical_devices() if x.device_type == 'GPU']) 
+    
+    assert batch_generator.is_valid(), \
+        "Batch generator is not valid. Have you assigned a dataset?"
+
+    # make a copy, as we will change some properties of the batch generator
+    batch_generator = copy.copy(batch_generator)
+    
+    # disable cropping 
+    batch_generator.crop_long_seqs = sys.maxsize
+
+    # TODO: ugly workaround code, should be refactored
+    # does currently not support multi-GPU, scale the batch size to account 
+    # for that and prevent overflow
+    num_gpu = len([
+        x.name 
+        for x in tf.config.list_logical_devices() 
+        if x.device_type == 'GPU'
+    ]) 
     num_devices = num_gpu + int(num_gpu==0) #account for the CPU-only case 
     batch_size = int(batch_size / num_devices)
-    #compute an optimized order for decoding that sorts sequences of equal length into the same batch
-    indices = np.reshape(indices, (-1))
-    num_indices = indices.shape[0]
-    sorted_indices = np.array([[i,j] for l,i,j in sorted(zip(data.seq_lens[indices], indices, range(num_indices)))])
+    
+    # initialize HMM matrices once before decoding
     msa_hmm_layer.cell.recurrent_init()
-    cell = msa_hmm_layer.cell
-    old_crop_long_seqs = batch_generator.crop_long_seqs
-    batch_generator.crop_long_seqs = math.inf #do not crop sequences
-    ds = train.make_dataset(sorted_indices[:,0], 
-                            batch_generator, 
-                            batch_size,
-                            shuffle=False,
-                            bucket_by_seq_length=True,
-                            model_lengths=cell.length)
     
-    @tf.function(input_signature=[[tf.TensorSpec(x.shape, dtype=x.dtype) for x in encoder.inputs]])
-    def batch_posterior_state_probs(inputs):
+    ds = train.make_dataset(
+        indices, 
+        batch_generator, 
+        batch_size,
+        shuffle=False,
+        bucket_by_seq_length=True,
+        model_lengths=msa_hmm_layer.cell.length
+    )
+
+    seq_len = np.amax(batch_generator.data.seq_len(indices)+1)
+
+    #initialize with terminal states
+    posterior = np.zeros(
+        (msa_hmm_layer.cell.num_models, msa_hmm_layer.cell.max_num_states), 
+        dtype=np.float32
+    ) 
+    
+    # TODO:
+    # a note for later refactoring: a non-shuffled BatchGenerator 
+    # (which is required to run decoding) will always return sequence shape
+    # (batch_size, seq_len) - not including a model dimension.
+    # We don't need a model dimension in the batches for decoding, but the 
+    # model currentl expects it. In the _decode methods later, there is
+    # some repeat and reshape code that workarounds this.
+    # This code has be disappear later.
+
+    # wrap everything in a tf function for speed
+    @tf.function(
+        input_signature=[[
+            tf.TensorSpec(x.shape[1:], dtype=x.dtype) 
+            for x in encoder.inputs
+        ]]
+    )
+    def _decode(inputs):
+        # encoder expects batch first and model second!
+        inputs = [
+            tf.repeat(
+                i[:, tf.newaxis], 
+                repeats=msa_hmm_layer.cell.num_models, 
+                axis=1
+            )
+            for i in inputs
+        ]
         encoded_seq = encoder(inputs) 
-        posterior_probs = msa_hmm_layer.state_posterior_log_probs(encoded_seq)
-        posterior_probs = tf.math.exp(posterior_probs)
-        #compute expected number of visits per hidden state and sum over batch dim
-        posterior_probs = tf.reduce_sum(posterior_probs, -2)
-        if reduce:
-            posterior_probs = tf.reduce_sum(posterior_probs, 1) / num_indices
-        return posterior_probs
-    
-    if reduce:
-        posterior_probs = tf.zeros((cell.num_models, cell.max_num_states), cell.dtype) 
-        for (*inputs, _), _ in ds:
-            posterior_probs += batch_posterior_state_probs(inputs)
-    else:
-        posterior_probs = np.zeros((cell.num_models, num_indices, cell.max_num_states), cell.dtype) 
-        for (*inputs, batch_indices), _ in ds:
-            posterior_probs[:,batch_indices] = batch_posterior_state_probs(inputs)
-    batch_generator.crop_long_seqs = old_crop_long_seqs       
-    return posterior_probs
+        posterior_log = msa_hmm_layer.state_posterior_log_probs(encoded_seq)
+        posterior = tf.math.exp(posterior_log)
+        #compute expected number of visits per hidden state and sum over batch 
+        posterior = tf.reduce_sum(posterior, -2)
+        posterior = tf.reduce_sum(posterior, 1) / indices.shape[0]
+        return posterior
+
+    # decode all batches
+    # TODO: make this more performant, a lot of GPU -> CPU transfers
+    # probably no prefetching
+    for (*inputs, batch_indices), _ in ds:
+        posterior += _decode(inputs).numpy()
+
+    return posterior
     
         
-def get_discard_or_expand_positions(am, 
-                                    del_t=0.5, 
-                                    ins_t=0.5):
-    """ Given an AlignmentModel, computes positions for match expansions and discards based on the posterior state probabilities.
+def get_discard_or_expand_positions(
+    am, 
+    del_t=0.5, 
+    ins_t=0.5
+):
+    """ Given an AlignmentModel, computes positions for match expansions and 
+        discards based on the posterior state probabilities.
     Args: 
         am: An AlignmentModel object.
-        del_t: Discards match positions that are expected less often than this number.
-        ins_t: Expands insertions that are expected more often than this number. 
-                Adds new match states according to the expected insertion length. 
+        del_t: Discards match positions that are expected less often than this 
+            number.
+        ins_t: Expands insertions that are expected more often than this 
+            number. Adds new match states according to the expected insertion 
+            length. 
     Returns:
         pos_expand: A list of arrays with match positions to expand per model.
         expansion_lens: A list of arrays with the expansion lengths.
         pos_discard: A list of arrays with match positions to discard.
     """
-    if USE_VITERBI_SURGERY:
-        state_seqs_max_lik = get_state_seqs_max_lik(am.data,
-                                                am.batch_generator,
-                                                am.indices,
-                                                am.batch_size,
-                                                am.msa_hmm_layer.cell,
-                                                list(range(am.num_models)),
-                                                am.encoder_model) #shape (num_model, num_seq, L)
-        #count
-        expected_state = tf.zeros((am.num_models, am.msa_hmm_layer.cell.max_num_states), am.msa_hmm_layer.cell.dtype)
-        for i in range(0, am.indices.shape[0], am.batch_size):
-            state_seqs_max_lik_batch = state_seqs_max_lik[:,i:i+am.batch_size]
-            state_seqs_max_lik_batch = tf.one_hot(state_seqs_max_lik_batch, am.msa_hmm_layer.cell.max_num_states) 
-            at_least_once = tf.cast(tf.reduce_sum(state_seqs_max_lik_batch, axis=-2) > 0, tf.float32)
-            expected_state += tf.reduce_sum(at_least_once, axis=-2)
-        expected_state /= am.indices.shape[0]
-        expected_state = expected_state.numpy()
-    else:
-        # num_models x max_num_states 
-        expected_state = get_state_expectations(am.data,
-                                        am.batch_generator,
-                                        am.indices,
-                                        am.batch_size,
-                                        am.msa_hmm_layer,
-                                        am.encoder_model).numpy()
+    # num_models x max_num_states 
+    expected_state = get_state_expectations(
+        am.data,
+        am.batch_generator,
+        am.indices,
+        am.batch_size,
+        am.msa_hmm_layer,
+        am.encoder_model
+    )
     pos_expand = []
     expansion_lens = []
     pos_discard = []
@@ -376,7 +428,9 @@ def get_discard_or_expand_positions(am,
         insert_states = expected_state[i, model_length+1:2*model_length]
         left_flank_state = expected_state[i, 0]
         right_flank_state = expected_state[i, 2*model_length+1]
-        all_inserts = np.concatenate([[left_flank_state], insert_states, [right_flank_state]], axis=0)
+        all_inserts = np.concatenate(
+            [[left_flank_state], insert_states, [right_flank_state]], axis=0
+        )
         which_to_expand = all_inserts > ins_t
         expand = np.arange(model_length+1, dtype=np.int32)[which_to_expand]
         pos_expand.append(expand)
@@ -391,7 +445,9 @@ def get_discard_or_expand_positions(am,
 #replicates insert_value for the expansions
 #assumes that del_marker is a value that does no occur in x
 #returns a new vector with all modifications applied
-def apply_mods(x, pos_expand, expansion_lens, pos_discard, insert_value, del_marker=-9999):
+def apply_mods(
+    x, pos_expand, expansion_lens, pos_discard, insert_value, del_marker=-9999
+):
     #mark discard positions with del_marker, expand thereafter 
     #and eventually remove the marked positions
     x = np.copy(x)
@@ -414,15 +470,19 @@ def apply_mods(x, pos_expand, expansion_lens, pos_discard, insert_value, del_mar
 #        replaced with discards from i+k-1 to j+k-1 if i+k > 0 and j+k == L-1
 #        replaced with discards from i+k to j+k-1 i+k == 0 and j+k == L-1
 #
-# - an expansion at position i by l is replaced by a discard at i+k-1 and an expansion by l+1 at i+k-1  
+# - an expansion at position i by l is replaced by a discard at i+k-1 and an 
+#   expansion by l+1 at i+k-1  
 #   edge cases that do not require a discard:
 #        replaced by an expansion by l at i+k if i+k == 0
-#        replaced by an expansion by l at i+k-1 if i+k==L or i+k-1 is already in the discarded positions
-#        if all positions are discarded (and the first expansion would add l match states to a model of length 0)
+#        replaced by an expansion by l at i+k-1 if i+k==L or i+k-1 is already 
+#        in the discarded positions
+#        if all positions are discarded (and the first expansion would add l 
+#        match states to a model of length 0)
 #        the length of the expansion is reduced by 1
 #
 # k can be any integer 
-# L is the length of the array to which the indices of pos_expand and pos_discard belong
+# L is the length of the array to which the indices of pos_expand and 
+# pos_discard belong
 def extend_mods(pos_expand, expansion_lens, pos_discard, L, k=0):
     if pos_discard.size == L and pos_expand.size > 0:
         expansion_lens = np.copy(expansion_lens)
@@ -433,13 +493,17 @@ def extend_mods(pos_expand, expansion_lens, pos_discard, L, k=0):
         diff = np.diff(pos_discard_shift, prepend=-1)
         diff_where = np.squeeze(np.argwhere(diff > 1))
         segment_starts = np.atleast_1d(pos_discard_shift[diff_where])
-        new_pos_discard = np.insert(pos_discard_shift, diff_where, segment_starts-1)
+        new_pos_discard = np.insert(
+            pos_discard_shift, diff_where, segment_starts-1
+        )
         new_pos_discard = np.unique(new_pos_discard)
         if pos_discard_shift[-1] == L-1:
             new_pos_discard = new_pos_discard[:-1]
             segment_starts = segment_starts[:-1]
         new_pos_expand = segment_starts-1
-        new_expansion_lens = np.ones(segment_starts.size, dtype=expansion_lens.dtype)
+        new_expansion_lens = np.ones(
+            segment_starts.size, dtype=expansion_lens.dtype
+        )
     else:
         new_pos_discard = pos_discard
         new_pos_expand = np.array([], dtype=pos_expand.dtype)
@@ -449,9 +513,11 @@ def extend_mods(pos_expand, expansion_lens, pos_discard, L, k=0):
         pos_expand_shift = pos_expand+k
         extend1 = pos_expand_shift > 0
         extend2 = pos_expand_shift < L
-        _,indices,_ = np.intersect1d(pos_expand_shift-1, 
-                                     np.setdiff1d(np.arange(L), new_pos_discard),
-                                     return_indices=True)
+        _,indices,_ = np.intersect1d(
+            pos_expand_shift-1, 
+            np.setdiff1d(np.arange(L), new_pos_discard),
+            return_indices=True
+        )
         extend3 = np.zeros(pos_expand_shift.size)
         extend3[indices] = 1
         extend = (extend1*extend2*extend3).astype(bool)
@@ -722,12 +788,14 @@ def select_model(am, model_criterion, verbose):
             
     
 def select_model_posterior(am, verbose=False):
-    expected_state = get_state_expectations(am.data,
-                                            am.batch_generator,
-                                            np.arange(am.data.num_seq),
-                                            am.batch_size,
-                                            am.msa_hmm_layer,
-                                            am.encoder_model)
+    expected_state = get_state_expectations(
+        am.data,
+        am.batch_generator,
+        np.arange(am.data.num_seq),
+        am.batch_size,
+        am.msa_hmm_layer,
+        am.encoder_model
+    )
     posterior_sums = [np.sum(expected_state[i, 1:am.length[i]+1]) for i in range(am.num_models)]
     if verbose:
         print("Total expected match states:", posterior_sums)
@@ -766,11 +834,16 @@ def select_model_consensus(am, verbose=False):
     return consensus
     
     
-def _make_defaults_if_none(model_generator, batch_generator):
+def _make_defaults_if_none(model_generator, batch_generator, config):
     if model_generator is None:
         model_generator = train.default_model_generator
     if batch_generator is None:
-        batch_generator = DefaultBatchGenerator()
+        batch_generator = DefaultBatchGenerator(
+            shuffle_batches=config["num_models"],
+            crop_long_seqs=config["crop_long_seqs"],
+            return_indices=True,
+            closing_terminal=True
+        )
     return model_generator, batch_generator
 
 

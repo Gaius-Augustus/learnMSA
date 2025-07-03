@@ -1,5 +1,6 @@
 import json
 import shutil
+import copy
 from pathlib import Path
 
 import numpy as np
@@ -101,7 +102,7 @@ class AlignedInsertions():
                 
         
         if aligned_insertions is None:
-            self.ext_insertions = np.array([])
+            self.ext_insertions = np.array([[0]])
         else:
             self.custom_columns_insertions = []
             for repeat in aligned_insertions:
@@ -135,15 +136,15 @@ class AlignedInsertions():
             )
             
         if aligned_unannotated_segments is None:
-            self.custom_columns_unannotated_segments = []
-            self.ext_unannotated = []
+            self.custom_columns_unannotated_segments = [0]
+            self.ext_unannotated = [0]
         else:
             self.custom_columns_unannotated_segments = [
                 _process(x[1]) if x is not None else None 
                 for x in aligned_unannotated_segments
             ]
             self.ext_unannotated = np.array([
-                np.amax(x)+1 if x is not None else np.array([]) 
+                np.amax(x)+1 if x is not None else 0
                 for x in self.custom_columns_unannotated_segments
             ])
     
@@ -243,7 +244,8 @@ class AlignmentModel():
                  gap_symbol_insertions=".",
                  A2M=True):
         self.data = data
-        self.batch_generator = batch_generator
+        self.batch_generator = copy.copy(batch_generator)
+        self.batch_generator.shuffle_batches = -1
         self.indices = indices
         self.batch_size = batch_size
         self.model = model
@@ -290,24 +292,44 @@ class AlignmentModel():
     def _build_alignment(self, models):
 
         assert len(models) == 1, "Not implemented for multiple models."
-        
+
+        if tf.distribute.has_strategy():
+            with tf.distribute.get_strategy().scope():
+                cell_copy = self.msa_hmm_layer.cell.duplicate(models)
+        else:
+            cell_copy = self.msa_hmm_layer.cell.duplicate(models)
+
+        hmm_layer = msa_hmm_layer.MsaHmmLayer(
+            cell=cell_copy,
+            num_seqs=self.msa_hmm_layer.num_seqs,
+            use_prior=self.msa_hmm_layer.use_prior,
+            sequence_weights=self.msa_hmm_layer.sequence_weights,
+            parallel_factor= self.msa_hmm_layer.parallel_factor
+        )
+        hmm_layer.build(
+            (1, None, None, hmm_layer.cell.dim)
+        )
+
         decoded_seqs = decode.decode(
             indices=self.indices,
             batch_generator=self.batch_generator,
-            msa_hmm_layer=self.msa_hmm_layer,
+            msa_hmm_layer=hmm_layer,
             batch_size=self.batch_size,
             model_ids=models,
             encoder=self.encoder_model,
-            decode_algorithm=decode.DecodingAlgorithm.VITERBI
+            decode_algorithm=decode.DecodingAlgorithm.VITERBI,
+            num_encoder_models=self.num_models
         )
-        decoded_seqs = self._clean_up_decoded_seqs(decoded_seqs, models)
+        decoded_seqs = self._clean_up_decoded_seqs(
+            decoded_seqs, models, hmm_layer
+        )
         for i,l,max_lik_seqs in zip(
-            models, self.msa_hmm_layer.cell.length, decoded_seqs
+            models, hmm_layer.cell.length, decoded_seqs
         ):
             decoded_data = AlignmentModel.decode(l,max_lik_seqs)
             self.metadata[i] = AlignmentMetaData(*decoded_data)
 
-    def _clean_up_decoded_seqs(self, decoded_seqs, models):
+    def _clean_up_decoded_seqs(self, decoded_seqs, models, hmm_layer_copy):
         # state_seqs_max_lik has shape (num_model, num_seq, L)
         faulty_sequences = find_faulty_sequences(
             decoded_seqs, 
@@ -321,11 +343,12 @@ class AlignmentModel():
             fixed_decoded_seqs = decode.decode(
                 indices=faulty_sequences,
                 batch_generator=self.batch_generator,
-                msa_hmm_layer=self.msa_hmm_layer,
+                msa_hmm_layer=hmm_layer_copy,
                 batch_size=self.batch_size,
                 model_ids=models,
                 encoder=self.encoder_model,
-                non_homogeneous_mask_func=non_homogeneous_mask_func
+                non_homogeneous_mask_func=non_homogeneous_mask_func,
+                num_encoder_models=self.num_models
             )
             if decoded_seqs.shape[-1] < fixed_decoded_seqs.shape[-1]:
                 decoded_seqs = np.pad(
@@ -567,8 +590,13 @@ class AlignmentModel():
             self.batch_size, 
             shuffle=False
         )
-        loglik = np.zeros((self.msa_hmm_layer.cell.num_models))
+        n = self.msa_hmm_layer.cell.num_models
+        loglik = np.zeros((n))
         for x, _ in ds:
+            x = [
+                np.repeat(i[:,np.newaxis, ...], repeats=n, axis=1) 
+                for i in x
+            ] # add model dimension
             loglik += np.sum(self.model(x)[0], axis=0)
         loglik /= ll_subset.size
 
@@ -683,8 +711,7 @@ class AlignmentModel():
                               filepath, 
                               data:SequenceDataset, 
                               from_packed=True, 
-                              custom_batch_gen=None,
-                              custom_config=None):
+                              custom_batch_gen=None):
         """ Recreates an AlignmentModel instance with underlying models from 
             file.
 
@@ -693,8 +720,6 @@ class AlignmentModel():
             from_packed: Pass true or false depending on the pack argument used 
                 with write_models_to_file.
             custom_batch_gen: A custom batch generator to use instead of the 
-                default one.
-            custom_config: A custom configuration to use instead of the 
                 default one.
 
         Returns:
@@ -734,11 +759,7 @@ class AlignmentModel():
             batch_gen = DefaultBatchGenerator() 
         else:
             batch_gen = custom_batch_gen
-        if custom_config is None:
-            configuration = config.make_default(d["num_models"]) 
-        else:
-            configuration = custom_config
-        batch_gen.configure(data, configuration) 
+        batch_gen.data = data
         am = cls(
             data, 
             batch_gen, 

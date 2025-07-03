@@ -24,7 +24,8 @@ def decode(
     encoder: tf.keras.Model|None=None,
     non_homogeneous_mask_func=None,
     parallel_factor=1,
-    decode_algorithm: DecodingAlgorithm = DecodingAlgorithm.VITERBI
+    decode_algorithm: DecodingAlgorithm = DecodingAlgorithm.VITERBI,
+    num_encoder_models: int = 1
 ):
     """ Runs a decoding algorithm (e.g. Viterbi) batch-wise on the sequences 
         in the dataset.
@@ -49,6 +50,8 @@ def decode(
             The parallel factor has to be a divisor of the sequence length.
         decode_algorithm (DecodingAlgorithm): The decoding algorithm to be
             used. Defaults to Viterbi.
+        num_encoder_models (int): The number of models in the encoder. 
+            (temporary; required because the encoder does not support subsetting)
 
     Returns:
         A dense integer representation of the most likely state sequences. 
@@ -104,21 +107,29 @@ def decode(
     def _decode_template(inputs):
         # TODO: this can be improved by encoding only for required models
         encoded_seq = tf.gather(inputs, model_ids, axis=0)
-        match decode_algorithm:
-            case DecodingAlgorithm.VITERBI:
-                decode_fn = msa_hmm_layer.viterbi
-            case DecodingAlgorithm.MEA:
-                decode_fn = msa_hmm_layer.maximum_expected_accuracy
-            case _:
-                raise ValueError(
-                    f"Unknown decoding algorithm: {decode_algorithm}"
-                )
+        if decode_algorithm == DecodingAlgorithm.VITERBI:
+            decode_fn = msa_hmm_layer.viterbi
+        elif decode_algorithm == DecodingAlgorithm.MEA:
+            decode_fn = msa_hmm_layer.maximum_expected_accuracy
+        else:
+            raise ValueError(
+                f"Unknown decoding algorithm: {decode_algorithm}"
+            )
         decoded_seq = decode_fn(
             encoded_seq, 
             non_homogeneous_mask_func=non_homogeneous_mask_func,
             do_recurrent_init=False,  # already done before
         )
         return decoded_seq
+    
+    # TODO:
+    # a note for later refactoring: a non-shuffled BatchGenerator 
+    # (which is required to run decoding) will always return sequence shape
+    # (batch_size, seq_len) - not including a model dimension.
+    # We don't need a model dimension in the batches for decoding, but the 
+    # model currentl expects it. In the _decode methods later, there is
+    # some repeat and reshape code that workarounds this.
+    # This code has be disappear later.
 
     # wrap everything in a tf function for speed
     if encoder is None:
@@ -144,17 +155,29 @@ def decode(
                 inputs[0], depth=batch_generator.data.alphabet_size()
             )
             seqs = seqs[tf.newaxis, ...]  # add model dimension
-            seqs = tf.repeat(seqs, repeats=msa_hmm_layer.cell.num_models, axis=0)
+            seqs = tf.repeat(
+                seqs, repeats=msa_hmm_layer.cell.num_models, axis=0
+            )
             return _decode_template(seqs)
     else:
         @tf.function(
             input_signature=[[
-                tf.TensorSpec(x.shape, dtype=x.dtype) 
+                tf.TensorSpec(x.shape[1:], dtype=x.dtype) 
                 for x in encoder.inputs
             ]]
         )
         def _decode(inputs):
+            # encoder expects batch first and model second!
+            inputs = [
+                tf.repeat(
+                    i[:, tf.newaxis], 
+                    repeats=num_encoder_models, 
+                    axis=1
+                )
+                for i in inputs
+            ]
             encoded_seq = encoder(inputs)
+            #TODO: encoder transposes batch and model dimensions
             return _decode_template(encoded_seq)
 
     # decode all batches

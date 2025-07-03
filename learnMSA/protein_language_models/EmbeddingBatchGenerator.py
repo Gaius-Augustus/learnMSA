@@ -3,11 +3,12 @@ import os
 import gc
 import numpy as np
 import tensorflow as tf
-from learnMSA.msa_hmm.Training import DefaultBatchGenerator, default_model_generator, PermuteSeqs, Identity, LearnMSAModel
+from learnMSA.msa_hmm.Training import default_model_generator, PermuteSeqs, Identity, LearnMSAModel
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 from learnMSA.protein_language_models.BilinearSymmetric import make_scoring_model
 import learnMSA.protein_language_models.Common as Common
 from learnMSA.protein_language_models.EmbeddingCache import EmbeddingCache
+from learnMSA.msa_hmm.BatchGenerator import DefaultBatchGenerator
 
 
 class EmbeddingBatchGenerator(DefaultBatchGenerator):

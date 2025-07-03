@@ -338,7 +338,7 @@ def fit_model(model_generator,
     assert_config(config)
     tf.keras.backend.clear_session() #frees occupied memory 
     tf.get_logger().setLevel('ERROR')
-    batch_generator.configure(data, config, verbose)
+    batch_generator.data = data # TODO: redundant? 
     optimizer = tf.keras.optimizers.Adam(config["learning_rate"])
     if verbose:
         print("Fitting models of lengths", model_lengths, "on", indices.shape[0], "sequences.")

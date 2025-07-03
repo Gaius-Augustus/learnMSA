@@ -1428,8 +1428,8 @@ class TestAncProbs(unittest.TestCase):
         return cases
     
     def get_simple_seq(self, data):      
-        sequences = get_all_seqs(data, 1)[:,:,:-1]
-        sequences = np.transpose(sequences, [1,0,2])
+        sequences = get_all_seqs(data, 1)[:,:-1]
+        sequences = sequences[np.newaxis, ...]
         return sequences
             
     def test_anc_probs(self):       
@@ -1458,7 +1458,6 @@ class TestAncProbs(unittest.TestCase):
             ind = np.arange(n)
             model_length = 10
             batch_gen = DefaultBatchGenerator(
-                shuffle_batches=1,
                 return_indices=True,
                 closing_terminal=True
             )
@@ -1481,6 +1480,7 @@ class TestAncProbs(unittest.TestCase):
                                     model=model)
                 self.assert_anc_probs_layer(am.encoder_model.layers[-1], case["config"])
                 for x,_ in ds:
+                    x = [i[:, np.newaxis, ...] for i in x] # add model dimension
                     anc_prob_seqs = am.encoder_model(x).numpy()[:,:,:-1]
                     shape = (case["config"]["num_models"], n, sequences.shape[2], case["config"]["num_rate_matrices"], len(SequenceDataset.standard_alphabet))
                     anc_prob_seqs = np.reshape(anc_prob_seqs, shape)
@@ -1535,9 +1535,9 @@ class TestData(unittest.TestCase):
                 ind = np.array(ind)
                 ref = [str(data.get_record(i).seq).upper() for i in ind]
                 s,i = batch_gen(ind) 
-                self.assert_vec(i[:,0], ind)
+                self.assert_vec(i, ind)
                 for i,(r,j) in enumerate(zip(ref, ind)):
-                    self.assertEqual("".join(alphabet[s[i,0,:data.seq_lens[j]]]), r)
+                    self.assertEqual("".join(alphabet[s[i,:data.seq_lens[j]]]), r)
         
         
 class TestModelSurgery(unittest.TestCase):
@@ -1619,7 +1619,9 @@ class TestModelSurgery(unittest.TestCase):
                 "..........-.--...ICaaaF--.I-nnn",
                 "..........FnE-...ICaaaF-LnI-nnn"
             ]
-            aligned_sequences = am.to_string(model_index=0, add_block_sep=False)
+            aligned_sequences = am.to_string(
+                model_index=0, add_block_sep=False
+            )
             for s, ref_s in zip(aligned_sequences, ref_seqs):
                 self.assertEqual(s, ref_s)
             self.assertTrue(0 in am.metadata)
@@ -1883,7 +1885,7 @@ class TestAlignment(unittest.TestCase):
             return_indices=True,
             closing_terminal=True
         )
-        batch_gen.data = data
+        batch_gen.data = fasta_file
         #create alignment after building model
         sub_am = AlignmentModel(fasta_file, batch_gen, subset, 32, model)
         subalignment_strings = sub_am.to_string(0, add_block_sep=False)
@@ -1902,10 +1904,12 @@ class TestAlignment(unittest.TestCase):
             config = Configuration.make_default(1)
             config["max_surgery_runs"] = 2 #do minimal surgery 
             config["epochs"] = [5,1,5]
-            am = Align.fit_and_align(data, 
-                                    config=config,
-                                    subset=ref_subset, 
-                                    verbose=False)
+            am = Align.fit_and_align(
+                data, 
+                config=config,
+                subset=ref_subset, 
+                verbose=False
+            )
             #some friendly thresholds to check if the alignment does make sense at all
             self.assertTrue(np.amin(am.compute_loglik()) > -70)
             self.assertTrue(am.msa_hmm_layer.cell.length[0] > 25)
@@ -2128,7 +2132,7 @@ class TestModelToFile(unittest.TestCase):
                 return_indices=True,
                 closing_terminal=True
             )
-            batch_gen.data
+            batch_gen.data = data
             ind = np.array([0,1])
             batch_size = 2
             am = AlignmentModel(data, batch_gen, ind, batch_size, model)

@@ -77,8 +77,14 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         built = True
         
         
-    def forward_recursion(self, inputs, end_hints=None, 
-                            return_prior=False, training=False):
+    def forward_recursion(
+        self, 
+        inputs, 
+        end_hints=None, 
+        return_prior=False, 
+        training=False,
+        do_recurrent_init=True
+    ):
         """ Computes the forward recursion for multiple models where each model
             receives a batch of sequences as input.
         Args:
@@ -86,18 +92,33 @@ class MsaHmmLayer(tf.keras.layers.Layer):
             end_hints: A tensor of shape (..., 2, num_states) that contains the correct state for the left and right ends of each chunk.
             return_prior: If true, the prior is computed and returned.
             training: If true, the cell is run in training mode.
+            do_recurrent_init: If True, the cell is initialized before running the forward recursion.
         Returns:
             forward variables: Shape: (num_model, b, seq_len, q)
             log-likelihoods: Shape: (num_model, b)
         """
         #initialize transition- and emission-matricies
-        return _forward_recursion_impl(inputs, self.cell, self.rnn, self.total_prob_rnn, 
-                                       end_hints=end_hints, return_prior=return_prior,
-                                       training=training, parallel_factor=self.parallel_factor)
+        return _forward_recursion_impl(
+            inputs, 
+            self.cell, 
+            self.rnn, 
+            self.total_prob_rnn, 
+            end_hints=end_hints, 
+            return_prior=return_prior,
+            training=training, 
+            do_recurrent_init=do_recurrent_init,
+            parallel_factor=self.parallel_factor
+        )
     
     
-    def backward_recursion(self, inputs, end_hints=None, 
-                            return_prior=False, training=False):
+    def backward_recursion(
+        self, 
+        inputs, 
+        end_hints=None, 
+        return_prior=False, 
+        training=False,
+        do_recurrent_init=True
+    ):
         """ Computes the backward recursion for multiple models where each model
             receives a batch of sequences as input.
         Args:
@@ -105,17 +126,33 @@ class MsaHmmLayer(tf.keras.layers.Layer):
             end_hints: A tensor of shape (..., 2, num_states) that contains the correct state for the left and right ends of each chunk.
             return_prior: If true, the prior is computed and returned.
             training: If true, the cell is run in training mode.
+            do_recurrent_init: If True, the cell is initialized before running the backward recursion.
         Returns:
             backward variables: Shape: (num_model, b, seq_len, q)
         """
-        return _backward_recursion_impl(inputs, self.cell, self.reverse_cell, 
-                                        self.rnn_backward, self.total_prob_rnn_rev, 
-                                        end_hints=end_hints, return_prior=return_prior,
-                                        training=training, parallel_factor=self.parallel_factor)
+        return _backward_recursion_impl(
+            inputs, 
+            self.cell, 
+            self.reverse_cell, 
+            self.rnn_backward, 
+            self.total_prob_rnn_rev, 
+            end_hints=end_hints, 
+            return_prior=return_prior,
+            training=training, 
+            do_recurrent_init=do_recurrent_init,
+            parallel_factor=self.parallel_factor
+        )
     
 
-    def state_posterior_log_probs(self, inputs, end_hints=None, 
-                                return_prior=False, training=False, no_loglik=False):
+    def state_posterior_log_probs(
+        self, 
+        inputs, 
+        end_hints=None, 
+        return_prior=False, 
+        training=False, 
+        no_loglik=False,
+        do_recurrent_init=True
+    ):
         """ Computes the log-probability of state q at position i given inputs.
         Args:
             inputs: Sequences. Shape: (num_model, b, seq_len, s)
@@ -124,15 +161,24 @@ class MsaHmmLayer(tf.keras.layers.Layer):
             training: If true, the cell is run in training mode.
             no_loglik: If true, the loglik is not used in the return value. This can be beneficial for end-to-end training when the
                         normalizing constant of the posteriors is not important and the activation function is the softmax.
+            do_recurrent_init: If True, the cell is initialized before running the forward and backward recursions.
         Returns:
             state posterior probbabilities: Shape: (num_model, b, seq_len, q)
         """
-        return _state_posterior_log_probs_impl(inputs, self.cell, self.reverse_cell, 
-                                                self.bidirectional_rnn, self.total_prob_rnn, 
-                                                self.total_prob_rnn_rev,
-                                                end_hints=end_hints, return_prior=return_prior,
-                                                training=training, no_loglik=no_loglik, 
-                                                parallel_factor=self.parallel_factor)
+        return _state_posterior_log_probs_impl(
+            inputs, 
+            self.cell, 
+            self.reverse_cell, 
+            self.bidirectional_rnn, 
+            self.total_prob_rnn, 
+            self.total_prob_rnn_rev,
+            end_hints=end_hints, 
+            return_prior=return_prior,
+            training=training, 
+            no_loglik=no_loglik, 
+            do_recurrent_init=do_recurrent_init,
+            parallel_factor=self.parallel_factor
+        )
     
 
     def viterbi(
@@ -238,7 +284,8 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         """ Computes log-likelihoods per model and sequence.
         Args:
             inputs: Sequences. Shape: (num_model, b, seq_len, s)
-            indices: Optional sequence indices required to assign sequence weights. Shape: (num_model, b)
+            indices: Optional sequence indices required to assign sequence 
+                weights. Shape: (num_model, b)
         Returns:
             log-likelihoods: Shape: (num_model, b)
             aggregated loglik: Shape: ()
@@ -247,11 +294,17 @@ class MsaHmmLayer(tf.keras.layers.Layer):
         """
         inputs = tf.cast(inputs, self.dtype)
         if self.use_prior:
-            _, loglik, prior, aux_loss = self.forward_recursion(inputs, return_prior=True, training=training)
+            _, loglik, prior, aux_loss = self.forward_recursion(
+                inputs, return_prior=True, training=training
+            )
             prior = self._scale_prior(prior)
         else:
-            _, loglik = self.forward_recursion(inputs, return_prior=False, training=training)
-        loglik_mean = self.apply_sequence_weights(loglik, indices, aggregate=True)
+            _, loglik = self.forward_recursion(
+                inputs, return_prior=False, training=training
+            )
+        loglik_mean = self.apply_sequence_weights(
+            loglik, indices, aggregate=True
+        )
         loglik_mean = tf.squeeze(loglik_mean)
         if self.use_prior:
             return loglik, loglik_mean, prior, aux_loss
@@ -339,9 +392,17 @@ def _maximum_expected_accuracy_impl(
     
         
 @tf.function
-def _forward_recursion_impl(inputs, cell, rnn, total_prob_rnn, 
-                            end_hints=None, return_prior=False,
-                            training=False, parallel_factor=1):
+def _forward_recursion_impl(
+    inputs, 
+    cell, 
+    rnn, 
+    total_prob_rnn, 
+    end_hints=None, 
+    return_prior=False,
+    training=False, 
+    do_recurrent_init=True,
+    parallel_factor=1
+):
     """ Computes the forward recursion for multiple models where each model
         receives a batch of sequences as input.
     Args:
@@ -352,12 +413,14 @@ def _forward_recursion_impl(inputs, cell, rnn, total_prob_rnn,
         end_hints: A tensor of shape (..., 2, num_states) that contains the correct state for the left and right ends of each chunk.
         return_prior: If true, the prior is computed and returned.
         training: If true, the cell is run in training mode.
+        do_recurrent_init: If True, the cell is initialized before running the forward recursion.
         parallel_factor: Increasing this number allows computing likelihoods and posteriors chunk-wise in parallel at the cost of memory usage.
     Returns:
         forward variables: Shape: (num_model, b, seq_len, q)
         log-likelihoods: Shape: (num_model, b)
     """
-    cell.recurrent_init()
+    if do_recurrent_init:
+        cell.recurrent_init()
     #initialize transition- and emission-matricies
     _, b, seq_len, s = tf.unstack(tf.shape(inputs))
     num_model = cell.num_models
@@ -419,10 +482,18 @@ def _get_total_forward_from_chunks(forward, cell, total_prob_rnn, b, seq_len, pa
     
     
 @tf.function
-def _backward_recursion_impl(inputs, cell, reverse_cell, 
-                            rnn_backward, total_prob_rnn_rev, 
-                            end_hints=None, return_prior=False,
-                            training=False, parallel_factor=1):
+def _backward_recursion_impl(
+    inputs, 
+    cell, 
+    reverse_cell, 
+    rnn_backward, 
+    total_prob_rnn_rev, 
+    end_hints=None,
+    return_prior=False,
+    training=False, 
+    do_recurrent_init=True,
+    parallel_factor=1
+):
     """ Computes the backward recursion for multiple models where each model
         receives a batch of sequences as input.
     Args:
@@ -434,12 +505,14 @@ def _backward_recursion_impl(inputs, cell, reverse_cell,
         end_hints: A tensor of shape (..., 2, num_states) that contains the correct state for the left and right ends of each chunk.
         return_prior: If true, the prior is computed and returned.
         training: If true, the cell is run in training mode.
+        do_recurrent_init: If True, the cell is initialized before running the backward recursion.
         parallel_factor: Increasing this number allows computing likelihoods and posteriors chunk-wise in parallel at the cost of memory usage.
     Returns:
         backward variables: Shape: (num_model, b, seq_len, q)
     """
-    cell.recurrent_init()
-    reverse_cell.recurrent_init()
+    if do_recurrent_init:
+        cell.recurrent_init()
+        reverse_cell.recurrent_init()
     _, b, seq_len, s = tf.unstack(tf.shape(inputs))
     num_model = cell.num_models
     q = cell.max_num_states
@@ -504,11 +577,20 @@ def proper_shape(tensor):
 
 
 @tf.function
-def _state_posterior_log_probs_impl(inputs, cell, reverse_cell, 
-                                    bidirectional_rnn, total_prob_rnn, 
-                                    total_prob_rnn_rev, 
-                                    end_hints=None, return_prior=False,
-                                    training=False, no_loglik=False, parallel_factor=1):
+def _state_posterior_log_probs_impl(
+    inputs, 
+    cell, 
+    reverse_cell, 
+    bidirectional_rnn, 
+    total_prob_rnn, 
+    total_prob_rnn_rev, 
+    end_hints=None, 
+    return_prior=False,
+    training=False, 
+    no_loglik=False, 
+    do_recurrent_init=True,
+    parallel_factor=1
+):
     """ Computes the log-probability of state q at position i given inputs.
     Args:
         inputs: Sequences. Shape: (num_model, b, seq_len, s)
@@ -522,12 +604,14 @@ def _state_posterior_log_probs_impl(inputs, cell, reverse_cell,
         training: If true, the cell is run in training mode.
         no_loglik: If true, the loglik is not used in the return value. This can be beneficial for end-to-end training when the
                     normalizing constant of the posteriors is not important and the activation function is the softmax.
+        do_recurrent_init: If True, the cell is initialized before running the forward and backward recursions.
         parallel_factor: Increasing this number allows computing likelihoods and posteriors chunk-wise in parallel at the cost of memory usage.
     Returns:
         state posterior probbabilities: Shape: (num_model, b, seq_len, q)
     """
-    cell.recurrent_init()
-    reverse_cell.recurrent_init()
+    if do_recurrent_init:
+        cell.recurrent_init()
+        reverse_cell.recurrent_init()
     _, b, seq_len, s = tf.unstack(tf.shape(inputs))
     num_model = cell.num_models
     q = cell.max_num_states
