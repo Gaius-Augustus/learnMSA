@@ -2424,6 +2424,41 @@ class MaximumExpectedAccuracyTest(unittest.TestCase):
         mea = hmm_layer.maximum_expected_accuracy(x).numpy()[0,0]
         np.testing.assert_equal(mea, [0, 0, 1, 1, 2, 3])
 
+    def test_maximum_expected_accuracy2(self):
+        from test.TestMea import TestMeaHMMLayer
+        # here it should be MEA != Viterbi iff 3p > q
+        hmm_layer = TestMeaHMMLayer(num_states=5, p=0.31, q=0.9)
+        hmm_layer.build([None, 2])
+        x = [0, 0, 0, 0, 0, 1]
+        x = np.eye(2)[x]
+        x = x[np.newaxis, np.newaxis]
+        mea = hmm_layer.maximum_expected_accuracy(x).numpy()[0,0]
+        viterbi = hmm_layer.viterbi(x).numpy()[0,0]
+        np.testing.assert_equal(mea, [0, 1, 1, 2, 3, 4])
+        np.testing.assert_equal(viterbi, [0, 0, 1, 2, 3, 4])
+
+    def test_maximum_expected_accuracy_not_argmax(self):
+        # test if MEA gives a different result than argmax, when the
+        # state graph topology restricts it
+        from test.TestMea import TestMeaHMMLayer
+        hmm_layer = TestMeaHMMLayer(
+            num_states=10, p=0.31, q=0.9
+        )
+        hmm_layer.build([None, 2])
+        x = [0]*20 + [1]
+        x = np.eye(2)[x]
+        x = x[np.newaxis, np.newaxis]
+        mea = hmm_layer.maximum_expected_accuracy(x).numpy()[0,0]
+        post = hmm_layer.state_posterior_log_probs(x).numpy()[0,0]
+        argmax = np.argmax(post, axis=-1)
+        self.assertTrue(
+            np.any(mea != argmax),
+            msg="When this fails this indicates a problem with the "\
+                "transitions. Check if for some reason MEA considers invalid "\
+                "transitions."
+        )
+
+
 
 if __name__ == '__main__':
     unittest.main()
