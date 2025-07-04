@@ -336,7 +336,7 @@ class AlignmentModel():
         # state_seqs_max_lik has shape (num_model, num_seq, L)
         faulty_sequences = find_faulty_sequences(
             decoded_seqs, 
-            self.msa_hmm_layer.cell.length[0], 
+            hmm_layer_copy.cell.length[0], 
             self.data.seq_lens[self.indices]
         )
         self.fixed_viterbi_seqs = faulty_sequences
@@ -361,7 +361,7 @@ class AlignmentModel():
                      (0,0),
                      (0,fixed_decoded_seqs.shape[-1]-decoded_seqs.shape[-1])
                     ), 
-                    constant_values=2*self.msa_hmm_layer.cell.length[0]+2
+                    constant_values=2*hmm_layer_copy.cell.length[0]+2
                 )
             decoded_seqs[0,faulty_sequences,:fixed_decoded_seqs.shape[-1]] = fixed_decoded_seqs[0]
         return decoded_seqs
@@ -1040,6 +1040,7 @@ def one_hot_set(indices, d, dtype):
 def find_faulty_sequences(
     state_seqs_max_lik, model_length, seq_lens, limit=32000
 ):
+    print("finding faulty sequences", model_length, seq_lens, limit)
     if state_seqs_max_lik.shape[1] > limit:
         return np.array([], dtype=np.int32)
     else:
