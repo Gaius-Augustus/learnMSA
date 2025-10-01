@@ -1,6 +1,6 @@
 from pydantic import ValidationError
 
-from learnMSA import ProfileHMMConfig
+from learnMSA import ProfileHMMConfig, TransitionerConfig
 
 
 def test_states_properties():
@@ -19,13 +19,13 @@ def test_states_properties():
 def test_custom_probability_sequence_per_head():
     # for 2 heads
     custom = [0.2, 0.8]
-    cfg = ProfileHMMConfig(lengths=[3, 5], p_begin_match=custom)
+    cfg = TransitionerConfig(lengths=[3, 5], p_begin_match=custom)
     assert isinstance(cfg.p_begin_match, list)
     assert cfg.p_begin_match == custom
 
     # overrides can be nested lists too
     nested = [[0.1, 0.9], [0.3, 0.7, 0.4]]
-    cfg2 = ProfileHMMConfig(lengths=[2, 3], p_match_match=nested)
+    cfg2 = TransitionerConfig(lengths=[2, 3], p_match_match=nested)
     assert isinstance(cfg2.p_match_match, list)
     assert cfg2.p_match_match == nested
 
@@ -33,7 +33,7 @@ def test_custom_probability_sequence_per_head():
 def test_head_lists_invalid_length():
     # Test head list wrong length
     try:
-        ProfileHMMConfig(
+        TransitionerConfig(
             lengths=[3, 5],
             p_begin_match=[0.2, 0.8, 0.3], # too long
             p_match_match=[0.5, 0.6],      # ok
@@ -50,7 +50,7 @@ def test_head_lists_invalid_length():
 def test_nested_lists_invalid_length():
     # Test nested head list wrong length
     try:
-        ProfileHMMConfig(
+        TransitionerConfig(
             lengths=[2, 3],
             p_begin_match=[[0.2, 0.8], [0.3, 0.7, 0.5]], # ok
             p_match_match=[[0.5, 0.6], [0.4, 0.5]],      # too short
