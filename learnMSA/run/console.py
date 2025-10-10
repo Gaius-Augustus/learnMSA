@@ -1,9 +1,10 @@
-import os
-import numpy as np
 import math
+import os
+
+import numpy as np
 
 import learnMSA.run.util as util
-from learnMSA.run.args import parse_args, LearnMSAArgumentParser
+from learnMSA.run.args import LearnMSAArgumentParser, parse_args
 
 #hide tensorflow messages and warnings
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3" 

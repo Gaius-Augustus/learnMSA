@@ -1,5 +1,7 @@
 import sys
 import os
+
+from learnMSA.msa_hmm.MSA2HMM import msa_to_counts
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 #do not print tf info/warnings on import
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
@@ -2111,6 +2113,143 @@ class ClusteringTest(unittest.TestCase):
                 "test/data/failing_ids.fasta",
                 temp_dir,
             )
+
+
+class MSA2HMMTest(unittest.TestCase):
+
+    def test_msa2hmm(self) -> None:
+        from learnMSA.msa_hmm.MSA2HMM import msa_to_counts
+        sequences = [
+            ("seq1", "----AA---AA--"),
+            ("seq2", "A---AC-C---A-"),
+            ("seq3", "-C-C--A--CAAA"),
+            ("seq4", "-CACA--AA----"),
+            ("seq5", "--ACAAA-AA--A"),
+        ]
+        with AlignedDataset(aligned_sequences=sequences) as data:
+            counts_local = msa_to_counts(
+                data, match_threshold=0.5, global_prob=0.0
+            )
+            counts_global = msa_to_counts(
+                data, match_threshold=0.5, global_prob=1.0
+            )
+            counts_mix = msa_to_counts(
+                data, match_threshold=0.5, global_prob=0.6
+            )
+            a_ind = data.alphabet.index("A")
+            c_ind = data.alphabet.index("C")
+
+        assert counts_local.matches() == 4 # number of match states
+        assert counts_global.matches() == 4 # number of match states
+
+        # Test emission counts
+        np.testing.assert_equal(
+            counts_local.match_emissions[:, a_ind], [0, 4, 2, 2]
+        )
+        np.testing.assert_equal(
+            counts_local.match_emissions[:, c_ind], [3, 0, 1, 1]
+        )
+        np.testing.assert_equal(
+            np.sum(counts_local.match_emissions, -1), [3, 4, 3, 3]
+        )
+        np.testing.assert_equal(counts_local.insert_emissions[a_ind], 14)
+        np.testing.assert_equal(counts_local.insert_emissions[c_ind], 3)
+        np.testing.assert_equal(np.sum(counts_local.insert_emissions), 17)
+        np.testing.assert_equal(
+            counts_local.match_emissions, counts_local.match_emissions
+        )
+        np.testing.assert_equal(
+            counts_local.insert_emissions, counts_local.insert_emissions
+        )
+
+        # Test transition counts
+        np.testing.assert_equal(
+            counts_local.transitions,
+            [
+                # matches
+                [0, 2, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
+                [0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0],
+                # inserts
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 2, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                # deletes
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                # L, B, E, C, R, T
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 4, 0, 0, 0, 0],
+                [3, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 5],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            ]
+        )
+        np.testing.assert_equal(
+            counts_global.transitions,
+            [
+                # matches
+                [0, 2, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 3, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 1, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0],
+                # inserts
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 2, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0],
+                # deletes
+                [0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0],
+                # L, B, E, C, R, T
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 4, 0, 0, 0, 0],
+                [3, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 4],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            ]
+        )
+        np.testing.assert_equal(
+            counts_mix.transitions,
+            counts_global.transitions * 0.6 + counts_local.transitions * 0.4
+        )
+
+    def test_threshold_too_high(self) -> None:
+        from learnMSA.msa_hmm.MSA2HMM import msa_to_counts
+        sequences = [
+            ("seq1", "----AA---AA--"),
+            ("seq2", "A---AC-C---A-"),
+            ("seq3", "-C-C--A--CAAA"),
+            ("seq4", "-CACA--AA----"),
+            ("seq5", "--ACAAA-AA--A"),
+        ]
+        with AlignedDataset(aligned_sequences=sequences) as data:
+            with self.assertRaises(AssertionError):
+                counts = msa_to_counts(
+                    data, match_threshold=1.0
+                )
+
+    def test_threshold_very_low(self) -> None:
+        from learnMSA.msa_hmm.MSA2HMM import msa_to_counts
+        sequences = [
+            ("seq1", "----AA---AA--"),
+            ("seq2", "A---AC-C---A-"),
+            ("seq3", "-C-C--A--CAAA"),
+            ("seq4", "-CACA--AA----"),
+            ("seq5", "--ACAAA-AA--A"),
+        ]
+        with AlignedDataset(aligned_sequences=sequences) as data:
+            counts = msa_to_counts(
+                data, match_threshold=0.0
+            )
+            # all columns are match states
+            assert counts.matches() == len(sequences[0][1])
 
 
 if __name__ == '__main__':

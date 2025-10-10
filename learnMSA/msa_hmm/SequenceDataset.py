@@ -13,7 +13,7 @@ class SequenceDataset:
     #for future changes in the alphabet: all learnMSA related code assumes that the standard amino acids occur at the first 20 positions
     #any special symbols should be added after that and the gap character comes last
     alphabet = "ARNDCQEGHILKMFPSTWYVXUO-"
-    
+
 
 
     def __init__(self, filename=None, fmt="fasta", sequences=None, indexed=False, threads=None):
