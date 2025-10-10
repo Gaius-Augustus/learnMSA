@@ -2117,7 +2117,7 @@ class ClusteringTest(unittest.TestCase):
 
 class MSA2HMMTest(unittest.TestCase):
 
-    def test_msa2hmm(self) -> None:
+    def test_msa_to_counts(self) -> None:
         from learnMSA.msa_hmm.MSA2HMM import msa_to_counts
         sequences = [
             ("seq1", "----AA---AA--"),
@@ -2220,6 +2220,65 @@ class MSA2HMMTest(unittest.TestCase):
             counts_global.transitions * 0.6 + counts_local.transitions * 0.4
         )
 
+    def test_add_pseudocounts(self) -> None:
+        from learnMSA.msa_hmm.MSA2HMM import add_pseudocounts, PHMMValueSet
+        L = 4
+        S = 3
+        zero_counts = PHMMValueSet(
+            match_emissions=np.zeros((L, S)),
+            insert_emissions=np.zeros((S,)),
+            transitions=np.zeros((3*L+5, 3*L+5)),
+            start=np.zeros((2,))
+        )
+        pseudocounts = add_pseudocounts(
+            zero_counts,
+            aa=[0., 1., 2.],
+            match_transition=[11., 22., 33.],
+            insert_transition=[4., 5.],
+            delete_transition=[6., 7.],
+            begin_to_match=[101., 102.],
+            match_to_end=13.,
+            left_flank=[103., 104.],
+            right_flank=[105., 106.],
+            unannotated_segment=[107., 108.],
+            flank_start=[109., 110.],
+        )
+        np.testing.assert_equal(
+            pseudocounts.match_emissions, np.tile([[0., 1., 2.]], (L, 1))
+        )
+        np.testing.assert_equal(
+            pseudocounts.insert_emissions, np.array([0., 1., 2.])
+        )
+        np.testing.assert_equal(
+            pseudocounts.transitions,
+            np.array([
+                # matches
+                [0, 11., 0, 0, 22., 0, 0, 0, 33., 0, 0, 0, 0, 13, 0, 0, 0],
+                [0, 0, 11., 0, 0, 22., 0, 0, 0, 33., 0, 0, 0, 13, 0, 0, 0],
+                [0, 0, 0, 11., 0, 0, 22., 0, 0, 0, 33., 0, 0, 13, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 13, 0, 0, 0],
+                # inserts
+                [0, 5, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 5, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 5, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                # deletes
+                [0, 7, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 7, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 7, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                # L, B, E, C, R, T
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 103, 104, 0, 0, 0, 0],
+                [101, 102, 102, 102, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 108, 0, 107, 0, 0],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 105, 106],
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            ])
+        )
+        np.testing.assert_equal(
+            pseudocounts.start, np.array([109., 110.])
+        )
+
     def test_threshold_too_high(self) -> None:
         from learnMSA.msa_hmm.MSA2HMM import msa_to_counts
         sequences = [
@@ -2231,9 +2290,7 @@ class MSA2HMMTest(unittest.TestCase):
         ]
         with AlignedDataset(aligned_sequences=sequences) as data:
             with self.assertRaises(AssertionError):
-                counts = msa_to_counts(
-                    data, match_threshold=1.0
-                )
+                counts = msa_to_counts(data, match_threshold=1.0)
 
     def test_threshold_very_low(self) -> None:
         from learnMSA.msa_hmm.MSA2HMM import msa_to_counts
@@ -2245,9 +2302,7 @@ class MSA2HMMTest(unittest.TestCase):
             ("seq5", "--ACAAA-AA--A"),
         ]
         with AlignedDataset(aligned_sequences=sequences) as data:
-            counts = msa_to_counts(
-                data, match_threshold=0.0
-            )
+            counts = msa_to_counts(data, match_threshold=0.0)
             # all columns are match states
             assert counts.matches() == len(sequences[0][1])
 

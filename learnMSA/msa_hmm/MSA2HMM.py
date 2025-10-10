@@ -218,16 +218,16 @@ def msa_to_counts(
 
 def add_pseudocounts(
     counts : PHMMValueSet,
-    aa_pseudocounts : np.ndarray | list | float = 0,
-    flank_start_pseudocounts : np.ndarray | list | float = 0,
-    match_transition_pseudocounts : np.ndarray | list | float = 0,
-    insert_transition_pseudocounts : np.ndarray | list | float = 0,
-    delete_transition_pseudocounts : np.ndarray | list | float = 0,
-    begin_to_match_pseudocounts : np.ndarray | list | float = 0,
-    match_to_end_pseudocounts : float = 0,
-    left_flank_pseudocounts : np.ndarray | list | float = 0,
-    right_flank_pseudocounts : np.ndarray | list | float = 0,
-    unannotated_segment_pseudocounts : np.ndarray | list | float = 0,
+    aa : np.ndarray | list | float = 0,
+    match_transition : np.ndarray | list | float = 0,
+    insert_transition : np.ndarray | list | float = 0,
+    delete_transition : np.ndarray | list | float = 0,
+    begin_to_match : np.ndarray | list | float = 0,
+    match_to_end : float = 0,
+    left_flank : np.ndarray | list | float = 0,
+    right_flank : np.ndarray | list | float = 0,
+    unannotated_segment : np.ndarray | list | float = 0,
+    flank_start : np.ndarray | list | float = 0,
 ) -> PHMMValueSet:
     """
     Adds pseudocounts to the given HMM counts in-place and returns a reference
@@ -235,65 +235,89 @@ def add_pseudocounts(
 
     Args:
         counts: An HMMValueSet object containing the counts.
-        aa_pseudocounts: Optional pseudocounts for amino acids to add to
+        aa: Optional pseudocounts for amino acids to add to
             emission counts (should be either a scalar or a 1D array of length
             equal to the alphabet size - 1).
-        flank_start_pseudocounts: Optional pseudocounts for the probability
-            of starting in the left flanking state (should be a scalar or a
-            1D array of length 2).
-        match_transition_pseudocounts: Optional pseudocounts for match
+        match_transition: Optional pseudocounts for match
             transition counts (should be a scalar or a 1D array of length 3
             [match, insert, delete]).
-        insert_transition_pseudocounts: Optional pseudocounts for insert
+        insert_transition: Optional pseudocounts for insert
             transition counts (should be a scalar or a 1D array of length 2
             [loop, exit]).
-        delete_transition_pseudocounts: Optional pseudocounts for delete
+        delete_transition: Optional pseudocounts for delete
             transition counts (should be a scalar or a 1D array of length 2
             [continue, exit]).
-        begin_to_match_pseudocounts: Optional pseudocounts for the counts of
+        begin_to_match: Optional pseudocounts for the counts of
             transitions from the begin state to the match states (should be a
             scalar or a 1D array of length 2 [first, others]).
-        match_to_end_pseudocounts: Optional pseudocounts for the counts of
+        match_to_end: Optional pseudocounts for the counts of
             transitions from the match states to the end state (should be a
             scalar).
-        left_flank_pseudocounts: Optional pseudocounts for the counts of
+        left_flank: Optional pseudocounts for the counts of
             transitions from the left flanking state (should be a scalar or a
             1D array of length 2 [loop, exit]).
-        right_flank_pseudocounts: Optional pseudocounts for the counts of
+        right_flank: Optional pseudocounts for the counts of
             transitions from the right flanking state (should be a scalar or a
             1D array of length 2 [loop, exit]).
-        unannotated_segment_pseudocounts: Optional pseudocounts for the counts
+        unannotated_segment: Optional pseudocounts for the counts
             from the unannotated segment state (should be a scalar or a
             1D array of length 2 [loop, exit]).
+        flank_start: Optional pseudocounts for the probability
+            of starting in the left flanking state (should be a scalar or a
+            1D array of length 2).
     """
+    L = counts.matches()
+
+    counts.match_emissions += aa
+    counts.insert_emissions += aa
+
     # Apply the pseudocounts for transitions
-    match_transition_pseudocounts = _expand(match_transition_pseudocounts, 3)
-    insert_transition_pseudocounts = _expand(insert_transition_pseudocounts, 2)
-    delete_transition_pseudocounts = _expand(delete_transition_pseudocounts, 2)
-    if isinstance(begin_to_match_pseudocounts, (list, np.ndarray)):
-        begin_to_match_pseudocounts = np.concat((
-            begin_to_match_pseudocounts[0:1],
-            _expand(begin_to_match_pseudocounts[1], L-1)
+    match_transition = _expand(match_transition, 3)
+    insert_transition = _expand(insert_transition, 2)
+    delete_transition = _expand(delete_transition, 2)
+    if isinstance(begin_to_match, (list, np.ndarray)):
+        begin_to_match = np.concat((
+            begin_to_match[0:1],
+            _expand(begin_to_match[1], L-1)
         ))
     else: # assume scalar
-        begin_to_match_pseudocounts = _expand(begin_to_match_pseudocounts, L)
+        begin_to_match = _expand(begin_to_match, L)
+    left_flank = _expand(left_flank, 2)
+    right_flank = _expand(right_flank, 2)
+    unannotated_segment = _expand(unannotated_segment, 2)
+    flank_start = _expand(flank_start, 2)
 
-    matches = np.arange(L-1, dtype=np.int32)
-    match_to_match = np.stack((matches, matches+1), axis=1)
-    match_to_insert = np.stack((matches, matches+L), axis=1)
-    match_to_delete = np.stack((matches, matches+2*L), axis=1)
-    insert_to_insert = np.stack((matches+L, matches+L), axis=1)
-    insert_to_match = np.stack((matches+L, matches+1), axis=1)
-    delete_to_match = np.stack((matches+2*L-1, matches+1), axis=1)
-    delete_to_delete = np.stack((matches+2*L-1, matches+2*L), axis=1)
+    matches_ind_plus = np.arange(L, dtype=np.int32)
+    matches_ind = matches_ind_plus[:-1]
+    match_to_match_ind = np.stack((matches_ind, matches_ind+1), axis=1)
+    match_to_insert_ind = np.stack((matches_ind, matches_ind+L), axis=1)
+    match_to_delete_ind = np.stack((matches_ind, matches_ind+2*L), axis=1)
+    match_to_end_ind = np.stack(
+        (matches_ind_plus, np.zeros(L, dtype=np.int32)+(3*L+1)), axis=1
+    )
+    insert_to_insert_ind = np.stack((matches_ind+L, matches_ind+L), axis=1)
+    insert_to_match_ind = np.stack((matches_ind+L, matches_ind+1), axis=1)
+    delete_to_match_ind = np.stack((matches_ind+2*L-1, matches_ind+1), axis=1)
+    delete_to_delete_ind = np.stack((matches_ind+2*L-1, matches_ind+2*L), axis=1)
 
-    _add(counts, match_to_match, match_transition_pseudocounts[0])
-    _add(counts, match_to_insert, match_transition_pseudocounts[1])
-    _add(counts, match_to_delete, match_transition_pseudocounts[2])
-    _add(counts, insert_to_insert, insert_transition_pseudocounts[0])
-    _add(counts, insert_to_match, insert_transition_pseudocounts[1])
-    _add(counts, delete_to_delete, delete_transition_pseudocounts[0])
-    _add(counts, delete_to_match, delete_transition_pseudocounts[1])
+    _add(counts.transitions, match_to_match_ind, match_transition[0])
+    _add(counts.transitions, match_to_insert_ind, match_transition[1])
+    _add(counts.transitions, match_to_delete_ind, match_transition[2])
+    _add(counts.transitions, insert_to_insert_ind, insert_transition[0])
+    _add(counts.transitions, insert_to_match_ind, insert_transition[1])
+    _add(counts.transitions, delete_to_delete_ind, delete_transition[0])
+    _add(counts.transitions, delete_to_match_ind, delete_transition[1])
+    counts.transitions[3*L, :L] += begin_to_match
+    _add(counts.transitions, match_to_end_ind, match_to_end)
+
+    counts.transitions[3*L-1, 3*L-1] += left_flank[0] # L -> L
+    counts.transitions[3*L-1, 3*L] += left_flank[1] # L -> B
+    counts.transitions[3*L+3, 3*L+3] += right_flank[0] # R -> R
+    counts.transitions[3*L+3, 3*L+4] += right_flank[1] # R -> T
+    counts.transitions[3*L+2, 3*L+2] += unannotated_segment[0] # C -> C
+    counts.transitions[3*L+2, 3*L] += unannotated_segment[1] # C -> B
+
+    counts.start += flank_start
 
     return counts
 
