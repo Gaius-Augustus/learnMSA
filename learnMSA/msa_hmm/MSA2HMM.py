@@ -28,6 +28,252 @@ class PHMMValueSet:
         """ Returns the number of match states `n`. """
         return self.match_emissions.shape[0]
 
+    def add_pseudocounts(
+        self,
+        aa : np.ndarray | list | float = 0,
+        match_transition : np.ndarray | list | float = 0,
+        insert_transition : np.ndarray | list | float = 0,
+        delete_transition : np.ndarray | list | float = 0,
+        begin_to_match : np.ndarray | list | float = 0,
+        begin_to_delete : float = 0,
+        match_to_end : float = 0,
+        left_flank : np.ndarray | list | float = 0,
+        right_flank : np.ndarray | list | float = 0,
+        unannotated : np.ndarray | list | float = 0,
+        end : np.ndarray | list | float = 0,
+        flank_start : np.ndarray | list | float = 0,
+    ) -> "PHMMValueSet":
+        """
+        Adds pseudocounts to the given HMM counts in-place and returns a reference
+        to the modified object.
+
+        Args:
+            counts: An HMMValueSet object containing the counts.
+            aa: Optional pseudocounts for amino acids to add to
+                emission counts (should be either a scalar or a 1D array of length
+                equal to the alphabet size - 1).
+            match_transition: Optional pseudocounts for match
+                transition counts (should be a scalar or a 1D array of length 3
+                [match, insert, delete]).
+            insert_transition: Optional pseudocounts for insert
+                transition counts (should be a scalar or a 1D array of length 2
+                [loop, exit]).
+            delete_transition: Optional pseudocounts for delete
+                transition counts (should be a scalar or a 1D array of length 2
+                [continue, exit]).
+            begin_to_match: Optional pseudocounts for the counts of
+                transitions from the begin state to the match states (should be a
+                scalar or a 1D array of length 2 [first, others]).
+            begin_to_delete: Optional pseudocount for the transition of the
+                begin state to the first delete state (should be a scalar).
+            match_to_end: Optional pseudocounts for the counts of
+                transitions from the match states to the end state (should be a
+                scalar).
+            left_flank: Optional pseudocounts for the counts of
+                transitions from the left flanking state (should be a scalar or a
+                1D array of length 2 [loop, exit]).
+            right_flank: Optional pseudocounts for the counts of
+                transitions from the right flanking state (should be a scalar or a
+                1D array of length 2 [loop, exit]).
+            unannotated: Optional pseudocounts for the counts
+                from the unannotated segment state (should be a scalar or a
+                1D array of length 2 [loop, exit]).
+            end: Optional pseudocounts for the counts of
+                transitions from the end state (should be a scalar or a
+                1D array of length 3 [unannotated, right_flank, terminal]).
+            flank_start: Optional pseudocounts for the probability
+                of starting in the left flanking state (should be a scalar or a
+                1D array of length 2).
+        """
+        L = self.matches()
+
+        self.match_emissions += aa
+        self.insert_emissions += aa
+
+        # Apply the pseudocounts for transitions
+        match_transition = _expand(match_transition, 3)
+        insert_transition = _expand(insert_transition, 2)
+        delete_transition = _expand(delete_transition, 2)
+        if isinstance(begin_to_match, (list, np.ndarray)):
+            begin_to_match = np.concat((
+                begin_to_match[0:1],
+                _expand(begin_to_match[1], L-1)
+            ))
+        else: # assume scalar
+            begin_to_match = _expand(begin_to_match, L)
+        left_flank = _expand(left_flank, 2)
+        right_flank = _expand(right_flank, 2)
+        unannotated = _expand(unannotated, 2)
+        flank_start = _expand(flank_start, 2)
+
+        ind = PHMMTransitionIndexSet(L)
+
+        _add(self.transitions, ind.match_to_match, match_transition[0])
+        _add(self.transitions, ind.match_to_insert, match_transition[1])
+        _add(self.transitions, ind.match_to_delete, match_transition[2])
+        _add(self.transitions, ind.insert_to_insert, insert_transition[0])
+        _add(self.transitions, ind.insert_to_match, insert_transition[1])
+        _add(self.transitions, ind.delete_to_delete, delete_transition[0])
+        _add(self.transitions, ind.delete_to_match, delete_transition[1])
+        self.transitions[ind.begin_to_match[:,0], ind.begin_to_match[:,1]] += \
+            begin_to_match
+        self.transitions[ind.begin_to_delete[0,0], ind.begin_to_delete[0,1]] += \
+            begin_to_delete
+        _add(self.transitions, ind.match_to_end, match_to_end)
+
+        self.transitions[ind.left_flank[:,0], ind.left_flank[:,1]] += \
+            left_flank
+        self.transitions[ind.right_flank[:,0], ind.right_flank[:,1]] += \
+            right_flank
+        self.transitions[ind.unannotated[:,0], ind.unannotated[:,1]] += \
+            unannotated
+        self.transitions[ind.end[:,0], ind.end[:,1]] += end
+
+        self.start += flank_start
+
+        return self
+
+    def normalize(self, log_zero_value=-1e8) -> "PHMMValueSet":
+        """
+        Normalizes the counts in the given HMMValueSet to probabilities
+        in-place and returns a reference to the modified object.
+        """
+        # Normalize emissions
+        self.match_emissions /= \
+            np.sum(self.match_emissions, axis=-1, keepdims=True)
+        self.insert_emissions /= np.sum(self.insert_emissions)
+
+        # Normalize starting probabilities
+        self.start /= np.sum(self.start)
+
+        # Mask for invalid
+        mask = PHMMTransitionIndexSet(L = self.matches()).mask()
+
+        # Normalize transitions
+        self.transitions[-1, -1] = 1 # terminal state can loop to itself
+        self.transitions /= np.sum(self.transitions, axis=-1, keepdims=True)
+
+        return self
+
+    def log(self, log_zero_value=-1e8) -> "PHMMValueSet":
+        """
+        Applies element-wise logarithm to all values. Should be used after
+        normalize(). Computes log(0) as log_zero_value.
+        Operates in-place and returns a reference to the modified object.
+        """
+
+        # Apply log transform with error handling
+        with np.errstate(divide='raise', invalid='raise'):
+            try:
+                self.match_emissions = safe_log(
+                    self.match_emissions, log_zero_value
+                )
+                self.insert_emissions = safe_log(
+                    self.insert_emissions, log_zero_value
+                )
+                self.start = safe_log(self.start, log_zero_value)
+                self.transitions = safe_log(self.transitions, log_zero_value)
+            except FloatingPointError as e:
+                raise ValueError(
+                    "Cannot compute log probabilities. "
+                    "This typically indicates that an emission or transition has "
+                    "been counted zero times. "
+                    "Consider adding pseudocounts using add_pseudocounts() before "
+                    "calling log_normalize()."
+                ) from e
+
+        return self
+
+
+def safe_log(x: np.ndarray, log_zero_value: float = -1e8) -> np.ndarray:
+    """
+    Computes the logarithm of x, replacing -inf with log_zero_value.
+    """
+    with np.errstate(divide='ignore'):
+        log_x = np.log(x)
+    log_x[~np.isfinite(log_x)] = log_zero_value
+    return log_x
+
+
+@dataclass
+class PHMMTransitionIndexSet:
+    """ Indices for accessing groups of values in a PHMM transition matrix.
+
+    Args:
+        L: Number of match states.
+    """
+    def __init__(self, L: int, dtype=np.int32) -> None:
+        self.L = L
+        self.matches_plus = np.arange(L, dtype=dtype)
+        self.matches = self.matches_plus[:-1]
+        self.begin_to_match = np.stack(
+            (np.zeros(L, dtype=dtype) + 3*L, self.matches_plus),
+            axis=1,
+        )
+        self.begin_to_delete = np.array([[3*L, 2*L-1]], dtype=dtype)
+        self.match_to_match = np.stack(
+            (self.matches, self.matches+1), axis=1
+        )
+        self.match_to_insert = np.stack(
+            (self.matches, self.matches+self.L), axis=1
+        )
+        self.match_to_delete = np.stack(
+            (self.matches, self.matches+2*self.L), axis=1
+        )
+        self.match_to_end = np.stack(
+            (self.matches_plus, np.zeros(self.L, dtype=dtype)+(3*self.L+1)),
+            axis=1,
+        )
+        self.insert_to_insert = np.stack(
+            (self.matches+self.L, self.matches+self.L), axis=1
+        )
+        self.insert_to_match = np.stack(
+            (self.matches+self.L, self.matches+1), axis=1
+        )
+        self.delete_to_match = np.stack(
+            (self.matches+2*self.L-1, self.matches+1), axis=1
+        )
+        self.delete_to_delete = np.stack(
+            (self.matches+2*self.L-1, self.matches+2*self.L), axis=1
+        )
+        self.left_flank = np.array(
+            [[3*L-1, 3*L-1], [3*L-1, 3*L]], dtype=dtype
+        )
+        self.right_flank = np.array(
+            [[3*L+3, 3*L+3], [3*L+3, 3*L+4]], dtype=dtype
+        )
+        self.unannotated = np.array(
+            [[3*L+2, 3*L+2], [3*L+2, 3*L]], dtype=dtype
+        )
+        self.end = np.array(
+            [[3*L+1, 3*L+2], [3*L+1, 3*L+3], [3*L+1, 3*L+4]], dtype=dtype
+        )
+
+
+    def mask(self, dtype=np.float32) -> np.ndarray:
+        """
+        Returns a mask matrix of shape `(3L+5, 3L+5)` with ones for invalid
+        transitions and zeros for valid transitions.
+        """
+        M = np.ones((3*self.L+5, 3*self.L+5), dtype=dtype)
+        M[self.begin_to_match[:,0], self.begin_to_match[:,1]] = 0
+        M[self.begin_to_delete[0,0], self.begin_to_delete[0,1]] = 0
+        M[self.match_to_match[:,0], self.match_to_match[:,1]] = 0
+        M[self.match_to_insert[:,0], self.match_to_insert[:,1]] = 0
+        M[self.match_to_delete[:,0], self.match_to_delete[:,1]] = 0
+        M[self.insert_to_insert[:,0], self.insert_to_insert[:,1]] = 0
+        M[self.insert_to_match[:,0], self.insert_to_match[:,1]] = 0
+        M[self.delete_to_delete[:,0], self.delete_to_delete[:,1]] = 0
+        M[self.delete_to_match[:,0], self.delete_to_match[:,1]] = 0
+        M[3*self.L-2, 3*self.L+1] = 0 # D_L to E
+        M[self.match_to_end[:,0], self.match_to_end[:,1]] = 0
+        M[self.left_flank[:,0], self.left_flank[:,1]] = 0
+        M[self.right_flank[:,0], self.right_flank[:,1]] = 0
+        M[self.unannotated[:,0], self.unannotated[:,1]] = 0
+        M[self.end[:,0], self.end[:,1]] = 0
+        M[-1, -1] = 0 # terminal state can loop to itself
+        return M
+
 
 def msa_to_counts(
     data : AlignedDataset,
@@ -205,7 +451,7 @@ def msa_to_counts(
     transitions = (1.-global_prob) * counts_local + global_prob * counts_global
 
     # Count how many sequences start in the left flanking state
-    flank_start = np.sum(np.any(state_seqs == 0, axis=1), keepdims=True)
+    flank_start = np.sum(np.any(state_seqs == 0, axis=1))
     start = np.array([flank_start, N - flank_start], dtype=np.float32)
 
     return PHMMValueSet(
@@ -214,112 +460,6 @@ def msa_to_counts(
         transitions=transitions,
         start=start
     )
-
-
-def add_pseudocounts(
-    counts : PHMMValueSet,
-    aa : np.ndarray | list | float = 0,
-    match_transition : np.ndarray | list | float = 0,
-    insert_transition : np.ndarray | list | float = 0,
-    delete_transition : np.ndarray | list | float = 0,
-    begin_to_match : np.ndarray | list | float = 0,
-    match_to_end : float = 0,
-    left_flank : np.ndarray | list | float = 0,
-    right_flank : np.ndarray | list | float = 0,
-    unannotated_segment : np.ndarray | list | float = 0,
-    flank_start : np.ndarray | list | float = 0,
-) -> PHMMValueSet:
-    """
-    Adds pseudocounts to the given HMM counts in-place and returns a reference
-    to the modified object.
-
-    Args:
-        counts: An HMMValueSet object containing the counts.
-        aa: Optional pseudocounts for amino acids to add to
-            emission counts (should be either a scalar or a 1D array of length
-            equal to the alphabet size - 1).
-        match_transition: Optional pseudocounts for match
-            transition counts (should be a scalar or a 1D array of length 3
-            [match, insert, delete]).
-        insert_transition: Optional pseudocounts for insert
-            transition counts (should be a scalar or a 1D array of length 2
-            [loop, exit]).
-        delete_transition: Optional pseudocounts for delete
-            transition counts (should be a scalar or a 1D array of length 2
-            [continue, exit]).
-        begin_to_match: Optional pseudocounts for the counts of
-            transitions from the begin state to the match states (should be a
-            scalar or a 1D array of length 2 [first, others]).
-        match_to_end: Optional pseudocounts for the counts of
-            transitions from the match states to the end state (should be a
-            scalar).
-        left_flank: Optional pseudocounts for the counts of
-            transitions from the left flanking state (should be a scalar or a
-            1D array of length 2 [loop, exit]).
-        right_flank: Optional pseudocounts for the counts of
-            transitions from the right flanking state (should be a scalar or a
-            1D array of length 2 [loop, exit]).
-        unannotated_segment: Optional pseudocounts for the counts
-            from the unannotated segment state (should be a scalar or a
-            1D array of length 2 [loop, exit]).
-        flank_start: Optional pseudocounts for the probability
-            of starting in the left flanking state (should be a scalar or a
-            1D array of length 2).
-    """
-    L = counts.matches()
-
-    counts.match_emissions += aa
-    counts.insert_emissions += aa
-
-    # Apply the pseudocounts for transitions
-    match_transition = _expand(match_transition, 3)
-    insert_transition = _expand(insert_transition, 2)
-    delete_transition = _expand(delete_transition, 2)
-    if isinstance(begin_to_match, (list, np.ndarray)):
-        begin_to_match = np.concat((
-            begin_to_match[0:1],
-            _expand(begin_to_match[1], L-1)
-        ))
-    else: # assume scalar
-        begin_to_match = _expand(begin_to_match, L)
-    left_flank = _expand(left_flank, 2)
-    right_flank = _expand(right_flank, 2)
-    unannotated_segment = _expand(unannotated_segment, 2)
-    flank_start = _expand(flank_start, 2)
-
-    matches_ind_plus = np.arange(L, dtype=np.int32)
-    matches_ind = matches_ind_plus[:-1]
-    match_to_match_ind = np.stack((matches_ind, matches_ind+1), axis=1)
-    match_to_insert_ind = np.stack((matches_ind, matches_ind+L), axis=1)
-    match_to_delete_ind = np.stack((matches_ind, matches_ind+2*L), axis=1)
-    match_to_end_ind = np.stack(
-        (matches_ind_plus, np.zeros(L, dtype=np.int32)+(3*L+1)), axis=1
-    )
-    insert_to_insert_ind = np.stack((matches_ind+L, matches_ind+L), axis=1)
-    insert_to_match_ind = np.stack((matches_ind+L, matches_ind+1), axis=1)
-    delete_to_match_ind = np.stack((matches_ind+2*L-1, matches_ind+1), axis=1)
-    delete_to_delete_ind = np.stack((matches_ind+2*L-1, matches_ind+2*L), axis=1)
-
-    _add(counts.transitions, match_to_match_ind, match_transition[0])
-    _add(counts.transitions, match_to_insert_ind, match_transition[1])
-    _add(counts.transitions, match_to_delete_ind, match_transition[2])
-    _add(counts.transitions, insert_to_insert_ind, insert_transition[0])
-    _add(counts.transitions, insert_to_match_ind, insert_transition[1])
-    _add(counts.transitions, delete_to_delete_ind, delete_transition[0])
-    _add(counts.transitions, delete_to_match_ind, delete_transition[1])
-    counts.transitions[3*L, :L] += begin_to_match
-    _add(counts.transitions, match_to_end_ind, match_to_end)
-
-    counts.transitions[3*L-1, 3*L-1] += left_flank[0] # L -> L
-    counts.transitions[3*L-1, 3*L] += left_flank[1] # L -> B
-    counts.transitions[3*L+3, 3*L+3] += right_flank[0] # R -> R
-    counts.transitions[3*L+3, 3*L+4] += right_flank[1] # R -> T
-    counts.transitions[3*L+2, 3*L+2] += unannotated_segment[0] # C -> C
-    counts.transitions[3*L+2, 3*L] += unannotated_segment[1] # C -> B
-
-    counts.start += flank_start
-
-    return counts
 
 
 def _count_transitions(state_seqs: np.ndarray, L: int) -> np.ndarray:
@@ -372,17 +512,3 @@ def _add(
     Adds the given values to the counts at the specified indices in-place.
     """
     np.add.at(counts, (indices[..., 0], indices[..., 1]), values)
-
-
-def _swap_pairs(
-        state_seqs_flat: np.ndarray,
-        a: int,
-        b: int
-) -> None:
-    """
-    Swaps all instances of state `a` followed by state `b` with `b` followed
-    by `a` in the given flattened state sequence array in-place.
-    """
-    ab = (state_seqs_flat[:-1] == a) & (state_seqs_flat[1:] == b)
-    state_seqs_flat[:-1][ab] = b
-    state_seqs_flat[1:][ab] = a
