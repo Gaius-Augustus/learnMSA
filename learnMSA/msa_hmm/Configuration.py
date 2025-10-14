@@ -1,6 +1,7 @@
 import math
 import numpy as np
 import tensorflow as tf
+from tensorflow.keras.initializers import Initializer
 from functools import partial
 import learnMSA.msa_hmm.Emitter as emit
 import learnMSA.msa_hmm.Transitioner as trans
@@ -11,6 +12,7 @@ from learnMSA.protein_language_models.MvnEmitter import MvnEmitter, AminoAcidPlu
 import subprocess as sp
 import os
 
+
 def as_str(config, items_per_line=1, prefix="", sep=""):
     return "\n"+prefix+"{" + sep.join(("\n"+prefix)*(i%items_per_line==0) + key + " : " + str(val) for i,(key,val) in enumerate(config.items())) + "\n"+prefix+"}"
 
@@ -19,8 +21,8 @@ def as_str(config, items_per_line=1, prefix="", sep=""):
 #we limit the batch size based on the longest model to train
 #the adpative batch size scales automatically with the number of GPUs
 def get_adaptive_batch_size(model_lengths, max_seq_len, small_gpu):
-    num_gpu = len([x.name for x in tf.config.list_logical_devices() if x.device_type == 'GPU']) 
-    num_devices = num_gpu + int(num_gpu==0) #account for the CPU-only case 
+    num_gpu = len([x.name for x in tf.config.list_logical_devices() if x.device_type == 'GPU'])
+    num_devices = num_gpu + int(num_gpu==0) #account for the CPU-only case
     model_length = max(model_lengths)
     if max_seq_len < 200 and model_length < 180:
         batch_size = 512*num_devices
@@ -41,10 +43,10 @@ def get_adaptive_batch_size(model_lengths, max_seq_len, small_gpu):
     if small_gpu:
         batch_size = batch_size//2
     return batch_size
-    
+
 def get_adaptive_batch_size_with_language_model(model_lengths, max_seq_len, embedding_dim, small_gpu):
-    num_gpu = len([x.name for x in tf.config.list_logical_devices() if x.device_type == 'GPU']) 
-    num_devices = num_gpu + int(num_gpu==0) #account for the CPU-only case 
+    num_gpu = len([x.name for x in tf.config.list_logical_devices() if x.device_type == 'GPU'])
+    num_devices = num_gpu + int(num_gpu==0) #account for the CPU-only case
     model_length = max(model_lengths)
     if max_seq_len < 200 and model_length < 180:
         batch_size = (20 + 180*32//embedding_dim)*num_devices
@@ -68,78 +70,114 @@ def get_adaptive_batch_size_with_language_model(model_lengths, max_seq_len, embe
 
 #the configuration can be changed by experienced users
 #proper command line support for these parameters will be added in the future
-def make_default(default_num_models=5, 
-                 use_language_model=False, 
-                 allow_user_keys_in_config=False,
-                 use_l2=False,
-                 scoring_model_config=plm_common.ScoringModelConfig(),
-                 num_prior_components=plm_common.PRIOR_DEFAULT_COMPONENTS,
-                 frozen_insertions=True,
-                 L2_match=10.,
-                 L2_insert=0.,
-                 temperature_mode="trainable",
-                 conditionally_independent=True,
-                 V2_emitter=True,
-                 V2_full_covariance=False,
-                 V2_temperature=3.,
-                 inv_gamma_alpha=3.,
-                 inv_gamma_beta=0.5,
-                 plm_cache_dir=None):
+def make_default(
+    default_num_models=5,
+    use_language_model=False,
+    allow_user_keys_in_config=False,
+    use_l2=False,
+    scoring_model_config=plm_common.ScoringModelConfig(),
+    num_prior_components=plm_common.PRIOR_DEFAULT_COMPONENTS,
+    frozen_insertions=True,
+    L2_match=10.,
+    L2_insert=0.,
+    temperature_mode="trainable",
+    conditionally_independent=True,
+    V2_emitter=True,
+    V2_full_covariance=False,
+    V2_temperature=3.,
+    inv_gamma_alpha=3.,
+    inv_gamma_beta=0.5,
+    plm_cache_dir=None,
+    emission_init : Initializer | list[Initializer] | None = None,
+    insertion_init : Initializer | list[Initializer] | None = None,
+    transition_init : Initializer | list[Initializer] | None = None,
+    flank_init : Initializer | list[Initializer] | None = None,
+) -> None:
     if use_language_model:
         if V2_emitter:
-            emission_init = [AminoAcidPlusMvnEmissionInitializer(scoring_model_config=scoring_model_config,
-                                                                        num_prior_components=num_prior_components) 
-                                                                            for _ in range(default_num_models)]
-            insertion_init = [AminoAcidPlusMvnEmissionInitializer(scoring_model_config=scoring_model_config,
-                                                                        num_prior_components=num_prior_components)  
-                                                                            for _ in range(default_num_models)]
-            emitter = MvnEmitter(scoring_model_config, 
-                                emission_init=emission_init, 
-                                insertion_init=insertion_init,
-                                num_prior_components=num_prior_components,
-                                full_covariance=V2_full_covariance,
-                                temperature=V2_temperature,
-                                frozen_insertions=frozen_insertions,
-                                inv_gamma_alpha=inv_gamma_alpha,
-                                inv_gamma_beta=inv_gamma_beta)
+            if emission_init is None:
+                emission_init = [
+                    AminoAcidPlusMvnEmissionInitializer(
+                        scoring_model_config=scoring_model_config,
+                        num_prior_components=num_prior_components
+                    )
+                for _ in range(default_num_models)]
+            if insertion_init is None:
+                insertion_init = [
+                    AminoAcidPlusMvnEmissionInitializer(
+                        scoring_model_config=scoring_model_config,
+                        num_prior_components=num_prior_components
+                    )
+                    for _ in range(default_num_models)]
+            emitter = MvnEmitter(
+                scoring_model_config,
+                emission_init=emission_init,
+                insertion_init=insertion_init,
+                num_prior_components=num_prior_components,
+                full_covariance=V2_full_covariance,
+                temperature=V2_temperature,
+                frozen_insertions=frozen_insertions,
+                inv_gamma_alpha=inv_gamma_alpha,
+                inv_gamma_beta=inv_gamma_beta
+            )
         else:
-            emission_init = [initializers.EmbeddingEmissionInitializer(scoring_model_config=scoring_model_config,
-                                                                        num_prior_components=num_prior_components) 
-                                                                            for _ in range(default_num_models)]
-            insertion_init = [initializers.EmbeddingEmissionInitializer(scoring_model_config=scoring_model_config,
-                                                                        num_prior_components=num_prior_components)  
-                                                                            for _ in range(default_num_models)]
-            #if num_prior_components == 0:
+            if emission_init is None:
+                emission_init = [
+                    initializers.EmbeddingEmissionInitializer(
+                        scoring_model_config=scoring_model_config,
+                        num_prior_components=num_prior_components
+                    )
+                    for _ in range(default_num_models)
+                ]
+            if insertion_init is None:
+                insertion_init = [
+                    initializers.EmbeddingEmissionInitializer(
+                        scoring_model_config=scoring_model_config,
+                        num_prior_components=num_prior_components
+                    )
+                    for _ in range(default_num_models)
+                ]
             prior = priors.L2Regularizer(L2_match=L2_match, L2_insert=L2_insert)
-            # else:
-            #     prior = priors.MvnEmbeddingPrior(scoring_model_config, num_prior_components, use_l2=use_l2, L2_match=L2_match, L2_insert=L2_insert)
-            emitter = emit.EmbeddingEmitter(scoring_model_config, 
-                                            emission_init=emission_init, 
-                                            insertion_init=insertion_init,
-                                            prior=prior,
-                                            frozen_insertions=frozen_insertions,
-                                            temperature_mode=emit.TemperatureMode.from_string(temperature_mode),
-                                            conditionally_independent=conditionally_independent)
+            emitter = emit.EmbeddingEmitter(
+                scoring_model_config,
+                emission_init=emission_init,
+                insertion_init=insertion_init,
+                prior=prior,
+                frozen_insertions=frozen_insertions,
+                temperature_mode=emit.TemperatureMode.from_string(temperature_mode),
+                conditionally_independent=conditionally_independent
+            )
     else:
-        emitter = emit.ProfileHMMEmitter([initializers.make_default_emission_init()
-                                                                         for _ in range(default_num_models)],
-                                           [initializers.make_default_insertion_init()
-                                                                         for _ in range(default_num_models)])
+        if emission_init is None:
+            emission_init = [
+                initializers.make_default_emission_init()
+                for _ in range(default_num_models)
+            ]
+        if insertion_init is None:
+            insertion_init = [
+                initializers.make_default_insertion_init()
+                for _ in range(default_num_models)
+            ]
+        emitter = emit.ProfileHMMEmitter(emission_init, insertion_init)
 
-    transitioner = trans.ProfileHMMTransitioner([initializers.make_default_transition_init() 
-                                                                        for _ in range(default_num_models)],
-                                                    [initializers.make_default_flank_init() 
-                                                                        for _ in range(default_num_models)])
-    #automaticall scale to a memory friendly version, if the GPU has less than 32GB     
+    if transition_init is None:
+        transition_init = [initializers.make_default_transition_init()
+                for _ in range(default_num_models)]
+    if flank_init is None:
+        flank_init = [initializers.make_default_flank_init()
+                for _ in range(default_num_models)]
+    transitioner = trans.ProfileHMMTransitioner(transition_init, flank_init)
+
+    #automaticall scale to a memory friendly version, if the GPU has less than 32GB
     small_gpu = False
-    if len([x.name for x in tf.config.list_logical_devices() if x.device_type == 'GPU']) > 0:     
-        #if there is at least one GPU, check its memory                                                          
+    if len([x.name for x in tf.config.list_logical_devices() if x.device_type == 'GPU']) > 0:
+        #if there is at least one GPU, check its memory
         gpu_mem = get_gpu_memory()
         small_gpu = gpu_mem[0] < 32000 if len(gpu_mem) > 0 else False
-    if use_language_model:                                                                    
-        batch_callback = partial(get_adaptive_batch_size_with_language_model, embedding_dim=scoring_model_config.dim, small_gpu=small_gpu)  
+    if use_language_model:
+        batch_callback = partial(get_adaptive_batch_size_with_language_model, embedding_dim=scoring_model_config.dim, small_gpu=small_gpu)
     else:
-        batch_callback = partial(get_adaptive_batch_size, small_gpu=small_gpu)                                                                  
+        batch_callback = partial(get_adaptive_batch_size, small_gpu=small_gpu)
     default = {
         "num_models" : default_num_models,
         "transitioner" : transitioner,
@@ -205,7 +243,7 @@ def assert_config(config):
         _make_assert_text("The multiplier must be greater than zero.", config["surgery_quantile"])
     assert "num_models" in config
     if config["use_language_model"]:
-        default = make_default(config["num_models"], 
+        default = make_default(config["num_models"],
                                 scoring_model_config=config["scoring_model_config"],
                                 num_prior_components=config["mvn_prior_components"],
                                 use_language_model=True)
@@ -217,7 +255,7 @@ def assert_config(config):
         for key in config:
             assert key in default, f"Unrecognized key {key} in user configuration."
 
-            
+
 def get_gpu_memory():
     command = "nvidia-smi --query-gpu=memory.total --format=csv"
     try:

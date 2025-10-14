@@ -8,32 +8,32 @@ from packaging import version
 if version.parse(tf.__version__) < version.parse("2.10.0"):
     from tensorflow.python.training.tracking.data_structures import NoDependency #see https://github.com/tensorflow/tensorflow/issues/36916
 else:
-    from tensorflow.python.trackable.data_structures import NoDependency 
+    from tensorflow.python.trackable.data_structures import NoDependency
 
 
 
 class ProfileHMMTransitioner(tf.keras.layers.Layer):
     """ A transitioner defines which transitions between HMM states are allowed, how they are initialized
         and how the transition matrix is represented (dense, sparse, other).
-        The transitioner also holds a prior on the transition distributions. 
+        The transitioner also holds a prior on the transition distributions.
         This transitioner implements the default profile HMM logic with the additional Plan7 states.
     Args:
-        transition_init: A list of dictionaries with initializers for each edge type, one per model. 
-        flank_init: A list of dictionaries with initializers for the initial probability of the left flank state. 
+        transition_init: A list of dictionaries with initializers for each edge type, one per model.
+        flank_init: A list of dictionaries with initializers for the initial probability of the left flank state.
         prior: A compatible prior that regularizes each transition type.
-        frozer_kernels: A dictionary that can be used to omit parameter updates for certain kernels 
+        frozer_kernels: A dictionary that can be used to omit parameter updates for certain kernels
                         by adding "kernel_id" : False
     """
-    def __init__(self, 
+    def __init__(self,
                 transition_init = initializers.make_default_transition_init(),
                 flank_init = initializers.make_default_flank_init(),
                 prior = None,
                 frozen_kernels={},
                 **kwargs):
         super(ProfileHMMTransitioner, self).__init__(**kwargs)
-        transition_init = [transition_init] if isinstance(transition_init, dict) else transition_init 
+        transition_init = [transition_init] if isinstance(transition_init, dict) else transition_init
         self.transition_init = NoDependency(transition_init)
-        self.flank_init = [flank_init] if not hasattr(flank_init, '__iter__') else flank_init 
+        self.flank_init = [flank_init] if not hasattr(flank_init, '__iter__') else flank_init
         self.prior = priors.ProfileHMMTransitionPrior(dtype=self.dtype) if prior is None else prior
         self.frozen_kernels = frozen_kernels
         self.approx_log_zero = -1000.
@@ -62,7 +62,7 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
             f"The number of flank initializers ({len(self.flank_init)}) should match the number of models ({len(self.lengths)})."
         for init, parts in zip(self.transition_init, self.explicit_transition_kernel_parts):
             _assert_transition_init_kernel(init, parts)
-        
+
     def build(self, input_shape=None):
         if self.built:
             return
@@ -74,12 +74,28 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
         for model_kernel_parts in self._get_kernel_parts_init_list():
             model_transition_kernel = {}
             for i, (part_name, length, init, frozen, shared_with) in enumerate(model_kernel_parts):
-                if (shared_with is None 
+                if (shared_with is None
                     or all(s not in model_transition_kernel for s in shared_with)):
-                    k = self.add_weight(shape=[length], 
-                                        initializer = init,
-                                        name="transition_kernel_"+part_name+"_"+str(i),
-                                        trainable=not frozen)
+                    try:
+                        k = self.add_weight(
+                            shape=[length],
+                            initializer = init,
+                            name="transition_kernel_"+part_name+"_"+str(i),
+                            trainable=not frozen
+                        )
+                    except Exception as e:
+                        if hasattr(init, "value"):
+                            raise ValueError(
+                                "Could not initialize transition kernel "
+                                f"'{part_name}' with initializer '{init}'."
+                                f"Initializer serves shape {init.value.shape} "
+                                f"but required shape is {(length,)}."
+                            ) from e
+                        else:
+                            raise ValueError(
+                                "Could not initialize transition kernel "
+                                f"'{part_name}' with initializer '{init}'."
+                            ) from e
                 else:
                     for s in shared_with:
                         if s in model_transition_kernel:
@@ -87,7 +103,7 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
                             break
                 model_transition_kernel[part_name] = k
             self.transition_kernel.append(model_transition_kernel)
-        
+
         # closely related to the initial probability of the left flank state
         self.flank_init_kernel = [self.add_weight(shape=[1],
                                          initializer=init,
@@ -95,7 +111,7 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
                                       for i,init in enumerate(self.flank_init)]
         self.prior.build()
         self.built = True
-        
+
 
     def recurrent_init(self):
         """ Automatically called before each recurrent run. Should be used for setups that
@@ -104,11 +120,11 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
         self.A_sparse, self.implicit_log_probs, self.log_probs, self.probs = self.make_A_sparse(return_probs = True)
         self.A = tf.sparse.to_dense(self.A_sparse)
         self.A_t = tf.transpose(self.A, (0,2,1))
-        
+
 
     def make_flank_init_prob(self):
         return tf.math.sigmoid(tf.stack([tf.identity(k) for k in self.flank_init_kernel]))
-        
+
 
     def make_initial_distribution(self):
         """Constructs the initial state distribution per model which depends on the transition probabilities.
@@ -121,34 +137,34 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
         log_complement_init_flank_probs = tf.math.log(1-init_flank_probs)
         log_init_dists = []
         for i in range(self.num_models):
-            log_init_match = (self.implicit_log_probs[i]["left_flank_to_match"] 
+            log_init_match = (self.implicit_log_probs[i]["left_flank_to_match"]
                           + log_complement_init_flank_probs[i]
                           - self.log_probs[i]["left_flank_exit"])
-            log_init_right_flank = (self.implicit_log_probs[i]["left_flank_to_right_flank"] 
-                                + log_complement_init_flank_probs[i] 
+            log_init_right_flank = (self.implicit_log_probs[i]["left_flank_to_right_flank"]
+                                + log_complement_init_flank_probs[i]
                                 - self.log_probs[i]["left_flank_exit"])
-            log_init_unannotated_segment = (self.implicit_log_probs[i]["left_flank_to_unannotated_segment"] 
-                                        + log_complement_init_flank_probs[i] 
+            log_init_unannotated_segment = (self.implicit_log_probs[i]["left_flank_to_unannotated_segment"]
+                                        + log_complement_init_flank_probs[i]
                                         - self.log_probs[i]["left_flank_exit"])
-            log_init_terminal = (self.implicit_log_probs[i]["left_flank_to_terminal"] 
-                             + log_complement_init_flank_probs[i] 
+            log_init_terminal = (self.implicit_log_probs[i]["left_flank_to_terminal"]
+                             + log_complement_init_flank_probs[i]
                              - self.log_probs[i]["left_flank_exit"] )
             log_init_insert = tf.zeros((self.lengths[i]-1), dtype=self.dtype) + self.approx_log_zero
-            log_init_dist = tf.concat([log_init_flank_probs[i], 
-                                        log_init_match, 
-                                        log_init_insert, 
-                                        log_init_unannotated_segment, 
-                                        log_init_right_flank, 
+            log_init_dist = tf.concat([log_init_flank_probs[i],
+                                        log_init_match,
+                                        log_init_insert,
+                                        log_init_unannotated_segment,
+                                        log_init_right_flank,
                                         log_init_terminal], axis=0)
-            log_init_dist = tf.pad(log_init_dist, 
-                                   [[0, self.max_num_states - self.num_states[i]]], 
+            log_init_dist = tf.pad(log_init_dist,
+                                   [[0, self.max_num_states - self.num_states[i]]],
                                    constant_values = self.approx_log_zero)
             log_init_dists.append(log_init_dist)
         log_init_dists = tf.stack(log_init_dists, axis=0)
         log_init_dists = tf.expand_dims(log_init_dists, 0)
         init_dists = tf.math.exp(log_init_dists)
         return init_dists
-    
+
 
     def make_transition_kernel(self):
         """Concatenates the kernels of all transition types (e.g. match-to-match) in a consistent order.
@@ -160,13 +176,13 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
             concat_kernel = tf.concat([kernel[part_name] for part_name,_ in part_names], axis=0)
             concat_transition_kernels.append( concat_kernel )
         return concat_transition_kernels
-              
+
 
     def make_probs(self):
-        """Computes all transition probabilities from kernels. Applies a softmax to the kernel values of 
+        """Computes all transition probabilities from kernels. Applies a softmax to the kernel values of
             all outgoing edges of a state.
         Returns:
-            A dictionary that maps transition types to probabilies. 
+            A dictionary that maps transition types to probabilies.
         """
         model_prob_dicts = []
         for indices_explicit, parts, num_states, kernel in zip(self.sparse_transition_indices_explicit,
@@ -174,7 +190,7 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
                                                                 self.num_states_implicit,
                                                                 self.make_transition_kernel()):
             probs_dict = {}
-            indices_explicit = np.concatenate([indices_explicit[part_name] 
+            indices_explicit = np.concatenate([indices_explicit[part_name]
                                                     for part_name,_ in parts], axis=0)
             dense_probs = make_transition_matrix_from_indices(indices_explicit, kernel, num_states)
             probs_vec = tf.gather_nd(dense_probs, indices_explicit)
@@ -190,12 +206,12 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
         probs = self.make_probs()
         log_probs = [{key : tf.math.log(p) for key,p in model_probs.items()} for model_probs in probs]
         return log_probs, probs
-    
-    
+
+
     def make_implicit_log_probs(self):
-        """Computes all logarithmic transition probabilities in the implicit model. 
+        """Computes all logarithmic transition probabilities in the implicit model.
         Returns:
-            A dictionary that maps transition types to probabilies. 
+            A dictionary that maps transition types to probabilies.
         """
         log_probs, probs = self.make_log_probs()
         implicit_log_probs = []
@@ -207,11 +223,11 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
             DD_cumsum = tf.math.cumsum(DD)
             DD = tf.expand_dims(DD_cumsum, 0) - tf.expand_dims(DD_cumsum, 1)
             DM = tf.expand_dims(p["delete_to_match"], 0)
-            M_skip = MD + DD + DM 
+            M_skip = MD + DD + DM
             upper_triangle = tf.linalg.band_part(tf.ones([length-2]*2, dtype=self.dtype), 0, -1)
-            entry_add = _logsumexp(p["begin_to_match"], 
+            entry_add = _logsumexp(p["begin_to_match"],
                                    tf.concat([[self.approx_log_zero], M_skip[0, :-1]], axis=0))
-            exit_add = _logsumexp(p["match_to_end"], 
+            exit_add = _logsumexp(p["match_to_end"],
                                   tf.concat([M_skip[1:,-1], [self.approx_log_zero]], axis=0))
             imp_probs = {}
             imp_probs["match_to_match"] = p["match_to_match"]
@@ -221,44 +237,44 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
             imp_probs["left_flank_loop"] = p["left_flank_loop"]
             imp_probs["right_flank_loop"] = p["right_flank_loop"]
             imp_probs["right_flank_exit"] = p["right_flank_exit"]
-            imp_probs["match_skip"] = tf.boolean_mask(M_skip[1:-1, 1:-1], 
-                                     mask=tf.cast(upper_triangle, dtype=tf.bool)) 
+            imp_probs["match_skip"] = tf.boolean_mask(M_skip[1:-1, 1:-1],
+                                     mask=tf.cast(upper_triangle, dtype=tf.bool))
             imp_probs["left_flank_to_match"] = p["left_flank_exit"] + entry_add
-            imp_probs["left_flank_to_right_flank"] = (p["left_flank_exit"] + M_skip[0, -1] 
+            imp_probs["left_flank_to_right_flank"] = (p["left_flank_exit"] + M_skip[0, -1]
                                                       + p["end_to_right_flank"])
-            imp_probs["left_flank_to_unannotated_segment"] = (p["left_flank_exit"] + M_skip[0, -1] 
+            imp_probs["left_flank_to_unannotated_segment"] = (p["left_flank_exit"] + M_skip[0, -1]
                                                               + p["end_to_unannotated_segment"])
-            imp_probs["left_flank_to_terminal"] = (p["left_flank_exit"] + M_skip[0, -1] 
+            imp_probs["left_flank_to_terminal"] = (p["left_flank_exit"] + M_skip[0, -1]
                                                    + p["end_to_terminal"])
             imp_probs["match_to_unannotated"] = exit_add + p["end_to_unannotated_segment"]
             imp_probs["match_to_right_flank"] = exit_add + p["end_to_right_flank"]
             imp_probs["match_to_terminal"] = exit_add + p["end_to_terminal"]
             imp_probs["unannotated_segment_to_match"] = p["unannotated_segment_exit"] + entry_add
-            imp_probs["unannotated_segment_loop"] = _logsumexp(p["unannotated_segment_loop"], 
-                                                               (p["unannotated_segment_exit"] 
-                                                                    + M_skip[0, -1] 
+            imp_probs["unannotated_segment_loop"] = _logsumexp(p["unannotated_segment_loop"],
+                                                               (p["unannotated_segment_exit"]
+                                                                    + M_skip[0, -1]
                                                                     + p["end_to_unannotated_segment"]))
-            imp_probs["unannotated_segment_to_right_flank"] = (p["unannotated_segment_exit"] 
-                                                               + M_skip[0, -1] 
+            imp_probs["unannotated_segment_to_right_flank"] = (p["unannotated_segment_exit"]
+                                                               + M_skip[0, -1]
                                                                + p["end_to_right_flank"])
-            imp_probs["unannotated_segment_to_terminal"] = (p["unannotated_segment_exit"] 
-                                                            + M_skip[0, -1] 
+            imp_probs["unannotated_segment_to_terminal"] = (p["unannotated_segment_exit"]
+                                                            + M_skip[0, -1]
                                                             + p["end_to_terminal"])
             imp_probs["terminal_self_loop"] = tf.zeros((1), dtype=self.dtype)
             implicit_log_probs.append(imp_probs)
         return implicit_log_probs, log_probs, probs
-    
+
 
     def make_log_A_sparse(self, return_probs=False):
         """
         Returns:
-            A 3D sparse tensor of dense shape (k, q, q) representing 
+            A 3D sparse tensor of dense shape (k, q, q) representing
             the logarithmic transition matricies for k models.
         """
         implicit_log_probs, log_probs, probs = self.make_implicit_log_probs()
         values_all_models, indices_all_models = [], []
-        for i, (p, parts, indices, num_states) in enumerate(zip(implicit_log_probs, 
-                                                           self.implicit_transition_parts, 
+        for i, (p, parts, indices, num_states) in enumerate(zip(implicit_log_probs,
+                                                           self.implicit_transition_parts,
                                                            self.sparse_transition_indices_implicit,
                                                            self.num_states_implicit)):
             #obtain values and indices in model order
@@ -274,30 +290,30 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
         values_all_models = tf.concat(values_all_models, axis=0) #"model major" order
         indices_all_models = np.concatenate(indices_all_models, axis=0)
         log_A_sparse = tf.sparse.SparseTensor(
-                            indices=indices_all_models, 
-                            values=values_all_models, 
+                            indices=indices_all_models,
+                            values=values_all_models,
                             dense_shape=[self.num_models] + [self.max_num_states]*2)
         if return_probs:
             return log_A_sparse, implicit_log_probs, log_probs, probs
         else:
             return log_A_sparse
-    
+
 
     def make_log_A(self):
         """
         Returns:
-            A 3D dense tensor of shape (k, q, q) representing 
+            A 3D dense tensor of shape (k, q, q) representing
             the logarithmic transition matricies for k models.
         """
         log_A = self.make_log_A_sparse()
         log_A = tf.sparse.to_dense(log_A, default_value=self.approx_log_zero)
         return log_A
-    
+
 
     def make_A_sparse(self, return_probs=False):
         """
         Returns:
-            A 3D sparse tensor of dense shape (k, q, q) representing 
+            A 3D sparse tensor of dense shape (k, q, q) representing
             the transition matricies for k models.
         """
         if return_probs:
@@ -305,29 +321,29 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
         else:
             log_A_sparse = self.make_log_A_sparse(False)
         A_sparse = tf.sparse.SparseTensor(
-                            indices=log_A_sparse.indices, 
-                            values=tf.math.exp(log_A_sparse.values), 
+                            indices=log_A_sparse.indices,
+                            values=tf.math.exp(log_A_sparse.values),
                             dense_shape=log_A_sparse.dense_shape)
         if return_probs:
             return A_sparse, *p
         else:
             return A_sparse
-        
+
 
     def make_A(self):
         """
         Returns:
-            A 3D dense tensor of shape (k, q, q) representing 
+            A 3D dense tensor of shape (k, q, q) representing
             the transition matricies for k models.
         """
         A = self.make_A_sparse()
         A = tf.sparse.to_dense(A)
         return A
-        
+
 
     def call(self, inputs):
-        """ 
-        Args: 
+        """
+        Args:
                 inputs: Shape (k, b, q)
         Returns:
                 Shape (k, b, q)
@@ -337,11 +353,11 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
             return tf.matmul(inputs, self.A_t)
         else:
             return tf.matmul(inputs, self.A)
-    
+
 
     def get_prior_log_densities(self):
         return self.prior(self.make_probs(), self.make_flank_init_prob())
-    
+
 
     def duplicate(self, model_indices=None, share_kernels=False):
         if model_indices is None:
@@ -358,37 +374,37 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
                                         flank_init = sub_flank_init,
                                         prior = self.prior,
                                         frozen_kernels = self.frozen_kernels,
-                                        dtype = self.dtype) 
+                                        dtype = self.dtype)
         if share_kernels:
             transitioner_copy.transition_kernel = self.transition_kernel
             transitioner_copy.flank_init_kernel = self.flank_init_kernel
             transitioner_copy.built = True
         return transitioner_copy
-        
-    
+
+
     def _get_kernel_parts_init_list(self):
         """ Returns a list of lists that specifies initialization data to the cell for all transition kernels.
-            The outer list contains one list per model. The inner list contains 5-tuples: 
+            The outer list contains one list per model. The inner list contains 5-tuples:
             (part_name : str, length : int, init : tf.initializer, frozen : bool, shared_with : list or None)
         """
         #assume that shared_kernels contains each name at most once
-        shared_kernels = [ ["right_flank_loop", "left_flank_loop"], 
+        shared_kernels = [ ["right_flank_loop", "left_flank_loop"],
                            ["right_flank_exit", "left_flank_exit"] ]
         #map each name to the list it is contained in
-        shared_kernel_dict = {} 
-        for shared in shared_kernels: 
+        shared_kernel_dict = {}
+        for shared in shared_kernels:
             for name in shared:
                 shared_kernel_dict[name] = shared
         kernel_part_list = []
         for init, parts in zip(self.transition_init, self.explicit_transition_kernel_parts):
-            kernel_part_list.append( [(part_name, 
-                                     length, 
-                                     init[part_name], 
-                                     self.frozen_kernels.get(part_name, False), 
-                                     shared_kernel_dict.get(part_name, None)) 
+            kernel_part_list.append( [(part_name,
+                                     length,
+                                     init[part_name],
+                                     self.frozen_kernels.get(part_name, False),
+                                     shared_kernel_dict.get(part_name, None))
                                         for part_name, length in parts] )
         return kernel_part_list
-        
+
 
     def _pad_and_stack(self, dicts):
         # takes a list of dictionaries with the same keys that map to arrays of different lengths
@@ -399,13 +415,13 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
         for d in dicts:
             for k,a in d.items():
                 transposed.setdefault(k, []).append(a)
-        padded_and_stacked = {k : tf.keras.preprocessing.sequence.pad_sequences(arrays, 
-                                                                                dtype=arrays[0].dtype.name, 
+        padded_and_stacked = {k : tf.keras.preprocessing.sequence.pad_sequences(arrays,
+                                                                                dtype=arrays[0].dtype.name,
                                                                                 padding="post",
-                                                                                value=self.approx_log_zero) 
+                                                                                value=self.approx_log_zero)
                               for k,arrays in transposed.items()}
         return padded_and_stacked
-    
+
 
     def get_config(self):
         config = super(ProfileHMMTransitioner, self).get_config()
@@ -420,7 +436,7 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
             "frozen_kernels" : self.frozen_kernels
         })
         return config
-    
+
 
     @classmethod
     def from_config(cls, config):
@@ -436,11 +452,11 @@ class ProfileHMMTransitioner(tf.keras.layers.Layer):
         emitter = cls(**config)
         emitter.set_lengths(lengths)
         return emitter
-    
+
 
     def __repr__(self):
         return f"ProfileHMMTransitioner(\n transition_init={config.as_str(self.transition_init[0], 2, '    ', ' , ')},\n flank_init={self.flank_init[0]},\n prior={self.prior},\n frozen_kernels={self.frozen_kernels})"
-    
+
 
 
 def make_transition_matrix_from_indices(indices, kernel, num_states, approx_log_zero = -1000.):
@@ -448,7 +464,7 @@ def make_transition_matrix_from_indices(indices, kernel, num_states, approx_log_
     Args:
         indices: A 2D tensor of shape (num_transitions, 2) that specifies the indices of the kernel.
         kernel: A 1D tensor of shape (num_transitions) that contains the kernel values.
-        num_states: The number of states in the model. 
+        num_states: The number of states in the model.
     Returns:
         A dense probabilistic transition matrix of shape (num_states, num_states).
     """
@@ -460,8 +476,8 @@ def make_transition_matrix_from_indices(indices, kernel, num_states, approx_log_
     #don't allow too small values in the kernel
     kernel_row_major = tf.maximum(kernel_row_major, approx_log_zero+1)
     sparse_kernel =  tf.sparse.SparseTensor(
-                                indices=indices_row_major, 
-                                values=kernel_row_major, 
+                                indices=indices_row_major,
+                                values=kernel_row_major,
                                 dense_shape=[num_states]*2)
     dense_kernel = tf.sparse.to_dense(sparse_kernel, default_value=approx_log_zero)
     #softmax that ignores non-existing transitions
@@ -474,25 +490,25 @@ def make_transition_matrix_from_indices(indices, kernel, num_states, approx_log_
     return dense_probs
 
 
-def _make_explicit_transition_kernel_parts(length): 
-    return [("begin_to_match", length), 
+def _make_explicit_transition_kernel_parts(length):
+    return [("begin_to_match", length),
              ("match_to_end", length),
-             ("match_to_match", length-1), 
+             ("match_to_match", length-1),
              ("match_to_insert", length-1),
-             ("insert_to_match", length-1), 
+             ("insert_to_match", length-1),
              ("insert_to_insert", length-1),
             #consider begin and end states as additional match states:
-             ("match_to_delete", length), 
+             ("match_to_delete", length),
              ("delete_to_match", length),
              ("delete_to_delete", length-1),
-             ("left_flank_loop", 1), 
+             ("left_flank_loop", 1),
              ("left_flank_exit", 1),
-             ("unannotated_segment_loop", 1), 
+             ("unannotated_segment_loop", 1),
              ("unannotated_segment_exit", 1),
-             ("right_flank_loop", 1), 
+             ("right_flank_loop", 1),
              ("right_flank_exit", 1),
-             ("end_to_unannotated_segment", 1), 
-             ("end_to_right_flank", 1), 
+             ("end_to_unannotated_segment", 1),
+             ("end_to_right_flank", 1),
              ("end_to_terminal", 1)]
 
 
@@ -522,7 +538,7 @@ def _make_implicit_transition_parts(length):
 
 def _make_sparse_transition_indices_implicit(length):
     """ Returns 2D indices for the kernel of a sparse (2L+3 x 2L+3) transition matrix without silent states.
-        Assumes the following ordering of states: 
+        Assumes the following ordering of states:
         LEFT_FLANK, MATCH x length, INSERT x length-1, UNANNOTATED_SEGMENT, RIGHT_FLANK, TERMINAL
     """
     a = np.arange(length+1, dtype=np.int64)
@@ -539,7 +555,7 @@ def _make_sparse_transition_indices_implicit(length):
         "left_flank_to_unannotated_segment" : [[left_flank, unanno_segment]],
         "left_flank_to_terminal" : [[left_flank, terminal]],
         "match_to_match" : np.stack([a[1:-1], a[1:-1]+1], axis=1),
-        "match_skip" : np.concatenate([np.stack([zeros[:-i-1]+i, 
+        "match_skip" : np.concatenate([np.stack([zeros[:-i-1]+i,
                                      np.arange(i+2, length+1)], axis=1)
             for i in range(1, length-1)
                 ], axis=0),
@@ -561,7 +577,7 @@ def _make_sparse_transition_indices_implicit(length):
 def _make_sparse_transition_indices_explicit(length):
     """ Returns 2D indices for the (linear) kernel of a sparse (3L+3 x 3L+3) transition matrix with silent states.
         Assumes the following ordering of states:
-        LEFT_FLANK, MATCH x length, INSERT x length-1, UNANNOTATED_SEGMENT, 
+        LEFT_FLANK, MATCH x length, INSERT x length-1, UNANNOTATED_SEGMENT,
         RIGHT_FLANK, TERMINAL, BEGIN, END, DELETE x length
     """
     a = np.arange(length+1, dtype=np.int64)
@@ -594,13 +610,13 @@ def _make_sparse_transition_indices_explicit(length):
         "end_to_right_flank" : [[end, right_flank]],
         "end_to_terminal" : [[end, terminal]] }
     return indices_dict
-            
+
 def _assert_transition_init_kernel(kernel_init, parts):
     for part_name,_ in parts:
         assert part_name in kernel_init, "No initializer found for kernel " + part_name + "."
     for part_name in kernel_init.keys():
         assert part_name in [part[0] for part in parts], part_name + " is in the kernel init dict but there is no kernel part matching it. Wrong spelling?"
-        
+
 def _logsumexp(x, y):
     return tf.math.log(tf.math.exp(x) +  tf.math.exp(y))
 

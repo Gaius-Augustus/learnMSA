@@ -1,48 +1,67 @@
+import argparse
 import math
 import os
 
 import numpy as np
 
 import learnMSA.run.util as util
-from learnMSA.run.args import LearnMSAArgumentParser, parse_args
+from learnMSA.run.args import parse_args
 
 #hide tensorflow messages and warnings
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3" 
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
 
 def run_main():
-    
+
     version = util.get_version()
     parser = parse_args(version)
     args = parser.parse_args()
 
     if not args.silent:
         print(parser.description)
-    
+
     util.setup_devices(args.cuda_visible_devices, args.silent)
 
-    from ..msa_hmm import Align, Training, Visualize
-    from ..msa_hmm.SequenceDataset import SequenceDataset
-    
+    from ..msa_hmm import Align, Training, Visualize, MSA2HMM, Initializers
+    from ..msa_hmm.SequenceDataset import SequenceDataset, AlignedDataset
+
     if args.logo or args.logo_gif:
         os.makedirs(args.logo_path, exist_ok=True)
         if args.logo_gif:
             os.makedirs(args.logo_path+"/frames/", exist_ok=True)
 
+    if args.from_msa is not None:
+        with AlignedDataset(args.from_msa, "fasta") as input_msa:
+            values = MSA2HMM.PHMMValueSet.from_msa(
+                input_msa,
+                match_threshold=args.match_threshold,
+                global_factor=args.global_factor,
+            )
+        initializers = Initializers.make_initializers_from(
+            values, num_models=args.num_model, random_scale=args.random_scale
+        )
+        initial_model_length_cb = lambda data, config: \
+                                    [values.matches()]*args.num_model
+    else:
+        initializers = None
+        initial_model_length_cb = None
+
     try:
         with SequenceDataset(
             args.input_file, "fasta", indexed=args.indexed_data
         ) as data:
-            # check if the input data is valid
+            # Check if the input data is valid
             data.validate_dataset()
-            # merge parsed arguments into a learnMSA configuration 
-            config = get_config(args, data)
+
+            # Merge parsed arguments into a learnMSA configuration
+            config = get_config(args, data, initializers)
             model_gen, batch_gen = get_generators(args, data, config)
             sequence_weights, clusters = get_clustering(args, config)
-            # set up default initial model length when not using warmup
+
+            # Set up default initial model length when not using warmup
             if args.logo_gif:
                 def get_initial_model_lengths_gif(
-                        data: SequenceDataset, 
+                        data: SequenceDataset,
                         config
                     ):
                     # initial model length
@@ -50,14 +69,20 @@ def run_main():
                         data.seq_lens, q=config["length_init_quantile"])
                     model_length = max(3, int(model_length))
                     return [model_length]
-                initial_model_length_cb = get_initial_model_lengths_gif
-            else:
+                if initial_model_length_cb is None:
+                    initial_model_length_cb = get_initial_model_lengths_gif
+            elif initial_model_length_cb is None:
                 initial_model_length_cb = Align.get_initial_model_lengths
 
+            if args.from_msa is not None:
+                config["epochs"] = [3]
+                config["learning_rate"] = 0.01
+
+            # Run a training to align the sequences
             alignment_model = Align.run_learnMSA(
                 data,
                 out_filename = args.output_file,
-                config = config, 
+                config = config,
                 model_generator=model_gen,
                 batch_generator=batch_gen,
                 align_insertions=not args.unaligned_insertions,
@@ -75,8 +100,8 @@ def run_main():
                 alignment_model.write_models_to_file(args.save_model)
             if args.logo:
                 Visualize.plot_and_save_logo(
-                    alignment_model, 
-                    alignment_model.best_model, 
+                    alignment_model,
+                    alignment_model.best_model,
                     args.logo_path + "/logo.pdf"
                 )
             if args.dist_out:
@@ -85,9 +110,9 @@ def run_main():
                 anc_probs_layer = alignment_model.encoder_model.layers[i]
                 tau_all = []
                 for (seq, indices), _ in Training.make_dataset(
-                    alignment_model.indices, 
-                    alignment_model.batch_generator, 
-                    alignment_model.batch_size, 
+                    alignment_model.indices,
+                    alignment_model.batch_generator,
+                    alignment_model.batch_size,
                     shuffle=False
                 ):
                     seq = tf.transpose(seq, [1, 0, 2])
@@ -107,8 +132,9 @@ def run_main():
 
 
 def get_config(
-    args : LearnMSAArgumentParser, 
-    data : "SequenceDataset"
+    args : argparse.Namespace,
+    data : "SequenceDataset",
+    initializers : "PHMMInitializerSet | None" = None,
 ) -> dict:
 
     from ..msa_hmm import Configuration, Initializers
@@ -140,7 +166,11 @@ def get_config(
         V2_temperature=args.temperature,
         inv_gamma_alpha=args.inverse_gamma_alpha,
         inv_gamma_beta=args.inverse_gamma_beta,
-        plm_cache_dir=args.plm_cache_dir
+        plm_cache_dir=args.plm_cache_dir,
+        emission_init=initializers.match_emissions if initializers else None,
+        insertion_init=initializers.insert_emissions if initializers else None,
+        transition_init=initializers.transitions if initializers else None,
+        flank_init=initializers.start if initializers else None,
     )
 
     if args.batch_size > 0:
@@ -184,11 +214,11 @@ def get_config(
     else:
         config["crop_long_seqs"] = int(args.crop)
 
-    return config 
+    return config
 
 def get_generators(
-    args : LearnMSAArgumentParser, 
-    data : "SequenceDataset", 
+    args : argparse.Namespace,
+    data : "SequenceDataset",
     config : dict
 ):
     if args.use_language_model:
@@ -196,8 +226,8 @@ def get_generators(
         import learnMSA.protein_language_models.Common as Common
         import learnMSA.protein_language_models.EmbeddingBatchGenerator as EmbeddingBatchGenerator
 
-        # we have to define a special model- and batch generator if using a 
-        # language model because the emission probabilities are computed 
+        # we have to define a special model- and batch generator if using a
+        # language model because the emission probabilities are computed
         # differently and the LM requires specific inputs
         model_gen = EmbeddingBatchGenerator.make_generic_embedding_model_generator(
             config["scoring_model_config"].dim)
@@ -212,7 +242,7 @@ def get_generators(
     return model_gen, batch_gen
 
 def get_clustering(
-    args : LearnMSAArgumentParser, 
+    args : argparse.Namespace,
     config : dict
 ):
     from ..msa_hmm import Align
@@ -220,9 +250,9 @@ def get_clustering(
         os.makedirs(args.cluster_dir, exist_ok=True)
         try:
             sequence_weights, clusters = Align.compute_sequence_weights(
-                args.input_file, 
-                args.cluster_dir, 
-                config["cluster_seq_id"], 
+                args.input_file,
+                args.cluster_dir,
+                config["cluster_seq_id"],
                 return_clusters=True
             )
         except Exception as e:
@@ -231,7 +261,7 @@ def get_clustering(
     else:
         sequence_weights, clusters = None, None
     return sequence_weights, clusters
- 
-            
+
+
 if __name__ == '__main__':
     run_main()

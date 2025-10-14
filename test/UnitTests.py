@@ -1,7 +1,6 @@
 import sys
 import os
 
-from learnMSA.msa_hmm.MSA2HMM import msa_to_counts
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 #do not print tf info/warnings on import
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
@@ -1791,8 +1790,11 @@ class TestModelToFile(unittest.TestCase):
 
         #remove any saved models from previous tests
         shutil.rmtree(test_filepath, ignore_errors=True)
-        os.remove(test_filepath+".keras")
-        os.remove(test_filepath+".zip")
+        try:
+            os.remove(test_filepath+".keras")
+            os.remove(test_filepath+".zip")
+        except FileNotFoundError:
+            pass
 
         #make a model with some custom parameters to save
         model_len = 10
@@ -2151,7 +2153,7 @@ class MSA2HMMTest(unittest.TestCase):
         ])
 
     def test_msa_to_counts(self) -> None:
-        from learnMSA.msa_hmm.MSA2HMM import msa_to_counts
+        from learnMSA.msa_hmm.MSA2HMM import PHMMValueSet
         sequences = [
             ("seq1", "----AA---AA--"),
             ("seq2", "A---AC-C---A-"),
@@ -2160,14 +2162,14 @@ class MSA2HMMTest(unittest.TestCase):
             ("seq5", "--ACAAA-AA--A"),
         ]
         with AlignedDataset(aligned_sequences=sequences) as data:
-            counts_local = msa_to_counts(
-                data, match_threshold=0.5, global_prob=0.0
+            counts_local = PHMMValueSet.from_msa(
+                data, match_threshold=0.5,global_factor=0.0
             )
-            counts_global = msa_to_counts(
-                data, match_threshold=0.5, global_prob=1.0
+            counts_global = PHMMValueSet.from_msa(
+                data, match_threshold=0.5,global_factor=1.0
             )
-            counts_mix = msa_to_counts(
-                data, match_threshold=0.5, global_prob=0.6
+            counts_mix = PHMMValueSet.from_msa(
+                data, match_threshold=0.5,global_factor=0.6
             )
             a_ind = data.alphabet.index("A")
             c_ind = data.alphabet.index("C")
@@ -2314,7 +2316,7 @@ class MSA2HMMTest(unittest.TestCase):
         )
 
     def test_log_normalize(self) -> None:
-        from learnMSA.msa_hmm.MSA2HMM import msa_to_counts, PHMMValueSet
+        from learnMSA.msa_hmm.MSA2HMM import PHMMValueSet
         sequences = [
             ("seq1", "----AA---AA--"),
             ("seq2", "A---AC-C---A-"),
@@ -2323,7 +2325,7 @@ class MSA2HMMTest(unittest.TestCase):
             ("seq5", "--ACAAA-AA--A"),
         ]
         with AlignedDataset(aligned_sequences=sequences) as data:
-            probs = msa_to_counts(data, global_prob=1.0).add_pseudocounts(
+            probs = PHMMValueSet.from_msa(data,global_factor=1.0).add_pseudocounts(
                 unannotated=1.0, insert_transition=1.0,
             ).normalize()
             a_ind = data.alphabet.index("A")
@@ -2367,7 +2369,7 @@ class MSA2HMMTest(unittest.TestCase):
 
 
     def test_threshold_too_high(self) -> None:
-        from learnMSA.msa_hmm.MSA2HMM import msa_to_counts
+        from learnMSA.msa_hmm.MSA2HMM import PHMMValueSet
         sequences = [
             ("seq1", "----AA---AA--"),
             ("seq2", "A---AC-C---A-"),
@@ -2377,10 +2379,10 @@ class MSA2HMMTest(unittest.TestCase):
         ]
         with AlignedDataset(aligned_sequences=sequences) as data:
             with self.assertRaises(AssertionError):
-                counts = msa_to_counts(data, match_threshold=1.0)
+                counts = PHMMValueSet.from_msa(data, match_threshold=1.0)
 
     def test_threshold_very_low(self) -> None:
-        from learnMSA.msa_hmm.MSA2HMM import msa_to_counts
+        from learnMSA.msa_hmm.MSA2HMM import PHMMValueSet
         sequences = [
             ("seq1", "----AA---AA--"),
             ("seq2", "A---AC-C---A-"),
@@ -2389,7 +2391,7 @@ class MSA2HMMTest(unittest.TestCase):
             ("seq5", "--ACAAA-AA--A"),
         ]
         with AlignedDataset(aligned_sequences=sequences) as data:
-            counts = msa_to_counts(data, match_threshold=0.0)
+            counts = PHMMValueSet.from_msa(data, match_threshold=0.0)
             # all columns are match states
             assert counts.matches() == len(sequences[0][1])
 

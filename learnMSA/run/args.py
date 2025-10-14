@@ -249,35 +249,57 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         "--no_sequence_weights",
         dest="no_sequence_weights",
         action='store_true',
-        help="Do not use sequence weights and strip mmseqs2 from requirements."\
+        help="Do not use sequence weights and strip mmseqs2 from requirements."
             " In general not recommended."
     )
 
     init_msa_group = parser.add_argument_group("Initialize with existing MSA")
     init_msa_group.add_argument(
-        "--from-msa",
-        dest="from-msa",
+        "--from_msa",
+        dest="from_msa",
         type=Path,
         default=None,
-        help="If set, the initial HMM parameters will inferred from the "\
+        help="If set, the initial HMM parameters will inferred from the "
             "provided MSA in FASTA format."
     )
     init_msa_group.add_argument(
-        "--match-threshold",
-        dest="match-threshold",
+        "--match_threshold",
+        dest="match_threshold",
         type=float,
         default=0.5,
-        help="When inferring HMM parameters from an MSA, a column is " \
-            "considered a match state if its occupancy (fraction of non-gap "\
+        help="When inferring HMM parameters from an MSA, a column is "
+            "considered a match state if its occupancy (fraction of non-gap "
             "characters) is at least this value. (default: %(default)s)"
     )
     init_msa_group.add_argument(
-        "--no-finetuning",
+        "--global_factor",
+        dest="global_factor",
+        type=float,
+        default=0.1,
+        help="A value in [0, 1] that describes the degree to which the MSA"
+        " provided with --from_msa is considered a global alignment. This "
+        "value is used as a mixing factor and affects how states are counted "
+        "when the data contains fragmentary sequences. A global alignment "
+        "counts flanks as deletions, while a local alignment counts them as "
+        "jumps into the profile using only a single edge. "
+        "(default: %(default)s)"
+    )
+    init_msa_group.add_argument(
+        "--no_finetuning",
         dest="no_finetuning",
         action='store_true',
-        help="If set, a model that was initialized using --from-msa will not "\
+        help="If set, a model that was initialized using --from_msa will not "\
             "be fine-tuned on the input sequences. learnMSA will directly "\
             "decode an alignment using the parameters inferred from the MSA."
+    )
+    init_msa_group.add_argument(
+        "--random_scale",
+        dest="random_scale",
+        type=float,
+        default=0.02,
+        help="When initializing from an MSA, the initial parameters are " \
+            "slightly perturbed by random noise. This parameter controls the " \
+            "scale of the noise. (default: %(default)s)"
     )
 
     plm_group = parser.add_argument_group("Protein language model integration")
