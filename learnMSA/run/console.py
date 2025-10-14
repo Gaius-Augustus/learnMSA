@@ -36,12 +36,27 @@ def run_main():
                 input_msa,
                 match_threshold=args.match_threshold,
                 global_factor=args.global_factor,
-            )
+            ).add_pseudocounts(
+                aa=1e-3,
+                match_transition=1e-3,
+                insert_transition=1e-3,
+                delete_transition=1e-3,
+                begin_to_match=1e-3,
+                match_to_end=1e-3,
+                left_flank=1e-3,
+                right_flank=1e-3,
+                unannotated=1e-3,
+                end=1e-3,
+                flank_start=1e-3,
+            ).normalize().log()
         initializers = Initializers.make_initializers_from(
             values, num_models=args.num_model, random_scale=args.random_scale
         )
         initial_model_length_cb = lambda data, config: \
                                     [values.matches()]*args.num_model
+        if not args.silent:
+            print(f"Initialized from MSA '{args.from_msa}' with "
+                  f"{values.matches()} match states.")
     else:
         initializers = None
         initial_model_length_cb = None
@@ -76,7 +91,8 @@ def run_main():
 
             if args.from_msa is not None:
                 config["epochs"] = [3]
-                config["learning_rate"] = 0.01
+                config["learning_rate"] = 1e-2
+                config["max_surgery_runs"] = 1
 
             # Run a training to align the sequences
             alignment_model = Align.run_learnMSA(
