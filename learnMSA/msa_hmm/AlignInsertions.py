@@ -24,7 +24,7 @@ def find_long_insertions_and_get_sequences(data : SequenceDataset, lens, starts,
         id_fragment_pairs = []
         to_delete = [] #keeps track of fragments that are too long
         for j in range(lengths.size):
-            aa_seq = str(data.get_record(which[j]).seq).upper()
+            aa_seq = data.get_standardized_seq(which[j])
             segment = aa_seq[start[j] : start[j] + lengths[j]]
             #sometimes segments look strange (like ones consisting only of X)
             #this can cause problems in the downstream aligner, omit these segments

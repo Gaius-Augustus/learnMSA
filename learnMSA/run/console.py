@@ -22,7 +22,7 @@ def run_main():
 
     util.setup_devices(args.cuda_visible_devices, args.silent)
 
-    from ..msa_hmm import Align, Training, Visualize, MSA2HMM, Initializers
+    from ..msa_hmm import Align, Training, Visualize, MSA2HMM, Initializers, Priors
     from ..msa_hmm.SequenceDataset import SequenceDataset, AlignedDataset
 
     if args.logo or args.logo_gif:
@@ -31,26 +31,44 @@ def run_main():
             os.makedirs(args.logo_path+"/frames/", exist_ok=True)
 
     if args.from_msa is not None:
+        # Load priors to get pseudocounts
+        aa_prior = Priors.AminoAcidPrior()
+        aa_prior.build()
+        aa_psc = aa_prior.emission_dirichlet_mix.make_alpha()[0].numpy()
+        # Add counts for special amino acids
+        aa_psc = np.pad(aa_psc, (0, 3), constant_values=1)
+        transition_prior = Priors.ProfileHMMTransitionPrior()
+        transition_prior.build()
+        match_psc = transition_prior.match_dirichlet.make_alpha()[0].numpy()
+        ins_psc = transition_prior.insert_dirichlet.make_alpha()[0].numpy()
+        del_psc = transition_prior.delete_dirichlet.make_alpha()[0].numpy()
+        del aa_prior
+        del transition_prior
+
+        # Load the MSA and count
         with AlignedDataset(args.from_msa, "fasta") as input_msa:
             values = MSA2HMM.PHMMValueSet.from_msa(
                 input_msa,
                 match_threshold=args.match_threshold,
                 global_factor=args.global_factor,
             ).add_pseudocounts(
-                aa=1e-3,
-                match_transition=1e-3,
-                insert_transition=1e-3,
-                delete_transition=1e-3,
-                begin_to_match=1e-3,
-                match_to_end=1e-3,
-                left_flank=1e-3,
-                right_flank=1e-3,
-                unannotated=1e-3,
-                end=1e-3,
-                flank_start=1e-3,
+                aa=aa_psc,
+                match_transition=match_psc,
+                insert_transition=ins_psc,
+                delete_transition=del_psc,
+                begin_to_match=1,
+                match_to_end=1,
+                left_flank=ins_psc,
+                right_flank=ins_psc,
+                unannotated=ins_psc,
+                end=1,
+                flank_start=ins_psc,
             ).normalize().log()
         initializers = Initializers.make_initializers_from(
-            values, num_models=args.num_model, random_scale=args.random_scale
+            values,
+            num_models=args.num_model,
+            # Apply random noise only when using multiple models
+            random_scale=args.random_scale if args.num_model > 1 else 0.0,
         )
         initial_model_length_cb = lambda data, config: \
                                     [values.matches()]*args.num_model
