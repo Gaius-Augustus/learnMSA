@@ -76,7 +76,7 @@ class PHMMValueSet:
             # Sum over insert states
             insert_counts = np.sum(insert_counts, axis=0)
         else:
-            insert_counts = np.zeros((len(data.alphabet)), dtype=np.float32)
+            insert_counts = np.zeros(counts.shape[-1], dtype=np.float32)
 
         # -1 indicates a position that has no meaning in the HMM such as an
         # insertion with a "hole"
