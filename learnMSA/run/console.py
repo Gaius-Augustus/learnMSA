@@ -31,19 +31,26 @@ def run_main():
             os.makedirs(args.logo_path+"/frames/", exist_ok=True)
 
     if args.from_msa is not None:
-        # Load priors to get pseudocounts
-        aa_prior = Priors.AminoAcidPrior()
-        aa_prior.build()
-        aa_psc = aa_prior.emission_dirichlet_mix.make_alpha()[0].numpy()
-        # Add counts for special amino acids
-        aa_psc = np.pad(aa_psc, (0, 3), constant_values=1)
-        transition_prior = Priors.ProfileHMMTransitionPrior()
-        transition_prior.build()
-        match_psc = transition_prior.match_dirichlet.make_alpha()[0].numpy()
-        ins_psc = transition_prior.insert_dirichlet.make_alpha()[0].numpy()
-        del_psc = transition_prior.delete_dirichlet.make_alpha()[0].numpy()
-        del aa_prior
-        del transition_prior
+
+        if args.no_pseudocounts:
+            # Load priors to get pseudocounts
+            aa_prior = Priors.AminoAcidPrior()
+            aa_prior.build()
+            aa_psc = aa_prior.emission_dirichlet_mix.make_alpha()[0].numpy()
+            # Add counts for special amino acids
+            aa_psc = np.pad(aa_psc, (0, 3), constant_values=1e-6)
+            transition_prior = Priors.ProfileHMMTransitionPrior()
+            transition_prior.build()
+            match_psc = transition_prior.match_dirichlet.make_alpha()[0].numpy()
+            ins_psc = transition_prior.insert_dirichlet.make_alpha()[0].numpy()
+            del_psc = transition_prior.delete_dirichlet.make_alpha()[0].numpy()
+            del aa_prior
+            del transition_prior
+        else:
+            aa_psc = 1e-6
+            match_psc = 1e-6
+            ins_psc = 1e-6
+            del_psc = 1e-6
 
         # Load the MSA and count
         with AlignedDataset(args.from_msa, "fasta") as input_msa:
@@ -56,12 +63,12 @@ def run_main():
                 match_transition=match_psc,
                 insert_transition=ins_psc,
                 delete_transition=del_psc,
-                begin_to_match=1,
-                match_to_end=1,
+                begin_to_match=1e-6,
+                match_to_end=1e-6,
                 left_flank=ins_psc,
                 right_flank=ins_psc,
                 unannotated=ins_psc,
-                end=1,
+                end=1e-6,
                 flank_start=ins_psc,
             ).normalize().log()
         initializers = Initializers.make_initializers_from(
@@ -106,11 +113,6 @@ def run_main():
                     initial_model_length_cb = get_initial_model_lengths_gif
             elif initial_model_length_cb is None:
                 initial_model_length_cb = Align.get_initial_model_lengths
-
-            if args.from_msa is not None:
-                config["epochs"] = [3]
-                config["learning_rate"] = 1e-2
-                config["max_surgery_runs"] = 1
 
             # Run a training to align the sequences
             alignment_model = Align.run_learnMSA(
@@ -210,7 +212,7 @@ def get_config(
     if args.batch_size > 0:
         config["batch_size"] = args.batch_size
     config["num_models"] = 1 if args.logo_gif else args.num_model
-    config["max_surgery_runs"] = args.max_surgery_runs
+    config["max_surgery_runs"] = args.max_iterations
     config["length_init_quantile"] = args.length_init_quantile
     config["surgery_quantile"] = args.surgery_quantile
     config["min_surgery_seqs"] = args.min_surgery_seqs

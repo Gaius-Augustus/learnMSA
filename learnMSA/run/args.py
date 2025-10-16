@@ -63,13 +63,13 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         "-s",
         "--silent",
         dest="silent",
-        action='store_true',
+        action="store_true",
         help="Suppresses all standard output messages."
     )
     io_group.add_argument(
         "--noA2M",
         dest="noA2M",
-        action='store_true',
+        action="store_true",
         help="If set, the output will use only upper case letters and \"-\" " \
             "for gaps. Otherwise, lower case letters are used for insertions " \
             "and \".\" denotes an insertion in another sequence."
@@ -130,23 +130,43 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         help="The learning rate used during gradient descent. "\
             "(default: %(default)s)"
     )
+
+    class EpochsAction(argparse.Action):
+        def __call__(
+            self,
+            parser: argparse.ArgumentParser,
+            namespace: argparse.Namespace,
+            values: list[int],
+            option_string: str | None = None
+        ) -> None:
+            if len(values) == 1:
+                # Single integer: use for all 3 entries
+                setattr(namespace, self.dest, [values[0]] * 3)
+            elif len(values) == 3:
+                # Three integers: use as provided
+                setattr(namespace, self.dest, values)
+            else:
+                parser.error(f"{option_string} requires either 1 or 3 integers")
+
     train_group.add_argument(
         "--epochs",
         dest="epochs",
         type=int,
-        nargs=3,
+        nargs='+',
+        action=EpochsAction,
         default=[10, 2, 10],
         help="Scheme for the number of training epochs during the first, an " \
-            "intermediate and the last iteration (expects 3 integers in this " \
-            "order). (default: %(default)s)"
+            "intermediate and the last iteration. Provide either a single " \
+            "integer (used for all iterations) or 3 integers (for first, " \
+            "intermediate, and last iteration). (default: %(default)s)"
     )
     train_group.add_argument(
-        "--max_surgery_runs",
-        dest="max_surgery_runs",
+        "--max_iterations",
+        dest="max_iterations",
         type=int,
         default=2,
-        help="Maximum number of model surgery iterations. " \
-            "(default: %(default)s)"
+        help="Maximum number of training iterations. If greater than 2, model"
+        "surgery will be applied. (default: %(default)s)"
     )
     train_group.add_argument(
         "--length_init_quantile",
@@ -208,13 +228,13 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
     train_group.add_argument(
         "--indexed_data",
         dest="indexed_data",
-        action='store_true',
+        action="store_true",
         help="Don't load all data into memory at once at the cost of training" \
             " time.")
     train_group.add_argument(
         "--unaligned_insertions",
         dest="unaligned_insertions",
-        action='store_true',
+        action="store_true",
         help="Insertions will be left unaligned."
     )
     train_group.add_argument(
@@ -242,13 +262,13 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
     train_group.add_argument(
         "--frozen_insertions",
         dest="frozen_insertions",
-        action='store_true',
+        action="store_true",
         help="Insertions will be frozen during training."
     )
     train_group.add_argument(
         "--no_sequence_weights",
         dest="no_sequence_weights",
-        action='store_true',
+        action="store_true",
         help="Do not use sequence weights and strip mmseqs2 from requirements."
             " In general not recommended."
     )
@@ -287,7 +307,7 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
     init_msa_group.add_argument(
         "--no_finetuning",
         dest="no_finetuning",
-        action='store_true',
+        action="store_true",
         help="If set, a model that was initialized using --from_msa will not "\
             "be fine-tuned on the input sequences. learnMSA will directly "\
             "decode an alignment using the parameters inferred from the MSA."
@@ -301,12 +321,18 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
             "slightly perturbed by random noise. This parameter controls the " \
             "scale of the noise. (default: %(default)s)"
     )
+    init_msa_group.add_argument(
+        "--no_pseudocounts",
+        dest="no_pseudocounts",
+        action="store_true",
+        help="If set, no pseudocounts will be used when initializing from an MSA."
+    )
 
     plm_group = parser.add_argument_group("Protein language model integration")
     plm_group.add_argument(
         "--use_language_model",
         dest="use_language_model",
-        action='store_true',
+        action="store_true",
         help="Uses a large protein lanague model to generate per-token "\
             "embeddings that guide the MSA step. (default: %(default)s)"
     )
@@ -366,7 +392,7 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
     plm_group.add_argument(
         "--use_L2",
         dest="use_L2",
-        action='store_true',
+        action="store_true",
         help=argparse.SUPPRESS
     )
     plm_group.add_argument(
@@ -395,14 +421,14 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
     vis_group.add_argument(
         "--logo",
         dest="logo",
-        action='store_true',
+        action="store_true",
         help="Produces a gif that animates the learned sequence logo over "\
             "training time."
     )
     vis_group.add_argument(
         "--logo_gif",
         dest="logo_gif",
-        action='store_true',
+        action="store_true",
         help="Produces a gif that animates the learned sequence logo over " \
             "training time. Slows down training significantly."
     )
@@ -474,7 +500,7 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
     parser.add_argument(
         "--frozen_distances",
         dest="frozen_distances",
-        action='store_true',
+        action="store_true",
         help=argparse.SUPPRESS
     )
     parser.add_argument(
@@ -487,7 +513,7 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
     parser.add_argument(
         "--trainable_rate_matrices",
         dest="trainable_rate_matrices",
-        action='store_true',
+        action="store_true",
         help=argparse.SUPPRESS
     )
 
