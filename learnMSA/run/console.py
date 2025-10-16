@@ -33,6 +33,11 @@ def run_main():
     if args.from_msa is not None:
 
         if args.no_pseudocounts:
+            aa_psc = 1e-6
+            match_psc = 1e-6
+            ins_psc = 1e-6
+            del_psc = 1e-6
+        else:
             # Load priors to get pseudocounts
             aa_prior = Priors.AminoAcidPrior()
             aa_prior.build()
@@ -46,11 +51,6 @@ def run_main():
             del_psc = transition_prior.delete_dirichlet.make_alpha()[0].numpy()
             del aa_prior
             del transition_prior
-        else:
-            aa_psc = 1e-6
-            match_psc = 1e-6
-            ins_psc = 1e-6
-            del_psc = 1e-6
 
         # Load the MSA and count
         with AlignedDataset(args.from_msa, "fasta") as input_msa:
