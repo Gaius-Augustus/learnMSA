@@ -388,21 +388,21 @@ def fit_model(model_generator,
                 break
         assert msa_hmm_layer is not None, "Can not find a MsaHmmLayer in the specified model."
 
-        # class CustomCallback(tf.keras.callbacks.Callback):
-
-        #     # def on_train_begin(self, logs=None):
-        #     #     msa_hmm_layer.cell.emitter[0].step_counter.assign(0.)
-        #     #     msa_hmm_layer.reverse_cell.emitter[0].step_counter.assign(0.)
-
-        #     def on_train_batch_end(self, batch, logs=None):
-        #         msa_hmm_layer.cell.emitter[0].step_counter.assign_add(1.)
-        #         msa_hmm_layer.reverse_cell.emitter[0].step_counter.assign_add(1.)
-        # callbacks.append(CustomCallback())
     history = model.fit(dataset, 
                         epochs=epochs,
                         steps_per_epoch=steps,
                           callbacks=callbacks,
                         verbose = 2*int(verbose))
+    
+    # Check if the last reported loss is NaN and terminate if so
+    if history.history and "loss" in history.history:
+        final_loss = history.history['loss'][-1]
+        if math.isnan(final_loss):
+            error_msg = "Training terminated: Final loss is NaN. Loss history: "\
+                f"{history.history['loss']}"
+            tf.get_logger().setLevel('INFO')
+            raise ValueError(error_msg)
+    
     if verbose:
         print("Fitted model successfully.")
     tf.get_logger().setLevel('INFO')

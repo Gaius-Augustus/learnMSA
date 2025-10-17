@@ -33,17 +33,17 @@ def run_main():
     if args.from_msa is not None:
 
         if args.no_pseudocounts:
-            aa_psc = 1e-6
-            match_psc = 1e-6
-            ins_psc = 1e-6
-            del_psc = 1e-6
+            aa_psc = 1e-2
+            match_psc = 1e-2
+            ins_psc = 1e-2
+            del_psc = 1e-2
         else:
             # Load priors to get pseudocounts
             aa_prior = Priors.AminoAcidPrior()
             aa_prior.build()
             aa_psc = aa_prior.emission_dirichlet_mix.make_alpha()[0].numpy()
             # Add counts for special amino acids
-            aa_psc = np.pad(aa_psc, (0, 3), constant_values=1e-6)
+            aa_psc = np.pad(aa_psc, (0, 3), constant_values=1e-2)
             transition_prior = Priors.ProfileHMMTransitionPrior()
             transition_prior.build()
             match_psc = transition_prior.match_dirichlet.make_alpha()[0].numpy()
@@ -63,12 +63,12 @@ def run_main():
                 match_transition=match_psc,
                 insert_transition=ins_psc,
                 delete_transition=del_psc,
-                begin_to_match=1e-6,
-                match_to_end=1e-6,
+                begin_to_match=1e-2,
+                match_to_end=1e-2,
                 left_flank=ins_psc,
                 right_flank=ins_psc,
                 unannotated=ins_psc,
-                end=1e-6,
+                end=1e-2,
                 flank_start=ins_psc,
             ).normalize().log()
         initializers = Initializers.make_initializers_from(
