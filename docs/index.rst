@@ -9,6 +9,7 @@ Welcome to learnMSA's documentation!
    :caption: User Guide:
 
    getting_started
+   init_msa
 
 .. toctree::
    :maxdepth: 2

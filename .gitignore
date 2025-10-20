@@ -19,3 +19,7 @@ tmp/
 test/data/test_model.zip
 .vscode/
 logo/frames/
+
+
+# Sphinx documentation
+docs/_build/
