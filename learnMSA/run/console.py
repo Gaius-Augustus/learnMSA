@@ -32,13 +32,8 @@ def run_main():
 
     if args.from_msa is not None:
 
-        if args.no_pseudocounts:
-            aa_psc = 1e-2
-            match_psc = 1e-2
-            ins_psc = 1e-2
-            del_psc = 1e-2
-        else:
-            # Load priors to get pseudocounts
+        if args.pseudocounts:
+            # Infer meaningful pseudocounts from Dirichlet priors
             aa_prior = Priors.AminoAcidPrior()
             aa_prior.build()
             aa_psc = aa_prior.emission_dirichlet_mix.make_alpha()[0].numpy()
@@ -51,6 +46,12 @@ def run_main():
             del_psc = transition_prior.delete_dirichlet.make_alpha()[0].numpy()
             del aa_prior
             del transition_prior
+        else:
+            # Use very small pseudocounts to avoid zero probabilities
+            aa_psc = 1e-2
+            match_psc = 1e-2
+            ins_psc = 1e-2
+            del_psc = 1e-2
 
         # Load the MSA and count
         with AlignedDataset(args.from_msa, "fasta") as input_msa:

@@ -305,27 +305,21 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         "(default: %(default)s)"
     )
     init_msa_group.add_argument(
-        "--no_finetuning",
-        dest="no_finetuning",
-        action="store_true",
-        help="If set, a model that was initialized using --from_msa will not "\
-            "be fine-tuned on the input sequences. learnMSA will directly "\
-            "decode an alignment using the parameters inferred from the MSA."
-    )
-    init_msa_group.add_argument(
         "--random_scale",
         dest="random_scale",
         type=float,
-        default=0.02,
+        default=1e-3,
         help="When initializing from an MSA, the initial parameters are " \
             "slightly perturbed by random noise. This parameter controls the " \
             "scale of the noise. (default: %(default)s)"
     )
     init_msa_group.add_argument(
-        "--no_pseudocounts",
-        dest="no_pseudocounts",
+        "--pseudocounts",
+        dest="pseudocounts",
         action="store_true",
-        help="If set, no pseudocounts will be used when initializing from an MSA."
+        help="If set, pseudocounts inferred from Dirichlet priors will be "\
+            "added on state transition and emissions counted in the MSA "\
+            "input via --from_msa."
     )
 
     plm_group = parser.add_argument_group("Protein language model integration")
