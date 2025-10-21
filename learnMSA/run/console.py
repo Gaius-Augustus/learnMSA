@@ -270,11 +270,10 @@ def get_generators(
         # language model because the emission probabilities are computed
         # differently and the LM requires specific inputs
         model_gen = EmbeddingBatchGenerator.make_generic_embedding_model_generator(
-            config["scoring_model_config"].dim)
+            config["scoring_model_config"].dim
+        )
         batch_gen = EmbeddingBatchGenerator.EmbeddingBatchGenerator(
-            EmbeddingBatchGenerator.generic_compute_embedding_func(
-                data, config["scoring_model_config"]
-            )
+            scoring_model_config = config["scoring_model_config"],
         )
     else:
         model_gen = None
