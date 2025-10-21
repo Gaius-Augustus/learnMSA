@@ -163,7 +163,7 @@ def fit_and_align_with_logo_gif(data : SequenceDataset, config, initial_model_le
                                       epochs=config["epochs"][-1],
                                       verbose=True,
                                       train_callbacks=[logo_plotter_callback])
-    make_logo_gif(logo_plotter_callback.frame_dir, logo_dir+"/training.gif")
+    make_logo_gif(logo_plotter_callback.frame_dir, logo_dir / "training.gif")
     am = AlignmentModel(data, batch_generator, indices, batch_size=batch_size, model=model)
     return am
 
@@ -183,7 +183,7 @@ def run_learnMSA(data : SequenceDataset,
                  initial_model_length_callback=get_initial_model_lengths,
                  select_best_for_comparison=True,
                  logo_gif_mode=False,
-                 logo_dir="",
+                 logo_dir=Path(),
                  output_format="fasta",
                  load_model="",
                  A2M_output=True):

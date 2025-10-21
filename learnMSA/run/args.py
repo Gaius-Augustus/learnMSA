@@ -343,26 +343,21 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
 
     vis_group = parser.add_argument_group("Visualization")
     vis_group.add_argument(
-        "--logo", 
-        dest="logo", 
-        action='store_true',
-        help="Produces a gif that animates the learned sequence logo over "\
-            "training time."
+        "--logo",
+        dest="logo",
+        type=str,
+        default="",
+        help="Produces a pdf of the learned sequence logo. "\
+            "Directories are created."
     )
     vis_group.add_argument(
-        "--logo_gif", 
-        dest="logo_gif", 
-        action='store_true',
+        "--logo_gif",
+        dest="logo_gif",
+        type=str,
+        default="",
         help="Produces a gif that animates the learned sequence logo over " \
-            "training time. Slows down training significantly."
-    )
-    vis_group.add_argument(
-        "--logo_path", 
-        dest="logo_path", 
-        type=str, 
-        default="./logo/",
-        help="Filepath used to store created logos and logo gifs. " \
-            "Directories are created. (default: %(default)s)"
+            "training time. Slows down training significantly. "\
+            "Directories are created."
     )
 
     # suppressed arguments intended for development but not for users

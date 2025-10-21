@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 
 def get_version() -> str:
@@ -11,6 +12,7 @@ def get_version() -> str:
     with open(version_file_path, "rt") as version_file:
         version = version_file.readlines()[0].split("=")[1].strip(' "')
     return version
+
 
 def setup_devices(
         cuda_visible_devices : str,
@@ -64,3 +66,21 @@ def setup_devices(
         else:
             print("Using GPU(s):", GPUS)
         print("Found tensorflow version", tf.__version__)
+
+
+def validate_filepath(filepath : str, expected_ext : str) -> Path:
+    """Ensure filepath has the correct extension and return as Path object."""
+    # Convert to Path object
+    path = Path(filepath)
+
+    # Get the extension
+    ext = path.suffix
+
+    # If no extension or wrong extension, append/replace with correct one
+    if ext.lower() != expected_ext.lower():
+        if not ext:  # No extension
+            path = Path(str(path) + expected_ext)
+        else:  # Wrong extension
+            path = path.with_suffix(expected_ext)
+
+    return path
