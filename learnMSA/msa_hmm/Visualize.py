@@ -57,13 +57,13 @@ class LogoPlotterCallback(tf.keras.callbacks.Callback):
         self.decode_indices = decode_indices
         self.batch_size = batch_size
         self.i = 0
-        self.frame_dir = self.logo_dir+"/frames/"
+        self.frame_dir = self.logo_dir / "frames"
     
     def on_train_batch_end(self, batch, logs=None):
         am = msa_hmm.AlignmentModel.AlignmentModel(self.data, self.batch_generator, self.decode_indices, batch_size=self.batch_size, model=self.model)
         fig, ax = plt.subplots(1, 1, figsize=(6, 4))
         plot_logo(am, 0, ax)
-        plt.savefig(self.frame_dir+f"/{self.i}.png", format="png", bbox_inches="tight")
+        plt.savefig(self.frame_dir / f"{self.i}.png", format="png", bbox_inches="tight")
         self.i += 1
         plt.close()
 
@@ -71,7 +71,7 @@ class LogoPlotterCallback(tf.keras.callbacks.Callback):
 def make_logo_gif(frame_dir, gif_filepath):
     #lexicographic sort would result in wrong order
     #sort by frame number
-    filenames = [(int(file.split(".")[0]), frame_dir+"/"+file) for file in os.listdir(frame_dir) if file.endswith(".png")]
+    filenames = [(int(file.split(".")[0]), frame_dir / file) for file in os.listdir(frame_dir) if file.endswith(".png")]
     filenames.sort()
     #simple heuristic to reduce the number of frames, which depends on the number of training steps
     #we want roughly 100 frames for a nice short and memory friendly gif

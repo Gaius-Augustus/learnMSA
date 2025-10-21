@@ -20,15 +20,18 @@ def run_main():
     if not args.silent:
         print(parser.description)
 
-    util.setup_devices(args.cuda_visible_devices, args.silent)
+    util.setup_devices(args.cuda_visible_devices, args.silent, args.grow_mem)
 
     from ..msa_hmm import Align, Training, Visualize, MSA2HMM, Initializers, Priors
     from ..msa_hmm.SequenceDataset import SequenceDataset, AlignedDataset
 
-    if args.logo or args.logo_gif:
-        os.makedirs(args.logo_path, exist_ok=True)
-        if args.logo_gif:
-            os.makedirs(args.logo_path+"/frames/", exist_ok=True)
+    if args.logo:
+        args.logo = util.validate_filepath(args.logo, ".pdf")
+        os.makedirs(args.logo.parent, exist_ok=True)
+    if args.logo_gif:
+        args.logo_gif = util.validate_filepath(args.logo_gif, ".gif")
+        os.makedirs(args.logo_gif.parent, exist_ok=True)
+        os.makedirs(args.logo_gif.parent / "frames", exist_ok=True)
 
     if args.from_msa is not None:
 
@@ -126,8 +129,8 @@ def run_main():
                 sequence_weights = sequence_weights,
                 clusters = clusters,
                 verbose = not args.silent,
-                logo_gif_mode = args.logo_gif,
-                logo_dir = args.logo_path,
+                logo_gif_mode = bool(args.logo_gif),
+                logo_dir = args.logo_gif.parent if args.logo_gif else "",
                 initial_model_length_callback = initial_model_length_cb,
                 output_format = args.format,
                 load_model = args.load_model,
@@ -139,7 +142,7 @@ def run_main():
                 Visualize.plot_and_save_logo(
                     alignment_model,
                     alignment_model.best_model,
-                    args.logo_path + "/logo.pdf"
+                    args.logo,
                 )
             if args.dist_out:
                 i = [l.name for l in alignment_model.encoder_model.layers].index(
