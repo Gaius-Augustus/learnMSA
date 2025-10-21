@@ -10,19 +10,19 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
 
 def run_main():
-    
+
     version = util.get_version()
     parser = parse_args(version)
     args = parser.parse_args()
 
     if not args.silent:
         print(parser.description)
-    
-    util.setup_devices(args.cuda_visible_devices, args.silent)
+
+    util.setup_devices(args.cuda_visible_devices, args.silent, args.grow_mem)
 
     from ..msa_hmm import Align, Training, Visualize
     from ..msa_hmm.SequenceDataset import SequenceDataset
-    
+
     if args.logo or args.logo_gif:
         os.makedirs(args.logo_path, exist_ok=True)
         if args.logo_gif:

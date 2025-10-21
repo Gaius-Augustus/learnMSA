@@ -1,5 +1,3 @@
-import argparse
-import sys
 import os
 
 
@@ -14,11 +12,19 @@ def get_version() -> str:
         version = version_file.readlines()[0].split("=")[1].strip(' "')
     return version
 
-def setup_devices(cuda_visible_devices : str, silent : bool) -> None:
+def setup_devices(
+        cuda_visible_devices : str,
+        silent : bool,
+        grow_mem : bool = False
+) -> None:
     """
-    Args: 
-        cuda_visible_devices: str 
+    Args:
+        cuda_visible_devices: str
             The value to set for the environment variable.
+        silent: bool
+            Whether to suppress output.
+        grow_mem: bool
+            Whether to enable memory growth for GPUs.
 
     Sets up the GPU environment for TensorFlow based on the command line.
     Avoids importing TensorFlow until the user has set the CUDA_VISIBLE_DEVICES.
@@ -26,15 +32,20 @@ def setup_devices(cuda_visible_devices : str, silent : bool) -> None:
     otherwise just showing the help message will be slow.
     """
     if not cuda_visible_devices == "default":
-        os.environ["CUDA_VISIBLE_DEVICES"] = cuda_visible_devices 
+        os.environ["CUDA_VISIBLE_DEVICES"] = cuda_visible_devices
 
     import tensorflow as tf
+
+    # IMPORTANT: Memory growth must be set before any TensorFlow operations
+    if grow_mem:
+        os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
+
     from tensorflow.python.client import device_lib
 
     if not silent:
         GPUS = [
-            x.physical_device_desc 
-            for x in device_lib.list_local_devices() 
+            x.physical_device_desc
+            for x in device_lib.list_local_devices()
             if x.device_type == "GPU"
         ]
         if len(GPUS) == 0:
