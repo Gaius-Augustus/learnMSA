@@ -247,7 +247,7 @@ class AminoAcidPlusMvnEmissionInitializer(Initializers.EmissionInitializer):
         super(AminoAcidPlusMvnEmissionInitializer, self).__init__(dist = dist)
 
 
-    def __call__(self, shape, dtype=None, **kwargs):
+    def __call__(self, shape, dtype=tf.float32, **kwargs):
         assert shape[-1] >= self.aa_dist.size
         emb_dim = self.expected_emb.shape[-1]
         if self.full_covariance:

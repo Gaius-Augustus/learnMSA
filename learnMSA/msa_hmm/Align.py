@@ -14,6 +14,8 @@ import learnMSA.msa_hmm.Initializers as initializers
 from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
 from learnMSA.msa_hmm.Configuration import as_str, assert_config
 from learnMSA.msa_hmm.AlignInsertions import make_aligned_insertions
+from learnMSA.protein_language_models.MvnEmitter import AminoAcidPlusMvnEmissionInitializer
+
 
 #experimental, only used for ablation studies
 #decreases accuracy slightly!
@@ -73,12 +75,15 @@ def fit_and_align(data : SequenceDataset,
         subset = np.arange(data.num_seq)
     full_length_estimate = get_full_length_estimate(data, config)
     model_lengths = initial_model_length_callback(data, config)
-    if hasattr(config["emitter"], '__iter__'):
-        emission_dummy = [em.emission_init[0] for em in config["emitter"]]
+
+    # Make dummy initializers for surgery
+    if "scoring_model_config" in config:
+        emission_dummy = [AminoAcidPlusMvnEmissionInitializer(config["scoring_model_config"])]
     else:
-        emission_dummy = [config["emitter"].emission_init[0]]
-    transition_dummy = config["transitioner"].transition_init[0]
-    flank_init_dummy = config["transitioner"].flank_init[0]
+        emission_dummy = [initializers.make_default_emission_init()]
+    transition_dummy = initializers.make_default_transition_init()
+    flank_init_dummy = initializers.make_default_flank_init()
+
     last_iteration=config["max_surgery_runs"]==1
     # 2 staged main loop: Fits model parameters with GD and optimized model architecture with surgery
     for i in range(config["max_surgery_runs"]):

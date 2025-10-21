@@ -212,7 +212,10 @@ class PHMMInitializerSet:
 
 
 def make_initializers_from(
-    values: PHMMValueSet, num_models: int = 1, random_scale: float = 0.0
+    values: PHMMValueSet,
+    num_models: int = 1,
+    random_scale: float = 0.0,
+    emission_kernel_extra : np.ndarray | None = None,
 ) -> PHMMInitializerSet:
     """
     Builds initializers from a given PHMMValueSet.
@@ -223,6 +226,9 @@ def make_initializers_from(
         num_models (int): The number of models to create initializers for.
         random_scale (float): The scale of the random noise to add to the
             initial values.
+        emission_kernel_extra (np.ndarray | None): If provided, this array will
+            be broadcasted and concatenated to the emission initializers as
+            additional dimensions.
     """
     # Gather transition values
     ind = PHMMTransitionIndexSet(values.matches())
@@ -270,12 +276,27 @@ def make_initializers_from(
     transitions = []
     start = []
     for _ in range(num_models):
-        match_emissions.append(
-            ConstantInitializer(_add_noise(values.match_emissions))
-        )
-        insert_emissions.append(
-            ConstantInitializer(_add_noise(values.insert_emissions))
-        )
+        match_emission = _add_noise(values.match_emissions)
+        insert_emission = _add_noise(values.insert_emissions)
+        if emission_kernel_extra is not None:
+            match_extra_broadcasted = np.broadcast_to(
+                emission_kernel_extra,
+                match_emission.shape[:-1] + emission_kernel_extra.shape
+            )
+            match_emission = np.concatenate(
+                [match_emission, match_extra_broadcasted],
+                axis=-1
+            )
+            insert_extra_broadcasted = np.broadcast_to(
+                emission_kernel_extra,
+                insert_emission.shape[:-1] + emission_kernel_extra.shape
+            )
+            insert_emission = np.concatenate(
+                [insert_emission, insert_extra_broadcasted],
+                axis=-1
+            )
+        match_emissions.append(ConstantInitializer(match_emission))
+        insert_emissions.append(ConstantInitializer(insert_emission))
         transitions.append({
             k: ConstantInitializer(_add_noise(v))
             for k, v in transition_values.items()

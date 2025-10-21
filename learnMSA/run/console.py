@@ -75,17 +75,30 @@ def run_main():
                 end=1e-2,
                 flank_start=ins_psc,
             ).normalize().log()
-        initializers = Initializers.make_initializers_from(
-            values,
-            num_models=args.num_model,
-            # Apply random noise only when using multiple models
-            random_scale=args.random_scale if args.num_model > 1 else 0.0,
-        )
-        initial_model_length_cb = lambda data, config: \
-                                    [values.matches()]*args.num_model
-        if not args.silent:
-            print(f"Initialized from MSA '{args.from_msa}' with "
-                  f"{values.matches()} match states.")
+
+            if args.from_msa is not None:
+                scoring_model_config = get_scoring_model_config(args)
+                if args.use_language_model:
+                    from learnMSA.protein_language_models.MvnEmitter import AminoAcidPlusMvnEmissionInitializer
+                    dim = len(input_msa.alphabet)-1 + 2 * scoring_model_config.dim
+                    emb_kernel = AminoAcidPlusMvnEmissionInitializer(
+                        scoring_model_config
+                    )((1,1,1,dim)).numpy().squeeze()
+                    emb_kernel = emb_kernel[len(input_msa.alphabet)-1:]
+                else:
+                    emb_kernel = None
+            initializers = Initializers.make_initializers_from(
+                values,
+                num_models=args.num_model,
+                # Apply random noise only when using multiple models
+                random_scale=args.random_scale if args.num_model > 1 else 0.0,
+                emission_kernel_extra=emb_kernel,
+            )
+            initial_model_length_cb = lambda data, config: \
+                                        [values.matches()]*args.num_model
+            if not args.silent:
+                print(f"Initialized from MSA '{args.from_msa}' with "
+                    f"{values.matches()} match states.")
     else:
         initializers = None
         initial_model_length_cb = None
@@ -171,15 +184,7 @@ def run_main():
         raise SystemExit(e)
 
 
-def get_config(
-    args : argparse.Namespace,
-    data : "SequenceDataset",
-    initializers : "PHMMInitializerSet | None" = None,
-) -> dict:
-
-    from ..msa_hmm import Configuration, Initializers
-    from ..msa_hmm.AncProbsLayer import inverse_softplus
-
+def get_scoring_model_config(args : argparse.Namespace):
     if args.use_language_model:
         import learnMSA.protein_language_models.Common as Common
         scoring_model_config = Common.ScoringModelConfig(
@@ -191,11 +196,22 @@ def get_config(
         )
     else:
         scoring_model_config = None
+    return scoring_model_config
+
+
+def get_config(
+    args : argparse.Namespace,
+    data : "SequenceDataset",
+    initializers : "PHMMInitializerSet | None" = None,
+) -> dict:
+
+    from ..msa_hmm import Configuration, Initializers
+    from ..msa_hmm.AncProbsLayer import inverse_softplus
 
     config = Configuration.make_default(
         1 if args.logo_gif else args.num_model,
         use_language_model=args.use_language_model,
-        scoring_model_config=scoring_model_config,
+        scoring_model_config=get_scoring_model_config(args),
         use_l2=args.use_L2,
         L2_match=args.L2_match,
         L2_insert=args.L2_insert,
