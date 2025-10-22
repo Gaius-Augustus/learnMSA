@@ -327,14 +327,14 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         "--noA2M",
         dest="noA2M",
         action='store_true',
-        help="Use --format fasta instead."
+        help="Deprecated: Use --format fasta instead."
     )
     deprecated_group.add_argument(
         "--cluster_dir",
-        dest="cluster_dir",
+        dest="work_dir",
         type=str,
         default="tmp",
-        help="Use --work_dir instead."
+        help="Deprecated: Use --work_dir instead."
     )
 
 

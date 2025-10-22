@@ -225,11 +225,11 @@ def get_clustering(
 ):
     from ..msa_hmm import Align
     if not args.no_sequence_weights:
-        os.makedirs(args.cluster_dir, exist_ok=True)
+        os.makedirs(args.work_dir, exist_ok=True)
         try:
             sequence_weights, clusters = Align.compute_sequence_weights(
                 args.input_file,
-                args.cluster_dir,
+                args.work_dir,
                 config["cluster_seq_id"],
                 return_clusters=True
             )
