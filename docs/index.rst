@@ -8,7 +8,6 @@ Welcome to learnMSA's documentation!
    :maxdepth: 2
    :caption: User Guide:
 
-   getting_started
    io
    training
    init_msa

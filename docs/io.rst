@@ -6,7 +6,10 @@ Arguments
 ---------
 
 ``-i / --in_file`` *INPUT_FILE*
-    Input fasta file containing the protein sequences to align.
+    Input fasta file containing the protein sequences to align. Any gaps
+    present in the input sequences are ignored. learnMSA uses the alphabet
+    ARNDCQEGHILKMFPSTWYVXUO. Special characters B, Z, J are mapped to X. The
+    sequences must not contain any other non-standard characters.
 
 ``-o / --out_file`` *OUTPUT_FILE*
     Output file path for the resulting multiple sequence

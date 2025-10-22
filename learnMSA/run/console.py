@@ -1,28 +1,33 @@
-import os
-import numpy as np
 import math
+import os
+import sys
+
+import numpy as np
 
 import learnMSA.run.util as util
-from learnMSA.run.args import parse_args, LearnMSAArgumentParser
+from learnMSA.run.args import LearnMSAArgumentParser, parse_args
+from learnMSA.run.help import handle_help_command
 
 #hide tensorflow messages and warnings
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3" 
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
 
 def run_main():
-    
+
     version = util.get_version()
+    if handle_help_command():
+        return
     parser = parse_args(version)
     args = parser.parse_args()
 
     if not args.silent:
         print(parser.description)
-    
+
     util.setup_devices(args.cuda_visible_devices, args.silent)
 
     from ..msa_hmm import Align, Training, Visualize
     from ..msa_hmm.SequenceDataset import SequenceDataset
-    
+
     if args.logo or args.logo_gif:
         os.makedirs(args.logo_path, exist_ok=True)
         if args.logo_gif:
@@ -34,14 +39,14 @@ def run_main():
         ) as data:
             # check if the input data is valid
             data.validate_dataset()
-            # merge parsed arguments into a learnMSA configuration 
+            # merge parsed arguments into a learnMSA configuration
             config = get_config(args, data)
             model_gen, batch_gen = get_generators(args, data, config)
             sequence_weights, clusters = get_clustering(args, config)
             # set up default initial model length when not using warmup
             if args.logo_gif:
                 def get_initial_model_lengths_gif(
-                        data: SequenceDataset, 
+                        data: SequenceDataset,
                         config
                     ):
                     # initial model length
@@ -56,7 +61,7 @@ def run_main():
             alignment_model = Align.run_learnMSA(
                 data,
                 out_filename = args.output_file,
-                config = config, 
+                config = config,
                 model_generator=model_gen,
                 batch_generator=batch_gen,
                 align_insertions=not args.unaligned_insertions,
@@ -74,8 +79,8 @@ def run_main():
                 alignment_model.write_models_to_file(args.save_model)
             if args.logo:
                 Visualize.plot_and_save_logo(
-                    alignment_model, 
-                    alignment_model.best_model, 
+                    alignment_model,
+                    alignment_model.best_model,
                     args.logo_path + "/logo.pdf"
                 )
             if args.dist_out:
@@ -84,9 +89,9 @@ def run_main():
                 anc_probs_layer = alignment_model.encoder_model.layers[i]
                 tau_all = []
                 for (seq, indices), _ in Training.make_dataset(
-                    alignment_model.indices, 
-                    alignment_model.batch_generator, 
-                    alignment_model.batch_size, 
+                    alignment_model.indices,
+                    alignment_model.batch_generator,
+                    alignment_model.batch_size,
                     shuffle=False
                 ):
                     seq = tf.transpose(seq, [1, 0, 2])
@@ -106,7 +111,7 @@ def run_main():
 
 
 def get_config(
-    args : LearnMSAArgumentParser, 
+    args : LearnMSAArgumentParser,
     data : "SequenceDataset"
 ) -> dict:
 
@@ -183,11 +188,11 @@ def get_config(
     else:
         config["crop_long_seqs"] = int(args.crop)
 
-    return config 
+    return config
 
 def get_generators(
-    args : LearnMSAArgumentParser, 
-    data : "SequenceDataset", 
+    args : LearnMSAArgumentParser,
+    data : "SequenceDataset",
     config : dict
 ):
     if args.use_language_model:
@@ -195,8 +200,8 @@ def get_generators(
         import learnMSA.protein_language_models.Common as Common
         import learnMSA.protein_language_models.EmbeddingBatchGenerator as EmbeddingBatchGenerator
 
-        # we have to define a special model- and batch generator if using a 
-        # language model because the emission probabilities are computed 
+        # we have to define a special model- and batch generator if using a
+        # language model because the emission probabilities are computed
         # differently and the LM requires specific inputs
         model_gen = EmbeddingBatchGenerator.make_generic_embedding_model_generator(
             config["scoring_model_config"].dim)
@@ -211,7 +216,7 @@ def get_generators(
     return model_gen, batch_gen
 
 def get_clustering(
-    args : LearnMSAArgumentParser, 
+    args : LearnMSAArgumentParser,
     config : dict
 ):
     from ..msa_hmm import Align
@@ -219,9 +224,9 @@ def get_clustering(
         os.makedirs(args.cluster_dir, exist_ok=True)
         try:
             sequence_weights, clusters = Align.compute_sequence_weights(
-                args.input_file, 
-                args.cluster_dir, 
-                config["cluster_seq_id"], 
+                args.input_file,
+                args.cluster_dir,
+                config["cluster_seq_id"],
                 return_clusters=True
             )
         except Exception as e:
@@ -230,7 +235,7 @@ def get_clustering(
     else:
         sequence_weights, clusters = None, None
     return sequence_weights, clusters
- 
-            
+
+
 if __name__ == '__main__':
     run_main()

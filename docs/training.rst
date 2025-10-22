@@ -1,28 +1,37 @@
 Training
 ========
 
+learnMSA runs a gradient-based training in order to find the best possible HMM
+for aligning the sequences.
+Automatically detects suitable hyperparameters for this training.
+In some scenarios direct control over the training regime can be beneficial.
+Possible reasons to adjust the training parameters are:
+
+- The training fails due to memory issues or is too slow.
+- The input sequences are very easy and the training should be faster.
+- The time for alignment is not critical and best possible accuracy is desired.
 
 Arguments
 ---------
 
 ``-n / --num_model`` *NUM_MODEL*
     This option controls how many models are trained in parallel. The models
-    differ slighly in their initialization, length (number of match states) and
+differ slighly in their initialization, length (number of match states) and
     mini-batches seen during training.
     learnMSA automatically selects the best model according to the Akaike
     Information Criterion (AIC) after training.
 
     Increase this option for the potential to gain accuracy at the cost of
     longer training times and higher memory consumption.
-    Reduce this option when you have limited GPU memory or want to speed up training.
+    Reduce this option when you have limited GPU memory or want to speed up
+    training.
 
     Default: 4
 
 ``-b / --batch`` *BATCH_SIZE*
-    Controls the batch size used during training, i.e. how many sequences
-    as shown to each model per training step.
-    The optimal batch size depends on the length of the input sequences and
-    the available GPU memory.
+    Controls the batch size used during training, i.e. how many sequences are
+    shown to each model per training step. The optimal batch size depends on the
+    length of the input sequences and the available GPU memory.
     Increase this value to speed up training.
     Reduce this value if you run out of GPU memory.
 
@@ -140,25 +149,24 @@ Simple alignment without language model:
 Training Configuration
 ^^^^^^^^^^^^^^^^^^^^^^
 
-**Quick alignment with fewer iterations:**
+**Quick alignment without model surgery:**
 
-For faster results when accuracy is less critical:
+For faster results can be obtained by skipping model surgery:
 
 .. code-block:: bash
 
-   learnMSA -i INPUT_FILE -o OUTPUT_FILE --max_iterations 1 --epochs 5
+   learnMSA -i INPUT_FILE -o OUTPUT_FILE --max_iterations 1
 
 **High-quality alignment with more models:**
 
-For maximum accuracy, train more models and use more iterations:
+For maximum accuracy, train more models and use more iterations (requires more GPU memory and time):
 
 .. code-block:: bash
 
    learnMSA -i INPUT_FILE -o OUTPUT_FILE \
        --use_language_model \
-       -n 8 \
-       --max_iterations 3 \
-       --epochs 15 5 15
+       -n 10 \
+       --max_iterations 3
 
 **Custom epoch scheme:**
 
@@ -174,152 +182,8 @@ Memory and Performance Optimization
 
 **Limited GPU memory:**
 
-Reduce batch size and number of models:
+Reduce batch size and number of models, for example:
 
 .. code-block:: bash
 
    learnMSA -i INPUT_FILE -o OUTPUT_FILE -n 2 -b 32
-
-**Large datasets:**
-
-Use indexed data to avoid loading everything into memory:
-
-.. code-block:: bash
-
-   learnMSA -i INPUT_FILE -o OUTPUT_FILE --indexed_data
-
-**Long sequences:**
-
-Enable automatic cropping to reduce memory usage during training:
-
-.. code-block:: bash
-
-   learnMSA -i INPUT_FILE -o OUTPUT_FILE --crop auto --auto_crop_scale 2.5
-
-Or set a specific crop length:
-
-.. code-block:: bash
-
-   learnMSA -i INPUT_FILE -o OUTPUT_FILE --crop 1000
-
-
-Model Surgery Settings
-^^^^^^^^^^^^^^^^^^^^^^
-
-**Aggressive model surgery:**
-
-Use more aggressive thresholds to create more compact models:
-
-.. code-block:: bash
-
-   learnMSA -i INPUT_FILE -o OUTPUT_FILE \
-       --max_iterations 3 \
-       --surgery_del 0.3 \
-       --surgery_ins 0.7
-
-**Conservative model surgery:**
-
-Use less aggressive thresholds to preserve more states:
-
-.. code-block:: bash
-
-   learnMSA -i INPUT_FILE -o OUTPUT_FILE \
-       --max_iterations 3 \
-       --surgery_del 0.7 \
-       --surgery_ins 0.3
-
-**Control sequence filtering:**
-
-Adjust which sequences are used in intermediate iterations:
-
-.. code-block:: bash
-
-   learnMSA -i INPUT_FILE -o OUTPUT_FILE \
-       --surgery_quantile 0.3 \
-       --min_surgery_seqs 50000
-
-
-Advanced Options
-^^^^^^^^^^^^^^^^
-
-**Unaligned insertions:**
-
-Keep insertions unaligned (faster, but less informative output):
-
-.. code-block:: bash
-
-   learnMSA -i INPUT_FILE -o OUTPUT_FILE --unaligned_insertions
-
-**Frozen insertions:**
-
-Freeze insertion parameters during training:
-
-.. code-block:: bash
-
-   learnMSA -i INPUT_FILE -o OUTPUT_FILE --frozen_insertions
-
-**Without sequence weighting:**
-
-Disable sequence weights (not recommended for most use cases):
-
-.. code-block:: bash
-
-   learnMSA -i INPUT_FILE -o OUTPUT_FILE --no_sequence_weights
-
-**Custom model selection:**
-
-Use BIC instead of AIC for model selection:
-
-.. code-block:: bash
-
-   learnMSA -i INPUT_FILE -o OUTPUT_FILE --model_criterion BIC
-
-
-Tips for Specific Scenarios
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-**Highly diverse sequences:**
-
-Use more iterations and a higher surgery quantile:
-
-.. code-block:: bash
-
-   learnMSA -i INPUT_FILE -o OUTPUT_FILE \
-       --use_language_model \
-       --max_iterations 4 \
-       --surgery_quantile 0.7 \
-       --epochs 15 3 15
-
-**Very long sequences (>2000 residues):**
-
-Enable cropping and reduce batch size:
-
-.. code-block:: bash
-
-   learnMSA -i INPUT_FILE -o OUTPUT_FILE \
-       --crop auto \
-       --auto_crop_scale 2.0 \
-       -b 16
-
-**Small datasets (<1000 sequences):**
-
-Use fewer models and adjust minimum surgery sequences:
-
-.. code-block:: bash
-
-   learnMSA -i INPUT_FILE -o OUTPUT_FILE \
-       -n 2 \
-       --min_surgery_seqs 100
-
-**Production-quality alignment:**
-
-Recommended settings for best results:
-
-.. code-block:: bash
-
-   learnMSA -i INPUT_FILE -o OUTPUT_FILE \
-       --use_language_model \
-       -n 8 \
-       --max_iterations 3 \
-       --epochs 20 5 20 \
-       --learning_rate 0.05
