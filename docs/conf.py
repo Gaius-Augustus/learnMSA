@@ -4,10 +4,10 @@ import sys
 # Add project root and hidten/ to sys.path so autodoc can import your code
 sys.path.insert(0, os.path.abspath(".."))
 
-project = 'HidTen'
-copyright = '2025, Felix Becker, Richard Krieg'
-author = 'Felix Becker, Richard Krieg'
-release = '0.1'
+project = 'learnMSA'
+copyright = '2025, Felix Becker'
+author = 'Felix Becker'
+release = '2.0.12'
 
 # Base extensions
 extensions = [

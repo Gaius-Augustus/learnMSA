@@ -1,5 +1,5 @@
 Initialize with existing MSA
-===============
+============================
 
 learnMSA allows to initialize the model using an existing MSA.
 This can be particularly useful when you have a high-quality MSA that you want to extend with more sequences.
