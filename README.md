@@ -1,7 +1,5 @@
 *Our tool is under active development and feedback is very much appreciated.*
 
-For more details on how to use learnMSA please refer to the [documentation](https://gaius-augustus.github.io/learnMSA/index.html#).
-
 # learnMSA2: deep protein multiple alignments with large language and hidden Markov models
 
 <img src="https://github.com/Gaius-Augustus/learnMSA/blob/main/logo/training_loop.gif" alt="" loop=infinite>
@@ -21,6 +19,10 @@ For more details on how to use learnMSA please refer to the [documentation](http
 - requires many sequences (in most cases starting at 1000, a few 100 might still be enough) to achieve high accuracy
 - only for proteins
 - increasingly slow for long proteins with a length > 1000 residues
+
+## Documentation
+
+Find it [here](https://gaius-augustus.github.io/learnMSA/index.html#).
 
 # Installation
 
