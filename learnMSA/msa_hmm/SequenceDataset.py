@@ -16,11 +16,11 @@ class SequenceDataset:
     alphabet: str = "ARNDCQEGHILKMFPSTWYVXUO-"
 
     def __init__(
-            self,
-            filespath: Path | str | None = None,
-            fmt: str = "fasta",
-            sequences: list[tuple[str, str]] | None = None,
-            indexed: bool = False,
+        self,
+        filespath: Path | str | None = None,
+        fmt: str = "fasta",
+        sequences: list[tuple[str, str]] | None = None,
+        indexed: bool = False,
     ) -> None:
         """
         Args:
@@ -80,10 +80,10 @@ class SequenceDataset:
         return self
 
     def __exit__(
-            self,
-            exc_type: type | None,
-            exc_value: BaseException | None,
-            traceback: TracebackType | None
+        self,
+        exc_type: type | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None
     ) -> None:
         self.close()
 
@@ -106,7 +106,7 @@ class SequenceDataset:
 
     @property
     def num_seq(self) -> int:
-        """Totel number of sequences in the dataset."""
+        """Total number of sequences in the dataset."""
         if not hasattr(self, "_num_seq"):
             return 0
         return self._num_seq
@@ -293,6 +293,14 @@ class SequenceDataset:
             )
 
     def write(self, filepath: Path | str, fmt="fasta") -> None:
+        """
+        Write the dataset to a file.
+
+        Args:
+            filepath (Path): Path to the output file.
+            fmt (str): Format of the output file. Can be any format supported
+                by Biopython's SeqIO.
+        """
         sequences = list(self.record_dict.values())
         for s in sequences:
             s.seq = Seq.Seq(s.seq)
