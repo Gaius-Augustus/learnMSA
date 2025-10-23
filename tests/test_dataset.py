@@ -113,7 +113,7 @@ def test_aligned_dataset() -> None:
                 data.seq_lens, [5, 8, 5]
             )
             np.testing.assert_equal(
-                data.starting_pos, [0, 5, 13]
+                data._starting_pos, [0, 5, 13]
             )
             np.testing.assert_equal(
                 data.get_column_map(0), [3, 4, 5, 6, 7]
