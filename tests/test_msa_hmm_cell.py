@@ -1,6 +1,3 @@
-from test import RefModels as ref
-from test import TestSupervisedTraining
-
 import numpy as np
 import pytest
 import tensorflow as tf
@@ -10,6 +7,7 @@ from learnMSA.msa_hmm.Emitter import ProfileHMMEmitter
 from learnMSA.msa_hmm.MsaHmmCell import MsaHmmCell
 from learnMSA.msa_hmm.MsaHmmLayer import MsaHmmLayer
 from learnMSA.msa_hmm.Transitioner import ProfileHMMTransitioner
+from tests import ref, supervised_training
 
 
 # Fixture to set up test data (replaces __init__ in unittest)
@@ -415,9 +413,9 @@ def test_parallel_longer_seq_batch(test_data : MsaHmmCellData) -> None:
 
 
 def test_parallel_posterior_casino() -> None:
-    y1 = TestSupervisedTraining.get_prediction(1).numpy()
-    y2 = TestSupervisedTraining.get_prediction(1).numpy()
-    y3 = TestSupervisedTraining.get_prediction(10).numpy()
+    y1 = supervised_training.get_prediction(1).numpy()
+    y2 = supervised_training.get_prediction(1).numpy()
+    y3 = supervised_training.get_prediction(10).numpy()
     np.testing.assert_almost_equal(y1, y2)  # if this fails, check if the batches are non-random
     np.testing.assert_almost_equal(y2, y3, decimal=4)  # if this fails, parallel != non-parallel
 

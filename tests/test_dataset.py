@@ -6,7 +6,7 @@ import pytest
 
 from learnMSA.msa_hmm.SequenceDataset import AlignedDataset, SequenceDataset
 
-DIR = "test/data/"
+DIR = "tests/data/"
 
 
 def test_records() -> None:
@@ -128,7 +128,7 @@ def test_aligned_dataset() -> None:
 
 def test_invalid_msa() -> None:
     with pytest.raises(ValueError):
-        AlignedDataset("test/data/faulty_msa.fasta", "fasta", indexed=False)
+        AlignedDataset("tests/data/faulty_msa.fasta", "fasta", indexed=False)
 
 
 def test_from_sequences() -> None:
@@ -178,7 +178,7 @@ def test_file_output_formats() -> None:
 
 def test_seq_headers() -> None:
     # make sure learnMSA keeps the full header >seqID seq_description [organism]
-    with SequenceDataset("test/data/headers.fasta", "fasta") as data:
+    with SequenceDataset("tests/data/headers.fasta", "fasta") as data:
         assert data.get_header(0) == \
             "QEG08237.1 MAG: ORF1b polyprotein [Pacific salmon nidovirus]"
         assert data.get_header(1) == \

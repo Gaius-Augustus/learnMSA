@@ -1,4 +1,3 @@
-import pytest
 import numpy as np
 from learnMSA.protein_language_models import EmbeddingCache
 from learnMSA.msa_hmm import Priors

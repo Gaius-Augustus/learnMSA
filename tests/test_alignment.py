@@ -1,7 +1,6 @@
 import os
 
 import numpy as np
-import pytest
 import tensorflow as tf
 
 from learnMSA.msa_hmm import (Align, Configuration, Emitter, Initializers,
@@ -18,7 +17,7 @@ def string_to_one_hot(s : str) -> tf.Tensor:
 
 
 def test_subalignment() -> None:
-    filename = os.path.dirname(__file__)+"/../test/data/felix.fa"
+    filename = os.path.dirname(__file__)+"/../tests/data/felix.fa"
     fasta_file = SequenceDataset(filename)
     length = 5
     config = Configuration.make_default(1)
@@ -57,8 +56,8 @@ def test_subalignment() -> None:
 
 def test_alignment_egf() -> None:
     """Test the high level alignment function with real world data"""
-    train_filename = os.path.dirname(__file__)+"/../test/data/egf.fasta"
-    ref_filename = os.path.dirname(__file__)+"/../test/data/egf.ref"
+    train_filename = os.path.dirname(__file__)+"/../tests/data/egf.fasta"
+    ref_filename = os.path.dirname(__file__)+"/../tests/data/egf.ref"
     with SequenceDataset(train_filename) as data:
         with AlignedDataset(ref_filename) as ref_msa:
             ref_subset = np.array([data.seq_ids.index(sid) for sid in ref_msa.seq_ids])
@@ -74,8 +73,8 @@ def test_alignment_egf() -> None:
         # some friendly thresholds to check if the alignment makes sense
         assert np.amin(am.compute_loglik()) > -70
         assert am.msa_hmm_layer.cell.length[0] > 25
-        am.to_file(os.path.dirname(__file__)+"/../test/data/egf.out.fasta", 0)
-        with AlignedDataset(os.path.dirname(__file__)+"/../test/data/egf.out.fasta") as pred_msa:
+        am.to_file(os.path.dirname(__file__)+"/../tests/data/egf.out.fasta", 0)
+        with AlignedDataset(os.path.dirname(__file__)+"/../tests/data/egf.out.fasta") as pred_msa:
             sp = pred_msa.SP_score(ref_msa)
             # based on experience, any half decent hyperparameter choice should yield at least this score
             assert sp > 0.7

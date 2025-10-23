@@ -4,10 +4,10 @@ from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 
 
 def test_error_handling() -> None:
-    single_seq = "test/data/single_sequence.fasta"
-    faulty_format = "test/data/faulty_format.fasta"
-    empty_seq = "test/data/empty_sequence.fasta"
-    unknown_symbol = "test/data/unknown_symbol.fasta"
+    single_seq = "tests/data/single_sequence.fasta"
+    faulty_format = "tests/data/faulty_format.fasta"
+    empty_seq = "tests/data/empty_sequence.fasta"
+    unknown_symbol = "tests/data/unknown_symbol.fasta"
 
     single_seq_expected_err = f"File {single_seq} contains only a single sequence."
     faulty_format_expected_err = f"Could not parse any sequences from {faulty_format}."

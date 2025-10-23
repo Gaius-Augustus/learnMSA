@@ -81,7 +81,7 @@ def make_test_alignment(data: SequenceDataset) -> AlignmentModel:
 
 def test_discard_or_expand_positions() -> None:
     """Test detection of positions to discard or expand."""
-    filename = os.path.dirname(__file__) + "/../test/data/felix_insert_delete.fa"
+    filename = os.path.dirname(__file__) + "/../tests/data/felix_insert_delete.fa"
     with SequenceDataset(filename) as data:
         am = make_test_alignment(data)
         # A simple alignment to test detection of
@@ -155,7 +155,7 @@ def test_extend_mods() -> None:
 
 def test_update_kernels() -> None:
     """Test updating model kernels during surgery."""
-    filename = os.path.dirname(__file__) + "/../test/data/felix_insert_delete.fa"
+    filename = os.path.dirname(__file__) + "/../tests/data/felix_insert_delete.fa"
     with SequenceDataset(filename) as data:
         am = make_test_alignment(data)
         pos_expand = np.array([2, 3, 5])

@@ -1,7 +1,6 @@
 """Tests for MSA HMM functionality including Viterbi, backward, and posterior probabilities."""
 import os
 import numpy as np
-import pytest
 import tensorflow as tf
 
 from learnMSA.msa_hmm import (
@@ -10,7 +9,7 @@ from learnMSA.msa_hmm import (
 )
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
-from test import RefModels as ref
+from tests import ref
 
 
 def string_to_one_hot(s : str) -> tf.Tensor:
@@ -73,7 +72,7 @@ def test_cell() -> None:
     hmm_cell = MsaHmmCell.MsaHmmCell(length, emitter=emitter, transitioner=transitioner)
     hmm_cell.build((None, None, len(SequenceDataset.alphabet)))
     hmm_cell.recurrent_init()
-    filename = os.path.dirname(__file__) + "/../test/data/simple.fa"
+    filename = os.path.dirname(__file__) + "/../tests/data/simple.fa"
     with SequenceDataset(filename) as data:
         sequences = get_all_seqs(data, 1)
     sequences = tf.one_hot(sequences, len(SequenceDataset.alphabet))
@@ -92,7 +91,7 @@ def test_cell() -> None:
     assert np.argmax(forward[0]) == 2 * length + 2
 
     hmm_cell.recurrent_init()
-    filename = os.path.dirname(__file__) + "/../test/data/length_diff.fa"
+    filename = os.path.dirname(__file__) + "/../tests/data/length_diff.fa"
     with SequenceDataset(filename) as data:
         sequences = get_all_seqs(data, 1)
     sequences = tf.one_hot(sequences, len(SequenceDataset.alphabet))
@@ -143,7 +142,7 @@ def test_viterbi() -> None:
     hmm_cell = MsaHmmCell.MsaHmmCell(length, emitter=emitter, transitioner=transitioner)
     hmm_cell.build((None, None, len(SequenceDataset.alphabet)))
     hmm_cell.recurrent_init()
-    with SequenceDataset(os.path.dirname(__file__) + "/../test/data/felix.fa") as data:
+    with SequenceDataset(os.path.dirname(__file__) + "/../tests/data/felix.fa") as data:
         ref_seqs = np.array([
             # model 1
             [[1, 2, 3, 4, 5, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12],
@@ -476,7 +475,7 @@ def test_parallel_viterbi():
     hmm_cell = MsaHmmCell.MsaHmmCell(length, emitter=emitter, transitioner=transitioner)
     hmm_cell.build((None, None, len(SequenceDataset.alphabet)))
     hmm_cell.recurrent_init()
-    with SequenceDataset(os.path.dirname(__file__) + "/../test/data/felix.fa") as data:
+    with SequenceDataset(os.path.dirname(__file__) + "/../tests/data/felix.fa") as data:
         ref_seqs = np.array([
             # model 1
             [[1, 2, 3, 4, 5, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12],
@@ -559,7 +558,7 @@ def test_backward() -> None:
 
 def test_posterior_state_probabilities() -> None:
     """Test posterior state probabilities."""
-    train_filename = os.path.dirname(__file__) + "/../test/data/egf.fasta"
+    train_filename = os.path.dirname(__file__) + "/../tests/data/egf.fasta"
     with SequenceDataset(train_filename) as data:
         hmm_cell = MsaHmmCell.MsaHmmCell(32)
         hmm_layer = MsaHmmLayer.MsaHmmLayer(hmm_cell, 1)

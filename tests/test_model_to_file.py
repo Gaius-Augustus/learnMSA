@@ -3,10 +3,9 @@ import shutil
 import warnings
 
 import numpy as np
-import pytest
 import tensorflow as tf
 
-from learnMSA.msa_hmm import Configuration, Initializers, Training, Utility
+from learnMSA.msa_hmm import Configuration, Initializers, Training
 from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
 from learnMSA.msa_hmm.Emitter import ProfileHMMEmitter
 from learnMSA.msa_hmm.Initializers import ConstantInitializer
@@ -24,7 +23,7 @@ def test_model_to_file() -> None:
     warnings.filterwarnings("ignore", category=DeprecationWarning, module="keras")
     warnings.filterwarnings("ignore", category=UserWarning, module="keras")
 
-    test_filepath = "test/data/test_model"
+    test_filepath = "tests/data/test_model"
 
     # Remove any saved models from previous tests
     shutil.rmtree(test_filepath, ignore_errors=True)
@@ -77,7 +76,7 @@ def test_model_to_file() -> None:
     loglik = model([seq, np.array([[0]])])[1].numpy()
 
     #make alignment and save
-    with SequenceDataset("test/data/simple.fa") as data:
+    with SequenceDataset("tests/data/simple.fa") as data:
         batch_gen = Training.DefaultBatchGenerator()
         batch_gen.configure(data, config)
         ind = np.array([0,1])

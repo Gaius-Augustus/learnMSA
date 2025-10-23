@@ -1,5 +1,4 @@
 import numpy as np
-import pytest
 import tensorflow as tf
 
 from learnMSA.msa_hmm import Priors

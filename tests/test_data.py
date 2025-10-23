@@ -7,7 +7,7 @@ from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 
 
 def test_default_batch_gen() -> None:
-    filename = os.path.dirname(__file__) + "/../test/data/felix_insert_delete.fa"
+    filename = os.path.dirname(__file__) + "/../tests/data/felix_insert_delete.fa"
     with SequenceDataset(filename) as data:
         batch_gen = Training.DefaultBatchGenerator(shuffle=False)
         batch_gen.configure(data, Configuration.make_default(1))

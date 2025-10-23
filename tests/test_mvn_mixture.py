@@ -1,4 +1,3 @@
-import pytest
 import numpy as np
 from learnMSA.protein_language_models import MvnMixture
 from learnMSA.msa_hmm import Utility

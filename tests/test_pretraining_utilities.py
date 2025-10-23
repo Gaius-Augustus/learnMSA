@@ -1,6 +1,7 @@
-import pytest
 import numpy as np
+import pytest
 import tensorflow as tf
+
 from learnMSA.protein_language_models import TrainingUtil
 
 

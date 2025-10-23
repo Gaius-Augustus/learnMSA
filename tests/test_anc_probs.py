@@ -1,14 +1,14 @@
 """Tests for ancestral probability calculations and rate matrices."""
 import os
+
 import numpy as np
 import pytest
 import tensorflow as tf
 
-from learnMSA.msa_hmm import (
-    AncProbsLayer, Initializers, Training, Configuration, Emitter, Utility
-)
-from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
+from learnMSA.msa_hmm import (AncProbsLayer, Configuration, Emitter,
+                              Initializers, Training, Utility)
 from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
+from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 
 
 class AncProbsData:
@@ -152,7 +152,7 @@ def get_test_configs(sequences : np.ndarray) -> list[dict]:
 
 def get_simple_seq(data: SequenceDataset) -> np.ndarray:
     """Get simple sequence data for testing."""
-    from learnMSA.msa_hmm import Training, Configuration
+    from learnMSA.msa_hmm import Configuration, Training
     indices = np.arange(data.num_seq)
     batch_generator = Training.DefaultBatchGenerator()
     config = Configuration.make_default(1)
@@ -198,7 +198,7 @@ def test_rate_matrices(anc_probs_data : AncProbsData) -> None:
 
 def test_anc_probs() -> None:
     """Test ancestral probability calculations."""
-    filename = os.path.dirname(__file__) + "/../test/data/simple.fa"
+    filename = os.path.dirname(__file__) + "/../tests/data/simple.fa"
     with SequenceDataset(filename) as data:
         sequences = get_simple_seq(data)
     n = sequences.shape[1]
@@ -216,7 +216,7 @@ def test_anc_probs() -> None:
 
 def test_encoder_model() -> None:
     """Test encoder model with ancestral probabilities layer."""
-    filename = os.path.dirname(__file__) + "/../test/data/simple.fa"
+    filename = os.path.dirname(__file__) + "/../tests/data/simple.fa"
     with SequenceDataset(filename) as data:
         sequences = get_simple_seq(data)
         n = sequences.shape[1]
@@ -259,7 +259,7 @@ def test_encoder_model() -> None:
 
 def test_transposed() -> None:
     """Test transposed ancestral probabilities."""
-    filename = os.path.dirname(__file__) + "/../test/data/simple.fa"
+    filename = os.path.dirname(__file__) + "/../tests/data/simple.fa"
     with SequenceDataset(filename) as data:
         sequences = get_simple_seq(data)
     n = sequences.shape[1]
