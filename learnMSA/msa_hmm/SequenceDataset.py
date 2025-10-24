@@ -17,35 +17,35 @@ class SequenceDataset:
 
     def __init__(
         self,
-        filespath: Path | str | None = None,
+        filepath: Path | str | None = None,
         fmt: str = "fasta",
         sequences: list[tuple[str, str]] | None = None,
         indexed: bool = False,
     ) -> None:
         """
         Args:
-            filespath (Path): Path to a sequence file in any supported format.
+            filepath (Path): Path to a sequence file in any supported format.
             fmt (str): Format of the file. Can be any format supported by
                 Biopython's SeqIO.
             sequences (list): A list of id/sequence pairs as strings. If given,
-                filespath and fmt arguments are ignored.
+                filepath and fmt arguments are ignored.
             indexed (bool): If True, avoid loading the whole file into memory
                 at once.  Otherwise regular parsing is used.
         """
         if sequences is None:
             # Attempt to parse the file when no sequences are given
-            assert filespath is not None, \
-                "Filespath must be provided when sequences are None"
-            if isinstance(filespath, str):
-                filespath = Path(filespath)
-            self._filepath = filespath
+            assert filepath is not None, \
+                "filepath must be provided when sequences are None"
+            if isinstance(filepath, str):
+                filepath = Path(filepath)
+            self._filepath = filepath
             self._fmt = fmt
             self._indexed = indexed
             try:
                 if indexed:
-                    self._record_dict = SeqIO.index(filespath, fmt)
+                    self._record_dict = SeqIO.index(filepath, fmt)
                 else:
-                    with open(filespath, "rt", encoding="utf-8") as handle:
+                    with open(filepath, "rt", encoding="utf-8") as handle:
                         self._record_dict = SeqIO.to_dict(
                             SeqIO.parse(handle, fmt)
                         )
@@ -88,7 +88,7 @@ class SequenceDataset:
         self.close()
 
     @property
-    def filespath(self) -> Path:
+    def filepath(self) -> Path:
         """Path to the sequence file."""
         return self._filepath
 

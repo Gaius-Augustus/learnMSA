@@ -198,7 +198,7 @@ def test_properties() -> None:
     """Test all property accessors."""
     with SequenceDataset(f"{DIR}/felix.fa", "fasta") as data:
         # Test basic properties
-        assert isinstance(data.filespath, Path)
+        assert isinstance(data.filepath, Path)
         assert data.fmt == "fasta"
         assert data.indexed == False
         assert data.parsing_ok == True
@@ -370,13 +370,13 @@ def test_string_filepath() -> None:
     """Test that string filepaths are converted to Path objects."""
     # Test with string path
     with SequenceDataset(f"{DIR}/felix.fa", "fasta") as data:
-        assert isinstance(data.filespath, Path)
-        assert data.filespath.name == "felix.fa"
+        assert isinstance(data.filepath, Path)
+        assert data.filepath.name == "felix.fa"
 
     # Test with Path object
     with SequenceDataset(Path(f"{DIR}/felix.fa"), "fasta") as data:
-        assert isinstance(data.filespath, Path)
-        assert data.filespath.name == "felix.fa"
+        assert isinstance(data.filepath, Path)
+        assert data.filepath.name == "felix.fa"
 
 
 def test_empty_properties_on_early_return() -> None:

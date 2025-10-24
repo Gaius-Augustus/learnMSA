@@ -13,6 +13,7 @@ learnMSA/protein_language_models/pretraining/.snakemake
 learnMSA/protein_language_models/pretraining/results/*rows
 build/
 dist/
+tests/data/*out*
 clustering/
 learnMSA.egg-info/
 tmp/

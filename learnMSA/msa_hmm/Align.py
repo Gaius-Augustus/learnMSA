@@ -208,8 +208,8 @@ def run_learnMSA(data : SequenceDataset,
         An AlignmentModel object.
     """
     if verbose:
-        print("Training of", config["num_models"], "models on file", os.path.basename(data.filename))
-        print("Configuration:", as_str(config)) 
+        print("Training of", config["num_models"], "models on file", os.path.basename(data.filepath))
+        print("Configuration:", as_str(config))
     # optionally load the reference and find the corresponding sequences in the train file
     subset = np.array([data.seq_ids.index(sid) for sid in subset_ids]) if subset_ids else None
     if load_model:
@@ -780,7 +780,7 @@ def _dataset_messages(data : SequenceDataset, seq_count_heuristic_gap_check=100,
         record = data.get_record(i)
         if '-' in record or '.' in record:
             if not warned:
-                print(f"Warning: The sequences in {data.filename} seem to be already aligned. learnMSA will ignore any gap character.")
+                print(f"Warning: The sequences in {data.filepath} seem to be already aligned. learnMSA will ignore any gap character.")
                 warned = True
     if data.num_seq < seq_count_warning_threshold:
         print(f"Warning: You are aligning {data.num_seq} sequences, although learnMSA is designed for large scale alignments. We recommend to have a sufficiently deep training dataset of at least {seq_count_warning_threshold} sequences for accurate results.")
