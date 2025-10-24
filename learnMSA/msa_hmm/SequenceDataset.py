@@ -295,7 +295,12 @@ class SequenceDataset:
                 "learnMSA requires unique sequence IDs."
             )
 
-    def write(self, filepath: Path | str, fmt="fasta") -> None:
+    def write(
+            self,
+            filepath: Path | str,
+            fmt="fasta",
+            standardize_sequences: bool = False,
+    ) -> None:
         """
         Write the dataset to a file.
 
@@ -303,10 +308,20 @@ class SequenceDataset:
             filepath (Path): Path to the output file.
             fmt (str): Format of the output file. Can be any format supported
                 by Biopython's SeqIO.
+            standardize_sequences (bool): If True, sequences are converted to
+                uppercase and non-standard amino acids are replaced with 'X'.
+                Dots are replaced with dashes.
         """
         sequences = list(self.record_dict.values())
         for s in sequences:
-            s.seq = Seq.Seq(s.seq)
+            if standardize_sequences:
+                seq = self.get_standardized_seq(
+                    self.seq_ids.index(s.id),
+                    remove_gaps=False,
+                )
+                s.seq = Seq.Seq(seq)
+            else:
+                s.seq = Seq.Seq(s.seq)
             s.description = ""
         SeqIO.write(sequences, filepath, fmt)
 

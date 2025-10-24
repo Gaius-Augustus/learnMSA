@@ -247,6 +247,12 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         help="Do not use sequence weights and strip mmseqs2 from requirements."
             " In general not recommended."
     )
+    train_group.add_argument(
+        "--skip_training",
+        dest="skip_training",
+        action="store_true",
+        help="Only decode an alignment from the provided model."
+    )
 
     init_msa_group = parser.add_argument_group("Initialize with existing MSA")
     init_msa_group.add_argument(

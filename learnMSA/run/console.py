@@ -283,6 +283,10 @@ def get_config(
     else:
         config["crop_long_seqs"] = int(args.crop)
 
+    if args.skip_training:
+        config["max_surgery_runs"] = 1
+        config["epochs"] = [0]*3
+
     return config
 
 def get_generators(
@@ -345,8 +349,15 @@ def get_clustering(
 def convert_file(args : Namespace) -> None:
     from ..msa_hmm.SequenceDataset import SequenceDataset
 
+    if args.format == "a2m":
+        raise ValueError("Cannot convert to a2m format without a model.")
+
     with SequenceDataset(args.input_file, args.input_format) as data:
-        data.write(args.output_file, args.format)
+        data.write(
+            args.output_file,
+            args.format,
+            standardize_sequences=args.format == "fasta",
+        )
     if not args.silent:
         print(
             f"Converted {args.input_file} to {args.output_file} in format "\

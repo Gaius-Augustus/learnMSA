@@ -123,8 +123,10 @@ differ slighly in their initialization, length (number of match states) and
     Do not use sequence weights and strip mmseqs2 from requirements. In general
     not recommended.
 
-
-
+``--skip_training``
+    Skips the training phase entirely and only decodes an alignment from the provided
+    model. This is useful if a pre-trained model is provided via ``--load_model``
+    or the model is initialized from an existing MSA via the option ``--init_msa``.
 
 
 Practical tips and example commands
