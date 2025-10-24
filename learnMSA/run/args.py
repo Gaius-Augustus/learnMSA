@@ -42,7 +42,7 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         "--format",
         dest="format",
         type=str,
-        default="fasta",
+        default="a2m",
         help="Format of the output alignment file."
     )
     io_group.add_argument(

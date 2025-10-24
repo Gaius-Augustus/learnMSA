@@ -22,8 +22,8 @@ def run_main():
     parser = parse_args(version)
     args = parser.parse_args()
 
-    if not args.silent:
-        print(parser.description)
+    if not args.silent and parser.description:
+        print(parser.description.split("\n")[0])
 
     util.setup_devices(args.cuda_visible_devices, args.silent, args.grow_mem)
 
@@ -41,6 +41,11 @@ def run_main():
         args.logo_gif = util.validate_filepath(args.logo_gif, ".gif")
         os.makedirs(args.logo_gif.parent, exist_ok=True)
         os.makedirs(args.logo_gif.parent / "frames", exist_ok=True)
+
+    if args.noA2M:
+        raise DeprecationWarning(
+            "--noA2M is deprecated. Use --format fasta instead."
+        )
 
     try:
         with SequenceDataset(
@@ -81,8 +86,7 @@ def run_main():
                 logo_dir = args.logo_gif.parent if args.logo_gif else "",
                 initial_model_length_callback = initial_model_length_cb,
                 output_format = args.format,
-                load_model = args.load_model,
-                A2M_output=not args.noA2M
+                load_model = args.load_model
             )
             if args.save_model:
                 alignment_model.write_models_to_file(args.save_model)

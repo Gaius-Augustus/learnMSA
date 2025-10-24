@@ -109,7 +109,7 @@ def fit_and_align(data : SequenceDataset,
                                           verbose=verbose)
         if verbose:
             print("Creating alignment model...")
-        am = AlignmentModel(data, batch_generator, decode_indices, batch_size=batch_size, model=model, A2M=A2M_output)
+        am = AlignmentModel(data, batch_generator, decode_indices, batch_size=batch_size, model=model)
         if verbose:
             print("Successfully created alignment model.")
         if last_iteration:
