@@ -53,3 +53,44 @@ def test_error_handling() -> None:
     )
     output = test.communicate()[1].strip().decode('ascii')
     assert unknown_symbol_expected_err in output
+
+def test_file_conversion_and_input_format() -> None:
+    input_fasta = "tests/data/egf.ref"
+    output_clustal = "tests/data/egf.out.clustal"
+
+    # fasta -> clustal
+    test = subprocess.Popen(
+        [
+            "python", "learnMSA.py", "--convert", "--silent",
+            "-i", input_fasta,
+            "-o", output_clustal,
+            "--format", "clustal"
+        ],
+        stderr=subprocess.PIPE
+    )
+    test.communicate()
+    with SequenceDataset(input_fasta, "fasta") as data:
+        original_seq_count = len(data)
+    with SequenceDataset(output_clustal, "clustal") as data:
+        assert len(data) == original_seq_count
+
+    # clustal -> fasta
+    output_fasta = "tests/data/egf.out.fasta"
+    test = subprocess.Popen(
+        [
+            "python", "learnMSA.py", "--convert", "--silent",
+            "-i", output_clustal,
+            "-o", output_fasta,
+            "--input_format", "clustal",
+            "--format", "fasta"
+        ],
+        stderr=subprocess.PIPE
+    )
+    test.communicate()
+    with SequenceDataset(output_fasta, "fasta") as data:
+        assert len(data) == original_seq_count
+
+    # cleanup
+    subprocess.Popen(
+        ["rm", output_clustal, output_fasta],stderr=subprocess.PIPE
+    ).communicate()

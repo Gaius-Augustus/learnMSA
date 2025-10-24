@@ -46,6 +46,13 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         help="Format of the output alignment file."
     )
     io_group.add_argument(
+        "--input_format",
+        dest="input_format",
+        type=str,
+        default="fasta",
+        help="Format of the input alignment file."
+    )
+    io_group.add_argument(
         "--save_model",
         dest="save_model",
         type=str,
@@ -80,6 +87,12 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         type=str,
         default="tmp",
         help="Working directory. (default: %(default)s)"
+    )
+    io_group.add_argument(
+        "--convert",
+        dest="convert",
+        action='store_true',
+        help="Convert input files to format specific by --format."
     )
 
     # Training

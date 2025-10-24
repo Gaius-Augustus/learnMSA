@@ -1,11 +1,12 @@
 import math
 import os
 import sys
+from argparse import Namespace
 
 import numpy as np
 
 import learnMSA.run.util as util
-from learnMSA.run.args import LearnMSAArgumentParser, parse_args
+from learnMSA.run.args import parse_args
 from learnMSA.run.help import handle_help_command
 
 #hide tensorflow messages and warnings
@@ -26,6 +27,10 @@ def run_main():
 
     util.setup_devices(args.cuda_visible_devices, args.silent, args.grow_mem)
 
+    if args.convert:
+        convert_file(args)
+        return
+
     from ..msa_hmm import Align, Training, Visualize
     from ..msa_hmm.SequenceDataset import SequenceDataset
 
@@ -39,7 +44,7 @@ def run_main():
 
     try:
         with SequenceDataset(
-            args.input_file, "fasta", indexed=args.indexed_data
+            args.input_file, args.input_format, indexed=args.indexed_data
         ) as data:
             # check if the input data is valid
             data.validate_dataset()
@@ -115,7 +120,7 @@ def run_main():
 
 
 def get_config(
-    args : LearnMSAArgumentParser,
+    args : Namespace,
     data : "SequenceDataset"
 ) -> dict:
 
@@ -195,7 +200,7 @@ def get_config(
     return config
 
 def get_generators(
-    args : LearnMSAArgumentParser,
+    args : Namespace,
     data : "SequenceDataset",
     config : dict
 ):
@@ -219,15 +224,27 @@ def get_generators(
     return model_gen, batch_gen
 
 def get_clustering(
-    args : LearnMSAArgumentParser,
+    args : Namespace,
     config : dict
 ):
-    from ..msa_hmm import Align
+    from ..msa_hmm import Align, SequenceDataset
     if not args.no_sequence_weights:
         os.makedirs(args.work_dir, exist_ok=True)
         try:
+            if args.input_format == "fasta":
+                cluster_file = args.input_file
+            else:
+                # We need to convert to fasta
+                cluster_file = os.path.join(
+                    args.work_dir,
+                    os.path.basename(args.input_file) + ".temp_for_clustering"
+                )
+                with SequenceDataset.SequenceDataset(
+                    args.input_file, args.input_format
+                ) as data:
+                    data.write(cluster_file, "fasta")
             sequence_weights, clusters = Align.compute_sequence_weights(
-                args.input_file,
+                cluster_file,
                 args.work_dir,
                 config["cluster_seq_id"],
                 return_clusters=True
@@ -238,6 +255,17 @@ def get_clustering(
     else:
         sequence_weights, clusters = None, None
     return sequence_weights, clusters
+
+def convert_file(args : Namespace) -> None:
+    from ..msa_hmm.SequenceDataset import SequenceDataset
+
+    with SequenceDataset(args.input_file, args.input_format) as data:
+        data.write(args.output_file, args.format)
+    if not args.silent:
+        print(
+            f"Converted {args.input_file} to {args.output_file} in format "\
+            f"{args.format}."
+        )
 
 
 if __name__ == '__main__':

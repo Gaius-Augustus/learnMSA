@@ -76,6 +76,9 @@ class SequenceDataset:
         ])
         self._max_len = np.amax(self._seq_lens) if self._seq_lens.size > 0 else 0
 
+    def __len__(self) -> int:
+        return self.num_seq
+
     def __enter__(self) -> Self:
         return self
 
