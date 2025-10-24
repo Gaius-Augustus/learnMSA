@@ -20,6 +20,10 @@
 - only for proteins
 - increasingly slow for long proteins with a length > 1000 residues
 
+## Documentation
+
+Find it [here](https://gaius-augustus.github.io/learnMSA/index.html#).
+
 # Installation
 
 You have 3 options to install learnMSA. 

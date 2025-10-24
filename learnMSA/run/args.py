@@ -13,7 +13,10 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
 
     parser = LearnMSAArgumentParser(
         description=f"learnMSA (version {version}) - "
-                    "multiple alignment of protein sequences"
+                    "multiple alignment of protein sequences\n"
+                    "\n"
+                    "Use 'learnMSA help [argument]' to get detailed help on a specific argument.",
+        formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
     # Input/output group
@@ -24,7 +27,7 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         dest="input_file",
         type=str,
         required=True,
-        help="Input FASTA file containing the protein sequences to align."
+        help="Input fasta file."
     )
     io_group.add_argument(
         "-o",
@@ -32,32 +35,36 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         dest="output_file",
         type=str,
         required=True,
-        help="Output file path for the resulting multiple sequence "\
-            "alignment. Use -f to change the output file type."
+        help="Output file. Use -f to change format."
     )
     io_group.add_argument(
         "-f",
         "--format",
         dest="format",
         type=str,
+        default="a2m",
+        help="Format of the output alignment file."
+    )
+    io_group.add_argument(
+        "--input_format",
+        dest="input_format",
+        type=str,
         default="fasta",
-        help="Format of the output alignment file. "\
-            "Must be either a2m or a valid Biopython SeqIO format. "\
-            "Default: a2m (fasta)."
+        help="Format of the input alignment file."
     )
     io_group.add_argument(
         "--save_model",
         dest="save_model",
         type=str,
         default="",
-        help="Optional file path to save the trained model"
+        help="Save a trained model for later reuse"
     )
     io_group.add_argument(
         "--load_model",
         dest="load_model",
         type=str,
         default="",
-        help="Optional file path to load a pretrained model and skip training."
+        help="Load a saved model."
     )
     io_group.add_argument(
         "-s",
@@ -67,37 +74,25 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         help="Suppresses all standard output messages."
     )
     io_group.add_argument(
-        "--noA2M",
-        dest="noA2M",
-        action="store_true",
-        help="If set, the output will use only upper case letters and \"-\" " \
-            "for gaps. Otherwise, lower case letters are used for insertions " \
-            "and \".\" denotes an insertion in another sequence."
-    )
-    io_group.add_argument(
         "-d",
         "--cuda_visible_devices",
         dest="cuda_visible_devices",
         type=str,
         default="default",
-        help="Controls the GPU devices visible to learnMSA as a " \
-        "comma-separated list of device IDs. The value -1 forces learnMSA to " \
-        "run on CPU. Per default, learnMSA attempts to use all available GPUs."
+        help="GPU device(s) visible to learnMSA. Use -1 for CPU."
     )
     io_group.add_argument(
-        "--cluster_dir",
-        dest="cluster_dir",
+        "--work_dir",
+        dest="work_dir",
         type=str,
         default="tmp",
-        help="Directory where the sequence clustering is stored. "\
-            "(default: %(default)s)"
+        help="Working directory. (default: %(default)s)"
     )
     io_group.add_argument(
-        "--dist_out",
-        dest="dist_out",
-        type=str,
-        default="",
-        help="Optional output file for the learned evolutionary distances."
+        "--convert",
+        dest="convert",
+        action='store_true',
+        help="Convert input files to format specific by --format."
     )
 
     # Training
@@ -108,7 +103,7 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         dest="num_model",
         type=int,
         default=4,
-        help="Number of models to train in parallel. (default: %(default)s)"
+        help="Number of models to train. (default: %(default)s)"
     )
     train_group.add_argument(
         "-b",
@@ -116,18 +111,14 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         dest="batch_size",
         type=int,
         default=-1,
-        help="Batch size for training. "\
-            "Increase for a speed up."\
-            "Reduce if you encounter memory issues. "\
-            "Default: adaptive "\
-            "(typically 64–512, based on proteins and model size)."
+        help="Batch size for training. Default: adaptive "
     )
     train_group.add_argument(
         "--learning_rate",
         dest="learning_rate",
         type=float,
         default=0.1,
-        help="The learning rate used during gradient descent. "\
+        help="Learning rate for gradient descent. "\
             "(default: %(default)s)"
     )
 
@@ -155,10 +146,7 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         nargs='+',
         action=EpochsAction,
         default=[10, 2, 10],
-        help="Scheme for the number of training epochs during the first, an " \
-            "intermediate and the last iteration. Provide either a single " \
-            "integer (used for all iterations) or 3 integers (for first, " \
-            "intermediate, and last iteration). (default: %(default)s)"
+        help="Number of training epochs (see detailed help)."
     )
     train_group.add_argument(
         "--max_iterations",
@@ -173,50 +161,44 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         dest="length_init_quantile",
         type=float,
         default=0.5,
-        help="Quantile of the input sequence lengths that defines the initial" \
-            " model lengths. (default: %(default)s)"
+        help="Check learnMSA help length_init_quantile for details."
     )
     train_group.add_argument(
         "--surgery_quantile",
         dest="surgery_quantile",
         type=float,
         default=0.5,
-        help="learnMSA will not use sequences shorter than this quantile for " \
-            "training during all iterations except the last. "\
-                "(default: %(default)s)"
+        help="Check learnMSA help surgery_quantile for details."
     )
     train_group.add_argument(
         "--min_surgery_seqs",
         dest="min_surgery_seqs",
         type=int,
         default=100000,
-        help="Minimum number of sequences used per iteration. Overshadows the " \
-            "effect of --surgery_quantile. (default: %(default)s)"
+        help="Check learnMSA help min_surgery_seqs for details."
     )
     train_group.add_argument(
         "--len_mul",
         dest="len_mul",
         type=float,
         default=0.8,
-        help="Multiplicative constant for the quantile used to define the " \
-            "initial model length (see --length_init_quantile). "\
-            "(default: %(default)s)"
+        help="Check learnMSA help len_mul for details."
     )
     train_group.add_argument(
         "--surgery_del",
         dest="surgery_del",
         type=float,
         default=0.5,
-        help="Will discard match states that are expected less often than " \
-            "this fraction. (default: %(default)s)"
+        help="Discard match states expected less often than this fraction. " \
+            "(default: %(default)s)"
     )
     train_group.add_argument(
         "--surgery_ins",
         dest="surgery_ins",
         type=float,
         default=0.5,
-        help="Will expand insertions that are expected more often than this " \
-            "fraction. (default: %(default)s)"
+        help="Expand insertions expected more often than this fraction. " \
+            "(default: %(default)s)"
     )
     train_group.add_argument(
         "--model_criterion",
@@ -228,9 +210,9 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
     train_group.add_argument(
         "--indexed_data",
         dest="indexed_data",
-        action="store_true",
-        help="Don't load all data into memory at once at the cost of training" \
-            " time.")
+        action='store_true',
+        help="Stream training data at the cost of training time."
+    )
     train_group.add_argument(
         "--unaligned_insertions",
         dest="unaligned_insertions",
@@ -242,22 +224,15 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         dest="crop",
         type=str,
         default="auto",
-        help="""During training, sequences longer than the given value will " \
-            "be cropped randomly. \n" \
-            "Reduces training runtime and memory usage, but might produce " \
-            "inaccurate results if too much of the sequences is cropped. The " \
-            "output alignment will not be cropped. \n" \
-            "Can be set to auto in which case sequences longer than 3 times " \
-            "the average length are cropped. Can be set to disable. " \
-            "(default: %(default)s)"""
+        help="Crop sequences longer than the given value during training."
     )
     train_group.add_argument(
         "--auto_crop_scale",
         dest="auto_crop_scale",
         type=float,
         default=2.,
-        help="During training sequences longer than this factor times the " \
-            "average length are cropped. (default: %(default)s)"
+        help="Automatically crop sequences longer than this factor times the " \
+            "average length during training. (default: %(default)s)"
     )
     train_group.add_argument(
         "--frozen_insertions",
@@ -417,8 +392,7 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         dest="logo",
         type=str,
         default="",
-        help="Produces a pdf of the learned sequence logo. "\
-            "Directories are created."
+        help="Produces a pdf of the learned sequence logo."
     )
     vis_group.add_argument(
         "--logo_gif",
@@ -426,11 +400,33 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         type=str,
         default="",
         help="Produces a gif that animates the learned sequence logo over " \
-            "training time. Slows down training significantly. "\
-            "Directories are created."
+            "training time. Slows down training significantly."
     )
 
+    deprecated_group = parser.add_argument_group("Deprecated arguments")
+    deprecated_group.add_argument(
+        "--noA2M",
+        dest="noA2M",
+        action='store_true',
+        help="Deprecated: Use --format fasta instead."
+    )
+    deprecated_group.add_argument(
+        "--cluster_dir",
+        dest="work_dir",
+        type=str,
+        default="tmp",
+        help="Deprecated: Use --work_dir instead."
+    )
+
+
     # suppressed arguments intended for development but not for users
+    parser.add_argument(
+        "--dist_out",
+        dest="dist_out",
+        type=str,
+        default="",
+        help=argparse.SUPPRESS
+    )
     parser.add_argument(
         "--alpha_flank",
         dest="alpha_flank",

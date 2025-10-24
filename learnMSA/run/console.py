@@ -1,11 +1,13 @@
-import argparse
 import math
 import os
+import sys
+from argparse import Namespace
 
 import numpy as np
 
 import learnMSA.run.util as util
 from learnMSA.run.args import parse_args
+from learnMSA.run.help import handle_help_command
 
 #hide tensorflow messages and warnings
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
@@ -13,14 +15,21 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
 def run_main():
 
+
     version = util.get_version()
+    if handle_help_command():
+        return
     parser = parse_args(version)
     args = parser.parse_args()
 
-    if not args.silent:
-        print(parser.description)
+    if not args.silent and parser.description:
+        print(parser.description.split("\n")[0])
 
     util.setup_devices(args.cuda_visible_devices, args.silent, args.grow_mem)
+
+    if args.convert:
+        convert_file(args)
+        return
 
     from ..msa_hmm import Align, Training, Visualize, MSA2HMM, Initializers, Priors
     from ..msa_hmm.SequenceDataset import SequenceDataset, AlignedDataset
@@ -103,9 +112,14 @@ def run_main():
         initializers = None
         initial_model_length_cb = None
 
+    if args.noA2M:
+        raise DeprecationWarning(
+            "--noA2M is deprecated. Use --format fasta instead."
+        )
+
     try:
         with SequenceDataset(
-            args.input_file, "fasta", indexed=args.indexed_data
+            args.input_file, args.input_format, indexed=args.indexed_data
         ) as data:
             # Check if the input data is valid
             data.validate_dataset()
@@ -146,8 +160,7 @@ def run_main():
                 logo_dir = args.logo_gif.parent if args.logo_gif else "",
                 initial_model_length_callback = initial_model_length_cb,
                 output_format = args.format,
-                load_model = args.load_model,
-                A2M_output=not args.noA2M
+                load_model = args.load_model
             )
             if args.save_model:
                 alignment_model.write_models_to_file(args.save_model)
@@ -184,7 +197,7 @@ def run_main():
         raise SystemExit(e)
 
 
-def get_scoring_model_config(args : argparse.Namespace):
+def get_scoring_model_config(args : Namespace) -> dict:
     if args.use_language_model:
         import learnMSA.protein_language_models.Common as Common
         scoring_model_config = Common.ScoringModelConfig(
@@ -200,7 +213,7 @@ def get_scoring_model_config(args : argparse.Namespace):
 
 
 def get_config(
-    args : argparse.Namespace,
+    args : Namespace,
     data : "SequenceDataset",
     initializers : "PHMMInitializerSet | None" = None,
 ) -> dict:
@@ -273,7 +286,7 @@ def get_config(
     return config
 
 def get_generators(
-    args : argparse.Namespace,
+    args : Namespace,
     data : "SequenceDataset",
     config : dict
 ):
@@ -297,16 +310,28 @@ def get_generators(
     return model_gen, batch_gen
 
 def get_clustering(
-    args : argparse.Namespace,
+    args : Namespace,
     config : dict
 ):
-    from ..msa_hmm import Align
+    from ..msa_hmm import Align, SequenceDataset
     if not args.no_sequence_weights:
-        os.makedirs(args.cluster_dir, exist_ok=True)
+        os.makedirs(args.work_dir, exist_ok=True)
         try:
+            if args.input_format == "fasta":
+                cluster_file = args.input_file
+            else:
+                # We need to convert to fasta
+                cluster_file = os.path.join(
+                    args.work_dir,
+                    os.path.basename(args.input_file) + ".temp_for_clustering"
+                )
+                with SequenceDataset.SequenceDataset(
+                    args.input_file, args.input_format
+                ) as data:
+                    data.write(cluster_file, "fasta")
             sequence_weights, clusters = Align.compute_sequence_weights(
-                args.input_file,
-                args.cluster_dir,
+                cluster_file,
+                args.work_dir,
                 config["cluster_seq_id"],
                 return_clusters=True
             )
@@ -316,6 +341,17 @@ def get_clustering(
     else:
         sequence_weights, clusters = None, None
     return sequence_weights, clusters
+
+def convert_file(args : Namespace) -> None:
+    from ..msa_hmm.SequenceDataset import SequenceDataset
+
+    with SequenceDataset(args.input_file, args.input_format) as data:
+        data.write(args.output_file, args.format)
+    if not args.silent:
+        print(
+            f"Converted {args.input_file} to {args.output_file} in format "\
+            f"{args.format}."
+        )
 
 
 if __name__ == '__main__':

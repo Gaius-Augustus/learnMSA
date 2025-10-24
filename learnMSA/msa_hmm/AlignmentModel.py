@@ -220,10 +220,7 @@ class AlignmentModel():
         gap_symbol: Character used to denote missing match positions.
         gap_symbol_insertions: Character used to denote insertions in other 
             sequences.
-        A2M: If true, the output is in A2M format, a variant of fasta where 
-            lower case amino acids indicate insertions
-            and "." indicates insertions in other sequences. If false, pure 
-            fasta with all upper case amino acids and only "-" is used.
+        A2M: DEPRECATED. Use format="a2m" or format="fasta" in to_file() method
     """
     def __init__(self, 
                  data : SequenceDataset, 
@@ -233,7 +230,7 @@ class AlignmentModel():
                  model,
                  gap_symbol="-",
                  gap_symbol_insertions=".",
-                 A2M=True):
+                 A2M=None):
         self.data = data
         self.batch_generator = batch_generator
         self.indices = indices
@@ -257,37 +254,29 @@ class AlignmentModel():
             "Can not find a MsaHmmLayer in the specified model."
         self.gap_symbol = gap_symbol
         self.gap_symbol_insertions = gap_symbol_insertions
-        if A2M:
-            self.output_alphabet = np.array((
-                list(data.get_alphabet_no_gap()) + 
-                [gap_symbol] + 
-                list(data.get_alphabet_no_gap().lower()) + 
-                [gap_symbol_insertions, "$"]
-            ))
-        else:
-            self.output_alphabet = np.array((
-                list(data.get_alphabet_no_gap()) + 
-                [gap_symbol] + 
-                list(data.get_alphabet_no_gap()) + 
-                [gap_symbol, "$"]
-            ))
+
         self.metadata = {}
         self.num_models = self.msa_hmm_layer.cell.num_models
         self.length = self.msa_hmm_layer.cell.length
-        
+        if A2M is not None:
+            raise DeprecationWarning(
+                "The A2M argument is deprecated. Use format='a2m' or " \
+                "format='fasta' in to_file() method."
+            )
+
     #computes an implicit alignment (without storing gaps)
-    #eventually, an alignment with explicit gaps can be written 
+    #eventually, an alignment with explicit gaps can be written
     #in a memory friendly manner to file
     def _build_alignment(self, models):
 
         assert len(models) == 1, "Not implemented for multiple models."
-        
+
         if tf.distribute.has_strategy():
             with tf.distribute.get_strategy().scope():
                 cell_copy = self.msa_hmm_layer.cell.duplicate(models)
         else:
             cell_copy = self.msa_hmm_layer.cell.duplicate(models)
-            
+
         cell_copy.build(
             (self.num_models, None, None, self.msa_hmm_layer.cell.dim)
         )
@@ -336,31 +325,62 @@ class AlignmentModel():
                 )
             state_seqs_max_lik[0,faulty_sequences,:fixed_state_seqs.shape[-1]] = fixed_state_seqs[0]
         return state_seqs_max_lik
-        
-    def to_string(
-        self, 
-        model_index, 
-        batch_size=100000, 
-        add_block_sep=True, 
-        aligned_insertions : AlignedInsertions = AlignedInsertions()
-    ):
-        """ Uses one model to decode an alignment and returns the sequences 
-            with gaps in a list.
-            Note that this method is not suitable im memory is limited and 
-            alignment depths and width are large.
-            
+
+    def get_output_alphabet(self, a2m : bool = True):
+        """ Returns the output alphabet used for string representation of
+            alignments.
+
         Args:
-            model_index: Specifies the model for decoding. Use a suitable 
-                criterion like loglik to decide for a model.
-            batch_size: Defines how many sequences are decoded at a time with 
-                no effect on the output MSA. It can be useful to lower this if 
-                memory is sufficient to store the table-form alignment but GPU 
-                memory used for decoding a batch is limited.
-            add_block_sep: If true, columns containing a special character are 
-                added to the alignment indicating domain boundaries.
-            aligned_insertions: Can be used to override insertion metadata if 
-                insertions are aligned after the main procedure.
+            a2m (bool): Whether to use the a2m format for strings
+                (with lowercase letters for inserted amino acids and dots for
+                gaps in insertions).
         """
+        if a2m:
+            output_alphabet = np.array((
+                list(self.data.get_alphabet_no_gap()) +
+                [self.gap_symbol] +
+                list(self.data.get_alphabet_no_gap().lower()) +
+                [self.gap_symbol_insertions, "$"]
+            ))
+        else:
+            output_alphabet = np.array((
+                list(self.data.get_alphabet_no_gap()) +
+                [self.gap_symbol] +
+                list(self.data.get_alphabet_no_gap()) +
+                [self.gap_symbol, "$"]
+            ))
+        return output_alphabet
+
+
+    def to_string(
+        self,
+        model_index,
+        batch_size=100000,
+        add_block_sep=True,
+        aligned_insertions : AlignedInsertions = AlignedInsertions(),
+        a2m=True,
+    ):
+        """ Uses one model to decode an alignment and returns the sequences
+            with gaps in a list.
+            Note that this method is not suitable im memory is limited and
+            alignment depths and width are large.
+
+        Args:
+            model_index: Specifies the model for decoding. Use a suitable
+                criterion like loglik to decide for a model.
+            batch_size: Defines how many sequences are decoded at a time with
+                no effect on the output MSA. It can be useful to lower this if
+                memory is sufficient to store the table-form alignment but GPU
+                memory used for decoding a batch is limited.
+            add_block_sep: If true, columns containing a special character are
+                added to the alignment indicating domain boundaries.
+            aligned_insertions: Can be used to override insertion metadata if
+                insertions are aligned after the main procedure.
+            a2m: Whether to use the a2m format for strings
+                (with lowercase letters for inserted amino acids and dots for
+                gaps in insertions).
+        """
+        output_alphabet = self.get_output_alphabet(a2m)
         alignment_strings_all = []
         n = self.indices.size
         i = 0
@@ -369,7 +389,9 @@ class AlignmentModel():
             batch_alignment = self.get_batch_alignment(
                 model_index, batch_indices, add_block_sep, aligned_insertions
             )
-            alignment_strings = self.batch_to_string(batch_alignment)
+            alignment_strings = self.batch_to_string(
+                batch_alignment, output_alphabet=output_alphabet
+            )
             alignment_strings_all.extend(alignment_strings)
             i += batch_size
         return alignment_strings_all
@@ -407,19 +429,22 @@ class AlignmentModel():
             fasta_line_limit: Maximum number of characters per line in the 
                 fasta file (only applies to sequences).
         """
-        if format == "fasta": #streaming batches to file
+        if format == "fasta" or format == "a2m": #streaming batches to file
+            output_alphabet = self.get_output_alphabet(format == "a2m")
             with open(filepath, "w") as output_file:
                 n = self.indices.size
                 i = 0
                 while i < n:
                     batch_indices = np.arange(i, min(n, i+batch_size))
                     batch_alignment = self.get_batch_alignment(
-                        model_index, 
-                        batch_indices, 
-                        add_block_sep, 
+                        model_index,
+                        batch_indices,
+                        add_block_sep,
                         aligned_insertions
                     )
-                    alignment_strings = self.batch_to_string(batch_alignment)
+                    alignment_strings = self.batch_to_string(
+                        batch_alignment, output_alphabet=output_alphabet
+                    )
                     for s, seq_ind in zip(alignment_strings, batch_indices):
                         seq_header = self.data.get_header(
                             self.indices[seq_ind]
@@ -532,10 +557,10 @@ class AlignmentModel():
         batch_alignment = np.concatenate(blocks, axis=1)
         return batch_alignment
     
-    def batch_to_string(self, batch_alignment):
+    def batch_to_string(self, batch_alignment, output_alphabet):
         """ Converts a dense matrix into string format.
         """
-        alignment_arr = self.output_alphabet[batch_alignment]
+        alignment_arr = output_alphabet[batch_alignment]
         alignment_strings = [''.join(s) for s in alignment_arr]
         return alignment_strings
     
