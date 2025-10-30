@@ -331,31 +331,35 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         dest="scoring_model_dim",
         type=int,
         default=16,
-        help="Reduced embedding dimension of the scoring model. "\
-            "(default: %(default)s)"
+        help=argparse.SUPPRESS
+        # help="Reduced embedding dimension of the scoring model. "\
+        #     "(default: %(default)s)"
     )
     plm_group.add_argument(
         "--scoring_model_activation",
         dest="scoring_model_activation",
         type=str,
         default="sigmoid",
-        help="Activation function of the scoring model. "\
-            "(default: %(default)s)"
+        help=argparse.SUPPRESS
+        # help="Activation function of the scoring model. "\
+        #     "(default: %(default)s)"
     )
     plm_group.add_argument(
         "--scoring_model_suffix",
         dest="scoring_model_suffix",
         type=str,
         default="",
-        help="Suffix to identify a specific scoring model. "\
-            "(default: %(default)s)"
+        help=argparse.SUPPRESS
+        # help="Suffix to identify a specific scoring model. "\
+        #     "(default: %(default)s)"
     )
     plm_group.add_argument(
         "--temperature",
         dest="temperature",
         type=float,
         default=3.,
-        help="Temperature of the softmax function. (default: %(default)s)"
+        help=argparse.SUPPRESS
+        # help="Temperature of the softmax function. (default: %(default)s)"
     )
     plm_group.add_argument(
         "--temperature_mode",
