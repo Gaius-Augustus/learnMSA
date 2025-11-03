@@ -1,21 +1,23 @@
-import tensorflow as tf
-import numpy as np
-import time
-import os
-import sys
 import math
-from pathlib import Path
+import os
 import subprocess
+import sys
+import time
+from pathlib import Path
 from shutil import which
+
+import numpy as np
 import pandas as pd
-from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
-import learnMSA.msa_hmm.Training as train
+import tensorflow as tf
+
 import learnMSA.msa_hmm.Initializers as initializers
+import learnMSA.msa_hmm.Training as train
+from learnMSA.msa_hmm.AlignInsertions import make_aligned_insertions
 from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
 from learnMSA.msa_hmm.Configuration import as_str, assert_config
-from learnMSA.msa_hmm.AlignInsertions import make_aligned_insertions
-from learnMSA.protein_language_models.MvnEmitter import AminoAcidPlusMvnEmissionInitializer
-
+from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
+from learnMSA.protein_language_models.MvnEmitter import \
+    AminoAcidPlusMvnEmissionInitializer
 
 #experimental, only used for ablation studies
 #decreases accuracy slightly!
@@ -54,21 +56,27 @@ Args:
     verbose: If False, all output messages will be disabled.
     A2M_output: If True, insertions will be indicated by lower case letters in the output and "." will indicate insertions in other sequences.
                 Otherwise all upper case letters and only "-" will be used.
+    load_model: Path to a pre-trained model to load (if any).
 Returns:
     An AlignmentModel object.
 """
-def fit_and_align(data : SequenceDataset,
-                  config,
-                  model_generator=None,
-                  batch_generator=None,
-                  subset=None,
-                  initial_model_length_callback=get_initial_model_lengths,
-                  sequence_weights=None,
-                  clusters=None,
-                  verbose=True,
-                  A2M_output=True):
+def fit_and_align(
+    data : SequenceDataset,
+    config,
+    model_generator=None,
+    batch_generator=None,
+    subset=None,
+    initial_model_length_callback=get_initial_model_lengths,
+    sequence_weights=None,
+    clusters=None,
+    verbose=True,
+    A2M_output=True,
+    load_model=""
+) -> AlignmentModel:
     assert_config(config)
-    model_generator, batch_generator = _make_defaults_if_none(model_generator, batch_generator)
+    model_generator, batch_generator = _make_defaults_if_none(
+        model_generator, batch_generator
+    )
     if verbose:
         _dataset_messages(data)
     if subset is None:
@@ -78,17 +86,45 @@ def fit_and_align(data : SequenceDataset,
 
     # Make dummy initializers for surgery
     if "scoring_model_config" in config:
-        emission_dummy = [AminoAcidPlusMvnEmissionInitializer(config["scoring_model_config"])]
+        emission_dummy = [
+            AminoAcidPlusMvnEmissionInitializer(config["scoring_model_config"])
+        ]
     else:
         emission_dummy = [initializers.make_default_emission_init()]
     transition_dummy = initializers.make_default_transition_init()
     flank_init_dummy = initializers.make_default_flank_init()
 
+    if load_model:
+        # Load the alignment model from file and use it as initialization
+        am = AlignmentModel.load_models_from_file(
+            load_model, data, custom_batch_gen=batch_generator
+        )
+        if verbose:
+            print("Loaded model from file", load_model)
+        # Prevent model surgery from adding or discarding any states,
+        # we'll use it to get initial transition and emission parameters
+        original_surgery_del = config["surgery_del"]
+        original_surgery_ins = config["surgery_ins"]
+        config["surgery_del"] = 0.0
+        config["surgery_ins"] = 1.0
+        config, model_lengths, _ = do_model_surgery(
+            0,
+            am,
+            config,
+            emission_dummy,
+            transition_dummy,
+            flank_init_dummy,
+            verbose
+        )
+
     last_iteration=config["max_surgery_runs"]==1
-    # 2 staged main loop: Fits model parameters with GD and optimized model architecture with surgery
+    # 2 staged main loop: Fits model parameters with GD and optimized model
+    # architecture with surgery
     for i in range(config["max_surgery_runs"]):
         if callable(config["batch_size"]):
-            batch_size = config["batch_size"](model_lengths, min(data.max_len, config["crop_long_seqs"]))
+            batch_size = config["batch_size"](
+                model_lengths, min(data.max_len, config["crop_long_seqs"])
+            )
         else:
             batch_size = config["batch_size"]
         #set the batch size to something smaller than the dataset size even though
@@ -101,37 +137,54 @@ def fit_and_align(data : SequenceDataset,
             train_indices = full_length_estimate
             decode_indices = full_length_estimate
         epochs_this_iteration = config["epochs"][0 if i==0 else 1 if not last_iteration else 2]
-        model, history = train.fit_model(model_generator,
-                                          batch_generator,
-                                          data,
-                                          train_indices,
-                                          model_lengths,
-                                          config,
-                                          batch_size=batch_size,
-                                          epochs=epochs_this_iteration,
-                                          sequence_weights=sequence_weights,
-                                          clusters=clusters,
-                                          verbose=verbose)
+        model, history = train.fit_model(
+            model_generator,
+            batch_generator,
+            data,
+            train_indices,
+            model_lengths,
+            config,
+            batch_size=batch_size,
+            epochs=epochs_this_iteration,
+            sequence_weights=sequence_weights,
+            clusters=clusters,
+            verbose=verbose
+        )
         if verbose:
             print("Creating alignment model...")
-        am = AlignmentModel(data, batch_generator, decode_indices, batch_size=batch_size, model=model)
+        am = AlignmentModel(
+            data,
+            batch_generator,
+            decode_indices,
+            batch_size=batch_size,
+            model=model
+        )
         if verbose:
             print("Successfully created alignment model.")
         if last_iteration:
             break
-        config, model_lengths, surgery_converged = do_model_surgery(i,
-                                                                    am,
-                                                                    config,
-                                                                    emission_dummy,
-                                                                    transition_dummy,
-                                                                    flank_init_dummy,
-                                                                    verbose)
+        config, model_lengths, surgery_converged = do_model_surgery(
+            i,
+            am,
+            config,
+            emission_dummy,
+            transition_dummy,
+            flank_init_dummy,
+            verbose
+        )
         if config["encoder_weight_extractor"] is not None:
             if config["experimental_evolve_upper_half"]:
-                print("Warning: The option experimental_evolve_upper_half is currently not compatible with encoder_weight_extractor. The weight extractor will be ignore.")
+                print(
+                    "Warning: The option experimental_evolve_upper_half is "\
+                    "currently not compatible with encoder_weight_extractor. "\
+                    "The weight extractor will be ignore."
+                )
             else:
                 if verbose:
-                    print("Used the encoder_weight_extractor callback to pass the encoder parameters to the next iteration.")
+                    print(
+                        "Used the encoder_weight_extractor callback to pass "\
+                        "the encoder parameters to the next iteration."
+                    )
                 config["encoder_initializer"] = config["encoder_weight_extractor"](am.encoder_model)
         elif verbose:
             print("Re-initialized the encoder parameters.")
@@ -141,9 +194,12 @@ def fit_and_align(data : SequenceDataset,
     return am
 
 
-def fit_and_align_with_logo_gif(data : SequenceDataset, config, initial_model_length_callback, logo_dir):
-    from learnMSA.msa_hmm.Visualize import LogoPlotterCallback, make_logo_gif
+def fit_and_align_with_logo_gif(
+    data : SequenceDataset, config, initial_model_length_callback, logo_dir
+) -> AlignmentModel:
     import matplotlib.pyplot as plt
+
+    from learnMSA.msa_hmm.Visualize import LogoPlotterCallback, make_logo_gif
 
     assert_config(config)
     model_generator, batch_generator = _make_defaults_if_none(None, None)
@@ -173,25 +229,27 @@ def fit_and_align_with_logo_gif(data : SequenceDataset, config, initial_model_le
     return am
 
 
-def run_learnMSA(data : SequenceDataset,
-                 out_filename,
-                 config,
-                 model_generator=None,
-                 batch_generator=None,
-                 subset_ids=[],
-                 align_insertions=False,
-                 insertion_aligner="famsa",
-                 aligner_threads=0,
-                 sequence_weights=None,
-                 clusters=None,
-                 verbose=True,
-                 initial_model_length_callback=get_initial_model_lengths,
-                 select_best_for_comparison=True,
-                 logo_gif_mode=False,
-                 logo_dir=Path(),
-                 output_format="fasta",
-                 load_model="",
-                 A2M_output=True):
+def run_learnMSA(
+    data : SequenceDataset,
+    out_filename,
+    config,
+    model_generator=None,
+    batch_generator=None,
+    subset_ids=[],
+    align_insertions=False,
+    insertion_aligner="famsa",
+    aligner_threads=0,
+    sequence_weights=None,
+    clusters=None,
+    verbose=True,
+    initial_model_length_callback=get_initial_model_lengths,
+    select_best_for_comparison=True,
+    logo_gif_mode=False,
+    logo_dir=Path(),
+    output_format="fasta",
+    load_model="",
+    A2M_output=True
+):
     """ Wraps fit_and_align and adds file parsing, verbosity, model selection, reference file comparison and an outfile file.
     Args:
         data: Dataset of sequences.
@@ -217,24 +275,31 @@ def run_learnMSA(data : SequenceDataset,
         print("Configuration:", as_str(config))
     # optionally load the reference and find the corresponding sequences in the train file
     subset = np.array([data.seq_ids.index(sid) for sid in subset_ids]) if subset_ids else None
-    if load_model:
-            am = AlignmentModel.load_models_from_file(load_model, data, custom_batch_gen=batch_generator)
+    if load_model and config["epochs"][0] == 0:
+        am = AlignmentModel.load_models_from_file(
+            load_model, data, custom_batch_gen=batch_generator
+        )
     else:
         try:
             t_a = time.time()
             if logo_gif_mode:
-                am = fit_and_align_with_logo_gif(data, config, initial_model_length_callback, logo_dir)
+                am = fit_and_align_with_logo_gif(
+                    data, config, initial_model_length_callback, logo_dir
+                )
             else:
-                am = fit_and_align(data,
-                                    config=config,
-                                    model_generator=model_generator,
-                                    batch_generator=batch_generator,
-                                    subset=subset,
-                                    initial_model_length_callback=initial_model_length_callback,
-                                    sequence_weights=sequence_weights,
-                                    clusters=clusters,
-                                    verbose=verbose,
-                                    A2M_output=A2M_output)
+                am = fit_and_align(
+                    data,
+                    config=config,
+                    model_generator=model_generator,
+                    batch_generator=batch_generator,
+                    subset=subset,
+                    initial_model_length_callback=initial_model_length_callback,
+                    sequence_weights=sequence_weights,
+                    clusters=clusters,
+                    verbose=verbose,
+                    A2M_output=A2M_output,
+                    load_model=load_model
+                )
             if verbose:
                 print("Time for alignment:", "%.4f" % (time.time()-t_a))
         except tf.errors.ResourceExhaustedError as e:
@@ -328,9 +393,7 @@ def get_state_expectations(data : SequenceDataset,
     return posterior_probs
 
 
-def get_discard_or_expand_positions(am,
-                                    del_t=0.5,
-                                    ins_t=0.5):
+def get_discard_or_expand_positions(am, del_t=0.5, ins_t=0.5):
     """ Given an AlignmentModel, computes positions for match expansions and discards based on the posterior state probabilities.
     Args:
         am: An AlignmentModel object.
@@ -598,15 +661,26 @@ def get_low_seq_num_batch_size(n):
     return max(batch_size, num_devices)
 
 
-def do_model_surgery(iteration, am : AlignmentModel, config, emission_dummy, transition_dummy, flank_init_dummy, verbose=False):
+def do_model_surgery(
+    iteration,
+    am : AlignmentModel,
+    config,
+    emission_dummy,
+    transition_dummy,
+    flank_init_dummy,
+    verbose=False
+):
     config = dict(config)
     surgery_converged = True
-    #duplicate the previous emitters and transitioner and replace their initializers later
+    # Duplicate the previous emitters and transitioner and replace their
+    # initializers later
     config["emitter"] = [em.duplicate() for em in am.msa_hmm_layer.cell.emitter]
     config["transitioner"] = am.msa_hmm_layer.cell.transitioner.duplicate()
-    pos_expand, expansion_lens, pos_discard = get_discard_or_expand_positions(am,
-                                                                                del_t=config["surgery_del"],
-                                                                                ins_t=config["surgery_ins"])
+    pos_expand, expansion_lens, pos_discard = get_discard_or_expand_positions(
+        am,
+        del_t=config["surgery_del"],
+        ins_t=config["surgery_ins"]
+    )
     model_lengths = []
     #evolve only after the first iteration
     #otherwise this would rule out models starting with too few or too many
@@ -624,26 +698,44 @@ def do_model_surgery(iteration, am : AlignmentModel, config, emission_dummy, tra
     for i,k in enumerate(models_for_next_iteration):
         surgery_converged &= pos_expand[k].size == 0 and pos_discard[k].size == 0
         if verbose:
-            print(f"expansions model {i}:", list(zip(pos_expand[k], expansion_lens[k])))
-            print(f"discards model {i}:", pos_discard[k])
-        transition_init, emission_init, flank_init = update_kernels(am,
-                                                                    k,
-                                                                    pos_expand[k],
-                                                                    expansion_lens[k],
-                                                                    pos_discard[k],
-                                                                    emission_dummy,
-                                                                    transition_dummy,
-                                                                    flank_init_dummy,
-                                                                    mutate=config["experimental_evolve_upper_half"])
-        for em, old_em, e_init in zip(config["emitter"], am.msa_hmm_layer.cell.emitter, emission_init):
+            if pos_expand[k].size > 0:
+                print(
+                    f"expansions model {i}:",
+                    list(zip(pos_expand[k], expansion_lens[k]))
+                )
+            if len(pos_discard[k]) > 0:
+                print(
+                    f"discards model {i}:", pos_discard[k]
+                )
+        transition_init, emission_init, flank_init = update_kernels(
+            am,
+            k,
+            pos_expand[k],
+            expansion_lens[k],
+            pos_discard[k],
+            emission_dummy,
+            transition_dummy,
+            flank_init_dummy,
+            mutate=config["experimental_evolve_upper_half"]
+        )
+        for em, old_em, e_init in zip(
+            config["emitter"], am.msa_hmm_layer.cell.emitter, emission_init
+        ):
             em.emission_init[i] = initializers.ConstantInitializer(e_init)
-            em.insertion_init[i] = initializers.ConstantInitializer(old_em.insertion_kernel[k].numpy())
-        config["transitioner"].transition_init[i] = {key : initializers.ConstantInitializer(t)
-                                     for key,t in transition_init.items()}
+            em.insertion_init[i] = initializers.ConstantInitializer(
+                old_em.insertion_kernel[k].numpy()
+            )
+        config["transitioner"].transition_init[i] = {
+            key : initializers.ConstantInitializer(t)
+            for key,t in transition_init.items()
+        }
         config["transitioner"].flank_init[i] = initializers.ConstantInitializer(flank_init)
         model_lengths.append(emission_init[0].shape[0])
         if model_lengths[-1] < 3:
-            raise SystemExit("A problem occured during model surgery: A pHMM is too short (length <= 2).")
+            raise SystemExit(
+                "A problem occured during model surgery: "\
+                "A pHMM is too short (length <= 2)."
+            )
     return config, model_lengths, surgery_converged
 
 

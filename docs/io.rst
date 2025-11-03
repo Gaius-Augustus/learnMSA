@@ -14,6 +14,7 @@ Arguments
 ``-o / --out_file`` *OUTPUT_FILE*
     Output file path for the resulting multiple sequence
     alignment. Use ``-f`` to change the output file type.
+    LearnMSA will override existing files.
 
 ``-f / --format`` *FORMAT*
     Format of the output alignment file.
@@ -37,6 +38,8 @@ Arguments
 ``--convert`` *MSA_FILE*
     With this option, learnMSA does not perform any alignment, but
     only converts the input MSA to the format specified with ``-f``.
+    For example, to convert an a2m file to fasta format, use:
+    ``learnMSA -i proteins.a2m --convert -f fasta -o protein.fasta``.
 
 ``-s / --silent``
     Suppresses all standard output messages.

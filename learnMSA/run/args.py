@@ -157,6 +157,16 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         "surgery will be applied. (default: %(default)s)"
     )
     train_group.add_argument(
+        "--length_init",
+        dest="length_init",
+        type=int,
+        nargs='+',
+        default=None,
+        help="Initial lengths for the models. Can be a single integer or a list of integers. "\
+            "If a list is provided, the number of models will be set to match the list length. "\
+            "(default: determined automatically based on sequence data)"
+    )
+    train_group.add_argument(
         "--length_init_quantile",
         dest="length_init_quantile",
         type=float,

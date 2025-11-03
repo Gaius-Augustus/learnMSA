@@ -91,6 +91,7 @@ differ slighly in their initialization, length (number of match states) and
 
 ``--model_criterion`` *MODEL_CRITERION*
     Criterion for model selection.
+    Possible values are: `posterior`, `loglik`, `AIC`, `consensus`.
 
     Default: AIC
 

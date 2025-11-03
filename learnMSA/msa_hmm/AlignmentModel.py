@@ -305,7 +305,7 @@ class AlignmentModel():
         )
         self.fixed_viterbi_seqs = faulty_sequences
         if faulty_sequences.size > 0:
-            # repeat Viterbi with a masking that prevents certain transitions 
+            # repeat Viterbi with a masking that prevents certain transitions
             # that can cause problems
             fixed_state_seqs = viterbi.get_state_seqs_max_lik(
                 self.data,

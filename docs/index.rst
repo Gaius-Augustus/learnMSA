@@ -9,6 +9,7 @@ Welcome to learnMSA's documentation!
    :caption: User Guide:
 
    io
+   language_model
    training
    init_msa
    visualization

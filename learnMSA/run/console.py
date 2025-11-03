@@ -124,6 +124,22 @@ def run_main():
             # Check if the input data is valid
             data.validate_dataset()
 
+            # Handle length_init: if provided, update num_model and set custom callback
+            if args.length_init is not None:
+                # Ensure all lengths are at least 3
+                args.length_init = [max(3, length) for length in args.length_init]
+                # Update num_model to match the number of specified lengths
+                args.num_model = len(args.length_init)
+                # Create callback to return the specified lengths
+                specified_lengths = args.length_init.copy()
+                if initial_model_length_cb is None:
+                    initial_model_length_cb = lambda data, config: specified_lengths
+                if not args.silent:
+                    print(
+                        "Using user-specified initial model lengths: "\
+                        f"{args.length_init}"
+                    )
+
             # Merge parsed arguments into a learnMSA configuration
             config = get_config(args, data, initializers)
             model_gen, batch_gen = get_generators(args, data, config)
