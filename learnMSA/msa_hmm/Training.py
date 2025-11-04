@@ -354,22 +354,23 @@ def fit_model(model_generator,
         return model
     num_gpu = len([x.name for x in tf.config.list_logical_devices() if x.device_type == 'GPU']) 
     if verbose:
-        print("Using", num_gpu, "GPUs.")
-    if num_gpu > 1:   
-        if config["use_language_model"]:
-            print("Found multiple GPUs, but using a language model is currently not supported in multi-GPU mode. Using single GPU.")
-            model = make_and_compile()
+        if num_gpu == 0:
+            print("Using CPU.")
         else:
-            #workaround: https://github.com/tensorflow/tensorflow/issues/50487
-            #import atexit
-            mirrored_strategy = tf.distribute.MirroredStrategy()    
-            #atexit.register(mirrored_strategy._extended._collective_ops._pool.close) # type: ignore
-            
-            with mirrored_strategy.scope():
-                model = make_and_compile()
-    else:
-        model = make_and_compile()
-    
+            print("Using GPU.")
+    if num_gpu > 1:
+        print(
+            "Found multiple GPUs, but multi-GPU training is currently not "\
+            "supported. Using single GPU."
+        )
+
+        # Currently not supported, and hard to maintain
+        # different TF versions seem to break this frequently.
+        #mirrored_strategy = tf.distribute.MirroredStrategy()
+        #with mirrored_strategy.scope():
+        #    model = make_and_compile()
+    model = make_and_compile()
+
     steps = min(max(10, int(100*np.sqrt(indices.shape[0])/batch_size)), 500)
     dataset = make_dataset(indices, 
                            batch_generator, 
