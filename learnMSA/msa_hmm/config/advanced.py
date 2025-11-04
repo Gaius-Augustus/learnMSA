@@ -1,0 +1,43 @@
+"""Advanced/development configuration parameters."""
+
+from pydantic import BaseModel
+
+
+class AdvancedConfig(BaseModel):
+    """Advanced/Development parameters."""
+
+    dist_out: str = ""
+    """Distribution output file."""
+
+    alpha_flank: float = 7000
+    """Alpha parameter for flank."""
+
+    alpha_single: float = 1e9
+    """Alpha parameter for single."""
+
+    alpha_global: float = 1e4
+    """Alpha parameter for global."""
+
+    alpha_flank_compl: float = 1
+    """Alpha parameter for flank complement."""
+
+    alpha_single_compl: float = 1
+    """Alpha parameter for single complement."""
+
+    alpha_global_compl: float = 1
+    """Alpha parameter for global complement."""
+
+    inverse_gamma_alpha: float = 3.0
+    """Inverse gamma alpha parameter."""
+
+    inverse_gamma_beta: float = 0.5
+    """Inverse gamma beta parameter."""
+
+    frozen_distances: bool = False
+    """Freeze distances during training."""
+
+    initial_distance: float = 0.05
+    """Initial distance value."""
+
+    trainable_rate_matrices: bool = False
+    """Make rate matrices trainable."""
