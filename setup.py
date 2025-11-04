@@ -37,7 +37,8 @@ setup(
         "msa_hmm/trained_prior/*", 
         "msa_hmm/trained_prior/transition_priors/*",
         "protein_language_models/new_scoring_models_frozen/*",
-        "protein_language_models/priors_V3/*"
+        "protein_language_models/priors_V3/*",
+        "docs/*.rst"
     ]},
     license="MIT",
     license_files = ("LICENSE.md"),
