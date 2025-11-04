@@ -2,6 +2,7 @@ import math
 import os
 import sys
 from argparse import Namespace
+from functools import partial
 
 import numpy as np
 
@@ -31,8 +32,9 @@ def run_main():
         convert_file(args)
         return
 
-    from ..msa_hmm import Align, Training, Visualize, MSA2HMM, Initializers, Priors
-    from ..msa_hmm.SequenceDataset import SequenceDataset, AlignedDataset
+    from ..msa_hmm import (MSA2HMM, Align, Configuration, Initializers, Priors,
+                           Training, Visualize)
+    from ..msa_hmm.SequenceDataset import AlignedDataset, SequenceDataset
 
     if args.logo:
         args.logo = util.validate_filepath(args.logo, ".pdf")
@@ -88,7 +90,8 @@ def run_main():
             if args.from_msa is not None:
                 scoring_model_config = get_scoring_model_config(args)
                 if args.use_language_model:
-                    from learnMSA.protein_language_models.MvnEmitter import AminoAcidPlusMvnEmissionInitializer
+                    from learnMSA.protein_language_models.MvnEmitter import \
+                        AminoAcidPlusMvnEmissionInitializer
                     dim = len(input_msa.alphabet)-1 + 2 * scoring_model_config.dim
                     emb_kernel = AminoAcidPlusMvnEmissionInitializer(
                         scoring_model_config
@@ -258,7 +261,12 @@ def get_config(
         flank_init=initializers.start if initializers else None,
     )
 
-    if args.batch_size > 0:
+    if args.tokens_per_batch > 0:
+        config["batch_size"] = partial(
+            Configuration.tokens_per_batch_to_batch_size,
+            tokens_per_batch=args.tokens_per_batch
+        )
+    elif args.batch_size > 0:
         config["batch_size"] = args.batch_size
     config["num_models"] = 1 if args.logo_gif else args.num_model
     config["max_surgery_runs"] = args.max_iterations

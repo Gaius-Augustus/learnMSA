@@ -30,12 +30,25 @@ differ slighly in their initialization, length (number of match states) and
 
 ``-b / --batch`` *BATCH_SIZE*
     Controls the batch size used during training, i.e. how many sequences are
-    shown to each model per training step. The optimal batch size depends on the
-    length of the input sequences and the available GPU memory.
-    Increase this value to speed up training.
+    shown to each model per training step.
+    Prefer ``--tokens_per_batch`` over this option if the input sequences have
+    varying lengths.
+    The optimal batch size depends on the length of the input sequences and the 
+    available GPU memory. Increase this value to speed up training.
     Reduce this value if you run out of GPU memory.
 
     Default: adaptive (typically 64–512, based on proteins and model size).
+
+``--tokens_per_batch`` *TOKENS_PER_BATCH*
+    Controls the number of tokens per batch used during training, i.e. how many
+    residues are shown to each model per training step. The optimal value
+    depends on the length of the input sequences and the available GPU memory.
+    Increase this value to speed up training.
+    Reduce this value if you run out of GPU memory.
+    Prefer experimenting with this over ``--batch`` if the input sequences have
+    varying lengths and if the default adaptive behavior leads to memory issues.
+
+    Default: adaptive.
 
 ``--learning_rate`` *FLOAT*
     The learning rate used during gradient descent.

@@ -68,6 +68,13 @@ def get_adaptive_batch_size_with_language_model(model_lengths, max_seq_len, embe
         batch_size = max(1, batch_size//2)
     return max(1, batch_size)
 
+def tokens_per_batch_to_batch_size(model_lengths, max_seq_len, tokens_per_batch):
+    #convert tokens per batch to batch size
+    _model_length = max(model_lengths) if len(model_lengths) > 0 else 0 # unused
+    if max_seq_len < 1:
+        return 1
+    return max(1, tokens_per_batch // max_seq_len)
+
 #the configuration can be changed by experienced users
 #proper command line support for these parameters will be added in the future
 def make_default(
