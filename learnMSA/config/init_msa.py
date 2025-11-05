@@ -1,5 +1,3 @@
-"""MSA initialization configuration parameters."""
-
 from pathlib import Path
 from pydantic import BaseModel, field_validator
 

@@ -1,5 +1,3 @@
-"""Visualization configuration parameters."""
-
 from pydantic import BaseModel
 
 

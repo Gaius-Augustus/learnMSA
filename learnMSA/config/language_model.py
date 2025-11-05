@@ -1,6 +1,4 @@
-"""Language model configuration parameters."""
-
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 class LanguageModelConfig(BaseModel):
@@ -42,3 +40,31 @@ class LanguageModelConfig(BaseModel):
 
     embedding_prior_components: int = 32
     """Number of embedding prior components."""
+
+
+    @field_validator("language_model")
+    def validate_language_model(cls, v: str) -> str:
+        if not v in {"protT5", "esm2", "proteinBERT"}:
+            raise ValueError(
+                "language_model must be one of 'protT5' or 'esm2' or "\
+                "'proteinBERT'."
+            )
+        return v
+
+    @field_validator("scoring_model_dim", "embedding_prior_components")
+    def validate_positive_ints(cls, v: int, info) -> int:
+        if v <= 0:
+            raise ValueError(f"{info.field_name} must be greater than 0.")
+        return v
+
+    @field_validator("temperature")
+    def validate_positive_floats(cls, v: float, info) -> float:
+        if v <= 0:
+            raise ValueError(f"{info.field_name} must be greater than 0.")
+        return v
+
+    @field_validator("L2_insert", "L2_match")
+    def validate_nonnegative_floats(cls, v: float, info) -> float:
+        if v < 0:
+            raise ValueError(f"{info.field_name} must be non-negative.")
+        return v

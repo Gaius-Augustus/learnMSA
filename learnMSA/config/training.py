@@ -1,14 +1,9 @@
-"""Training configuration parameters."""
-
 from collections.abc import Sequence
 from pydantic import BaseModel, field_validator
 
 
 class TrainingConfig(BaseModel):
     """Training parameters."""
-
-    num_model: int = 4
-    """Number of models to train."""
 
     batch_size: int = -1
     """Batch size for training. Default: adaptive."""
@@ -70,12 +65,6 @@ class TrainingConfig(BaseModel):
 
     skip_training: bool = False
     """Only decode an alignment from the provided model."""
-
-    @field_validator("num_model")
-    def validate_num_model(cls, v: int) -> int:
-        if v < 1:
-            raise ValueError("num_model must be greater than or equal to 1.")
-        return v
 
     @field_validator("learning_rate")
     def validate_learning_rate(cls, v: float) -> float:

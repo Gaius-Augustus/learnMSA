@@ -1,6 +1,4 @@
-"""Advanced/development configuration parameters."""
-
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 class AdvancedConfig(BaseModel):
@@ -41,3 +39,20 @@ class AdvancedConfig(BaseModel):
 
     trainable_rate_matrices: bool = False
     """Make rate matrices trainable."""
+
+
+    @field_validator(
+        "alpha_flank",
+        "alpha_single",
+        "alpha_global",
+        "alpha_flank_compl",
+        "alpha_single_compl",
+        "alpha_global_compl",
+        "inverse_gamma_alpha",
+        "inverse_gamma_beta",
+        "initial_distance",
+    )
+    def validate_quantiles(cls, v: float, info) -> float:
+        if not v > 0:
+            raise ValueError(f"{info.field_name} must be greater than 0.")
+        return v

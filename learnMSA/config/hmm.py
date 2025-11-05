@@ -1,36 +1,11 @@
-"""Main configuration class."""
-
 from collections.abc import Sequence
 from typing import ClassVar
+
 from pydantic import BaseModel, field_validator
 
-from .training import TrainingConfig
-from .init_msa import InitMSAConfig
-from .language_model import LanguageModelConfig
-from .visualization import VisualizationConfig
-from .advanced import AdvancedConfig
 
-
-class Configuration(BaseModel):
-    """Main configuration combining all parameter groups."""
-
-    # Nested configuration groups
-    training: TrainingConfig = TrainingConfig()
-    """Training parameters."""
-
-    init_msa: InitMSAConfig = InitMSAConfig()
-    """Initialize with existing MSA parameters."""
-
-    language_model: LanguageModelConfig = LanguageModelConfig()
-    """Protein language model integration parameters."""
-
-    visualization: VisualizationConfig = VisualizationConfig()
-    """Visualization parameters."""
-
-    advanced: AdvancedConfig = AdvancedConfig()
-    """Advanced/Development parameters."""
-
-    # ==================== HMM ====================
+class HMMConfig(BaseModel):
+    """HMM parameters."""
 
     lengths: Sequence[int]
     """The number of match states in each head of the pHMM.
