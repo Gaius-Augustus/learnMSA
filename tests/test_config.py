@@ -1,8 +1,9 @@
 import pytest
+from pathlib import Path
 from pydantic import ValidationError
 
 from learnMSA.config import (AdvancedConfig, Configuration, HMMConfig,
-                             InitMSAConfig, LanguageModelConfig,
+                             InitMSAConfig, InputOutputConfig, LanguageModelConfig,
                              TrainingConfig, VisualizationConfig, get_value)
 
 
@@ -877,4 +878,178 @@ class TestAdvancedConfig:
         assert config.alpha_flank_compl == 1.0
         assert config.alpha_single_compl == 1.0
         assert config.alpha_global_compl == 1.0
+
+
+class TestInputOutputConfig:
+    """Tests for InputOutputConfig."""
+
+    def test_default_input_output_config(self):
+        """Test that InputOutputConfig can be created with defaults."""
+        config = InputOutputConfig()
+        assert config.input_file == Path()
+        assert config.output_file == Path()
+        assert config.format == "a2m"
+        assert config.input_format == "fasta"
+        assert config.save_model == ""
+        assert config.load_model == ""
+        assert config.silent is False
+        assert config.cuda_visible_devices == "default"
+        assert config.work_dir == "tmp"
+        assert config.convert is False
+
+    def test_input_output_config_with_files(self):
+        """Test InputOutputConfig with file paths."""
+        config = InputOutputConfig(
+            input_file=Path("input.fasta"),
+            output_file=Path("output.a2m")
+        )
+        assert config.input_file == Path("input.fasta")
+        assert config.output_file == Path("output.a2m")
+
+    def test_input_output_config_with_string_paths(self):
+        """Test InputOutputConfig accepts string paths."""
+        config = InputOutputConfig(
+            input_file=Path("sequences.fasta"),
+            output_file=Path("alignment.a2m")
+        )
+        assert config.input_file == Path("sequences.fasta")
+        assert config.output_file == Path("alignment.a2m")
+
+    def test_format_validation_valid_formats(self):
+        """Test format validation accepts valid formats."""
+        valid_formats = ["a2m", "fasta", "stockholm", "clustal", "phylip"]
+        for fmt in valid_formats:
+            config = InputOutputConfig(format=fmt)
+            assert config.format == fmt
+
+    def test_format_validation_invalid_format(self):
+        """Test format validation rejects invalid formats."""
+        with pytest.raises(ValidationError, match="format must be one of"):
+            InputOutputConfig(format="invalid_format")
+
+    def test_input_format_validation_valid_formats(self):
+        """Test input_format validation accepts valid formats."""
+        valid_formats = ["fasta", "a2m", "stockholm", "clustal"]
+        for fmt in valid_formats:
+            config = InputOutputConfig(input_format=fmt)
+            assert config.input_format == fmt
+
+    def test_input_format_validation_invalid_format(self):
+        """Test input_format validation rejects invalid formats."""
+        with pytest.raises(ValidationError, match="input_format must be one of"):
+            InputOutputConfig(input_format="invalid_format")
+
+    def test_save_model_path(self):
+        """Test save_model can be set to a file path."""
+        config = InputOutputConfig(save_model="/path/to/model.pkl")
+        assert config.save_model == "/path/to/model.pkl"
+
+    def test_load_model_path(self):
+        """Test load_model can be set to a file path."""
+        config = InputOutputConfig(load_model="/path/to/model.pkl")
+        assert config.load_model == "/path/to/model.pkl"
+
+    def test_silent_flag(self):
+        """Test silent flag can be set."""
+        config = InputOutputConfig(silent=True)
+        assert config.silent is True
+
+    def test_cuda_visible_devices_default(self):
+        """Test cuda_visible_devices with default value."""
+        config = InputOutputConfig(cuda_visible_devices="default")
+        assert config.cuda_visible_devices == "default"
+
+    def test_cuda_visible_devices_cpu(self):
+        """Test cuda_visible_devices can be set to CPU."""
+        config = InputOutputConfig(cuda_visible_devices="-1")
+        assert config.cuda_visible_devices == "-1"
+
+    def test_cuda_visible_devices_single_gpu(self):
+        """Test cuda_visible_devices with single GPU."""
+        config = InputOutputConfig(cuda_visible_devices="0")
+        assert config.cuda_visible_devices == "0"
+
+    def test_cuda_visible_devices_multiple_gpus(self):
+        """Test cuda_visible_devices with multiple GPUs."""
+        config = InputOutputConfig(cuda_visible_devices="0,1,2")
+        assert config.cuda_visible_devices == "0,1,2"
+
+    def test_cuda_visible_devices_invalid_negative(self):
+        """Test cuda_visible_devices rejects invalid negative values."""
+        with pytest.raises(ValidationError, match="Device IDs must be non-negative"):
+            InputOutputConfig(cuda_visible_devices="0,-2")
+
+    def test_cuda_visible_devices_invalid_format(self):
+        """Test cuda_visible_devices rejects non-numeric values."""
+        with pytest.raises(ValidationError, match="cuda_visible_devices must be"):
+            InputOutputConfig(cuda_visible_devices="abc")
+
+    def test_work_dir_custom(self):
+        """Test work_dir can be set to custom directory."""
+        config = InputOutputConfig(work_dir="/custom/work/dir")
+        assert config.work_dir == "/custom/work/dir"
+
+    def test_convert_flag_true(self):
+        """Test convert flag can be set to True."""
+        config = InputOutputConfig(convert=True)
+        assert config.convert is True
+
+    def test_input_output_config_comprehensive(self):
+        """Test InputOutputConfig with all parameters set."""
+        config = InputOutputConfig(
+            input_file=Path("input.fasta"),
+            output_file=Path("output.stockholm"),
+            format="stockholm",
+            input_format="a2m",
+            save_model="model.pkl",
+            load_model="pretrained.pkl",
+            silent=True,
+            cuda_visible_devices="0,1",
+            work_dir="/tmp/learnmsa",
+            convert=True
+        )
+        assert config.input_file == Path("input.fasta")
+        assert config.output_file == Path("output.stockholm")
+        assert config.format == "stockholm"
+        assert config.input_format == "a2m"
+        assert config.save_model == "model.pkl"
+        assert config.load_model == "pretrained.pkl"
+        assert config.silent is True
+        assert config.cuda_visible_devices == "0,1"
+        assert config.work_dir == "/tmp/learnmsa"
+        assert config.convert is True
+
+    def test_input_output_in_configuration(self):
+        """Test InputOutputConfig as part of Configuration."""
+        config = Configuration(
+            input_output=InputOutputConfig(
+                input_file=Path("test.fasta"),
+                output_file=Path("test.a2m"),
+                format="fasta"
+            )
+        )
+
+        assert config.input_output is not None
+        assert config.input_output.input_file == Path("test.fasta")
+        assert config.input_output.output_file == Path("test.a2m")
+        assert config.input_output.format == "fasta"
+
+    def test_input_output_serialization(self):
+        """Test that InputOutputConfig can be serialized."""
+        config = InputOutputConfig(
+            input_file=Path("input.fasta"),
+            output_file=Path("output.a2m"),
+            save_model="model.pkl",
+            convert=True
+        )
+
+        config_dict = config.model_dump()
+
+        assert "input_file" in config_dict
+        assert "output_file" in config_dict
+        assert "format" in config_dict
+        assert "save_model" in config_dict
+        assert "convert" in config_dict
+        assert config_dict["save_model"] == "model.pkl"
+        assert config_dict["convert"] is True
 

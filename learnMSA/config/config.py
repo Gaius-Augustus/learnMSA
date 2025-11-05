@@ -4,6 +4,7 @@ from pydantic import BaseModel, ConfigDict, PrivateAttr, model_validator
 
 from .advanced import AdvancedConfig
 from .init_msa import InitMSAConfig
+from .input_output import InputOutputConfig
 from .language_model import LanguageModelConfig
 from .training import TrainingConfig
 from .visualization import VisualizationConfig
@@ -20,6 +21,9 @@ class Configuration(BaseModel):
     _num_model: int = PrivateAttr(default=4)
 
     # Nested configuration groups
+    input_output: InputOutputConfig = InputOutputConfig()
+    """Input/output and general control parameters."""
+
     training: TrainingConfig = TrainingConfig()
     """Training parameters."""
 

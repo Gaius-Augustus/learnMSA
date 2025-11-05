@@ -1,11 +1,10 @@
-"""Type stubs for Configuration class to support num_model in constructor."""
-
 from typing import Any
 
 from pydantic import BaseModel
 
 from .advanced import AdvancedConfig
 from .init_msa import InitMSAConfig
+from .input_output import InputOutputConfig
 from .language_model import LanguageModelConfig
 from .training import TrainingConfig
 from .visualization import VisualizationConfig
@@ -14,6 +13,7 @@ class Configuration(BaseModel):
     """Type stub for Configuration to include num_model parameter."""
 
     _num_model: int
+    input_output: InputOutputConfig
     training: TrainingConfig
     init_msa: InitMSAConfig
     language_model: LanguageModelConfig
@@ -24,6 +24,7 @@ class Configuration(BaseModel):
         self,
         *,
         num_model: int = 4,
+        input_output: InputOutputConfig = ...,
         training: TrainingConfig = ...,
         init_msa: InitMSAConfig = ...,
         language_model: LanguageModelConfig = ...,
