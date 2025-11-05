@@ -5,8 +5,8 @@ from dataclasses import dataclass
 from typing import List
 
 
-# Documentation directory (go up from learnMSA/run to project root)
-HELP_DIR = Path(__file__).parent.parent.parent / "docs"
+# Documentation directory (inside the learnMSA package)
+HELP_DIR = Path(__file__).parent.parent / "docs"
 
 
 def format_description(description: str) -> str:

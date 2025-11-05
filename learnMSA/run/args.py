@@ -111,7 +111,15 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         dest="batch_size",
         type=int,
         default=-1,
-        help="Batch size for training. Default: adaptive "
+        help="Batch size for training. Prefer --tokens_per_batch unless "\
+            "sequences have roughly the same length. Default: adaptive."
+    )
+    train_group.add_argument(
+        "--tokens_per_batch",
+        dest="tokens_per_batch",
+        type=int,
+        default=-1,
+        help="Number of tokens per batch for training. Default: adaptive."
     )
     train_group.add_argument(
         "--learning_rate",
