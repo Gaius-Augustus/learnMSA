@@ -259,69 +259,43 @@ class TestInitMSAConfig:
         assert config.random_scale == 0.01
         assert config.pseudocounts is True
 
-    def test_match_threshold_validation(self):
-        """Test that match_threshold must be in [0, 1]."""
-        # Valid values
-        InitMSAConfig(match_threshold=0.0)
-        InitMSAConfig(match_threshold=1.0)
-        InitMSAConfig(match_threshold=0.5)
-
-        # Invalid values
-        with pytest.raises(
-            ValidationError,
-            match="match_threshold must be in the range"
-        ):
+    def test_init_msa_validation(self):
+        """Test InitMSAConfig field validations."""
+        # Valid match_threshold values
+        for val in [0.0, 0.5, 1.0]:
+            InitMSAConfig(match_threshold=val)
+        
+        # Invalid match_threshold values
+        with pytest.raises(ValidationError, match="match_threshold must be in the range"):
             InitMSAConfig(match_threshold=-0.1)
-
-        with pytest.raises(
-            ValidationError,
-            match="match_threshold must be in the range"
-        ):
+        with pytest.raises(ValidationError, match="match_threshold must be in the range"):
             InitMSAConfig(match_threshold=1.5)
 
-    def test_global_factor_validation(self):
-        """Test that global_factor must be in [0, 1]."""
-        # Valid values
-        InitMSAConfig(global_factor=0.0)
-        InitMSAConfig(global_factor=1.0)
-        InitMSAConfig(global_factor=0.5)
-
-        # Invalid values
-        with pytest.raises(
-            ValidationError,
-            match="global_factor must be in the range"
-        ):
+        # Valid global_factor values
+        for val in [0.0, 0.5, 1.0]:
+            InitMSAConfig(global_factor=val)
+        
+        # Invalid global_factor values
+        with pytest.raises(ValidationError, match="global_factor must be in the range"):
             InitMSAConfig(global_factor=-0.1)
-
-        with pytest.raises(
-            ValidationError,
-            match="global_factor must be in the range"
-        ):
+        with pytest.raises(ValidationError, match="global_factor must be in the range"):
             InitMSAConfig(global_factor=1.1)
 
-    def test_random_scale_validation(self):
-        """Test that random_scale must be positive."""
-        # Valid values
-        InitMSAConfig(random_scale=0.001)
-        InitMSAConfig(random_scale=1.0)
-        InitMSAConfig(random_scale=100.0)
-
-        # Invalid values
-        with pytest.raises(
-            ValidationError,
-            match="random_scale must be greater than 0"
-        ):
+        # Valid random_scale values
+        for val in [0.001, 1.0, 100.0]:
+            InitMSAConfig(random_scale=val)
+        
+        # Invalid random_scale values
+        with pytest.raises(ValidationError, match="random_scale must be greater than 0"):
             InitMSAConfig(random_scale=0)
-
-        with pytest.raises(
-            ValidationError,
-            match="random_scale must be greater than 0"
-        ):
+        with pytest.raises(ValidationError, match="random_scale must be greater than 0"):
             InitMSAConfig(random_scale=-0.001)
 
     def test_init_msa_serialization(self):
-        """Test InitMSAConfig serialization to dict."""
+        """Test InitMSAConfig serialization and deserialization."""
         from pathlib import Path
+        
+        # Serialization
         config = InitMSAConfig(
             from_msa=Path("/path/to/file.fasta"),
             match_threshold=0.6,
@@ -335,22 +309,21 @@ class TestInitMSAConfig:
         assert config_dict["random_scale"] == 1e-3
         assert config_dict["pseudocounts"] is False
 
-    def test_init_msa_deserialization(self):
-        """Test InitMSAConfig deserialization from dict."""
-        config_dict = {
+        # Deserialization
+        config_dict2 = {
             "from_msa": "/path/to/file.fasta",
             "match_threshold": 0.8,
             "global_factor": 0.3,
             "random_scale": 0.05,
             "pseudocounts": True
         }
-        config = InitMSAConfig(**config_dict)
+        config2 = InitMSAConfig(**config_dict2)
 
-        assert str(config.from_msa) == "/path/to/file.fasta"
-        assert config.match_threshold == 0.8
-        assert config.global_factor == 0.3
-        assert config.random_scale == 0.05
-        assert config.pseudocounts is True
+        assert str(config2.from_msa) == "/path/to/file.fasta"
+        assert config2.match_threshold == 0.8
+        assert config2.global_factor == 0.3
+        assert config2.random_scale == 0.05
+        assert config2.pseudocounts is True
 
     def test_init_msa_in_configuration(self):
         """Test InitMSAConfig as part of Configuration."""
@@ -375,48 +348,38 @@ class TestVisualizationConfig:
         assert config.logo == ""
         assert config.logo_gif == ""
 
-    def test_visualization_config_custom_values(self):
-        """Test VisualizationConfig with custom values."""
-        config = VisualizationConfig(
+    def test_visualization_config_values(self):
+        """Test VisualizationConfig with various combinations."""
+        # Both set
+        config1 = VisualizationConfig(
             logo="output/logo.pdf",
             logo_gif="output/logo_animation.gif"
         )
-        assert config.logo == "output/logo.pdf"
-        assert config.logo_gif == "output/logo_animation.gif"
+        assert config1.logo == "output/logo.pdf"
+        assert config1.logo_gif == "output/logo_animation.gif"
 
-    def test_visualization_config_logo_only(self):
-        """Test VisualizationConfig with only logo set."""
-        config = VisualizationConfig(logo="results/sequence_logo.pdf")
-        assert config.logo == "results/sequence_logo.pdf"
-        assert config.logo_gif == ""
+        # Only logo set
+        config2 = VisualizationConfig(logo="results/sequence_logo.pdf")
+        assert config2.logo == "results/sequence_logo.pdf"
+        assert config2.logo_gif == ""
 
-    def test_visualization_config_logo_gif_only(self):
-        """Test VisualizationConfig with only logo_gif set."""
-        config = VisualizationConfig(logo_gif="results/animation.gif")
-        assert config.logo == ""
-        assert config.logo_gif == "results/animation.gif"
+        # Only logo_gif set
+        config3 = VisualizationConfig(logo_gif="results/animation.gif")
+        assert config3.logo == ""
+        assert config3.logo_gif == "results/animation.gif"
 
     def test_visualization_serialization(self):
-        """Test VisualizationConfig serialization to dict."""
-        config = VisualizationConfig(
-            logo="logo.pdf",
-            logo_gif="logo.gif"
-        )
+        """Test VisualizationConfig serialization and deserialization."""
+        # Serialization
+        config = VisualizationConfig(logo="logo.pdf", logo_gif="logo.gif")
         config_dict = config.model_dump()
-
         assert config_dict["logo"] == "logo.pdf"
         assert config_dict["logo_gif"] == "logo.gif"
 
-    def test_visualization_deserialization(self):
-        """Test VisualizationConfig deserialization from dict."""
-        config_dict = {
-            "logo": "path/to/logo.pdf",
-            "logo_gif": "path/to/animation.gif"
-        }
-        config = VisualizationConfig(**config_dict)
-
-        assert config.logo == "path/to/logo.pdf"
-        assert config.logo_gif == "path/to/animation.gif"
+        # Deserialization
+        config2 = VisualizationConfig(**{"logo": "path/to/logo.pdf", "logo_gif": "path/to/animation.gif"})
+        assert config2.logo == "path/to/logo.pdf"
+        assert config2.logo_gif == "path/to/animation.gif"
 
     def test_visualization_in_configuration(self):
         """Test VisualizationConfig as part of Configuration."""
@@ -499,9 +462,7 @@ class TestLanguageModelConfig:
         ):
             LanguageModelConfig(language_model="invalid_model")
 
-    def test_scoring_model_dim_validation(self):
-        """Test that scoring_model_dim must be positive."""
-        # Valid values
+        # Valid values (must be positive)
         LanguageModelConfig(scoring_model_dim=1)
         LanguageModelConfig(scoring_model_dim=100)
 
@@ -518,9 +479,7 @@ class TestLanguageModelConfig:
         ):
             LanguageModelConfig(scoring_model_dim=-5)
 
-    def test_embedding_prior_components_validation(self):
-        """Test that embedding_prior_components must be positive."""
-        # Valid values
+        # Valid values (must be positive)
         LanguageModelConfig(embedding_prior_components=1)
         LanguageModelConfig(embedding_prior_components=128)
 
@@ -537,8 +496,6 @@ class TestLanguageModelConfig:
         ):
             LanguageModelConfig(embedding_prior_components=-10)
 
-    def test_temperature_validation(self):
-        """Test that temperature must be positive."""
         # Valid values
         LanguageModelConfig(temperature=0.1)
         LanguageModelConfig(temperature=10.0)
@@ -556,8 +513,6 @@ class TestLanguageModelConfig:
         ):
             LanguageModelConfig(temperature=-1.0)
 
-    def test_l2_match_validation(self):
-        """Test that L2_match must be non-negative."""
         # Valid values
         LanguageModelConfig(L2_match=0.0)
         LanguageModelConfig(L2_match=1.0)
@@ -570,8 +525,6 @@ class TestLanguageModelConfig:
         ):
             LanguageModelConfig(L2_match=-0.1)
 
-    def test_l2_insert_validation(self):
-        """Test that L2_insert must be non-negative."""
         # Valid values
         LanguageModelConfig(L2_insert=0.0)
         LanguageModelConfig(L2_insert=500.0)
@@ -899,101 +852,66 @@ class TestInputOutputConfig:
         assert config.convert is False
 
     def test_input_output_config_with_files(self):
-        """Test InputOutputConfig with file paths."""
-        config = InputOutputConfig(
+        """Test InputOutputConfig with file paths and string paths."""
+        # With Path objects
+        config1 = InputOutputConfig(
             input_file=Path("input.fasta"),
             output_file=Path("output.a2m")
         )
-        assert config.input_file == Path("input.fasta")
-        assert config.output_file == Path("output.a2m")
-
-    def test_input_output_config_with_string_paths(self):
-        """Test InputOutputConfig accepts string paths."""
-        config = InputOutputConfig(
+        assert config1.input_file == Path("input.fasta")
+        assert config1.output_file == Path("output.a2m")
+        
+        # With string paths (converted to Path)
+        config2 = InputOutputConfig(
             input_file=Path("sequences.fasta"),
             output_file=Path("alignment.a2m")
         )
-        assert config.input_file == Path("sequences.fasta")
-        assert config.output_file == Path("alignment.a2m")
+        assert config2.input_file == Path("sequences.fasta")
+        assert config2.output_file == Path("alignment.a2m")
 
-    def test_format_validation_valid_formats(self):
-        """Test format validation accepts valid formats."""
-        valid_formats = ["a2m", "fasta", "stockholm", "clustal", "phylip"]
-        for fmt in valid_formats:
+    def test_format_validation(self):
+        """Test format and input_format validation."""
+        # Valid output formats
+        for fmt in ["a2m", "fasta", "stockholm", "clustal", "phylip"]:
             config = InputOutputConfig(format=fmt)
             assert config.format == fmt
 
-    def test_format_validation_invalid_format(self):
-        """Test format validation rejects invalid formats."""
+        # Invalid output format
         with pytest.raises(ValidationError, match="format must be one of"):
             InputOutputConfig(format="invalid_format")
 
-    def test_input_format_validation_valid_formats(self):
-        """Test input_format validation accepts valid formats."""
-        valid_formats = ["fasta", "a2m", "stockholm", "clustal"]
-        for fmt in valid_formats:
+        # Valid input formats
+        for fmt in ["fasta", "a2m", "stockholm", "clustal"]:
             config = InputOutputConfig(input_format=fmt)
             assert config.input_format == fmt
 
-    def test_input_format_validation_invalid_format(self):
-        """Test input_format validation rejects invalid formats."""
+        # Invalid input format
         with pytest.raises(ValidationError, match="input_format must be one of"):
             InputOutputConfig(input_format="invalid_format")
 
-    def test_save_model_path(self):
-        """Test save_model can be set to a file path."""
-        config = InputOutputConfig(save_model="/path/to/model.pkl")
-        assert config.save_model == "/path/to/model.pkl"
+    def test_model_paths(self):
+        """Test save_model and load_model paths."""
+        config = InputOutputConfig(
+            save_model="/path/to/save.pkl",
+            load_model="/path/to/load.pkl"
+        )
+        assert config.save_model == "/path/to/save.pkl"
+        assert config.load_model == "/path/to/load.pkl"
 
-    def test_load_model_path(self):
-        """Test load_model can be set to a file path."""
-        config = InputOutputConfig(load_model="/path/to/model.pkl")
-        assert config.load_model == "/path/to/model.pkl"
+    def test_cuda_visible_devices_validation(self):
+        """Test cuda_visible_devices with various valid and invalid values."""
+        # Valid values
+        for value in ["default", "-1", "0", "0,1,2"]:
+            config = InputOutputConfig(cuda_visible_devices=value)
+            assert config.cuda_visible_devices == value
 
-    def test_silent_flag(self):
-        """Test silent flag can be set."""
-        config = InputOutputConfig(silent=True)
-        assert config.silent is True
-
-    def test_cuda_visible_devices_default(self):
-        """Test cuda_visible_devices with default value."""
-        config = InputOutputConfig(cuda_visible_devices="default")
-        assert config.cuda_visible_devices == "default"
-
-    def test_cuda_visible_devices_cpu(self):
-        """Test cuda_visible_devices can be set to CPU."""
-        config = InputOutputConfig(cuda_visible_devices="-1")
-        assert config.cuda_visible_devices == "-1"
-
-    def test_cuda_visible_devices_single_gpu(self):
-        """Test cuda_visible_devices with single GPU."""
-        config = InputOutputConfig(cuda_visible_devices="0")
-        assert config.cuda_visible_devices == "0"
-
-    def test_cuda_visible_devices_multiple_gpus(self):
-        """Test cuda_visible_devices with multiple GPUs."""
-        config = InputOutputConfig(cuda_visible_devices="0,1,2")
-        assert config.cuda_visible_devices == "0,1,2"
-
-    def test_cuda_visible_devices_invalid_negative(self):
-        """Test cuda_visible_devices rejects invalid negative values."""
+        # Invalid: negative device IDs
         with pytest.raises(ValidationError, match="Device IDs must be non-negative"):
             InputOutputConfig(cuda_visible_devices="0,-2")
 
-    def test_cuda_visible_devices_invalid_format(self):
-        """Test cuda_visible_devices rejects non-numeric values."""
+        # Invalid: non-numeric values
         with pytest.raises(ValidationError, match="cuda_visible_devices must be"):
             InputOutputConfig(cuda_visible_devices="abc")
-
-    def test_work_dir_custom(self):
-        """Test work_dir can be set to custom directory."""
-        config = InputOutputConfig(work_dir="/custom/work/dir")
-        assert config.work_dir == "/custom/work/dir"
-
-    def test_convert_flag_true(self):
-        """Test convert flag can be set to True."""
-        config = InputOutputConfig(convert=True)
-        assert config.convert is True
 
     def test_input_output_config_comprehensive(self):
         """Test InputOutputConfig with all parameters set."""
