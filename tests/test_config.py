@@ -13,7 +13,7 @@ class TestConfiguration:
     def test_default_configuration(self):
         """Test that Configuration can be created with defaults."""
         config = Configuration()
-        assert config.num_model == 4
+        assert config.training.num_model == 4
         assert isinstance(config.training, TrainingConfig)
         assert isinstance(config.init_msa, InitMSAConfig)
         assert isinstance(config.language_model, LanguageModelConfig)
@@ -25,13 +25,13 @@ class TestConfiguration:
         config = Configuration(
             training=TrainingConfig(length_init=[5, 10, 15])
         )
-        assert config.num_model == 3
+        assert config.training.num_model == 3
 
     def test_num_model_setter(self):
         """Test that num_model can be set directly."""
         config = Configuration()
-        config.num_model = 10
-        assert config.num_model == 10
+        config.training.num_model = 10
+        assert config.training.num_model == 10
 
     def test_num_model_setter_validation(self):
         """Test that num_model validates value >= 1."""
@@ -39,46 +39,44 @@ class TestConfiguration:
         with pytest.raises(
             ValueError, match="num_model must be greater than or equal to 1"
         ):
-            config.num_model = 0
+            config.training.num_model = 0
         with pytest.raises(
             ValueError, match="num_model must be greater than or equal to 1"
         ):
-            config.num_model = -5
+            config.training.num_model = -5
 
     def test_num_model_initialization_with_alias(self):
         """Test that num_model can be set during initialization."""
-        config = Configuration(num_model=7)
-        assert config.num_model == 7
+        training_config = TrainingConfig(num_model=7)
+        assert training_config.num_model == 7
+        config = Configuration(training=training_config)
+        assert config.training.num_model == 7
 
     def test_num_model_length_init_precedence(self):
         """Test that length_init takes precedence over num_model."""
         config = Configuration(
-            num_model=10,
-            training=TrainingConfig(length_init=[5, 10])
+            training=TrainingConfig(num_model=10, length_init=[5, 10])
         )
         # length_init has 2 elements, so num_model should be 2
-        assert config.num_model == 2
+        assert config.training.num_model == 2
 
         # Setting num_model shouldn't change the result while length_init is set
-        config.num_model = 20
-        assert config.num_model == 2  # Still returns len(length_init)
+        config.training.num_model = 20
+        assert config.training.num_model == 2  # Still returns len(length_init)
 
     def test_num_model_after_clearing_length_init(self):
         """Test num_model behavior when length_init is set then cleared."""
-        config = Configuration(
-            num_model=5,
-            training=TrainingConfig(length_init=[10, 20])
-        )
-        assert config.num_model == 2  # From length_init
+        training_config = TrainingConfig(num_model=5, length_init=[10, 20])
+        assert training_config.num_model == 2  # From length_init
 
         # Clear length_init
-        config.training.length_init = None
+        training_config.length_init = None
         # Should now use the _num_model value (which was set to 5 during init)
-        assert config.num_model == 5
+        assert training_config.num_model == 5
 
         # Set a different length_init
-        config.training.length_init = [1, 2, 3]
-        assert config.num_model == 3
+        training_config.length_init = [1, 2, 3]
+        assert training_config.num_model == 3
 
 
 class TestTrainingConfig:
@@ -144,40 +142,39 @@ class TestConfigurationSerialization:
 
     def test_configuration_to_dict(self):
         """Test that Configuration can be serialized to dict."""
-        config = Configuration(num_model=5)
+        config = Configuration(training=TrainingConfig(num_model=5))
         config_dict = config.model_dump()
         assert "training" in config_dict
         assert "init_msa" in config_dict
         assert "language_model" in config_dict
         assert "visualization" in config_dict
         assert "advanced" in config_dict
-        assert "num_model" in config_dict
-        assert config_dict["num_model"] == 5
+        # num_model is now in the training dict
+        assert "num_model" in config_dict["training"]
+        assert config_dict["training"]["num_model"] == 5
 
     def test_configuration_from_dict(self):
         """Test that Configuration can be created from dict."""
         config_dict = {
-            "num_model": 7,
-            "training": {"learning_rate": 0.05}
+            "training": {"num_model": 7, "learning_rate": 0.05}
         }
-        config = Configuration(**config_dict)
-        assert config.num_model == 7
+        config = Configuration(**config_dict)  # type: ignore
+        assert config.training.num_model == 7
         assert config.training.learning_rate == 0.05
 
     def test_configuration_roundtrip_with_num_model(self):
         """Test that num_model is preserved through serialization."""
         config = Configuration(
-            num_model=10,
-            training=TrainingConfig(learning_rate=0.01)
+            training=TrainingConfig(num_model=10, learning_rate=0.01)
         )
-        assert config.num_model == 10
+        assert config.training.num_model == 10
 
-        # Serialize and deserialize - num_model is now included
+        # Serialize and deserialize - num_model is now included in training dict
         config_dict = config.model_dump()
-        assert config_dict["num_model"] == 10
+        assert config_dict["training"]["num_model"] == 10
 
         config2 = Configuration(**config_dict)
-        assert config2.num_model == 10
+        assert config2.training.num_model == 10
         assert config2.training.learning_rate == 0.01
 
     def test_configuration_with_length_init_serialization(self):
@@ -187,8 +184,8 @@ class TestConfigurationSerialization:
         )
         config_dict = config.model_dump()
         # num_model is computed from length_init and included in serialization
-        assert config.num_model == 3
-        assert config_dict["num_model"] == 3
+        assert config.training.num_model == 3
+        assert config_dict["training"]["num_model"] == 3
         assert config_dict["training"]["length_init"] == [10, 20, 30]
 
 
@@ -210,14 +207,14 @@ class TestConfigurationSerialization:
 #         )
 
 #         # Verify initial state
-#         assert config.num_model == 5
+#         assert config.training.num_model == 5
 #         assert config.training.epochs == [20, 20, 20]
 
 #         # Modify training config to add length_init
 #         config.training.length_init = [10, 20, 30]
 
 #         # num_model should now reflect length_init
-#         assert config.num_model == 3
+#         assert config.training.num_model == 3
 
 #         # Serialize and deserialize
 #         config_dict = config.model_dump()

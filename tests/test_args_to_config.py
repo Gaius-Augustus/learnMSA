@@ -31,7 +31,7 @@ class TestArgsToConfig:
         assert config.input_output.convert is False
 
         # Check training defaults are applied
-        assert config.num_model == 4
+        assert config.training.num_model == 4
         assert config.training.batch_size == -1
         assert config.training.tokens_per_batch == -1
         assert config.training.learning_rate == 0.1
@@ -73,7 +73,7 @@ class TestArgsToConfig:
         config = args_to_config(args)
 
         # num_model is overridden by length_init (3 elements)
-        assert config.num_model == 3
+        assert config.training.num_model == 3
         assert config.training.tokens_per_batch == 2000
         assert config.training.learning_rate == 0.05
         assert config.training.epochs == [20, 5, 15]
@@ -224,7 +224,7 @@ class TestArgsToConfig:
 
         config = args_to_config(args)
         # num_model should be computed from length_init (5 elements)
-        assert config.num_model == 5
+        assert config.training.num_model == 5
         assert config.training.length_init == [5, 10, 15, 20, 25]
 
     def test_args_to_config_comprehensive(self):
@@ -255,7 +255,6 @@ class TestArgsToConfig:
         # Verify configuration can be serialized
         config_dict = config.model_dump()
 
-        assert "num_model" in config_dict
         assert "input_output" in config_dict
         assert "training" in config_dict
         assert "init_msa" in config_dict
@@ -264,7 +263,7 @@ class TestArgsToConfig:
         assert "advanced" in config_dict
 
         # Spot-check some values
-        assert config.num_model == 3
+        assert config.training.num_model == 3
         assert config.input_output is not None
         assert config.input_output.format == "stockholm"
         assert config.training.batch_size == 16
@@ -319,7 +318,7 @@ class TestArgsToConfig:
 
         config = args_to_config(args)
 
-        assert config.num_model == 6
+        assert config.training.num_model == 6
         assert config.training.batch_size == 64
 
     def test_standard_msa_with_language_model(self):
@@ -362,7 +361,7 @@ class TestArgsToConfig:
 
         config = args_to_config(args)
 
-        assert config.num_model == 10
+        assert config.training.num_model == 10
         assert config.training.max_iterations == 3
         assert config.language_model.use_language_model is True
 
@@ -378,7 +377,7 @@ class TestArgsToConfig:
 
         config = args_to_config(args)
 
-        assert config.num_model == 2
+        assert config.training.num_model == 2
         assert config.training.batch_size == 32
 
     def test_custom_epoch_scheme(self):
@@ -426,7 +425,7 @@ class TestArgsToConfig:
         assert config.init_msa.from_msa == Path("/path/to/initial.fasta")
         assert config.training.epochs == [3, 3, 3]
         assert config.training.max_iterations == 1
-        assert config.num_model == 1
+        assert config.training.num_model == 1
 
     def test_skip_training_with_loaded_model(self):
         """Test: Skip training and use pre-trained model."""
@@ -657,7 +656,7 @@ class TestArgsToConfig:
         assert config.input_output.output_file == Path("proteins.fasta")
 
         # When converting, training parameters still get defaults
-        assert config.num_model == 4
+        assert config.training.num_model == 4
 
     def test_convert_defaults_to_false(self):
         """Test: convert flag defaults to False."""

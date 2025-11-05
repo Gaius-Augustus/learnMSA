@@ -1,10 +1,19 @@
 from collections.abc import Sequence
-from pydantic import BaseModel, field_validator, model_validator
+from typing import Any, ClassVar
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator, model_serializer, PrivateAttr
 import warnings
 
 
 class TrainingConfig(BaseModel):
     """Training parameters."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Private attribute for num_model storage
+    _num_model: int = PrivateAttr(default=4)
+
+    # Class variable to temporarily store num_model during validation
+    _num_model_init_value: ClassVar[dict[int, int]] = {}
 
     batch_size: int = -1
     """Batch size for training. Default: adaptive."""
@@ -141,6 +150,63 @@ class TrainingConfig(BaseModel):
         raise ValueError(
             "crop must be \"disable\", \"auto\", or an integer > 0."
         )
+
+    @property
+    def num_model(self) -> int:
+        """Number of models to train.
+
+        If length_init is provided, returns its length.
+        Otherwise, returns the stored num_model value.
+        """
+        if self.length_init is not None:
+            return len(self.length_init)
+        return self._num_model
+
+    @num_model.setter
+    def num_model(self, value: int) -> None:
+        """Set the number of models.
+
+        This sets the internal _num_model field, but note that if
+        length_init is set, this value will be overridden.
+        """
+        if value < 1:
+            raise ValueError("num_model must be greater than or equal to 1.")
+        self._num_model = value
+
+    @model_validator(mode="before")
+    @classmethod
+    def extract_num_model(cls, data: Any) -> Any:
+        """Extract num_model from input data and store for later initialization."""
+        if isinstance(data, dict) and "num_model" in data:
+            # Store it in class variable using id(data) as key
+            cls._num_model_init_value[id(data)] = data.pop("num_model")
+        return data
+
+    def model_post_init(self, __context: Any) -> None:
+        """Store the num_model value after initialization.
+
+        Args:
+            __context: Context passed during validation (typically None).
+        """
+        # Check if there's a stored value for this instance
+        # We need to find it in the class variable
+        for key, value in list(self._num_model_init_value.items()):
+            # Clean up and use the first available value
+            self._num_model = value
+            del self._num_model_init_value[key]
+            break
+
+    @model_serializer(mode='wrap')
+    def serialize_model(self, serializer: Any) -> dict[str, Any]:
+        """Custom serializer to include num_model in the output.
+
+        This wraps the default serializer and adds num_model.
+        """
+        # Call the default serializer
+        data = serializer(self)
+        # Add the computed property
+        data["num_model"] = self.num_model
+        return data
 
     @model_validator(mode="after")
     def warn_batch_size_ignored(self) -> "TrainingConfig":

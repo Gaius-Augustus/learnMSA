@@ -45,6 +45,7 @@ def args_to_config(args: Namespace) -> Configuration:
 
     # Create nested configuration objects
     training_config = TrainingConfig(
+        num_model=args.num_model,
         batch_size=args.batch_size,
         tokens_per_batch=args.tokens_per_batch,
         learning_rate=args.learning_rate,
@@ -112,7 +113,6 @@ def args_to_config(args: Namespace) -> Configuration:
 
     # Create main Configuration object
     config = Configuration(
-        num_model=args.num_model,
         input_output=input_output_config,
         training=training_config,
         init_msa=init_msa_config,
