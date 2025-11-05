@@ -1,5 +1,6 @@
 from collections.abc import Sequence
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
+import warnings
 
 
 class TrainingConfig(BaseModel):
@@ -7,6 +8,9 @@ class TrainingConfig(BaseModel):
 
     batch_size: int = -1
     """Batch size for training. Default: adaptive."""
+
+    tokens_per_batch: int = -1
+    """Tokens per batch for training. Default: adaptive."""
 
     learning_rate: float = 0.1
     """Learning rate for gradient descent."""
@@ -137,3 +141,19 @@ class TrainingConfig(BaseModel):
         raise ValueError(
             "crop must be \"disable\", \"auto\", or an integer > 0."
         )
+
+    @model_validator(mode="after")
+    def warn_batch_size_ignored(self) -> "TrainingConfig":
+        """Warn if both batch_size and tokens_per_batch are set.
+
+        When tokens_per_batch > 0, it takes precedence and batch_size is ignored.
+        """
+        if self.batch_size > 0 and self.tokens_per_batch > 0:
+            warnings.warn(
+                f"Both batch_size ({self.batch_size}) and tokens_per_batch "
+                f"({self.tokens_per_batch}) are set. tokens_per_batch will be used "
+                "and batch_size will be ignored.",
+                UserWarning,
+                stacklevel=2
+            )
+        return self

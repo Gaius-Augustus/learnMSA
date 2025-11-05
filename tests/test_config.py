@@ -88,6 +88,7 @@ class TestTrainingConfig:
         """Test TrainingConfig default values."""
         config = TrainingConfig()
         assert config.batch_size == -1
+        assert config.tokens_per_batch == -1
         assert config.learning_rate == 0.1
         assert config.epochs == [10, 2, 10]
         assert config.max_iterations == 2

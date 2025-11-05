@@ -33,6 +33,7 @@ class TestArgsToConfig:
         # Check training defaults are applied
         assert config.num_model == 4
         assert config.training.batch_size == -1
+        assert config.training.tokens_per_batch == -1
         assert config.training.learning_rate == 0.1
         assert config.training.epochs == [10, 2, 10]
         assert config.training.crop == "auto"
@@ -48,7 +49,7 @@ class TestArgsToConfig:
             "-i", "input.fasta",
             "-o", "output.a2m",
             "-n", "7",
-            "-b", "32",
+            "--tokens_per_batch", "2000",
             "--learning_rate", "0.05",
             "--epochs", "20", "5", "15",
             "--max_iterations", "5",
@@ -73,7 +74,7 @@ class TestArgsToConfig:
 
         # num_model is overridden by length_init (3 elements)
         assert config.num_model == 3
-        assert config.training.batch_size == 32
+        assert config.training.tokens_per_batch == 2000
         assert config.training.learning_rate == 0.05
         assert config.training.epochs == [20, 5, 15]
         assert config.training.max_iterations == 5

@@ -46,6 +46,7 @@ def args_to_config(args: Namespace) -> Configuration:
     # Create nested configuration objects
     training_config = TrainingConfig(
         batch_size=args.batch_size,
+        tokens_per_batch=args.tokens_per_batch,
         learning_rate=args.learning_rate,
         epochs=args.epochs,
         max_iterations=args.max_iterations,
