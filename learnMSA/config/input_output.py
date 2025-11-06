@@ -1,14 +1,25 @@
 from pathlib import Path
-from pydantic import BaseModel, field_validator
+from typing import Annotated, Union
+from pydantic import BaseModel, field_validator, field_serializer, BeforeValidator
+
+
+def path_validator(v: Union[Path, str]) -> Path:
+    """Convert string to Path."""
+    if isinstance(v, str):
+        return Path(v)
+    return v
+
+
+PathField = Annotated[Union[Path, str], BeforeValidator(path_validator)]
 
 
 class InputOutputConfig(BaseModel):
     """Input/output and general control parameters."""
 
-    input_file: Path = Path()
+    input_file: PathField = Path()
     """Input fasta file containing the protein sequences to align."""
 
-    output_file: Path = Path()
+    output_file: PathField = Path()
     """Output file path for the resulting multiple sequence alignment."""
 
     format: str = "a2m"

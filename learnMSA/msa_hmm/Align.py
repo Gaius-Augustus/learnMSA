@@ -37,6 +37,11 @@ def align(data : SequenceDataset, config : Configuration) -> AlignmentModel:
     Returns:
         An AlignmentModel object.
     """
+    # If the input/output config is not set, we use forward the dataset path
+    if config.input_output.input_file == Path():
+        config.input_output.input_file = data.filepath
+
+    # Create a context that automatically sets up data-dependent parameters
     context = LearnMSAContext(data, config)
 
     # temporary solution: convert the new config to the legacy config format
@@ -338,6 +343,9 @@ def run_learnMSA(
             sys.exit(e.error_code)
     tf.keras.backend.clear_session() #not sure if necessary
     am.best_model = select_model(am, config["model_criterion"], verbose)
+
+    if out_filename == Path():
+        return am
 
     Path(os.path.dirname(out_filename)).mkdir(parents=True, exist_ok=True)
     t = time.time()

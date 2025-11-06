@@ -2,8 +2,6 @@ import os
 import subprocess as sp
 from pathlib import Path
 
-import tensorflow as tf
-
 
 def get_version() -> str:
     """
@@ -36,6 +34,9 @@ def setup_devices(
     This function should be called after parsing the command line arguments,
     otherwise just showing the help message will be slow.
     """
+    # import only if needed
+    import tensorflow as tf
+
     if not cuda_visible_devices == "default":
         os.environ["CUDA_VISIBLE_DEVICES"] = cuda_visible_devices
 
@@ -73,6 +74,8 @@ def setup_devices(
 
 def get_num_gpus() -> int:
     """Returns the number of GPUs detected by TensorFlow."""
+    # import only if needed
+    import tensorflow as tf
     num_gpu = len([x.name for x in tf.config.list_logical_devices() if x.device_type == 'GPU'])
     return num_gpu
 

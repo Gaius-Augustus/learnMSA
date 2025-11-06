@@ -352,7 +352,7 @@ class AlignmentModel():
 
     def to_string(
         self,
-        model_index,
+        model_index=None,
         batch_size=100000,
         add_block_sep=True,
         aligned_insertions : AlignedInsertions = AlignedInsertions(),
@@ -378,6 +378,8 @@ class AlignmentModel():
                 (with lowercase letters for inserted amino acids and dots for
                 gaps in insertions).
         """
+        if model_index is None:
+            model_index = self.best_model
         output_alphabet = self.get_output_alphabet(a2m)
         alignment_strings_all = []
         n = self.indices.size
@@ -397,7 +399,7 @@ class AlignmentModel():
     def to_file(
         self, 
         filepath, 
-        model_index, 
+        model_index = None, 
         batch_size=100000, 
         add_block_sep=False, 
         aligned_insertions : AlignedInsertions = AlignedInsertions(), 
@@ -427,6 +429,8 @@ class AlignmentModel():
             fasta_line_limit: Maximum number of characters per line in the 
                 fasta file (only applies to sequences).
         """
+        if model_index is None:
+            model_index = self.best_model
         if format == "fasta" or format == "a2m": #streaming batches to file
             output_alphabet = self.get_output_alphabet(format == "a2m")
             with open(filepath, "w") as output_file:

@@ -1,16 +1,17 @@
 import os
 import warnings
 from functools import partial
+from pathlib import Path
 from typing import Any, Callable
 
 import numpy as np
 import tensorflow as tf
 
+import learnMSA.msa_hmm.Align as Align
 import learnMSA.msa_hmm.Emitter as emit
 import learnMSA.msa_hmm.Initializers as initializers
 import learnMSA.msa_hmm.training_util as training_util
 import learnMSA.msa_hmm.Transitioner as trans
-import learnMSA.msa_hmm.Align as Align
 import learnMSA.protein_language_models.Common as Common
 import learnMSA.protein_language_models.EmbeddingBatchGenerator as EmbeddingBatchGenerator
 from learnMSA import Configuration
@@ -364,7 +365,16 @@ class LearnMSAContext:
         if not self.config.training.no_sequence_weights:
             os.makedirs(self.config.input_output.work_dir, exist_ok=True)
             try:
-                if self.config.input_output.input_format == "fasta":
+                if self.config.input_output.input_file == Path():
+                # When no input file is provided, we need to write a temporary
+                # for mmseqs2 clustering
+                    cluster_file = os.path.join(
+                        self.config.input_output.work_dir,
+                        "temp_for_clustering.fasta"
+                    )
+                    self.data.write(cluster_file, "fasta")
+                elif self.config.input_output.input_format == "fasta":
+                    # When the input file is fasta: all good
                     cluster_file = self.config.input_output.input_file
                 else:
                     # We need to convert to fasta
