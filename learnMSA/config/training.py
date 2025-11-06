@@ -1,7 +1,10 @@
+import sys
+import warnings
 from collections.abc import Sequence
 from typing import Any, ClassVar
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator, model_serializer, PrivateAttr
-import warnings
+
+from pydantic import (BaseModel, ConfigDict, PrivateAttr, field_validator,
+                      model_serializer, model_validator)
 
 
 class TrainingConfig(BaseModel):
@@ -62,8 +65,11 @@ class TrainingConfig(BaseModel):
     unaligned_insertions: bool = False
     """Insertions will be left unaligned."""
 
-    crop: int | str = "auto"
+    crop: int = sys.maxsize
     """Crop sequences longer than the given value during training."""
+
+    auto_crop: bool = True
+    """Automatically crop sequences during training based on auto_crop_scale."""
 
     auto_crop_scale: float = 2.0
     """Automatically crop sequences longer than this factor times the
@@ -78,6 +84,43 @@ class TrainingConfig(BaseModel):
 
     skip_training: bool = False
     """Only decode an alignment from the provided model."""
+
+    cluster_seq_id: float = 0.9
+    """Sequence identity for computing sequence weights."""
+
+    use_prior: bool = True
+    """Whether to use a prior on the model parameters."""
+
+    dirichlet_mix_comp_count: int = 1
+    """Number of components for Dirichlet mixture prior."""
+
+    use_anc_probs: bool = False
+    """Whether to use ancestral state probabilities."""
+
+    trainable_rate_matrices: bool = False
+    """Whether rate matrices are trainable."""
+
+    trainable_distances: bool = True
+    """Whether distances are trainable."""
+
+    num_rate_matrices: int = 1
+    """Number of rate matrices to use."""
+
+    per_matrix_rate: bool = False
+    """Whether to use a separate rate for each rate matrix."""
+
+    matrix_rate_l2: float = 0.0
+    """L2 regularization strength for rate matrices."""
+
+    shared_rate_matrix: bool = False
+    """Whether to share rate matrices."""
+
+    equilibrium_sample: bool = False
+    """Whether to use equilibrium sampling."""
+
+    transposed: bool = False
+    """Whether to use transposed rate matrices."""
+
 
     @field_validator("learning_rate")
     def validate_learning_rate(cls, v: float) -> float:
@@ -121,6 +164,7 @@ class TrainingConfig(BaseModel):
         "surgery_quantile",
         "surgery_del",
         "surgery_ins",
+        "cluster_seq_id",
     )
     def validate_quantiles(cls, v: float, info) -> float:
         if not 0 <= v <= 1:
@@ -131,6 +175,8 @@ class TrainingConfig(BaseModel):
         "len_mul",
         "auto_crop_scale",
         "min_surgery_seqs",
+        "dirichlet_mix_comp_count",
+        "num_rate_matrices",
     )
     def validate_positive_floats(cls, v: float | int, info) -> float | int:
         if v <= 0:

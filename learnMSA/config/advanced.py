@@ -37,8 +37,8 @@ class AdvancedConfig(BaseModel):
     initial_distance: float = 0.05
     """Initial distance value."""
 
-    trainable_rate_matrices: bool = False
-    """Make rate matrices trainable."""
+    grow_mem: bool = False
+    """Enable memory growth for GPUs."""
 
 
     @field_validator(

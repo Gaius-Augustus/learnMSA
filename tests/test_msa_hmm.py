@@ -1,14 +1,16 @@
 """Tests for MSA HMM functionality including Viterbi, backward, and posterior probabilities."""
 import os
+
 import numpy as np
 import tensorflow as tf
 
-from learnMSA.msa_hmm import (
-    Align, Emitter, Transitioner, Initializers, MsaHmmCell, MsaHmmLayer,
-    Training, Configuration, Viterbi
-)
-from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
+from learnMSA import Configuration
+from learnMSA.msa_hmm import (Emitter, Initializers, MsaHmmCell,
+                              MsaHmmLayer, Training, Transitioner, Viterbi)
 from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
+from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
+from learnMSA.msa_hmm.legacy import make_legacy_config
+from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 from tests import ref
 
 
@@ -22,7 +24,10 @@ def get_all_seqs(data: SequenceDataset, num_models: int) -> np.ndarray:
     """Get all sequences from a dataset."""
     indices = np.arange(data.num_seq)
     batch_generator = Training.DefaultBatchGenerator()
-    config = Configuration.make_default(num_models)
+    config = Configuration()
+    config.training.num_model = num_models
+    config.training.no_sequence_weights = True
+    config = make_legacy_config(config, LearnMSAContext(data, config))
     batch_generator.configure(data, config)
     ds = Training.make_dataset(indices,
                                batch_generator,
@@ -171,7 +176,11 @@ def test_viterbi() -> None:
         # This produces a result identical to above, but runs viterbi batch wise
         # to avoid memory overflow
         batch_generator = Training.DefaultBatchGenerator(return_only_sequences=True)
-        batch_generator.configure(data, Configuration.make_default(2))
+        config = Configuration()
+        config.training.num_model = 2
+        config.training.no_sequence_weights = True
+        config = make_legacy_config(config, LearnMSAContext(data, config))
+        batch_generator.configure(data, config)
         state_seqs_max_lik2 = Viterbi.get_state_seqs_max_lik(
             data,
             batch_generator,
@@ -563,8 +572,12 @@ def test_posterior_state_probabilities() -> None:
         hmm_cell = MsaHmmCell.MsaHmmCell(32)
         hmm_layer = MsaHmmLayer.MsaHmmLayer(hmm_cell, 1)
         hmm_layer.build((1, None, None, len(SequenceDataset.alphabet)))
+        config = Configuration()
+        config.training.num_model = 1
+        config.training.no_sequence_weights = True
+        config = make_legacy_config(config, LearnMSAContext(data, config))
         batch_gen = Training.DefaultBatchGenerator()
-        batch_gen.configure(data, Configuration.make_default(1))
+        batch_gen.configure(data, config)
         indices = tf.range(data.num_seq, dtype=tf.int64)
         ds = Training.make_dataset(indices, batch_gen, batch_size=data.num_seq, shuffle=False)
         for x, _ in ds:

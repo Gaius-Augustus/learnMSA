@@ -5,9 +5,12 @@ import numpy as np
 import pytest
 import tensorflow as tf
 
-from learnMSA.msa_hmm import (AncProbsLayer, Configuration, Emitter,
-                              Initializers, Training, Utility)
+from learnMSA import Configuration
+from learnMSA.msa_hmm import (AncProbsLayer, Emitter, Initializers, Training,
+                              Utility)
 from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
+from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
+from learnMSA.msa_hmm.legacy import make_legacy_config
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 
 
@@ -112,10 +115,13 @@ def get_test_configs(sequences : np.ndarray) -> list[dict]:
         for rate_init in [-100., -3., 100.]:
             for num_matrices in [1, 3]:
                 case = {}
-                config = Configuration.make_default(1)
-                config["num_models"] = 1
-                config["equilibrium_sample"] = equilibrium_sample
-                config["num_rate_matrices"] = num_matrices
+                config = Configuration()
+                config.training.num_model = 1
+                config.training.no_sequence_weights = True
+                config.training.equilibrium_sample = equilibrium_sample
+                config.training.num_rate_matrices = num_matrices
+                dummy_data = SequenceDataset(sequences=["seq1", "ACGT"])
+                config = make_legacy_config(config, LearnMSAContext(dummy_data, config))
                 if num_matrices > 1:
                     R_stack = np.concatenate([inv_sp_R] * num_matrices, axis=1)
                     p_stack = np.concatenate([log_p] * num_matrices, axis=1)
@@ -152,10 +158,13 @@ def get_test_configs(sequences : np.ndarray) -> list[dict]:
 
 def get_simple_seq(data: SequenceDataset) -> np.ndarray:
     """Get simple sequence data for testing."""
-    from learnMSA.msa_hmm import Configuration, Training
+    from learnMSA.msa_hmm import Training
     indices = np.arange(data.num_seq)
     batch_generator = Training.DefaultBatchGenerator()
-    config = Configuration.make_default(1)
+    config = Configuration()
+    config.training.num_model = 1
+    config.training.no_sequence_weights = True
+    config = make_legacy_config(config, LearnMSAContext(data, config))
     batch_generator.configure(data, config)
     ds = Training.make_dataset(indices,
                                batch_generator,
@@ -223,7 +232,11 @@ def test_encoder_model() -> None:
         ind = np.arange(n)
         model_length = 10
         batch_gen = Training.DefaultBatchGenerator()
-        batch_gen.configure(data, Configuration.make_default(1))
+        config = Configuration()
+        config.training.num_model = 1
+        config.training.no_sequence_weights = True
+        config = make_legacy_config(config, LearnMSAContext(data, config))
+        batch_gen.configure(data, config)
         ds = Training.make_dataset(ind, batch_gen, batch_size=n, shuffle=False)
         for case in get_test_configs(sequences):
             # The default emitter initializers expect 25 as last dimension which is not compatible with num_matrix=3
@@ -263,7 +276,10 @@ def test_transposed() -> None:
     with SequenceDataset(filename) as data:
         sequences = get_simple_seq(data)
     n = sequences.shape[1]
-    config = Configuration.make_default(1)
+    config = Configuration()
+    config.training.num_model = 1
+    config.training.no_sequence_weights = True
+    config = make_legacy_config(config, LearnMSAContext(data, config))
     anc_probs_layer = Training.make_anc_probs_layer(1, config)
     msa_hmm_layer = Training.make_msa_hmm_layer(n, 10, config)
     msa_hmm_layer.build((1, None, None, len(SequenceDataset.alphabet)))

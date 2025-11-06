@@ -22,10 +22,23 @@ class TrainingConfig(BaseModel):
     indexed_data: bool
     unaligned_insertions: bool
     crop: int | str
+    auto_crop: bool
     auto_crop_scale: float
     frozen_insertions: bool
     no_sequence_weights: bool
     skip_training: bool
+    cluster_seq_id: float
+    use_prior: bool
+    dirichlet_mix_comp_count: int
+    use_anc_probs: bool
+    trainable_rate_matrices: bool
+    trainable_distances: bool
+    num_rate_matrices: int
+    per_matrix_rate: bool
+    matrix_rate_l2: float
+    shared_rate_matrix: bool
+    equilibrium_sample: bool
+    transposed: bool
 
     def __init__(
         self,
@@ -47,10 +60,23 @@ class TrainingConfig(BaseModel):
         indexed_data: bool = False,
         unaligned_insertions: bool = False,
         crop: int | str = "auto",
+        auto_crop: bool = True,
         auto_crop_scale: float = 2.0,
         frozen_insertions: bool = False,
         no_sequence_weights: bool = False,
         skip_training: bool = False,
+        cluster_seq_id: float = 0.9,
+        use_prior: bool = True,
+        dirichlet_mix_comp_count: int = 1,
+        use_anc_probs: bool = False,
+        trainable_rate_matrices: bool = False,
+        trainable_distances: bool = True,
+        num_rate_matrices: int = 1,
+        per_matrix_rate: bool = False,
+        matrix_rate_l2: float = 0.0,
+        shared_rate_matrix: bool = False,
+        equilibrium_sample: bool = False,
+        transposed: bool = False,
         **kwargs: Any,
     ) -> None: ...
 

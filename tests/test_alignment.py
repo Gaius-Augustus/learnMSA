@@ -3,11 +3,14 @@ import os
 import numpy as np
 import tensorflow as tf
 
-from learnMSA.msa_hmm import (Align, Configuration, Emitter, Initializers,
-                              Training, Transitioner)
+from learnMSA import Configuration
+from learnMSA.msa_hmm import (Align, Emitter, Initializers, Training,
+                              Transitioner)
 from learnMSA.msa_hmm.AlignmentModel import (AlignmentModel,
                                              find_faulty_sequences,
                                              non_homogeneous_mask_func)
+from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
+from learnMSA.msa_hmm.legacy import make_legacy_config
 from learnMSA.msa_hmm.SequenceDataset import AlignedDataset, SequenceDataset
 
 
@@ -20,7 +23,10 @@ def test_subalignment() -> None:
     filename = os.path.dirname(__file__)+"/../tests/data/felix.fa"
     fasta_file = SequenceDataset(filename)
     length = 5
-    config = Configuration.make_default(1)
+    config = Configuration()
+    config.training.num_model = 1
+    config.training.no_sequence_weights = True
+    config = make_legacy_config(config, LearnMSAContext(fasta_file, config))
     emission_init = string_to_one_hot("FELIK").numpy()*20
     insert_init = np.squeeze(string_to_one_hot("A") + string_to_one_hot("H") + string_to_one_hot("C"))*20
     config["emitter"] = Emitter.ProfileHMMEmitter(
@@ -45,7 +51,11 @@ def test_subalignment() -> None:
     # subalignment
     subset = np.array([0, 2, 5])
     batch_gen = Training.DefaultBatchGenerator()
-    batch_gen.configure(fasta_file, Configuration.make_default(1))
+    config = Configuration()
+    config.training.num_model = 1
+    config.training.no_sequence_weights = True
+    config = make_legacy_config(config, LearnMSAContext(fasta_file, config))
+    batch_gen.configure(fasta_file, config)
     # create alignment after building model
     sub_am = AlignmentModel(fasta_file, batch_gen, subset, 32, model)
     subalignment_strings = sub_am.to_string(0, add_block_sep=False)
@@ -61,7 +71,10 @@ def test_alignment_egf() -> None:
     with SequenceDataset(train_filename) as data:
         with AlignedDataset(ref_filename) as ref_msa:
             ref_subset = np.array([data.seq_ids.index(sid) for sid in ref_msa.seq_ids])
-        config = Configuration.make_default(1)
+        config = Configuration()
+        config.training.num_model = 1
+        config.training.no_sequence_weights = True
+        config = make_legacy_config(config, LearnMSAContext(data, config))
         config["max_surgery_runs"] = 2  # do minimal surgery
         config["epochs"] = [5, 1, 5]
         am = Align.fit_and_align(

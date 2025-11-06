@@ -4,8 +4,11 @@ import os
 import numpy as np
 import tensorflow as tf
 
-from learnMSA.msa_hmm import (Align, Configuration, Emitter, Initializers,
-                              Training, Transitioner)
+from learnMSA import Configuration
+from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
+from learnMSA.msa_hmm.legacy import make_legacy_config
+from learnMSA.msa_hmm import (Align, Emitter, Initializers, Training,
+                              Transitioner)
 from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 
@@ -28,7 +31,10 @@ def string_to_one_hot(s : str) -> tf.Tensor:
 
 def make_test_alignment(data: SequenceDataset) -> AlignmentModel:
     """Create a test alignment model with specific parameters."""
-    config = Configuration.make_default(1)
+    config = Configuration()
+    config.training.num_model = 1
+    config.training.no_sequence_weights = True
+    config = make_legacy_config(config, LearnMSAContext(data, config))
     emission_init = string_to_one_hot("FELIC").numpy() * 10
     insert_init = np.squeeze(
         string_to_one_hot("A") + string_to_one_hot("N")

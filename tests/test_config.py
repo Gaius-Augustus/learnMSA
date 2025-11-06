@@ -121,20 +121,14 @@ class TestTrainingConfig:
 
     def test_training_config_crop_validation(self):
         """Test crop parameter validation."""
-        config1 = TrainingConfig(crop="auto")
-        assert config1.crop == "auto"
+        config1 = TrainingConfig(auto_crop=True)
+        assert config1.auto_crop
 
-        config2 = TrainingConfig(crop="disable")
-        assert config2.crop == "disable"
-
-        config3 = TrainingConfig(crop=100)
-        assert config3.crop == 100
+        config2 = TrainingConfig(auto_crop=False, crop=100)
+        assert config2.crop == 100
 
         with pytest.raises(ValidationError):
             TrainingConfig(crop=0)  # Must be > 0
-
-        with pytest.raises(ValidationError):
-            TrainingConfig(crop="invalid")  # Invalid string
 
 
 class TestConfigurationSerialization:
@@ -600,7 +594,6 @@ class TestAdvancedConfig:
         assert config.inverse_gamma_beta == 0.5
         assert config.frozen_distances is False
         assert config.initial_distance == 0.05
-        assert config.trainable_rate_matrices is False
 
     def test_advanced_config_custom_values(self):
         """Test AdvancedConfig with custom values."""
@@ -616,7 +609,6 @@ class TestAdvancedConfig:
             inverse_gamma_beta=1.0,
             frozen_distances=True,
             initial_distance=0.1,
-            trainable_rate_matrices=True
         )
         assert config.dist_out == "distributions.txt"
         assert config.alpha_flank == 5000
@@ -629,7 +621,6 @@ class TestAdvancedConfig:
         assert config.inverse_gamma_beta == 1.0
         assert config.frozen_distances is True
         assert config.initial_distance == 0.1
-        assert config.trainable_rate_matrices is True
 
     def test_alpha_flank_validation(self):
         """Test that alpha_flank must be positive."""
@@ -790,14 +781,12 @@ class TestAdvancedConfig:
             "dist_out": "results.txt",
             "alpha_single": 5e8,
             "inverse_gamma_alpha": 4.0,
-            "trainable_rate_matrices": True
         }
         config = AdvancedConfig(**config_dict)
 
         assert config.dist_out == "results.txt"
         assert config.alpha_single == 5e8
         assert config.inverse_gamma_alpha == 4.0
-        assert config.trainable_rate_matrices is True
 
     def test_advanced_in_configuration(self):
         """Test AdvancedConfig as part of Configuration."""

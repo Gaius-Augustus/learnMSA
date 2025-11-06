@@ -15,7 +15,8 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         description=f"learnMSA (version {version}) - "
                     "multiple alignment of protein sequences\n"
                     "\n"
-                    "Use 'learnMSA help [argument]' to get detailed help on a specific argument.",
+                    "Use 'learnMSA help [argument]' to get detailed help on "
+                    "a specific argument.",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
 

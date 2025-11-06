@@ -5,7 +5,10 @@ import warnings
 import numpy as np
 import tensorflow as tf
 
-from learnMSA.msa_hmm import Configuration, Initializers, Training
+from learnMSA import Configuration
+from learnMSA.msa_hmm.legacy import make_legacy_config
+from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
+from learnMSA.msa_hmm import Initializers, Training
 from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
 from learnMSA.msa_hmm.Emitter import ProfileHMMEmitter
 from learnMSA.msa_hmm.Initializers import ConstantInitializer
@@ -45,7 +48,11 @@ def test_model_to_file() -> None:
     custom_insertion_init = ConstantInitializer(np.random.rand(len(SequenceDataset.alphabet)-1))
     encoder_initializer = Initializers.make_default_anc_probs_init(1)
     encoder_initializer[0] = ConstantInitializer(np.random.rand(1, 2))
-    config = Configuration.make_default(1)
+    config = Configuration()
+    config.training.num_model = 1
+    config.training.no_sequence_weights = True
+    dummy_data = SequenceDataset(sequences=["seq1", "ACGT"])
+    config = make_legacy_config(config, LearnMSAContext(dummy_data, config))
     config["transitioner"] = ProfileHMMTransitioner(custom_transition_init, custom_flank_init)
     config["emitter"] = ProfileHMMEmitter(custom_emission_init, custom_insertion_init)
     config["encoder_initializer"] = encoder_initializer

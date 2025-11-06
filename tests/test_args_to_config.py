@@ -1,4 +1,5 @@
 from pathlib import Path
+import sys
 
 from learnMSA.run.args import parse_args
 from learnMSA.run.args_to_config import args_to_config
@@ -36,11 +37,12 @@ class TestArgsToConfig:
         assert config.training.tokens_per_batch == -1
         assert config.training.learning_rate == 0.1
         assert config.training.epochs == [10, 2, 10]
-        assert config.training.crop == "auto"
+        assert config.training.auto_crop is True
         assert config.init_msa.from_msa is None
         assert config.language_model.use_language_model is False
         assert config.visualization.logo == ""
         assert config.advanced.alpha_flank == 7000
+        assert config.advanced.grow_mem is False
 
     def test_args_to_config_with_training_args(self):
         """Test conversion with training-related arguments."""
@@ -68,6 +70,7 @@ class TestArgsToConfig:
             "--frozen_insertions",
             "--no_sequence_weights",
             "--skip_training",
+            "--grow_mem",
         ])
 
         config = args_to_config(args)
@@ -93,6 +96,7 @@ class TestArgsToConfig:
         assert config.training.frozen_insertions is True
         assert config.training.no_sequence_weights is True
         assert config.training.skip_training is True
+        assert config.advanced.grow_mem is True
 
     def test_args_to_config_with_epochs_single_value(self):
         """Test that single epoch value is expanded to 3."""
@@ -210,7 +214,7 @@ class TestArgsToConfig:
         assert config.advanced.inverse_gamma_beta == 1.0
         assert config.advanced.frozen_distances is True
         assert config.advanced.initial_distance == 0.1
-        assert config.advanced.trainable_rate_matrices is True
+        assert config.training.trainable_rate_matrices is True
 
     def test_args_to_config_num_model_from_length_init(self):
         """Test that num_model is computed from length_init when provided."""
@@ -303,7 +307,7 @@ class TestArgsToConfig:
         assert config.language_model.use_language_model is True
         assert config.language_model.use_L2 is True
         assert config.advanced.frozen_distances is True
-        assert config.advanced.trainable_rate_matrices is True
+        assert config.training.trainable_rate_matrices is True
 
     def test_args_to_config_short_options(self):
         """Test conversion using short option names."""
@@ -541,6 +545,7 @@ class TestArgsToConfig:
 
         config = args_to_config(args)
 
+        assert config.training.auto_crop is False
         assert config.training.crop == 1000
 
     def test_disable_crop(self):
@@ -554,7 +559,8 @@ class TestArgsToConfig:
 
         config = args_to_config(args)
 
-        assert config.training.crop == "disable"
+        assert config.training.auto_crop is False
+        assert config.training.crop == sys.maxsize
 
     def test_auto_crop_with_scale(self):
         """Test: Auto crop with custom scale factor."""
@@ -568,7 +574,7 @@ class TestArgsToConfig:
 
         config = args_to_config(args)
 
-        assert config.training.crop == "auto"
+        assert config.training.auto_crop is True
         assert config.training.auto_crop_scale == 3.0
 
     def test_save_model(self):

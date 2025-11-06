@@ -10,14 +10,15 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 
+from learnMSA import Configuration
 import learnMSA.msa_hmm.Initializers as initializers
 import learnMSA.msa_hmm.Training as train
 from learnMSA.msa_hmm.AlignInsertions import make_aligned_insertions
 from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
-from learnMSA.msa_hmm.Configuration import as_str, assert_config
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 from learnMSA.protein_language_models.MvnEmitter import \
     AminoAcidPlusMvnEmissionInitializer
+from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
 
 #experimental, only used for ablation studies
 #decreases accuracy slightly!
@@ -26,6 +27,38 @@ if USE_VITERBI_SURGERY:
     from learnMSA.msa_hmm.Viterbi import get_state_seqs_max_lik
 
 np.set_printoptions(legacy='1.25')
+
+
+def align(data : SequenceDataset, config : Configuration) -> AlignmentModel:
+    """ Aligns the sequences in data according to the specified config.
+    Args:
+        data: Dataset of sequences.
+        config: Configuration that can be used to control training and decoding (see msa_hmm.config.make_default).
+    Returns:
+        An AlignmentModel object.
+    """
+    context = LearnMSAContext(data, config)
+
+    # temporary solution: convert the new config to the legacy config format
+    # such that the code runs
+    from learnMSA.msa_hmm.legacy import make_legacy_config
+
+    return run_learnMSA(
+        data,
+        out_filename = config.input_output.output_file,
+        config = make_legacy_config(config, context),
+        model_generator=context.model_gen,
+        batch_generator=context.batch_gen,
+        align_insertions=not config.training.unaligned_insertions,
+        sequence_weights = context.sequence_weights,
+        clusters = context.clusters,
+        verbose = not config.input_output.silent,
+        logo_gif_mode = bool(config.visualization.logo_gif),
+        logo_dir = config.visualization.logo_gif.parent if config.visualization.logo_gif else "", # type: ignore
+        initial_model_length_callback = context.initial_model_length_cb,
+        output_format = config.input_output.format,
+        load_model = config.input_output.load_model
+    )
 
 
 def get_initial_model_lengths(data : SequenceDataset, config, random=True):
@@ -73,7 +106,6 @@ def fit_and_align(
     A2M_output=True,
     load_model=""
 ) -> AlignmentModel:
-    assert_config(config)
     model_generator, batch_generator = _make_defaults_if_none(
         model_generator, batch_generator
     )
@@ -201,7 +233,6 @@ def fit_and_align_with_logo_gif(
 
     from learnMSA.msa_hmm.Visualize import LogoPlotterCallback, make_logo_gif
 
-    assert_config(config)
     model_generator, batch_generator = _make_defaults_if_none(None, None)
     indices = np.arange(data.num_seq)
     model_lengths = initial_model_length_callback(data, config)
@@ -272,7 +303,6 @@ def run_learnMSA(
     """
     if verbose:
         print("Training of", config["num_models"], "models on file", os.path.basename(data.filepath))
-        print("Configuration:", as_str(config))
     # optionally load the reference and find the corresponding sequences in the train file
     subset = np.array([data.seq_ids.index(sid) for sid in subset_ids]) if subset_ids else None
     if load_model and config["epochs"][0] == 0:

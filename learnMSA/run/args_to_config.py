@@ -1,14 +1,9 @@
+import sys
 from argparse import Namespace
 
-from learnMSA.config import (
-    AdvancedConfig,
-    Configuration,
-    InitMSAConfig,
-    InputOutputConfig,
-    LanguageModelConfig,
-    TrainingConfig,
-    VisualizationConfig,
-)
+from learnMSA.config import (AdvancedConfig, Configuration, InitMSAConfig,
+                             InputOutputConfig, LanguageModelConfig,
+                             TrainingConfig, VisualizationConfig)
 
 
 def args_to_config(args: Namespace) -> Configuration:
@@ -21,13 +16,16 @@ def args_to_config(args: Namespace) -> Configuration:
         Configuration object with values from the command-line arguments.
     """
     # Convert crop to appropriate type (str or int)
-    crop = args.crop
-    if crop != "auto" and crop != "disable":
+    auto_crop = args.crop == "auto"
+    if args.crop in {"auto", "disable"}:
+        crop = sys.maxsize
+    else:
         try:
-            crop = int(crop)
+            crop = int(args.crop)
         except ValueError:
-            # Keep as string if not convertible to int
-            pass
+            raise ValueError(
+                "Invalid value for --crop. Use 'auto', 'disable' or an integer."
+            )
 
     # Create input/output configuration
     input_output_config = InputOutputConfig(
@@ -62,10 +60,14 @@ def args_to_config(args: Namespace) -> Configuration:
         indexed_data=args.indexed_data,
         unaligned_insertions=args.unaligned_insertions,
         crop=crop,
+        auto_crop=auto_crop,
         auto_crop_scale=args.auto_crop_scale,
         frozen_insertions=args.frozen_insertions,
         no_sequence_weights=args.no_sequence_weights,
         skip_training=args.skip_training,
+        trainable_rate_matrices=args.trainable_rate_matrices,
+        trainable_distances=args.trainable_rate_matrices,
+        equilibrium_sample=args.trainable_rate_matrices,
     )
 
     init_msa_config = InitMSAConfig(
@@ -108,7 +110,7 @@ def args_to_config(args: Namespace) -> Configuration:
         inverse_gamma_beta=args.inverse_gamma_beta,
         frozen_distances=args.frozen_distances,
         initial_distance=args.initial_distance,
-        trainable_rate_matrices=args.trainable_rate_matrices,
+        grow_mem=args.grow_mem,
     )
 
     # Create main Configuration object
@@ -120,5 +122,11 @@ def args_to_config(args: Namespace) -> Configuration:
         visualization=visualization_config,
         advanced=advanced_config,
     )
+
+    # Deprecated checks
+    if args.noA2M:
+        raise DeprecationWarning(
+            "--noA2M is deprecated. Use --format fasta instead."
+        )
 
     return config

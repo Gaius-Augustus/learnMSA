@@ -41,6 +41,9 @@ class LanguageModelConfig(BaseModel):
     embedding_prior_components: int = 32
     """Number of embedding prior components."""
 
+    conditionally_independent: bool = True
+    """Whether to use conditionally independent emissions."""
+
 
     @field_validator("language_model")
     def validate_language_model(cls, v: str) -> str:

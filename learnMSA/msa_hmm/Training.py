@@ -5,7 +5,6 @@ from functools import partial
 from learnMSA.msa_hmm.MsaHmmCell import MsaHmmCell
 from learnMSA.msa_hmm.MsaHmmLayer import MsaHmmLayer
 from learnMSA.msa_hmm.AncProbsLayer import AncProbsLayer
-from learnMSA.msa_hmm.Configuration import assert_config
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 from learnMSA.msa_hmm.Utility import deserialize
 
@@ -121,7 +120,6 @@ def make_msa_hmm_layer(effective_num_seq,
                         alphabet_size=len(SequenceDataset.alphabet)-1):
     """Constructs a cell and a MSA HMM layer given a config.
     """
-    assert_config(config)
     msa_hmm_cell = MsaHmmCell(model_lengths, 
                                 dim = 24 * config["num_rate_matrices"],
                                 emitter = config["emitter"], 
@@ -135,7 +133,6 @@ def make_msa_hmm_layer(effective_num_seq,
 
 
 def make_anc_probs_layer(num_seq, config, clusters=None):
-    assert_config(config)
     anc_probs_layer = AncProbsLayer(config["num_models"],
                                     num_seq,
                                     config["num_rate_matrices"],
@@ -325,7 +322,6 @@ def fit_model(model_generator,
               clusters=None,
               verbose=True, 
               train_callbacks=[]):
-    assert_config(config)
     tf.keras.backend.clear_session() #frees occupied memory 
     tf.get_logger().setLevel('ERROR')
     batch_generator.configure(data, config, verbose)

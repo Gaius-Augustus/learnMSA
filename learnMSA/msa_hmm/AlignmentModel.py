@@ -4,7 +4,6 @@ import learnMSA.msa_hmm.AncProbsLayer as anc_probs
 import learnMSA.msa_hmm.MsaHmmLayer as msa_hmm_layer
 import learnMSA.msa_hmm.MsaHmmCell as msa_hmm_cell
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset, AlignedDataset
-import learnMSA.msa_hmm.Configuration as config
 import learnMSA.msa_hmm.Training as train
 import learnMSA.msa_hmm.Viterbi as viterbi
 import learnMSA.msa_hmm.Priors as priors
@@ -15,8 +14,7 @@ import shutil
 from packaging import version
 from pathlib import Path
 
-        
-# utility class used in AlignmentModel storing useful information on a 
+# utility class used in AlignmentModel storing useful information on a
 # specific alignment
 class AlignmentMetaData():
     def __init__(
@@ -395,7 +393,7 @@ class AlignmentModel():
             alignment_strings_all.extend(alignment_strings)
             i += batch_size
         return alignment_strings_all
-    
+
     def to_file(
         self, 
         filepath, 
@@ -748,31 +746,39 @@ class AlignmentModel():
                 shutil.rmtree(filepath)
             except OSError as e:
                 print("Error: %s - %s." % (e.filepath, e.strerror))
-        # todo: this is currently a bit limited because it creates a default 
+        # todo: this is currently a bit limited because it creates a default
         # batch gen from a default config
         if custom_batch_gen is None:
-            batch_gen = train.DefaultBatchGenerator() 
+            batch_gen = train.DefaultBatchGenerator()
         else:
             batch_gen = custom_batch_gen
         if custom_config is None:
-            configuration = config.make_default(d["num_models"]) 
+            # temporary solution to get a legacy config on the fly
+            from learnMSA import Configuration
+            from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
+            from learnMSA.msa_hmm.legacy import make_legacy_config
+
+            config = Configuration()
+            config.training.num_model = d["num_models"]
+            config.training.no_sequence_weights = True
+            configuration = make_legacy_config(config, LearnMSAContext(data, config))
         else:
             configuration = custom_config
-        batch_gen.configure(data, configuration) 
+        batch_gen.configure(data, configuration)
         am = cls(
-            data, 
-            batch_gen, 
+            data,
+            batch_gen,
             indices,
-            d["batch_size"], 
+            d["batch_size"],
             model,
-            d["gap_symbol"], 
+            d["gap_symbol"],
             d["gap_symbol_insertions"]
         )
         if "best_model" in d:
             am.best_model = d["best_model"]
         return am
-    
-    
+
+
     @classmethod
     def decode_core(cls, model_length, state_seqs_max_lik, indices):
         """ Decodes consensus columns as a matrix as well as insertion lengths 

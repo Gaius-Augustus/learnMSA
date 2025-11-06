@@ -2,7 +2,7 @@ import os
 import numpy as np
 import sys
 sys.path.insert(1, "../..")
-import learnMSA.msa_hmm.SequenceDataset as SequenceDataset
+from learnMSA.msa_hmm.SequenceDataset import AlignedDataset
 import learnMSA.protein_language_models.Common as Common
 import pandas as pd
 import tensorflow as tf
@@ -49,7 +49,7 @@ def get_clan_data(drop_overlap = True #remove families that have at least one se
             family = ".".join(file.split(".")[:-1])
             if family in to_drop: #skip if family has sequences similar to those in the test dataset
                 continue
-            fasta = SequenceDataset.AlignedDataset(datasets+file, single_seq_ok=True)
+            fasta = AlignedDataset(datasets+file, single_seq_ok=True)
             #omit families with only one sequence
             if fasta.num_seq == 1:
                 to_drop.append(family)
@@ -100,7 +100,7 @@ def _get_features_labels(fasta, rand, max_len, force_segment_start=None):
     return seq, pos_to_col, (crop_start, crop_end)
 
 
-def _get_column_occupancies(fasta : SequenceDataset.AlignedDataset):
+def _get_column_occupancies(fasta : AlignedDataset):
     """ 
     Returns a boolean mask indicating which columns of the alignment are match columns.
     """
@@ -321,7 +321,7 @@ def make_homfam_dataset(encoder : Common.InputEncoder,
     clan_families = []
     for file in os.listdir(homfam_path):
         if file.endswith(ext):
-            fasta = SequenceDataset.AlignedDataset(homfam_path + file)
+            fasta = AlignedDataset(homfam_path + file)
             family = get_family(file)
             fasta_dict[family] = fasta
             clan_families.append([family])

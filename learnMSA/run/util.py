@@ -1,5 +1,8 @@
 import os
+import subprocess as sp
 from pathlib import Path
+
+import tensorflow as tf
 
 
 def get_version() -> str:
@@ -66,6 +69,32 @@ def setup_devices(
         else:
             print("Using GPU(s):", GPUS)
         print("Found tensorflow version", tf.__version__)
+
+
+def get_num_gpus() -> int:
+    """Returns the number of GPUs detected by TensorFlow."""
+    num_gpu = len([x.name for x in tf.config.list_logical_devices() if x.device_type == 'GPU'])
+    return num_gpu
+
+
+def get_gpu_memory() -> list[int]:
+    """Returns a list of total memory (in MB) for each GPU detected."""
+    command = "nvidia-smi --query-gpu=memory.total --format=csv"
+    try:
+        memory_free_info = sp.check_output(command.split()).decode('ascii').split('\n')[:-1][1:]
+        memory_free_values = [int(x.split()[0]) for i, x in enumerate(memory_free_info)]
+    except sp.CalledProcessError as e:
+        print(
+            "Warning: There were GPU(s) detected, but nvidia-smi failed to "\
+            "run. It is used to infer GPU memory and adapt the batch size. "\
+            "Please make sure nvidia-smi is installed and working properly. "\
+            "It might also mean that you are not running an NVIDIA GPU. "\
+            "learnMSA will continue with default settings and might behave "\
+            "as expected. You can adjust the batch size manually with the "\
+            "-b option."
+        )
+        return []
+    return memory_free_values
 
 
 def validate_filepath(filepath : str, expected_ext : str) -> Path:
