@@ -88,7 +88,13 @@ differ slighly in their initialization, length (number of match states) and
 
 ``--len_mul`` *LEN_MUL*
     Multiplicative constant for the quantile used to define the initial model
-    length (see ``--length_init_quantile``).
+    length (see ``--length_init_quantile``). If model surgery is not used
+    (i.e., ``--max_iterations`` is 1), this value is forced to 1.0, as the
+    algorithm has no chance to optimize the model length.
+    The intuition behind the parameter is that shorter models might be faster
+    and more stable to train at first, focusing on the most important parts of
+    a family profile. Missin match states will be automatically added by model
+    surgery if necessary.
 
     Default: 0.8
 

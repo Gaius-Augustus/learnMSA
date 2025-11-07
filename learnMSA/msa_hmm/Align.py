@@ -69,7 +69,10 @@ def align(data : SequenceDataset, config : Configuration) -> AlignmentModel:
 def get_initial_model_lengths(data : SequenceDataset, config, random=True):
     #initial model length
     model_length = np.quantile(data.seq_lens, q=config["length_init_quantile"])
-    model_length *= config["len_mul"]
+    if config["max_surgery_runs"] > 1:
+        # only scale the length if model surgery is used and the algorithm
+        # has a chance to optimize it
+        model_length *= config["len_mul"]
     model_length = max(3., model_length)
     if random:
         #scale = (3 + model_length/30)
