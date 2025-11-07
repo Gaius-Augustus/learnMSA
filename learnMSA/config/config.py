@@ -12,7 +12,8 @@ from .visualization import VisualizationConfig
 
 class Configuration(BaseModel):
     """A configuration for learnMSA controlling all aspects of training and
-    evaluation.
+    evaluation. See the nested configuration groups for details on each set of
+    parameters.
     """
 
     model_config = ConfigDict(extra="allow")

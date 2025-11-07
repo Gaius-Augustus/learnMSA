@@ -4,8 +4,8 @@ import numpy as np
 import tensorflow as tf
 
 from learnMSA import Configuration
-from learnMSA.msa_hmm import (Align, Emitter, Initializers, Training,
-                              Transitioner)
+from learnMSA.msa_hmm import (Emitter, Initializers, Training,
+                              Transitioner, align)
 from learnMSA.msa_hmm.AlignmentModel import (AlignmentModel,
                                              find_faulty_sequences,
                                              non_homogeneous_mask_func)
@@ -70,19 +70,16 @@ def test_alignment_egf() -> None:
     ref_filename = os.path.dirname(__file__)+"/../tests/data/egf.ref"
     with SequenceDataset(train_filename) as data:
         with AlignedDataset(ref_filename) as ref_msa:
-            ref_subset = np.array([data.seq_ids.index(sid) for sid in ref_msa.seq_ids])
+            seq_ids = ref_msa.seq_ids
         config = Configuration()
         config.training.num_model = 1
         config.training.no_sequence_weights = True
-        config = make_legacy_config(config, LearnMSAContext(data, config))
-        config["max_surgery_runs"] = 2  # do minimal surgery
-        config["epochs"] = [5, 1, 5]
-        am = Align.fit_and_align(
-            data,
-            config=config,
-            subset=ref_subset,
-            verbose=False
-        )
+        config.training.epochs = [5, 1, 5]
+        config.training.max_iterations = 2
+        config.input_output.subset_ids = seq_ids
+        config.input_output.verbose = False
+        config.training.length_init = [20]
+        am = align(data, config)
         # some friendly thresholds to check if the alignment makes sense
         assert np.amin(am.compute_loglik()) > -70
         assert am.msa_hmm_layer.cell.length[0] > 25

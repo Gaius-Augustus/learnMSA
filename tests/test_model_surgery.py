@@ -7,10 +7,11 @@ import tensorflow as tf
 from learnMSA import Configuration
 from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
 from learnMSA.msa_hmm.legacy import make_legacy_config
-from learnMSA.msa_hmm import (Align, Emitter, Initializers, Training,
-                              Transitioner)
+from learnMSA.msa_hmm import (Emitter, Initializers, Training,
+                              Transitioner, align)
 from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
+import learnMSA.msa_hmm.model_surgery as surgery
 
 
 def assert_vec(x : np.ndarray, y: np.ndarray) -> None:
@@ -131,7 +132,7 @@ def test_discard_or_expand_positions() -> None:
               [0, 0, 0, 0],
               [0, 0, 1, 0]]]
         )
-        pos_expand, expansion_lens, pos_discard = Align.get_discard_or_expand_positions(am)
+        pos_expand, expansion_lens, pos_discard = surgery.get_discard_or_expand_positions(am)
         pos_expand = pos_expand[0]
         expansion_lens = expansion_lens[0]
         pos_discard = pos_discard[0]
@@ -145,15 +146,15 @@ def test_extend_mods() -> None:
     pos_expand = np.array([2, 3, 5])
     expansion_lens = np.array([9, 1, 3])
     pos_discard = np.array([4])
-    e, l, d = Align.extend_mods(pos_expand, expansion_lens, pos_discard, L=5)
+    e, l, d = surgery.extend_mods(pos_expand, expansion_lens, pos_discard, L=5)
     assert_vec(d, [1, 2, 3])
     assert_vec(e, [1, 2, 4])
     assert_vec(l, [10, 2, 3])
-    e, l, d = Align.extend_mods(pos_expand, expansion_lens, pos_discard, L=6, k=1)
+    e, l, d = surgery.extend_mods(pos_expand, expansion_lens, pos_discard, L=6, k=1)
     assert_vec(d, [2, 3, 4])
     assert_vec(e, [2, 3, 5])
     assert_vec(l, [10, 2, 3])
-    e, l, d = Align.extend_mods(pos_expand, expansion_lens, pos_discard, L=6)
+    e, l, d = surgery.extend_mods(pos_expand, expansion_lens, pos_discard, L=6)
     assert_vec(d, [1, 2, 3, 4])
     assert_vec(e, [1, 2, 3, 4])
     assert_vec(l, [10, 2, 1, 3])
@@ -188,7 +189,7 @@ def test_update_kernels() -> None:
             "end_to_right_flank": Initializers.ConstantInitializer(77),
             "end_to_terminal": Initializers.ConstantInitializer(77)
         }
-        transitions_new, emissions_new, _ = Align.update_kernels(
+        transitions_new, emissions_new, _ = surgery.update_kernels(
             am, 0,
             pos_expand, expansion_lens, pos_discard,
             emission_init2, transition_init2, Initializers.ConstantInitializer(0.0)
@@ -208,7 +209,7 @@ def test_update_kernels() -> None:
 
 def test_apply_mods() -> None:
     """Test applying modifications to arrays."""
-    x1 = Align.apply_mods(
+    x1 = surgery.apply_mods(
         x=list(range(10)),
         pos_expand=[0, 4, 7, 10],
         expansion_lens=[2, 1, 2, 1],
@@ -216,7 +217,7 @@ def test_apply_mods() -> None:
         insert_value=55
     )
     assert_vec(x1, [55, 55, 0, 1, 2, 3, 55, 5, 55, 55, 55])
-    x2 = Align.apply_mods(
+    x2 = surgery.apply_mods(
         x=[[1, 2, 3], [1, 2, 3]],
         pos_expand=[1],
         expansion_lens=[1],
@@ -234,8 +235,8 @@ def test_apply_mods() -> None:
     lens = np.array([2, 1, 1, 1, 1, 1, 1, 5, 1, 1, 5, 10, 1, 1, 3, 1, 1, 1,
                      9, 1, 1, 8, 2, 1, 4, 1, 1, 2, 2, 1, 2, 1, 3])
     dis = np.array([13, 84, 129, 130])
-    new_pos_expand, new_expansion_lens, new_pos_discard = Align.extend_mods(exp, lens, dis, L)
-    x3 = Align.apply_mods(
+    new_pos_expand, new_expansion_lens, new_pos_discard = surgery.extend_mods(exp, lens, dis, L)
+    x3 = surgery.apply_mods(
         list(range(L - 1)),
         new_pos_expand, new_expansion_lens, new_pos_discard,
         insert_value=-1
@@ -247,11 +248,11 @@ def test_apply_mods() -> None:
     exp = np.array([0, 1])
     lens = np.array([1, 1])
     dis = np.array([1])
-    new_pos_expand, new_expansion_lens, new_pos_discard = Align.extend_mods(exp, lens, dis, L)
+    new_pos_expand, new_expansion_lens, new_pos_discard = surgery.extend_mods(exp, lens, dis, L)
     assert_vec(new_pos_expand, [0])
     assert_vec(new_expansion_lens, [3])
     assert_vec(new_pos_discard, [0, 1])
-    x3 = Align.apply_mods(
+    x3 = surgery.apply_mods(
         list(range(L - 1)),
         new_pos_expand, new_expansion_lens, new_pos_discard,
         insert_value=-1
@@ -262,8 +263,8 @@ def test_apply_mods() -> None:
     exp = np.array([0, 1])
     lens = np.array([9, 1])
     dis = np.array([])
-    new_pos_expand, new_expansion_lens, new_pos_discard = Align.extend_mods(exp, lens, dis, L)
-    x3 = Align.apply_mods(
+    new_pos_expand, new_expansion_lens, new_pos_discard = surgery.extend_mods(exp, lens, dis, L)
+    x3 = surgery.apply_mods(
         list(range(L - 1)),
         new_pos_expand, new_expansion_lens, new_pos_discard,
         insert_value=-1
@@ -274,8 +275,8 @@ def test_apply_mods() -> None:
     exp = np.array([0, L - 1])
     lens = np.array([5, 5])
     dis = np.arange(L)
-    new_pos_expand, new_expansion_lens, new_pos_discard = Align.extend_mods(exp, lens, dis, L)
-    x4 = Align.apply_mods(
+    new_pos_expand, new_expansion_lens, new_pos_discard = surgery.extend_mods(exp, lens, dis, L)
+    x4 = surgery.apply_mods(
         list(range(L - 1)),
         new_pos_expand, new_expansion_lens, new_pos_discard,
         insert_value=-1
@@ -285,7 +286,7 @@ def test_apply_mods() -> None:
 
 def test_checked_concat() -> None:
     """Test concatenation with checking for edge cases."""
-    e, l, d = Align.extend_mods(
+    e, l, d = surgery.extend_mods(
         pos_expand=np.array([]),
         expansion_lens=np.array([]),
         pos_discard=np.array([0, 2, 4, 5, 6, 9, 10]),
@@ -294,7 +295,7 @@ def test_checked_concat() -> None:
     assert_vec(e, [1, 3])
     assert_vec(l, [1, 1])
     assert_vec(d, [0, 1, 2, 3, 4, 5, 6, 8, 9])
-    e, l, d = Align.extend_mods(
+    e, l, d = surgery.extend_mods(
         pos_expand=np.array([0, 4, 9, 10, 11]),
         expansion_lens=np.array([2, 1, 2, 3, 1]),
         pos_discard=np.array([]),
@@ -303,7 +304,7 @@ def test_checked_concat() -> None:
     assert_vec(e, [0, 3, 8, 9, 10])
     assert_vec(l, [2, 2, 3, 4, 1])
     assert_vec(d, [3, 8, 9])
-    e, l, d = Align.extend_mods(
+    e, l, d = surgery.extend_mods(
         pos_expand=np.array([]),
         expansion_lens=np.array([]),
         pos_discard=np.array([1]),
@@ -312,7 +313,7 @@ def test_checked_concat() -> None:
     assert_vec(e, [1])
     assert_vec(l, [1])
     assert_vec(d, [1, 2])
-    e, l, d = Align.extend_mods(
+    e, l, d = surgery.extend_mods(
         pos_expand=np.array([5]),
         expansion_lens=np.array([3]),
         pos_discard=np.array(list(range(8))),
@@ -321,7 +322,7 @@ def test_checked_concat() -> None:
     assert_vec(e, [4])
     assert_vec(l, [2])
     assert_vec(d, list(range(7)))
-    e, l, d = Align.extend_mods(
+    e, l, d = surgery.extend_mods(
         pos_expand=np.array([5]),
         expansion_lens=np.array([3]),
         pos_discard=np.array(list(range(8))),
@@ -331,7 +332,7 @@ def test_checked_concat() -> None:
     assert_vec(l, [3])
     assert_vec(d, list(range(8)))
 
-    e, l, d = Align.extend_mods(
+    e, l, d = surgery.extend_mods(
         pos_expand=np.array([5]),
         expansion_lens=np.array([3]),
         pos_discard=np.array([0, 1, 2, 4, 5, 6, 7]),
@@ -340,7 +341,7 @@ def test_checked_concat() -> None:
     assert_vec(e, [4])
     assert_vec(l, [3])
     assert_vec(d, list(range(7)))
-    e, l, d = Align.extend_mods(
+    e, l, d = surgery.extend_mods(
         pos_expand=np.array([5]),
         expansion_lens=np.array([3]),
         pos_discard=np.array([0, 1, 2, 4, 5, 6, 7]),
@@ -349,7 +350,7 @@ def test_checked_concat() -> None:
     assert_vec(e, [0, 5])
     assert_vec(l, [1, 3])
     assert_vec(d, list(range(8)))
-    e, l, d = Align.extend_mods(
+    e, l, d = surgery.extend_mods(
         pos_expand=np.array([0, 10]),
         expansion_lens=np.array([5, 5]),
         pos_discard=np.arange(10),

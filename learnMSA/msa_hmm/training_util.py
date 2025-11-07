@@ -1,6 +1,77 @@
+from logging import config
 from typing import Sequence
 
+import numpy as np
+
 from learnMSA.run.util import get_num_gpus
+
+
+def get_initial_model_lengths(
+    seq_lens: np.ndarray,
+    quantile: float,
+    len_mul: float,
+    num_models: int,
+    random: bool = True,
+) -> np.ndarray:
+    """
+    Computes initial model lengths based on sequence lengths.
+
+    Args:
+        seq_lens: np.ndarray
+            1D-array of sequence lengths.
+        quantile: float
+            Quantile of sequence lengths to use for initial model length.
+        random: bool
+            Whether to add randomness to the model lengths.
+
+    Returns:
+        A list of initial model lengths for each model.
+    """
+    model_length = np.quantile(seq_lens, q=quantile)
+    model_length *= len_mul
+    model_length = max(3., model_length)
+    if random:
+        scale = (1 + model_length/50.)
+        lens = np.round(np.random.normal(
+            loc=model_length, scale=scale, size=num_models
+        )).astype(np.int32)
+        lens = np.maximum(lens, 3)
+        return lens
+    else:
+        return np.array([int(model_length)] * num_models, dtype=np.int32)
+
+
+def get_full_length_estimate(
+    seq_lens: np.ndarray,
+    quantile: float,
+    min_seqs: int,
+) -> np.ndarray:
+    """
+    Returns a subset of the indices [0, ..., data.num_seq-1] corresponding to
+    sequences that are likely to be full-length based on a simple heuristic.
+    """
+    num_seq = len(seq_lens)
+    #ignore short sequences for all surgery iterations except the last
+    k = int(min(num_seq*quantile, max(0, num_seq-min_seqs)))
+    #a rough estimate of a set of only full-length sequences
+    sorted_indices = np.array([
+        i for l,i in sorted(zip(seq_lens, range(num_seq)))
+    ])
+    full_length_estimate = sorted_indices[k:]
+    return full_length_estimate
+
+
+def get_low_seq_num_batch_size(num_seq: int) -> int:
+    """
+    Computes a batch size for datasets with a low number of sequences that is
+    not the entire dataset but still large enough for efficient training.
+    """
+    # Compute the number of computing devices, which is the number of GPUs
+    # if there is at least one GPU, else 1 (for CPU-only case)
+    num_devices = get_num_gpus() + int(get_num_gpus() == 0)
+    batch_size = int(np.ceil(num_seq*0.5))
+    batch_size -= batch_size % num_devices
+    return max(batch_size, num_devices)
 
 
 def get_adaptive_batch_size(

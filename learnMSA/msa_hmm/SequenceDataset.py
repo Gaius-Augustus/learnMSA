@@ -12,6 +12,19 @@ from Bio.File import _IndexedSeqFileDict
 class SequenceDataset:
     """
     Manages a set of protein sequences.
+
+    Attributes:
+        alphabet (str): The amino acid alphabet used for encoding sequences.
+        filepath (Path): The path to the sequence file.
+        fmt (str): The format of the sequence file.
+        num_seq (int): The number of sequences in the dataset.
+        seq_lens (np.ndarray): An array containing the lengths of each sequence.
+        max_len (int): The length of the longest sequence in the dataset.
+        seq_ids (list[str]): The list of sequence IDs.
+        indexed (bool): Whether the dataset is indexed.
+        parsing_ok (bool): Whether the dataset was parsed successfully.
+        record_dict (dict|_IndexedSeqFileDict): A dictionary(-like) object that
+            maps sequence IDs to SeqRecord objects.
     """
     alphabet: str = "ARNDCQEGHILKMFPSTWYVXUO-"
 

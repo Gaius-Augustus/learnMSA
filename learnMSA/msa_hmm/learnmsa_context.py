@@ -7,7 +7,6 @@ from typing import Any, Callable
 import numpy as np
 import tensorflow as tf
 
-import learnMSA.msa_hmm.Align as Align
 import learnMSA.msa_hmm.Emitter as emit
 import learnMSA.msa_hmm.Initializers as initializers
 import learnMSA.msa_hmm.training_util as training_util
@@ -15,6 +14,7 @@ import learnMSA.msa_hmm.Transitioner as trans
 import learnMSA.protein_language_models.Common as Common
 import learnMSA.protein_language_models.EmbeddingBatchGenerator as EmbeddingBatchGenerator
 from learnMSA import Configuration
+from learnMSA.msa_hmm import clustering
 from learnMSA.protein_language_models.MvnEmitter import (
     AminoAcidPlusMvnEmissionInitializer, MvnEmitter)
 from learnMSA.run.util import get_gpu_memory, validate_filepath
@@ -57,7 +57,18 @@ class LearnMSAContext:
 
         # If still not set, use default length callback
         if self.initial_model_length_cb is None:
-            self.initial_model_length_cb = Align.get_initial_model_lengths
+            def _default_length_callback(data, _config):
+                if self.config.training.max_iterations > 1:
+                    len_mul = self.config.training.len_mul
+                else:
+                    len_mul = 1.0
+                return training_util.get_initial_model_lengths(
+                    data.seq_lens,
+                    self.config.training.length_init_quantile,
+                    len_mul,
+                    self.config.training.num_model,
+                )
+            self.initial_model_length_cb = _default_length_callback
 
         self._setup_batch_size_cb()
 
@@ -72,7 +83,9 @@ class LearnMSAContext:
         )
         self.encoder_weight_extractor = None
         self.encoder_initializer[0] = ConstantInitializer(
-            inverse_softplus(np.array(self.config.advanced.initial_distance) + 1e-8).numpy()
+            inverse_softplus(
+                np.array(self.config.advanced.initial_distance) + 1e-8
+            ).numpy()
         )
 
         # Set custom transitioner parameters if specified
@@ -231,7 +244,7 @@ class LearnMSAContext:
                 max(3, length) for length in length_init
             ]
             # Create callback to return the specified lengths
-            specified_lengths = np.array(length_init)
+            specified_lengths = np.array(length_init, dtype=np.int32)
             if self.config.input_output.verbose:
                 print(
                     "Using user-specified initial model lengths: "\
@@ -369,7 +382,7 @@ class LearnMSAContext:
 
 
     def _get_clustering(self) -> tuple[np.ndarray | None, Any]:
-        from ..msa_hmm import Align, SequenceDataset
+        from ..msa_hmm import SequenceDataset
         if not self.config.training.no_sequence_weights:
             os.makedirs(self.config.input_output.work_dir, exist_ok=True)
             try:
@@ -395,7 +408,7 @@ class LearnMSAContext:
                         self.config.input_output.input_format
                     ) as data:
                         data.write(cluster_file, "fasta")
-                sequence_weights, clusters = Align.compute_sequence_weights(
+                sequence_weights, clusters = clustering.compute_sequence_weights(
                     cluster_file,
                     self.config.input_output.work_dir,
                     self.config.training.cluster_seq_id,
