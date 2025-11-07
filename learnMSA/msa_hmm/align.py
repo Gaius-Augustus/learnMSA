@@ -18,8 +18,12 @@ from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 from learnMSA.protein_language_models.MvnEmitter import \
     AminoAcidPlusMvnEmissionInitializer
 
+# Temporary solution: convert the new config to the legacy config format
+# such that the code runs
+from learnMSA.msa_hmm.legacy import make_legacy_config
 
-np.set_printoptions(legacy='1.25')
+
+np.set_printoptions(legacy='1.21')
 
 
 def align(data : SequenceDataset, config : Configuration) -> AlignmentModel:
@@ -54,32 +58,13 @@ def align(data : SequenceDataset, config : Configuration) -> AlignmentModel:
         )
     else:
         try:
-            # Temporary solution: convert the new config to the legacy config format
-            # such that the code runs
-            from learnMSA.msa_hmm.legacy import make_legacy_config
 
             t_a = time.time()
             legacy_config = make_legacy_config(config, context) # type: ignore
             if config.visualization.logo_gif:
-                am = _fit_and_align_with_logo_gif(
-                    data,
-                    legacy_config,
-                    context.initial_model_length_cb(data, legacy_config), # type: ignore
-                    config.visualization.logo_gif.parent if config.visualization.logo_gif else "", # type: ignore
-                )
+                am = _fit_and_align_with_logo_gif(context)
             else:
-                am = _fit_and_align(
-                    data,
-                    legacy_config,
-                    context.initial_model_length_cb(data, legacy_config), # type: ignore
-                    model_generator=context.model_gen,
-                    batch_generator=context.batch_gen,
-                    subset=context.subset,
-                    sequence_weights=context.sequence_weights,
-                    clusters=context.clusters,
-                    verbose=config.input_output.verbose,
-                    load_model=config.input_output.load_model
-                )
+                am = _fit_and_align(context)
             if config.input_output.verbose:
                 print("Time for alignment:", "%.4f" % (time.time()-t_a))
         except tf.errors.ResourceExhaustedError as e:
@@ -153,73 +138,72 @@ Args:
 Returns:
     An AlignmentModel object.
 """
-def _fit_and_align(
-    data : SequenceDataset,
-    config,
-    model_lengths,
-    model_generator=None,
-    batch_generator=None,
-    subset=None,
-    sequence_weights=None,
-    clusters=None,
-    verbose=True,
-    A2M_output=True,
-    load_model=""
-) -> AlignmentModel:
-    model_generator, batch_generator = _make_defaults_if_none(
-        model_generator, batch_generator
-    )
-    if verbose:
+def _fit_and_align(context : LearnMSAContext) -> AlignmentModel:
+    data, config = context.data, context.config
+    if config.input_output.verbose:
         _dataset_messages(data)
-    if subset is None:
-        subset = np.arange(data.num_seq)
+
+    # Roughly estimate the full length of a protein
     full_length_estimate = training_util.get_full_length_estimate(
-        data.seq_lens, config["surgery_quantile"], config["min_surgery_seqs"]
+        data.seq_lens,
+        config.training.surgery_quantile,
+        config.training.min_surgery_seqs
     )
 
     # Make dummy initializers for surgery
-    if "scoring_model_config" in config:
+    if config.language_model.use_language_model:
         emission_dummy = [
-            AminoAcidPlusMvnEmissionInitializer(config["scoring_model_config"])
+            AminoAcidPlusMvnEmissionInitializer(context.scoring_model_config)
         ]
     else:
         emission_dummy = [initializers.make_default_emission_init()]
     transition_dummy = initializers.make_default_transition_init()
     flank_init_dummy = initializers.make_default_flank_init()
 
-    if load_model:
+    legacy_config = make_legacy_config(config, context) # type: ignore
+
+    if config.input_output.load_model:
         # Load the alignment model from file and use it as initialization
         am = AlignmentModel.load_models_from_file(
-            load_model, data, custom_batch_gen=batch_generator
+            config.input_output.load_model,
+            data,
+            custom_batch_gen=context.batch_gen,
         )
-        if verbose:
-            print("Loaded model from file", load_model)
+        if config.input_output.verbose:
+            print("Loaded model from file", config.input_output.load_model)
+
         # Prevent model surgery from adding or discarding any states,
         # we'll use it to get initial transition and emission parameters
-        original_surgery_del = config["surgery_del"]
-        original_surgery_ins = config["surgery_ins"]
-        config["surgery_del"] = 0.0
-        config["surgery_ins"] = 1.0
-        config, model_lengths, _ = do_model_surgery(
+        original_surgery_del = config.training.surgery_del
+        original_surgery_ins = config.training.surgery_ins
+        # TODO: don't modify the config!!
+        legacy_config["surgery_del"] = 0.0
+        legacy_config["surgery_ins"] = 1.0
+        legacy_config, model_lengths, _ = do_model_surgery(
             0,
             am,
-            config,
+            legacy_config,
             emission_dummy,
             transition_dummy,
             flank_init_dummy,
-            verbose
+            config.input_output.verbose
         )
 
-    last_iteration=config["max_surgery_runs"]==1
+    # Check the maximum number of iterations that the user allows
+    # if it's 1, we only do a single training iteration without surgery
+    last_iteration=config.training.max_iterations==1
+
+    model_lengths = context.initial_model_length_cb(data, legacy_config) # type: ignore
+
     # 2 staged main loop: Fits model parameters with GD and optimized model
     # architecture with surgery
-    for i in range(config["max_surgery_runs"]):
-        if callable(config["batch_size"]):
-            batch_size = config["batch_size"](
-                model_lengths, min(data.max_len, config["crop_long_seqs"])
+    for i in range(config.training.max_iterations):
+        if callable(context.batch_size):
+            batch_size = context.batch_size(
+                model_lengths, min(data.max_len, config.training.crop) # type: ignore
             )
         else:
-            batch_size = config["batch_size"]
+            batch_size = context.batch_size
         #set the batch size to something smaller than the dataset size even though
         #for low sequence numbers it would be feasible to train on all data at once
         batch_size = min(
@@ -227,98 +211,98 @@ def _fit_and_align(
         )
         if last_iteration:
             train_indices = np.arange(data.num_seq)
-            decode_indices = subset
+            decode_indices = context.subset
         else:
             train_indices = full_length_estimate
             decode_indices = full_length_estimate
-        epochs_this_iteration = config["epochs"][0 if i==0 else 1 if not last_iteration else 2]
+        epochs_this_iteration = config.training.epochs[0 if i==0 else 1 if not last_iteration else 2]
         model, history = train.fit_model(
-            model_generator,
-            batch_generator,
+            context.model_gen,
+            context.batch_gen,
             data,
             train_indices,
             model_lengths,
-            config,
+            legacy_config,
             batch_size=batch_size,
             epochs=epochs_this_iteration,
-            sequence_weights=sequence_weights,
-            clusters=clusters,
-            verbose=verbose
+            sequence_weights=context.sequence_weights,
+            clusters=context.clusters,
+            verbose=config.input_output.verbose
         )
-        if verbose:
+        if config.input_output.verbose:
             print("Creating alignment model...")
         am = AlignmentModel(
             data,
-            batch_generator,
+            context.batch_gen,
             decode_indices,
             batch_size=batch_size,
             model=model
         )
-        if verbose:
+        if config.input_output.verbose:
             print("Successfully created alignment model.")
         if last_iteration:
             break
-        config, model_lengths, surgery_converged = do_model_surgery(
+        legacy_config, model_lengths, surgery_converged = do_model_surgery(
             i,
             am,
-            config,
+            legacy_config,
             emission_dummy,
             transition_dummy,
             flank_init_dummy,
-            verbose
+            config.input_output.verbose
         )
-        if config["encoder_weight_extractor"] is not None:
-            if config["experimental_evolve_upper_half"]:
+        # quick hack, todo
+        context.emitter = legacy_config["emitter"]
+        context.transitioner = legacy_config["transitioner"]
+
+        if context.encoder_weight_extractor is not None:
+            if config.input_output.verbose:
                 print(
-                    "Warning: The option experimental_evolve_upper_half is "\
-                    "currently not compatible with encoder_weight_extractor. "\
-                    "The weight extractor will be ignore."
+                    "Used the encoder_weight_extractor callback to pass "\
+                    "the encoder parameters to the next iteration."
                 )
-            else:
-                if verbose:
-                    print(
-                        "Used the encoder_weight_extractor callback to pass "\
-                        "the encoder parameters to the next iteration."
-                    )
-                config["encoder_initializer"] = config["encoder_weight_extractor"](am.encoder_model)
-        elif verbose:
+            context.encoder_initializer = context.encoder_weight_extractor(am.encoder_model)
+        elif config.input_output.verbose:
             print("Re-initialized the encoder parameters.")
-        if verbose and surgery_converged:
+        if config.input_output.verbose and surgery_converged:
             print("Surgery converged.")
-        last_iteration = surgery_converged or (i == config["max_surgery_runs"]-2)
+        last_iteration = surgery_converged or (i == config.training.max_iterations-2)
     return am
 
 
-def _fit_and_align_with_logo_gif(
-    data : SequenceDataset, config, model_lengths, logo_dir
-) -> AlignmentModel:
-    import matplotlib.pyplot as plt
-
+def _fit_and_align_with_logo_gif(context : LearnMSAContext) -> AlignmentModel:
     from learnMSA.msa_hmm.Visualize import LogoPlotterCallback, make_logo_gif
-
-    model_generator, batch_generator = _make_defaults_if_none(None, None)
+    data, config = context.data, context.config
     indices = np.arange(data.num_seq)
-    if callable(config["batch_size"]):
-        batch_size = config["batch_size"](model_lengths, min(data.max_len, config["crop_long_seqs"]))
+    legacy_config = make_legacy_config(config, context) # type: ignore
+    logo_dir = config.visualization.logo_gif.parent if config.visualization.logo_gif else "", # type: ignore
+    model_lengths = context.initial_model_length_cb(data, legacy_config), # type: ignore
+    if callable(context.batch_size):
+        batch_size = context.batch_size(
+            model_lengths, # type: ignore
+            min(data.max_len, config.training.crop) # type: ignore
+        )
     else:
-        batch_size = config["batch_size"]
+        batch_size = context.batch_size
 
-    logo_plotter_callback = LogoPlotterCallback(logo_dir, data, batch_generator, indices, batch_size)
+    logo_plotter_callback = LogoPlotterCallback(logo_dir, data, context.batch_gen, indices, batch_size)
     print("Running in logo gif mode. A sequence logo will be generated for each training step.")
     print("This mode is much slower and less accurate (no model surgery and just 1 model) than the default mode")
     print("and should only be used for vizualization and debugging.")
-    model, history = train.fit_model(model_generator,
-                                      batch_generator,
-                                      data,
-                                      indices,
-                                      model_lengths,
-                                      config,
-                                      batch_size=batch_size,
-                                      epochs=config["epochs"][-1],
-                                      verbose=True,
-                                      train_callbacks=[logo_plotter_callback])
-    make_logo_gif(logo_plotter_callback.frame_dir, logo_dir / "training.gif")
-    am = AlignmentModel(data, batch_generator, indices, batch_size=batch_size, model=model)
+    model, history = train.fit_model(
+        context.model_gen,
+        context.batch_gen,
+        data,
+        indices,
+        model_lengths,
+        config,
+        batch_size=batch_size,
+        epochs=config.training.epochs[-1],
+        verbose=True,
+        train_callbacks=[logo_plotter_callback]
+    )
+    make_logo_gif(logo_plotter_callback.frame_dir, logo_dir / "training.gif") # type: ignore
+    am = AlignmentModel(data, context.batch_gen, indices, batch_size=batch_size, model=model)
     return am
 
 
@@ -386,14 +370,6 @@ def select_model_consensus(am, verbose=False):
     if verbose:
         print("Consensus scores: ", ["%.4f" % c for c in consensus])
     return consensus
-
-
-def _make_defaults_if_none(model_generator, batch_generator):
-    if model_generator is None:
-        model_generator = train.default_model_generator
-    if batch_generator is None:
-        batch_generator = train.DefaultBatchGenerator()
-    return model_generator, batch_generator
 
 
 def _dataset_messages(data : SequenceDataset, seq_count_heuristic_gap_check=100, seq_count_warning_threshold=100):

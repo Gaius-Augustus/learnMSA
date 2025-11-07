@@ -11,6 +11,7 @@ import learnMSA.msa_hmm.Emitter as emit
 import learnMSA.msa_hmm.Initializers as initializers
 import learnMSA.msa_hmm.training_util as training_util
 import learnMSA.msa_hmm.Transitioner as trans
+import learnMSA.msa_hmm.Training as train
 import learnMSA.protein_language_models.Common as Common
 import learnMSA.protein_language_models.EmbeddingBatchGenerator as EmbeddingBatchGenerator
 from learnMSA import Configuration
@@ -118,7 +119,7 @@ class LearnMSAContext:
                 data.seq_ids.index(sid) for sid in config.input_output.subset_ids
             ])
         else:
-            self.subset = None
+            self.subset = np.arange(data.num_seq)
 
     def _setup_initializers(self) -> PHMMInitializerSet:
         num_model = self.config.training.num_model
@@ -364,7 +365,7 @@ class LearnMSAContext:
         return scoring_model_config
 
 
-    def _get_generators(self) -> tuple[Callable | None, Callable | None]:
+    def _get_generators(self) -> tuple[Callable, Callable]:
         if self.config.language_model.use_language_model:
             # we have to define a special model- and batch generator if using a
             # language model because the emission probabilities are computed
@@ -376,8 +377,8 @@ class LearnMSAContext:
                 scoring_model_config=self.scoring_model_config,
             )
         else:
-            model_gen = None
-            batch_gen = None
+            model_gen = train.default_model_generator
+            batch_gen = train.DefaultBatchGenerator()
         return model_gen, batch_gen
 
 
