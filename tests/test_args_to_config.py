@@ -26,7 +26,7 @@ class TestArgsToConfig:
         assert config.input_output.input_format == "fasta"
         assert config.input_output.save_model == ""
         assert config.input_output.load_model == ""
-        assert config.input_output.silent is False
+        assert config.input_output.verbose is True
         assert config.input_output.cuda_visible_devices == "default"
         assert config.input_output.work_dir == "tmp"
         assert config.input_output.convert is False
@@ -71,6 +71,7 @@ class TestArgsToConfig:
             "--no_sequence_weights",
             "--skip_training",
             "--grow_mem",
+            "--silent",
         ])
 
         config = args_to_config(args)
@@ -97,6 +98,7 @@ class TestArgsToConfig:
         assert config.training.no_sequence_weights is True
         assert config.training.skip_training is True
         assert config.advanced.grow_mem is True
+        assert config.input_output.verbose is False
 
     def test_args_to_config_with_epochs_single_value(self):
         """Test that single epoch value is expanded to 3."""

@@ -35,7 +35,7 @@ def args_to_config(args: Namespace) -> Configuration:
         input_format=args.input_format,
         save_model=args.save_model,
         load_model=args.load_model,
-        silent=args.silent,
+        verbose=not args.silent,
         cuda_visible_devices=args.cuda_visible_devices,
         work_dir=args.work_dir,
         convert=args.convert,

@@ -17,15 +17,15 @@ def get_version() -> str:
 
 def setup_devices(
         cuda_visible_devices : str,
-        silent : bool,
+        verbose : bool,
         grow_mem : bool = False
 ) -> None:
     """
     Args:
         cuda_visible_devices: str
             The value to set for the environment variable.
-        silent: bool
-            Whether to suppress output.
+        verbose: bool
+            Whether to enable std output messages.
         grow_mem: bool
             Whether to enable memory growth for GPUs.
 
@@ -48,7 +48,7 @@ def setup_devices(
 
     from tensorflow.python.client import device_lib
 
-    if not silent:
+    if verbose:
         GPUS = [
             x.physical_device_desc
             for x in device_lib.list_local_devices()

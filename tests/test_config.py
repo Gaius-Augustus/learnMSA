@@ -832,7 +832,7 @@ class TestInputOutputConfig:
         assert config.input_format == "fasta"
         assert config.save_model == ""
         assert config.load_model == ""
-        assert config.silent is False
+        assert config.verbose is True
         assert config.cuda_visible_devices == "default"
         assert config.work_dir == "tmp"
         assert config.convert is False
@@ -846,7 +846,7 @@ class TestInputOutputConfig:
         )
         assert config1.input_file == Path("input.fasta")
         assert config1.output_file == Path("output.a2m")
-        
+
         # With string paths (converted to Path)
         config2 = InputOutputConfig(
             input_file=Path("sequences.fasta"),
@@ -908,7 +908,7 @@ class TestInputOutputConfig:
             input_format="a2m",
             save_model="model.pkl",
             load_model="pretrained.pkl",
-            silent=True,
+            verbose=False,
             cuda_visible_devices="0,1",
             work_dir="/tmp/learnmsa",
             convert=True
@@ -919,7 +919,7 @@ class TestInputOutputConfig:
         assert config.input_format == "a2m"
         assert config.save_model == "model.pkl"
         assert config.load_model == "pretrained.pkl"
-        assert config.silent is True
+        assert config.verbose is False
         assert config.cuda_visible_devices == "0,1"
         assert config.work_dir == "/tmp/learnmsa"
         assert config.convert is True

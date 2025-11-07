@@ -33,7 +33,7 @@ def align(data : SequenceDataset, config : Configuration) -> AlignmentModel:
     """ Aligns the sequences in data according to the specified config.
     Args:
         data: Dataset of sequences.
-        config: Configuration that can be used to control training and decoding (see msa_hmm.config.make_default).
+        config: Configuration that can be used to control training and decoding
     Returns:
         An AlignmentModel object.
     """
@@ -57,7 +57,7 @@ def align(data : SequenceDataset, config : Configuration) -> AlignmentModel:
         align_insertions=not config.training.unaligned_insertions,
         sequence_weights = context.sequence_weights,
         clusters = context.clusters,
-        verbose = not config.input_output.silent,
+        verbose = config.input_output.verbose,
         logo_gif_mode = bool(config.visualization.logo_gif),
         logo_dir = config.visualization.logo_gif.parent if config.visualization.logo_gif else "", # type: ignore
         initial_model_length_callback = context.initial_model_length_cb,

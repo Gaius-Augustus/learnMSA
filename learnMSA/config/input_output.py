@@ -34,8 +34,8 @@ class InputOutputConfig(BaseModel):
     load_model: str = ""
     """If set, learnMSA will load the model parameters from the specified file."""
 
-    silent: bool = False
-    """Suppresses all standard output messages."""
+    verbose: bool = True
+    """If False, all output messages will be disabled."""
 
     cuda_visible_devices: str = "default"
     """GPU device(s) visible to learnMSA. Use -1 for CPU."""

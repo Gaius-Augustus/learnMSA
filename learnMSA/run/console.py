@@ -20,7 +20,7 @@ def run_main():
     config = args_to_config(args)
 
     # Print brief description of the tool
-    if not config.input_output.silent and parser.description:
+    if config.input_output.verbose and parser.description:
         print(parser.description.split("\n")[0])
 
     # When converting files, do not run the full program, but just convert
@@ -31,7 +31,7 @@ def run_main():
     # Set up devices (CPU/GPU)
     util.setup_devices(
         config.input_output.cuda_visible_devices,
-        config.input_output.silent,
+        config.input_output.verbose,
         config.advanced.grow_mem,
     )
 
@@ -99,7 +99,7 @@ def convert_file(config : Configuration) -> None:
             config.input_output.format,
             standardize_sequences=config.input_output.format == "fasta",
         )
-    if not config.input_output.silent:
+    if config.input_output.verbose:
         print(
             f"Converted {config.input_output.input_file} to "\
             f"{config.input_output.output_file} in format "\
