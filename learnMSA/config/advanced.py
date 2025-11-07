@@ -40,6 +40,11 @@ class AdvancedConfig(BaseModel):
     grow_mem: bool = False
     """Enable memory growth for GPUs."""
 
+    insertion_aligner: str = "famsa"
+    """Insertion aligner to use."""
+
+    aligner_threads: int = 0
+    """Number of threads to use for the aligner."""
 
     @field_validator(
         "alpha_flank",

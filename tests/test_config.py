@@ -902,8 +902,8 @@ class TestInputOutputConfig:
     def test_input_output_config_comprehensive(self):
         """Test InputOutputConfig with all parameters set."""
         config = InputOutputConfig(
-            input_file=Path("input.fasta"),
-            output_file=Path("output.stockholm"),
+            input_file="input.fasta",
+            output_file="output.stockholm",
             format="stockholm",
             input_format="a2m",
             save_model="model.pkl",
@@ -911,7 +911,8 @@ class TestInputOutputConfig:
             verbose=False,
             cuda_visible_devices="0,1",
             work_dir="/tmp/learnmsa",
-            convert=True
+            convert=True,
+            subset_ids=["seq1", "seq2"]
         )
         assert config.input_file == Path("input.fasta")
         assert config.output_file == Path("output.stockholm")
@@ -923,6 +924,7 @@ class TestInputOutputConfig:
         assert config.cuda_visible_devices == "0,1"
         assert config.work_dir == "/tmp/learnmsa"
         assert config.convert is True
+        assert config.subset_ids == ["seq1", "seq2"]
 
     def test_input_output_in_configuration(self):
         """Test InputOutputConfig as part of Configuration."""

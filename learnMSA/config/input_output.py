@@ -1,16 +1,21 @@
+from __future__ import annotations
 from pathlib import Path
-from typing import Annotated, Union
-from pydantic import BaseModel, field_validator, field_serializer, BeforeValidator
+from typing import Union
+from pydantic import BaseModel, field_validator
+from pydantic.functional_validators import BeforeValidator
+from typing_extensions import Annotated
 
 
-def path_validator(v: Union[Path, str]) -> Path:
+def _validate_path(v: str | Path) -> Path:
     """Convert string to Path."""
     if isinstance(v, str):
         return Path(v)
     return v
 
 
-PathField = Annotated[Union[Path, str], BeforeValidator(path_validator)]
+# Accepts str or Path as input, converts to Path
+# Note: Type checkers will see this as accepting str | Path
+PathField = Annotated[Union[str, Path], BeforeValidator(_validate_path)]
 
 
 class InputOutputConfig(BaseModel):
@@ -45,6 +50,10 @@ class InputOutputConfig(BaseModel):
 
     convert: bool = False
     """If True, only convert the input MSA to the format specified with format."""
+
+    subset_ids: list[str] = []
+    """If set, only align the sequences with these IDs from the input file, but
+    train on all sequences."""
 
     @field_validator("format")
     @classmethod

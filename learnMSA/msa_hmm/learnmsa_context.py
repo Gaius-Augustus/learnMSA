@@ -99,6 +99,14 @@ class LearnMSAContext:
         self.model_gen, self.batch_gen = self._get_generators()
         self.sequence_weights, self.clusters = self._get_clustering()
 
+        # If required, find indices of sequences for a subset
+        if config.input_output.subset_ids:
+            self.subset = np.array([
+                data.seq_ids.index(sid) for sid in config.input_output.subset_ids
+            ])
+        else:
+            self.subset = None
+
     def _setup_initializers(self) -> PHMMInitializerSet:
         num_model = self.config.training.num_model
         if self.config.language_model.use_language_model:
@@ -204,7 +212,7 @@ class LearnMSAContext:
             )
             initial_model_length_cb = lambda data, config: \
                                         [values.matches()]*self.config.training.num_model
-            if not self.config.input_output.silent:
+            if self.config.input_output.verbose:
                 print(
                     f"Initialized from MSA '{self.config.init_msa.from_msa}' with "
                     f"{values.matches()} match states."
@@ -224,7 +232,7 @@ class LearnMSAContext:
             ]
             # Create callback to return the specified lengths
             specified_lengths = np.array(length_init)
-            if not self.config.input_output.silent:
+            if self.config.input_output.verbose:
                 print(
                     "Using user-specified initial model lengths: "\
                     f"{self.config.training.length_init}"

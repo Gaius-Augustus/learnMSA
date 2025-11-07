@@ -37,33 +37,109 @@ def align(data : SequenceDataset, config : Configuration) -> AlignmentModel:
     Returns:
         An AlignmentModel object.
     """
-    # If the input/output config is not set, we use forward the dataset path
+    # If the input/output config is not set, we use the dataset path
     if config.input_output.input_file == Path():
         config.input_output.input_file = data.filepath
 
     # Create a context that automatically sets up data-dependent parameters
     context = LearnMSAContext(data, config)
 
-    # temporary solution: convert the new config to the legacy config format
-    # such that the code runs
-    from learnMSA.msa_hmm.legacy import make_legacy_config
+    if config.input_output.verbose:
+        print(
+            f"Training of {config.training.num_model} models on file "\
+            f"{Path(config.input_output.input_file).name}"
+        )
 
-    return run_learnMSA(
-        data,
-        out_filename = config.input_output.output_file,
-        config = make_legacy_config(config, context),
-        model_generator=context.model_gen,
-        batch_generator=context.batch_gen,
-        align_insertions=not config.training.unaligned_insertions,
-        sequence_weights = context.sequence_weights,
-        clusters = context.clusters,
-        verbose = config.input_output.verbose,
-        logo_gif_mode = bool(config.visualization.logo_gif),
-        logo_dir = config.visualization.logo_gif.parent if config.visualization.logo_gif else "", # type: ignore
-        initial_model_length_callback = context.initial_model_length_cb,
-        output_format = config.input_output.format,
-        load_model = config.input_output.load_model
+
+    if config.input_output.load_model == Path() and \
+            config.training.skip_training:
+        # Load a model without any training
+        am = AlignmentModel.load_models_from_file(
+            config.input_output.load_model,
+            data,
+            custom_batch_gen=context.batch_gen
+        )
+    else:
+        try:
+            # Temporary solution: convert the new config to the legacy config format
+            # such that the code runs
+            from learnMSA.msa_hmm.legacy import make_legacy_config
+
+            t_a = time.time()
+            if config.visualization.logo_gif:
+                am = fit_and_align_with_logo_gif(
+                    data,
+                    make_legacy_config(config, context), # type: ignore
+                    context.initial_model_length_cb,
+                    config.visualization.logo_gif.parent if config.visualization.logo_gif else "", # type: ignore
+                )
+            else:
+                am = fit_and_align(
+                    data,
+                    make_legacy_config(config, context), # type: ignore
+                    model_generator=context.model_gen,
+                    batch_generator=context.batch_gen,
+                    subset=context.subset,
+                    initial_model_length_callback=context.initial_model_length_cb,
+                    sequence_weights=context.sequence_weights,
+                    clusters=context.clusters,
+                    verbose=config.input_output.verbose,
+                    load_model=config.input_output.load_model
+                )
+            if config.input_output.verbose:
+                print("Time for alignment:", "%.4f" % (time.time()-t_a))
+        except tf.errors.ResourceExhaustedError as e:
+            print("Out of memory. A resource was exhausted.")
+            print(
+                "Try reducing the batch size (-b). The current batch size "\
+                "was: "+str(config.training.batch_size)+"."
+            )
+            sys.exit(e.error_code)
+    tf.keras.backend.clear_session() #not sure if necessary
+    am.best_model = select_model(
+        am, config.training.model_criterion, config.input_output.verbose
     )
+
+    if config.input_output.output_file == Path():
+        return am
+
+    Path(config.input_output.output_file).parent.mkdir(parents=True, exist_ok=True)
+    t = time.time()
+
+    if config.training.unaligned_insertions:
+        am.to_file(
+            config.input_output.output_file,
+            am.best_model,
+            format=config.input_output.format
+        )
+    else:
+        aligned_insertions = make_aligned_insertions(
+            am,
+            config.advanced.insertion_aligner,
+            config.advanced.aligner_threads,
+            verbose=config.input_output.verbose
+        )
+        am.to_file(
+            config.input_output.output_file,
+            am.best_model,
+            aligned_insertions=aligned_insertions,
+            format=config.input_output.format
+        )
+
+    if config.input_output.verbose:
+        if am.fixed_viterbi_seqs.size > 0:
+            max_show_seqs = 5
+            print(f"Fixed {am.fixed_viterbi_seqs.size} Viterbi sequences:")
+            print("\n".join([
+                am.data.seq_ids[i]
+                for i in am.fixed_viterbi_seqs[:max_show_seqs]
+            ]))
+            if am.fixed_viterbi_seqs.size > max_show_seqs:
+                print("...")
+        print("time for generating output:", "%.4f" % (time.time()-t))
+        print("Wrote file", config.input_output.output_file)
+
+    return am
 
 
 def get_initial_model_lengths(data : SequenceDataset, config, random=True):
@@ -265,110 +341,6 @@ def fit_and_align_with_logo_gif(
                                       train_callbacks=[logo_plotter_callback])
     make_logo_gif(logo_plotter_callback.frame_dir, logo_dir / "training.gif")
     am = AlignmentModel(data, batch_generator, indices, batch_size=batch_size, model=model)
-    return am
-
-
-def run_learnMSA(
-    data : SequenceDataset,
-    out_filename,
-    config,
-    model_generator=None,
-    batch_generator=None,
-    subset_ids=[],
-    align_insertions=False,
-    insertion_aligner="famsa",
-    aligner_threads=0,
-    sequence_weights=None,
-    clusters=None,
-    verbose=True,
-    initial_model_length_callback=get_initial_model_lengths,
-    select_best_for_comparison=True,
-    logo_gif_mode=False,
-    logo_dir=Path(),
-    output_format="fasta",
-    load_model="",
-    A2M_output=True
-):
-    """ Wraps fit_and_align and adds file parsing, verbosity, model selection, reference file comparison and an outfile file.
-    Args:
-        data: Dataset of sequences.
-        out_filename: Filepath of the output fasta file with the aligned sequences.
-        config: Configuration that can be used to control training and decoding (see msa_hmm.config.make_default).
-        model_generator: Optional callback that generates a user defined model (if None, the default model generator will be used).
-        batch_generator: Optional callback that generates sequence batches defined by user(if None, the default batch generator will be used).
-        subset_ids: A list of sequence ids occuring in the training data. If non-empty, only these sequences will be aligned.
-        align_insertions: If true, a third party aligner is used to align long insertions after the main MSA step.
-        insertion_aligner: Tool to align insertions; "famsa" is installed by default and "clustalo" or "t_coffee" are supported but must be installed manually.
-        aligner_threads: Number of threads to use by the aligner.
-        verbose: If False, all output messages will be disabled.
-        logo_gif_mode: If true, trains with a special mode that generates a sequence logo per train step.
-        output_format: Format of the output file.
-        load_model: Path to a model file that should be loaded instead of training a new model.
-        A2M_output: If True, insertions will be indicated by lower case letters in the output and "." will indicate insertions in other sequences.
-                    Otherwise all upper case letters and only "-" will be used.
-    Returns:
-        An AlignmentModel object.
-    """
-    if verbose:
-        print("Training of", config["num_models"], "models on file", os.path.basename(data.filepath))
-    # optionally load the reference and find the corresponding sequences in the train file
-    subset = np.array([data.seq_ids.index(sid) for sid in subset_ids]) if subset_ids else None
-    if load_model and config["epochs"][0] == 0:
-        am = AlignmentModel.load_models_from_file(
-            load_model, data, custom_batch_gen=batch_generator
-        )
-    else:
-        try:
-            t_a = time.time()
-            if logo_gif_mode:
-                am = fit_and_align_with_logo_gif(
-                    data, config, initial_model_length_callback, logo_dir
-                )
-            else:
-                am = fit_and_align(
-                    data,
-                    config=config,
-                    model_generator=model_generator,
-                    batch_generator=batch_generator,
-                    subset=subset,
-                    initial_model_length_callback=initial_model_length_callback,
-                    sequence_weights=sequence_weights,
-                    clusters=clusters,
-                    verbose=verbose,
-                    A2M_output=A2M_output,
-                    load_model=load_model
-                )
-            if verbose:
-                print("Time for alignment:", "%.4f" % (time.time()-t_a))
-        except tf.errors.ResourceExhaustedError as e:
-            print("Out of memory. A resource was exhausted.")
-            print("Try reducing the batch size (-b). The current batch size was: "+str(config["batch_size"])+".")
-            sys.exit(e.error_code)
-    tf.keras.backend.clear_session() #not sure if necessary
-    am.best_model = select_model(am, config["model_criterion"], verbose)
-
-    if out_filename == Path():
-        return am
-
-    Path(os.path.dirname(out_filename)).mkdir(parents=True, exist_ok=True)
-    t = time.time()
-
-    if align_insertions:
-        aligned_insertions = make_aligned_insertions(am, insertion_aligner, aligner_threads, verbose=verbose)
-        am.to_file(out_filename, am.best_model, aligned_insertions = aligned_insertions, format=output_format)
-    else:
-        am.to_file(out_filename, am.best_model, format=output_format)
-
-    if verbose:
-        if am.fixed_viterbi_seqs.size > 0:
-            max_show_seqs = 5
-            print(f"Fixed {am.fixed_viterbi_seqs.size} Viterbi sequences:")
-            print("\n".join([am.data.seq_ids[i] for i in am.fixed_viterbi_seqs[:max_show_seqs]]))
-            if am.fixed_viterbi_seqs.size > max_show_seqs:
-                print("...")
-        print("time for generating output:", "%.4f" % (time.time()-t))
-        print("Wrote file", out_filename)
-
     return am
 
 
