@@ -189,7 +189,7 @@ def _fit_and_align(context : LearnMSAContext) -> AlignmentModel:
     # if it's 1, we only do a single training iteration without surgery
     last_iteration=config.training.max_iterations==1
 
-    model_lengths = context.initial_model_length_cb(data, legacy_config) # type: ignore
+    model_lengths = context.model_lengths_cb(data)
 
     # 2 staged main loop: Fits model parameters with GD and optimized model
     # architecture with surgery
@@ -275,7 +275,7 @@ def _fit_and_align_with_logo_gif(context : LearnMSAContext) -> AlignmentModel:
     indices = np.arange(data.num_seq)
     legacy_config = make_legacy_config(config, context) # type: ignore
     logo_dir = config.visualization.logo_gif.parent if config.visualization.logo_gif else "", # type: ignore
-    model_lengths = context.initial_model_length_cb(data, legacy_config), # type: ignore
+    model_lengths = context.model_lengths_cb(data)
     if callable(context.batch_size):
         batch_size = context.batch_size(
             model_lengths, # type: ignore

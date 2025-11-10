@@ -26,8 +26,23 @@ from .Initializers import (ConstantInitializer, PHMMInitializerSet,
                            make_initializers_from)
 from .SequenceDataset import AlignedDataset, SequenceDataset
 
+# Type alias for model length callback
+ModelLengthsCallback = Callable[[SequenceDataset], np.ndarray]
+
 
 class LearnMSAContext:
+    """
+    Sets up data-dependent context for learning a profile HMM for alignment.
+
+    Attributes:
+        data: SequenceDataset containing the sequences to align.
+        config: Configuration object with all settings.
+        model_lenghts_cb: Callable that takes a SequenceDataset and Configuration
+            and returns an array of initial model lengths.
+    """
+
+    model_lengths_cb: ModelLengthsCallback
+
     """
     Is created from a Configuration and a SequenceDataset to hold all relevant
     context for training a profile model and decoding an alignment.
@@ -44,21 +59,22 @@ class LearnMSAContext:
         # Needed for legacy reasons, may cleanup in the future
         self.scoring_model_config = self._get_scoring_model_config()
 
+        model_len_cb = None
+
         # Set up initializers
         if self.config.init_msa.from_msa is None:
             self.initializers = self._setup_initializers()
-            self.initial_model_length_cb = None
         else:
-            self.initializers, self.initial_model_length_cb = self._setup_init_msa()
+            self.initializers, model_len_cb = self._setup_init_msa()
         self._setup_visualization()
 
         # When not included in the initializers, set up lengths from the config
-        if self.initial_model_length_cb is None:
-            self.initial_model_length_cb = self._setup_lengths()
+        if model_len_cb is None:
+            model_len_cb = self._setup_lengths()
 
         # If still not set, use default length callback
-        if self.initial_model_length_cb is None:
-            def _default_length_callback(data, _config):
+        if model_len_cb is None:
+            def _default_length_callback(data):
                 if self.config.training.max_iterations > 1:
                     len_mul = self.config.training.len_mul
                 else:
@@ -69,7 +85,9 @@ class LearnMSAContext:
                     len_mul,
                     self.config.training.num_model,
                 )
-            self.initial_model_length_cb = _default_length_callback
+            model_len_cb = _default_length_callback
+
+        self.model_lengths_cb = model_len_cb
 
         self._setup_batch_size_cb()
 
@@ -158,7 +176,7 @@ class LearnMSAContext:
             start=flank_init
         )
 
-    def _setup_init_msa(self) -> tuple[PHMMInitializerSet, Callable | None]:
+    def _setup_init_msa(self) -> tuple[PHMMInitializerSet, ModelLengthsCallback]:
         """Set up model initializers based on configuration."""
         from_msa = self.config.init_msa.from_msa
         if self.config.init_msa.pseudocounts:
@@ -224,18 +242,18 @@ class LearnMSAContext:
                 random_scale=random_scale,
                 emission_kernel_extra=emb_kernel,
             )
-            initial_model_length_cb = lambda data, config: \
-                                        [values.matches()]*self.config.training.num_model
+            model_lengths_cb = lambda data: \
+                np.array([values.matches()]*self.config.training.num_model)
             if self.config.input_output.verbose:
                 print(
                     f"Initialized from MSA '{self.config.init_msa.from_msa}' with "
                     f"{values.matches()} match states."
                 )
 
-            return initializers, initial_model_length_cb
+            return initializers, model_lengths_cb
 
 
-    def _setup_lengths(self) -> Callable | None:
+    def _setup_lengths(self) -> ModelLengthsCallback | None:
         """Set up model lengths based on configuration."""
         # Handle length_init: if provided, update num_model and set custom callback
         length_init = self.config.training.length_init
@@ -251,7 +269,7 @@ class LearnMSAContext:
                     "Using user-specified initial model lengths: "\
                     f"{self.config.training.length_init}"
                 )
-            return lambda data, config: specified_lengths
+            return lambda data: specified_lengths
         return None
 
 
