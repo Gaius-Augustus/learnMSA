@@ -58,9 +58,7 @@ def align(data : SequenceDataset, config : Configuration) -> AlignmentModel:
         )
     else:
         try:
-
             t_a = time.time()
-            legacy_config = make_legacy_config(config, context) # type: ignore
             if config.visualization.logo_gif:
                 am = _fit_and_align_with_logo_gif(context)
             else:
@@ -174,20 +172,18 @@ def _fit_and_align(context : LearnMSAContext) -> AlignmentModel:
 
         # Prevent model surgery from adding or discarding any states,
         # we'll use it to get initial transition and emission parameters
-        original_surgery_del = config.training.surgery_del
-        original_surgery_ins = config.training.surgery_ins
-        # TODO: don't modify the config!!
-        legacy_config["surgery_del"] = 0.0
-        legacy_config["surgery_ins"] = 1.0
-        legacy_config, model_lengths, _ = do_model_surgery(
-            0,
-            am,
-            legacy_config,
+        surgery_result = do_model_surgery(
+            am, 0.0, 1.0,
             emission_dummy,
             transition_dummy,
             flank_init_dummy,
             config.input_output.verbose
         )
+
+        # Override the initializers in the legacy config
+        legacy_config["emitter"] = surgery_result.emitter
+        legacy_config["transitioner"] = surgery_result.transitioner
+        model_lengths = surgery_result.model_lengths
 
     # Check the maximum number of iterations that the user allows
     # if it's 1, we only do a single training iteration without surgery
@@ -242,18 +238,21 @@ def _fit_and_align(context : LearnMSAContext) -> AlignmentModel:
             print("Successfully created alignment model.")
         if last_iteration:
             break
-        legacy_config, model_lengths, surgery_converged = do_model_surgery(
-            i,
+        surgery_result = do_model_surgery(
             am,
-            legacy_config,
+            config.training.surgery_del,
+            config.training.surgery_ins,
             emission_dummy,
             transition_dummy,
             flank_init_dummy,
             config.input_output.verbose
         )
-        # quick hack, todo
-        context.emitter = legacy_config["emitter"]
-        context.transitioner = legacy_config["transitioner"]
+        context.emitter = surgery_result.emitter
+        context.transitioner = surgery_result.transitioner
+        legacy_config["emitter"] = surgery_result.emitter
+        legacy_config["transitioner"] = surgery_result.transitioner
+        model_lengths = surgery_result.model_lengths
+        surgery_converged = surgery_result.surgery_converged
 
         if context.encoder_weight_extractor is not None:
             if config.input_output.verbose:

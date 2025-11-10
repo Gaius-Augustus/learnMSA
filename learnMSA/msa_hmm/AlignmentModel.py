@@ -267,7 +267,7 @@ class AlignmentModel():
     #in a memory friendly manner to file
     def _build_alignment(self, models):
 
-        assert len(models) == 1, "Not implemented for multiple models."
+        assert len(models), "Not implemented for multiple models."
 
         if tf.distribute.has_strategy():
             with tf.distribute.get_strategy().scope():
@@ -297,8 +297,8 @@ class AlignmentModel():
     def _clean_up_viterbi_seqs(self, state_seqs_max_lik, models, cell_copy):
         # state_seqs_max_lik has shape (num_model, num_seq, L)
         faulty_sequences = find_faulty_sequences(
-            state_seqs_max_lik, 
-            cell_copy.length[0], 
+            state_seqs_max_lik,
+            cell_copy.length[0],
             self.data.seq_lens[self.indices]
         )
         self.fixed_viterbi_seqs = faulty_sequences
@@ -317,7 +317,7 @@ class AlignmentModel():
             )
             if state_seqs_max_lik.shape[-1] < fixed_state_seqs.shape[-1]:
                 state_seqs_max_like = np.pad(
-                    state_seqs_max_lik, 
+                    state_seqs_max_lik,
                     ((0,0),(0,0),(0,fixed_state_seqs.shape[-1]-state_seqs_max_lik.shape[-1])), 
                     constant_values=2*cell_copy.length[0]+2
                 )

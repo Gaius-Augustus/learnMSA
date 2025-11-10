@@ -1,3 +1,4 @@
+from attr import dataclass
 import numpy as np
 import tensorflow as tf
 
@@ -264,41 +265,35 @@ def update_kernels(am,
     return transitions_new, emissions_new, init_flank_new
 
 
+@dataclass
+class ModelSurgeryResult:
+    emitter: list[tf.keras.layers.Layer]
+    transitioner: tf.keras.layers.Layer
+    model_lengths: list
+    surgery_converged: bool
+
+
 def do_model_surgery(
-    iteration,
-    am : AlignmentModel,
-    config,
-    emission_dummy,
-    transition_dummy,
-    flank_init_dummy,
-    verbose=False
-):
-    config = dict(config)
+    am: AlignmentModel,
+    surgery_del: float,
+    surgery_ins: float,
+    emission_dummy: list[initializers.Initializer],
+    transition_dummy: dict[str, initializers.Initializer],
+    flank_init_dummy: initializers.Initializer,
+    verbose: bool=False
+) -> ModelSurgeryResult:
     surgery_converged = True
     # Duplicate the previous emitters and transitioner and replace their
     # initializers later
-    config["emitter"] = [em.duplicate() for em in am.msa_hmm_layer.cell.emitter]
-    config["transitioner"] = am.msa_hmm_layer.cell.transitioner.duplicate()
+    emitter = [em.duplicate() for em in am.msa_hmm_layer.cell.emitter]
+    transitioner = am.msa_hmm_layer.cell.transitioner.duplicate()
     pos_expand, expansion_lens, pos_discard = get_discard_or_expand_positions(
         am,
-        del_t=config["surgery_del"],
-        ins_t=config["surgery_ins"]
+        del_t=surgery_del,
+        ins_t=surgery_ins
     )
     model_lengths = []
-    #evolve only after the first iteration
-    #otherwise this would rule out models starting with too few or too many
-    #matches, that could still turn out good eventually
-    #so we wait until all models had one iteration to adapt their length
-    if config["experimental_evolve_upper_half"] and iteration > 0:
-        scores = get_model_scores(am, config["model_criterion"], verbose)
-        p = int(np.floor(config["num_models"]/2))
-        best_p_models = tf.argsort(-scores)[:p]
-        models_for_next_iteration = tf.tile(best_p_models, [2])
-        if verbose:
-            print(f"Evolving the upper half of the models.")
-    else:
-        models_for_next_iteration = range(config["num_models"])
-    for i,k in enumerate(models_for_next_iteration):
+    for i,k in enumerate(range(am.num_models)):
         surgery_converged &= pos_expand[k].size == 0 and pos_discard[k].size == 0
         if verbose:
             if pos_expand[k].size > 0:
@@ -319,24 +314,28 @@ def do_model_surgery(
             emission_dummy,
             transition_dummy,
             flank_init_dummy,
-            mutate=config["experimental_evolve_upper_half"]
         )
         for em, old_em, e_init in zip(
-            config["emitter"], am.msa_hmm_layer.cell.emitter, emission_init
+            emitter, am.msa_hmm_layer.cell.emitter, emission_init
         ):
             em.emission_init[i] = initializers.ConstantInitializer(e_init)
             em.insertion_init[i] = initializers.ConstantInitializer(
                 old_em.insertion_kernel[k].numpy()
             )
-        config["transitioner"].transition_init[i] = {
+        transitioner.transition_init[i] = {
             key : initializers.ConstantInitializer(t)
             for key,t in transition_init.items()
         }
-        config["transitioner"].flank_init[i] = initializers.ConstantInitializer(flank_init)
+        transitioner.flank_init[i] = initializers.ConstantInitializer(flank_init)
         model_lengths.append(emission_init[0].shape[0])
         if model_lengths[-1] < 3:
             raise SystemExit(
                 "A problem occured during model surgery: "\
                 "A pHMM is too short (length <= 2)."
             )
-    return config, model_lengths, surgery_converged
+    return ModelSurgeryResult(
+        emitter=emitter,
+        transitioner=transitioner,
+        model_lengths=model_lengths,
+        surgery_converged=surgery_converged
+    )

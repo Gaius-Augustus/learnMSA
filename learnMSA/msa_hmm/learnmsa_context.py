@@ -255,7 +255,7 @@ class LearnMSAContext:
         return None
 
 
-    def _setup_hmm_components(self) -> tuple[tf.keras.Layer, tf.keras.Layer]:
+    def _setup_hmm_components(self) -> tuple[list[tf.keras.Layer], tf.keras.Layer]:
         if self.config.language_model.use_language_model:
             emitter = MvnEmitter(
                 self.scoring_model_config,
@@ -277,7 +277,7 @@ class LearnMSAContext:
             transition_init = self.initializers.transitions,
             flank_init = self.initializers.start # type: ignore
         )
-        return emitter, transitioner
+        return [emitter], transitioner
 
 
     def _setup_batch_size_cb(self) -> None:

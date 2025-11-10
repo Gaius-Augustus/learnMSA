@@ -45,7 +45,7 @@ def find_long_insertions_and_get_sequences(data : SequenceDataset, lens, starts,
             return (which, id_fragment_pairs)
     return None
 
-        
+
 def make_aligned_insertions(am, method="famsa", threads=0, verbose=True):
     """
     Aligns insertions with the given method and adds them to the alignment model.
@@ -70,7 +70,7 @@ def make_aligned_insertions(am, method="famsa", threads=0, verbose=True):
     unannotated_long = []
     for r in range(data.num_repeats-1):
         unannotated_long.append(find_long_insertions_and_get_sequences(am.data, data.unannotated_segments_len[r], data.unannotated_segments_start[r]))
-        
+
     slices = {}
     if left_flank_long is not None:
         slices["left_flank"] = left_flank_long[1]
@@ -83,11 +83,11 @@ def make_aligned_insertions(am, method="famsa", threads=0, verbose=True):
     for r in range(data.num_repeats-1):
         if unannotated_long[r] is not None:
             slices[f"unannotated_{r}"] = unannotated_long[r][1]
-    
+
     if verbose:
         print(f"Aligning {len(slices)} insertion slices with {method}.")
     alignments = make_slice_msas(slices, method, threads)
-        
+
     #merge msa
     insertions_long = [[(x[0], AlignedDataset(aligned_sequences = alignments[f"ins_{r}_{i}"] )) if x is not None else None for i,x in enumerate(repeats)] for r,repeats in enumerate(insertions_long)]
     left_flank_long = (left_flank_long[0],  AlignedDataset(aligned_sequences = alignments["left_flank"])) if left_flank_long is not None else None
