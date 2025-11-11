@@ -4,14 +4,6 @@ import tensorflow as tf
 
 import learnMSA.msa_hmm.Initializers as initializers
 from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
-from learnMSA.msa_hmm.posterior import get_state_expectations
-
-
-#experimental, only used for ablation studies
-#decreases accuracy slightly!
-USE_VITERBI_SURGERY = False
-if USE_VITERBI_SURGERY:
-    from learnMSA.msa_hmm.Viterbi import get_state_seqs_max_lik
 
 
 def get_discard_or_expand_positions(am, del_t=0.5, ins_t=0.5):
@@ -26,33 +18,8 @@ def get_discard_or_expand_positions(am, del_t=0.5, ins_t=0.5):
         expansion_lens: A list of arrays with the expansion lengths.
         pos_discard: A list of arrays with match positions to discard.
     """
-    if USE_VITERBI_SURGERY:
-        state_seqs_max_lik = get_state_seqs_max_lik(am.data,
-                                                am.batch_generator,
-                                                am.indices,
-                                                am.batch_size,
-                                                am.msa_hmm_layer.cell,
-                                                list(range(am.num_models)),
-                                                am.encoder_model) #shape (num_model, num_seq, L)
-        #count
-        expected_state = tf.zeros((am.num_models, am.msa_hmm_layer.cell.max_num_states), am.msa_hmm_layer.cell.dtype)
-        for i in range(0, am.indices.shape[0], am.batch_size):
-            state_seqs_max_lik_batch = state_seqs_max_lik[:,i:i+am.batch_size]
-            state_seqs_max_lik_batch = tf.one_hot(state_seqs_max_lik_batch, am.msa_hmm_layer.cell.max_num_states)
-            at_least_once = tf.cast(tf.reduce_sum(state_seqs_max_lik_batch, axis=-2) > 0, tf.float32)
-            expected_state += tf.reduce_sum(at_least_once, axis=-2)
-        expected_state /= am.indices.shape[0]
-        expected_state = expected_state.numpy()
-    else:
-        # num_models x max_num_states
-        expected_state = get_state_expectations(
-            am.data,
-            am.batch_generator,
-            am.indices,
-            am.batch_size,
-            am.msa_hmm_layer,
-            am.encoder_model
-        ).numpy()
+    # num_models x max_num_states
+    expected_state = am.model.posterior(am.indices, am.batch_size)
     pos_expand = []
     expansion_lens = []
     pos_discard = []
@@ -172,26 +139,20 @@ def extend_mods(pos_expand, expansion_lens, pos_discard, L, k=0):
 
 
 #applies expansions and discards to emission and transition kernels
-def update_kernels(am,
-                   model_index,
-                    pos_expand,
-                    expansion_lens,
-                    pos_discard,
-                    emission_dummy,
-                    transition_dummy,
-                    init_flank_dummy,
-                    mutate=False):
+def update_kernels(
+    am,
+    model_index,
+    pos_expand,
+    expansion_lens,
+    pos_discard,
+    emission_dummy,
+    transition_dummy,
+    init_flank_dummy,
+):
     L = am.msa_hmm_layer.cell.length[model_index]
     emissions = [em.emission_kernel[model_index].numpy() for em in am.msa_hmm_layer.cell.emitter]
     transitions = { key : kernel.numpy()
                          for key, kernel in am.msa_hmm_layer.cell.transitioner.transition_kernel[model_index].items()}
-    if mutate:
-        for i in range(len(emissions)):
-            noise = np.random.normal(scale=0.2, size=emissions[i].shape)
-            emissions[i] += noise
-        for key in transitions:
-            noise = np.random.normal(scale=0.2, size=transitions[key].shape)
-            transitions[key] += noise
     dtype = am.msa_hmm_layer.cell.dtype
     emission_dummy = [d((1, em.shape[-1]), dtype).numpy() for d,em in zip(emission_dummy, emissions)]
     transition_dummy = { key : transition_dummy[key](t.shape, dtype).numpy() for key, t in transitions.items()}
@@ -269,7 +230,7 @@ def update_kernels(am,
 class ModelSurgeryResult:
     emitter: list[tf.keras.layers.Layer]
     transitioner: tf.keras.layers.Layer
-    model_lengths: list
+    model_lengths: np.ndarray
     surgery_converged: bool
 
 

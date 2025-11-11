@@ -94,7 +94,7 @@ class TrainingConfig(BaseModel):
     dirichlet_mix_comp_count: int = 1
     """Number of components for Dirichlet mixture prior."""
 
-    use_anc_probs: bool = False
+    use_anc_probs: bool = True
     """Whether to use ancestral state probabilities."""
 
     trainable_rate_matrices: bool = False

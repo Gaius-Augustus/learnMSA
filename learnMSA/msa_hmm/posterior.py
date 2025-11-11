@@ -3,7 +3,7 @@ import math
 import numpy as np
 import tensorflow as tf
 
-import learnMSA.msa_hmm.Training as train
+import learnMSA.msa_hmm.training as train
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 
 
@@ -48,7 +48,10 @@ def get_state_expectations(
                             bucket_by_seq_length=True,
                             model_lengths=cell.length)
 
-    @tf.function(input_signature=[[tf.TensorSpec(x.shape, dtype=x.dtype) for x in encoder.inputs]])
+    @tf.function(input_signature=[[
+        tf.TensorSpec((None, msa_hmm_layer.cell.num_models, None), dtype=tf.uint8),
+        tf.TensorSpec((None, msa_hmm_layer.cell.num_models), dtype=tf.int64)
+    ]]) #embeddings missing
     def batch_posterior_state_probs(inputs):
         encoded_seq = encoder(inputs)
         posterior_probs = msa_hmm_layer.state_posterior_log_probs(encoded_seq)

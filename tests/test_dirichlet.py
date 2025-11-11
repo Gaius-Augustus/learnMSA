@@ -21,7 +21,7 @@ def test_dirichlet_log_pdf_single() -> None:
         )
         mix_init = Initializers.ConstantInitializer(np.log(q))
         mean_log_pdf = DirichletMixture.DirichletMixtureLayer(
-            1, 3, alpha_init=alpha_init, mix_init=mix_init
+            1, 3, alpha_init=alpha_init, mix_init=mix_init, trainable=False
         )(probs)
         np.testing.assert_almost_equal(mean_log_pdf, np.mean(e), decimal=3)
 
@@ -40,7 +40,7 @@ def test_dirichlet_log_pdf_mix() -> None:
     )
     mix_init = Initializers.ConstantInitializer(np.log(q))
     mean_log_pdf = DirichletMixture.DirichletMixtureLayer(
-        4, 3, alpha_init=alpha_init, mix_init=mix_init
+        4, 3, alpha_init=alpha_init, mix_init=mix_init, trainable=False
     )(probs)
     np.testing.assert_almost_equal(mean_log_pdf, np.mean(expected), decimal=3)
 
@@ -50,6 +50,6 @@ def test_dirichlet_log_pdf_mix() -> None:
     np.testing.assert_almost_equal(log_pdf2, expected2, decimal=3)
     mix_init2 = Initializers.ConstantInitializer(np.log(q2))
     mean_log_pdf2 = DirichletMixture.DirichletMixtureLayer(
-        4, 3, alpha_init=alpha_init, mix_init=mix_init2
+        4, 3, alpha_init=alpha_init, mix_init=mix_init2, trainable=False
     )(probs)
     np.testing.assert_almost_equal(mean_log_pdf2, np.mean(expected2), decimal=3)

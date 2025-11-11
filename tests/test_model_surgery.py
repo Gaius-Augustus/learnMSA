@@ -4,14 +4,13 @@ import os
 import numpy as np
 import tensorflow as tf
 
-from learnMSA import Configuration
-from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
-from learnMSA.msa_hmm.legacy import make_legacy_config
-from learnMSA.msa_hmm import (Emitter, Initializers, Training,
-                              Transitioner, align)
-from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
-from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 import learnMSA.msa_hmm.model_surgery as surgery
+from learnMSA import Configuration
+from learnMSA.msa_hmm import Emitter, Initializers, Transitioner, training
+from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
+from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
+from learnMSA.msa_hmm.model import LearnMSAModel
+from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 
 
 def assert_vec(x : np.ndarray, y: np.ndarray) -> None:
@@ -35,7 +34,9 @@ def make_test_alignment(data: SequenceDataset) -> AlignmentModel:
     config = Configuration()
     config.training.num_model = 1
     config.training.no_sequence_weights = True
-    config = make_legacy_config(config, LearnMSAContext(data, config))
+    config.training.length_init = [5]
+    context = LearnMSAContext(data, config)
+    context.effective_num_seq = 10
     emission_init = string_to_one_hot("FELIC").numpy() * 10
     insert_init = np.squeeze(
         string_to_one_hot("A") + string_to_one_hot("N")
@@ -60,25 +61,19 @@ def make_test_alignment(data: SequenceDataset) -> AlignmentModel:
     transition_init["match_to_delete"] = Initializers.ConstantInitializer(-1)
     transition_init["begin_to_match"] = Initializers.ConstantInitializer([1, 0, 0, 0, 0])
     transition_init["match_to_end"] = Initializers.ConstantInitializer(0)
-    config["emitter"] = Emitter.ProfileHMMEmitter(
+    context.emitter = [Emitter.ProfileHMMEmitter(
         emission_init=Initializers.ConstantInitializer(emission_init),
         insertion_init=Initializers.ConstantInitializer(insert_init)
-    )
-    config["transitioner"] = Transitioner.ProfileHMMTransitioner(
+    )]
+    context.transitioner = Transitioner.ProfileHMMTransitioner(
         transition_init=transition_init
     )
-    model = Training.default_model_generator(
-        num_seq=10,
-        effective_num_seq=10,
-        model_lengths=[5],
-        config=config,
-        data=data
-    )
-    batch_gen = Training.DefaultBatchGenerator()
-    batch_gen.configure(data, config)
+    model = LearnMSAModel(context)
+    model.build()
+    context.batch_gen.configure(data, config)
     am = AlignmentModel(
         data,
-        batch_gen,
+        context.batch_gen,
         np.arange(data.num_seq),
         32,
         model

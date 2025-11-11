@@ -6,7 +6,8 @@ import numpy as np
 import tensorflow as tf
 
 import learnMSA.msa_hmm.Initializers as initializers
-import learnMSA.msa_hmm.Training as train
+import learnMSA.msa_hmm.training as train
+from learnMSA.msa_hmm.model import LearnMSAModel
 import learnMSA.msa_hmm.training_util as training_util
 from learnMSA import Configuration
 from learnMSA.msa_hmm.AlignInsertions import make_aligned_insertions
@@ -17,10 +18,6 @@ from learnMSA.msa_hmm.posterior import get_state_expectations
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 from learnMSA.protein_language_models.MvnEmitter import \
     AminoAcidPlusMvnEmissionInitializer
-
-# Temporary solution: convert the new config to the legacy config format
-# such that the code runs
-from learnMSA.msa_hmm.legacy import make_legacy_config
 
 
 np.set_printoptions(legacy='1.21')
@@ -158,8 +155,6 @@ def _fit_and_align(context : LearnMSAContext) -> AlignmentModel:
     transition_dummy = initializers.make_default_transition_init()
     flank_init_dummy = initializers.make_default_flank_init()
 
-    legacy_config = make_legacy_config(config, context) # type: ignore
-
     if config.input_output.load_model:
         # Load the alignment model from file and use it as initialization
         am = AlignmentModel.load_models_from_file(
@@ -181,22 +176,20 @@ def _fit_and_align(context : LearnMSAContext) -> AlignmentModel:
         )
 
         # Override the initializers in the legacy config
-        legacy_config["emitter"] = surgery_result.emitter
-        legacy_config["transitioner"] = surgery_result.transitioner
-        model_lengths = surgery_result.model_lengths
+        context.emitter = surgery_result.emitter
+        context.transitioner = surgery_result.transitioner
+        context.model_lengths = surgery_result.model_lengths
 
     # Check the maximum number of iterations that the user allows
     # if it's 1, we only do a single training iteration without surgery
     last_iteration=config.training.max_iterations==1
-
-    model_lengths = context.model_lengths_cb(data)
 
     # 2 staged main loop: Fits model parameters with GD and optimized model
     # architecture with surgery
     for i in range(config.training.max_iterations):
         if callable(context.batch_size):
             batch_size = context.batch_size(
-                model_lengths, min(data.max_len, config.training.crop) # type: ignore
+                context.model_lengths, min(data.max_len, config.training.crop) # type: ignore
             )
         else:
             batch_size = context.batch_size
@@ -211,20 +204,16 @@ def _fit_and_align(context : LearnMSAContext) -> AlignmentModel:
         else:
             train_indices = full_length_estimate
             decode_indices = full_length_estimate
-        epochs_this_iteration = config.training.epochs[0 if i==0 else 1 if not last_iteration else 2]
-        model, history = train.fit_model(
-            context.model_gen,
-            context.batch_gen,
-            data,
-            train_indices,
-            model_lengths,
-            legacy_config,
-            batch_size=batch_size,
-            epochs=epochs_this_iteration,
-            sequence_weights=context.sequence_weights,
-            clusters=context.clusters,
-            verbose=config.input_output.verbose
-        )
+
+        # Create and compile the model
+        context.effective_num_seq = train_indices.shape[0] #todo: workaround
+        model = LearnMSAModel(context)
+        model.compile()
+        model.build(batch_size)
+
+        # Run training
+        model.fit(train_indices, i, batch_size)
+
         if config.input_output.verbose:
             print("Creating alignment model...")
         am = AlignmentModel(
@@ -249,9 +238,7 @@ def _fit_and_align(context : LearnMSAContext) -> AlignmentModel:
         )
         context.emitter = surgery_result.emitter
         context.transitioner = surgery_result.transitioner
-        legacy_config["emitter"] = surgery_result.emitter
-        legacy_config["transitioner"] = surgery_result.transitioner
-        model_lengths = surgery_result.model_lengths
+        context.model_lengths = surgery_result.model_lengths
         surgery_converged = surgery_result.surgery_converged
 
         if context.encoder_weight_extractor is not None:
@@ -273,12 +260,10 @@ def _fit_and_align_with_logo_gif(context : LearnMSAContext) -> AlignmentModel:
     from learnMSA.msa_hmm.Visualize import LogoPlotterCallback, make_logo_gif
     data, config = context.data, context.config
     indices = np.arange(data.num_seq)
-    legacy_config = make_legacy_config(config, context) # type: ignore
     logo_dir = config.visualization.logo_gif.parent if config.visualization.logo_gif else "", # type: ignore
-    model_lengths = context.model_lengths_cb(data)
     if callable(context.batch_size):
         batch_size = context.batch_size(
-            model_lengths, # type: ignore
+            context.model_lengths, # type: ignore
             min(data.max_len, config.training.crop) # type: ignore
         )
     else:
@@ -288,18 +273,14 @@ def _fit_and_align_with_logo_gif(context : LearnMSAContext) -> AlignmentModel:
     print("Running in logo gif mode. A sequence logo will be generated for each training step.")
     print("This mode is much slower and less accurate (no model surgery and just 1 model) than the default mode")
     print("and should only be used for vizualization and debugging.")
-    model, history = train.fit_model(
-        context.model_gen,
-        context.batch_gen,
-        data,
-        indices,
-        model_lengths,
-        config,
-        batch_size=batch_size,
-        epochs=config.training.epochs[-1],
-        verbose=True,
-        train_callbacks=[logo_plotter_callback]
-    )
+
+    # Create and compile the model
+    model = LearnMSAModel(context)
+    model.compile()
+
+    # Run training
+    model.fit(indices, 0, batch_size, [logo_plotter_callback])
+
     make_logo_gif(logo_plotter_callback.frame_dir, logo_dir / "training.gif") # type: ignore
     am = AlignmentModel(data, context.batch_gen, indices, batch_size=batch_size, model=model)
     return am

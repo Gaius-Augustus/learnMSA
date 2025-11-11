@@ -6,7 +6,7 @@ import tensorflow as tf
 
 from learnMSA import Configuration
 from learnMSA.msa_hmm import (Emitter, Initializers, MsaHmmCell,
-                              MsaHmmLayer, Training, Transitioner, Viterbi)
+                              MsaHmmLayer, Transitioner, Viterbi, training)
 from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
 from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
 from learnMSA.msa_hmm.legacy import make_legacy_config
@@ -23,13 +23,13 @@ def string_to_one_hot(s : str) -> tf.Tensor:
 def get_all_seqs(data: SequenceDataset, num_models: int) -> np.ndarray:
     """Get all sequences from a dataset."""
     indices = np.arange(data.num_seq)
-    batch_generator = Training.DefaultBatchGenerator()
+    batch_generator = training.DefaultBatchGenerator()
     config = Configuration()
     config.training.num_model = num_models
     config.training.no_sequence_weights = True
     config = make_legacy_config(config, LearnMSAContext(data, config))
     batch_generator.configure(data, config)
-    ds = Training.make_dataset(indices,
+    ds = training.make_dataset(indices,
                                batch_generator,
                                batch_size=data.num_seq,
                                shuffle=False)
@@ -175,7 +175,7 @@ def test_viterbi() -> None:
         assert_vec(state_seqs_max_lik, ref_seqs)
         # This produces a result identical to above, but runs viterbi batch wise
         # to avoid memory overflow
-        batch_generator = Training.DefaultBatchGenerator(return_only_sequences=True)
+        batch_generator = training.DefaultBatchGenerator(return_only_sequences=True)
         config = Configuration()
         config.training.num_model = 2
         config.training.no_sequence_weights = True
@@ -576,10 +576,10 @@ def test_posterior_state_probabilities() -> None:
         config.training.num_model = 1
         config.training.no_sequence_weights = True
         config = make_legacy_config(config, LearnMSAContext(data, config))
-        batch_gen = Training.DefaultBatchGenerator()
+        batch_gen = training.DefaultBatchGenerator()
         batch_gen.configure(data, config)
         indices = tf.range(data.num_seq, dtype=tf.int64)
-        ds = Training.make_dataset(indices, batch_gen, batch_size=data.num_seq, shuffle=False)
+        ds = training.make_dataset(indices, batch_gen, batch_size=data.num_seq, shuffle=False)
         for x, _ in ds:
             seq = tf.one_hot(x[0], len(SequenceDataset.alphabet))
             seq = tf.transpose(seq, [1, 0, 2, 3])

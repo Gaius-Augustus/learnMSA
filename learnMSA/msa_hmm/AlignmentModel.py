@@ -4,8 +4,7 @@ import learnMSA.msa_hmm.AncProbsLayer as anc_probs
 import learnMSA.msa_hmm.MsaHmmLayer as msa_hmm_layer
 import learnMSA.msa_hmm.MsaHmmCell as msa_hmm_cell
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset, AlignedDataset
-import learnMSA.msa_hmm.Training as train
-import learnMSA.msa_hmm.Viterbi as viterbi
+import learnMSA.msa_hmm.training as train
 import learnMSA.msa_hmm.Priors as priors
 import learnMSA.msa_hmm.Transitioner as trans
 import learnMSA.msa_hmm.Emitter as emit
@@ -234,22 +233,9 @@ class AlignmentModel():
         self.indices = indices
         self.batch_size = batch_size
         self.model = model
-        # encoder model is the same as model but with the MsaHmmLayer removed
-        # the output of the encoder model will be the input to viterbi
-        # in the default learnMSA, the encoder model is only the Ancestral 
-        # Probability layer.
-        self.encoder_model = None
-        for i, layer in enumerate(model.layers[1:]):
-            if layer.name.startswith("anc_probs_layer"):
-                self.anc_probs_layer = layer
-            if layer.name.startswith("msa_hmm_layer"):
-                encoder_out = model.layers[i].output
-                self.msa_hmm_layer = layer
-                self.encoder_model = tf.keras.Model(
-                    inputs=self.model.inputs, outputs=[encoder_out]
-                )
-        assert self.encoder_model is not None, \
-            "Can not find a MsaHmmLayer in the specified model."
+        self.anc_probs_layer = model.anc_probs_layer
+        self.msa_hmm_layer = model.msa_hmm_layer
+
         self.gap_symbol = gap_symbol
         self.gap_symbol_insertions = gap_symbol_insertions
 
@@ -269,57 +255,35 @@ class AlignmentModel():
 
         assert len(models), "Not implemented for multiple models."
 
-        if tf.distribute.has_strategy():
-            with tf.distribute.get_strategy().scope():
-                cell_copy = self.msa_hmm_layer.cell.duplicate(models)
-        else:
-            cell_copy = self.msa_hmm_layer.cell.duplicate(models)
-
-        cell_copy.build(
-            (self.num_models, None, None, self.msa_hmm_layer.cell.dim)
-        )
-        state_seqs_max_lik = viterbi.get_state_seqs_max_lik(
-            self.data,
-            self.batch_generator,
-            self.indices,
-            self.batch_size,
-            cell_copy,
-            models,
-            self.encoder_model
+        state_seqs_max_lik = self.model.decode(
+            self.indices, self.batch_size, models
         )
         state_seqs_max_lik = self._clean_up_viterbi_seqs(
-            state_seqs_max_lik, models, cell_copy
+            state_seqs_max_lik, models
         )
-        for i,l,max_lik_seqs in zip(models, cell_copy.length, state_seqs_max_lik):
+        for i,l,max_lik_seqs in zip(models, self.model.context.model_lengths, state_seqs_max_lik):
             decoded_data = AlignmentModel.decode(l,max_lik_seqs)
             self.metadata[i] = AlignmentMetaData(*decoded_data)
 
-    def _clean_up_viterbi_seqs(self, state_seqs_max_lik, models, cell_copy):
+    def _clean_up_viterbi_seqs(self, state_seqs_max_lik, models):
         # state_seqs_max_lik has shape (num_model, num_seq, L)
         faulty_sequences = find_faulty_sequences(
             state_seqs_max_lik,
-            cell_copy.length[0],
+            self.model.context.model_lengths[0],
             self.data.seq_lens[self.indices]
         )
         self.fixed_viterbi_seqs = faulty_sequences
         if faulty_sequences.size > 0:
             # repeat Viterbi with a masking that prevents certain transitions
             # that can cause problems
-            fixed_state_seqs = viterbi.get_state_seqs_max_lik(
-                self.data,
-                self.batch_generator,
-                faulty_sequences,
-                self.batch_size,
-                cell_copy,
-                models,
-                self.encoder_model,
-                non_homogeneous_mask_func
+            fixed_state_seqs = self.model.decode(
+                faulty_sequences, self.batch_size, models, non_homogeneous_mask_func
             )
             if state_seqs_max_lik.shape[-1] < fixed_state_seqs.shape[-1]:
                 state_seqs_max_like = np.pad(
                     state_seqs_max_lik,
-                    ((0,0),(0,0),(0,fixed_state_seqs.shape[-1]-state_seqs_max_lik.shape[-1])), 
-                    constant_values=2*cell_copy.length[0]+2
+                    ((0,0),(0,0),(0,fixed_state_seqs.shape[-1]-state_seqs_max_lik.shape[-1])),
+                    constant_values=2*self.model.context.model_lengths[0]+2
                 )
             state_seqs_max_lik[0,faulty_sequences,:fixed_state_seqs.shape[-1]] = fixed_state_seqs[0]
         return state_seqs_max_lik

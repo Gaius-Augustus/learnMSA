@@ -118,7 +118,8 @@ class DirichletMixtureLayer(tf.keras.layers.Layer):
         alpha = self.make_alpha()
         mix = self.make_mix()
         loglik = tf.reduce_mean(dirichlet_log_pdf(p, alpha, mix))
-        if training:
+        if self.trainable:
+            # deprecated code, not working in newer TF versions
             self.add_metric(loglik, name="loglik")
             if self.use_dirichlet_process:
                 sum_alpha = tf.reduce_sum(alpha, axis=-1, keepdims=True)
@@ -139,7 +140,7 @@ class DirichletMixtureLayer(tf.keras.layers.Layer):
             else:
                 self.add_loss(-loglik)
         return loglik
-    
+
 
 def make_model(dirichlet_mixture_layer):
     """Utility function that constructs a keras model over a DirichletMixtureLayer.
@@ -156,6 +157,3 @@ def load_mixture_model(model_path, num_components, alphabet_size, trainable=Fals
     model = make_model(dm)
     model.load_weights(model_path)
     return model
-    
-
-    

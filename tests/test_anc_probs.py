@@ -1,17 +1,20 @@
 """Tests for ancestral probability calculations and rate matrices."""
 import os
+from multiprocessing import context
 
 import numpy as np
 import pytest
 import tensorflow as tf
 
 from learnMSA import Configuration
-from learnMSA.msa_hmm import (AncProbsLayer, Emitter, Initializers, Training,
-                              Utility)
+from learnMSA.msa_hmm import Emitter, Initializers, Utility, training
 from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
+from learnMSA.msa_hmm.AncProbsLayer import AncProbsLayer, make_rate_matrix
 from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
-from learnMSA.msa_hmm.legacy import make_legacy_config
+from learnMSA.msa_hmm.model import LearnMSAModel
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
+from learnMSA.msa_hmm.MsaHmmCell import MsaHmmCell
+from learnMSA.msa_hmm.MsaHmmLayer import MsaHmmLayer
 
 
 class AncProbsData:
@@ -78,19 +81,19 @@ def assert_anc_probs(
 
 
 def assert_anc_probs_layer(
-    anc_probs_layer : AncProbsLayer, config: dict
+    anc_probs_layer : AncProbsLayer, config: Configuration
 ) -> None:
     """Assert properties of an ancestral probabilities layer."""
     anc_probs_layer.build()
     p = anc_probs_layer.make_p()
     R = anc_probs_layer.make_R()
     Q = anc_probs_layer.make_Q()
-    assert p.shape[0] == config["num_models"]
-    assert R.shape[0] == config["num_models"]
-    assert Q.shape[0] == config["num_models"]
-    assert p.shape[1] == config["num_rate_matrices"]
-    assert R.shape[1] == config["num_rate_matrices"]
-    assert Q.shape[1] == config["num_rate_matrices"]
+    assert p.shape[0] == config.training.num_model
+    assert R.shape[0] == config.training.num_model
+    assert Q.shape[0] == config.training.num_model
+    assert p.shape[1] == config.training.num_rate_matrices
+    assert R.shape[1] == config.training.num_rate_matrices
+    assert Q.shape[1] == config.training.num_rate_matrices
     for model_equi in p:
         for equi in model_equi:
             assert_equilibrium(equi)
@@ -115,26 +118,29 @@ def get_test_configs(sequences : np.ndarray) -> list[dict]:
         for rate_init in [-100., -3., 100.]:
             for num_matrices in [1, 3]:
                 case = {}
+
                 config = Configuration()
                 config.training.num_model = 1
                 config.training.no_sequence_weights = True
                 config.training.equilibrium_sample = equilibrium_sample
                 config.training.num_rate_matrices = num_matrices
-                dummy_data = SequenceDataset(sequences=["seq1", "ACGT"])
-                config = make_legacy_config(config, LearnMSAContext(dummy_data, config))
+                case["config"] = config
+
+                encoder_initializer = Initializers.make_default_anc_probs_init(num_matrices)
                 if num_matrices > 1:
                     R_stack = np.concatenate([inv_sp_R] * num_matrices, axis=1)
                     p_stack = np.concatenate([log_p] * num_matrices, axis=1)
-                    config["encoder_initializer"] = (
-                        config["encoder_initializer"][:1] +
+                    encoder_initializer = (
+                        encoder_initializer[:1] +
                         [Initializers.ConstantInitializer(R_stack),
                          Initializers.ConstantInitializer(p_stack)]
                     )
-                config["encoder_initializer"] = (
+                encoder_initializer = (
                     [Initializers.ConstantInitializer(rate_init)] +
-                    config["encoder_initializer"][1:]
+                    encoder_initializer[1:]
                 )
-                case["config"] = config
+                case["encoder_initializer"] = encoder_initializer
+
                 if rate_init == -100.:
                     case["expected_anc_probs"] = tf.one_hot(sequences, len(SequenceDataset.alphabet)).numpy()
                 elif rate_init == 100.:
@@ -156,24 +162,41 @@ def get_test_configs(sequences : np.ndarray) -> list[dict]:
     return cases
 
 
+def make_anc_probs_layer(config : Configuration, enc_init, num_seq) -> AncProbsLayer:
+    return AncProbsLayer(
+        config.training.num_model,
+        num_seq,
+        config.training.num_rate_matrices,
+        equilibrium_init=enc_init[2],
+        rate_init=enc_init[0],
+        exchangeability_init=enc_init[1],
+        trainable_rate_matrices=config.training.trainable_rate_matrices,
+        trainable_distances=config.training.trainable_distances,
+        per_matrix_rate=config.training.per_matrix_rate,
+        matrix_rate_l2=config.training.matrix_rate_l2,
+        shared_matrix=config.training.shared_rate_matrix,
+        equilibrium_sample=config.training.equilibrium_sample,
+        transposed=config.training.transposed,
+    )
+
+
 def get_simple_seq(data: SequenceDataset) -> np.ndarray:
     """Get simple sequence data for testing."""
-    from learnMSA.msa_hmm import Training
+    from learnMSA.msa_hmm import training
     indices = np.arange(data.num_seq)
-    batch_generator = Training.DefaultBatchGenerator()
+    batch_generator = training.BatchGenerator()
     config = Configuration()
     config.training.num_model = 1
     config.training.no_sequence_weights = True
-    config = make_legacy_config(config, LearnMSAContext(data, config))
     batch_generator.configure(data, config)
-    ds = Training.make_dataset(indices,
+    ds = training.make_dataset(indices,
                                batch_generator,
                                batch_size=data.num_seq,
                                shuffle=False)
     for (seq, _), _ in ds:
         sequences = seq.numpy()[:, :, :-1]
         sequences = np.transpose(sequences, [1, 0, 2])
-        return sequences
+    return sequences
 
 
 def test_paml_parsing(anc_probs_data : AncProbsData) -> None:
@@ -201,21 +224,29 @@ def test_paml_parsing(anc_probs_data : AncProbsData) -> None:
 def test_rate_matrices(anc_probs_data : AncProbsData) -> None:
     """Test construction of rate matrices from PAML data."""
     for R, p in map(Utility.parse_paml, anc_probs_data.paml_all, [anc_probs_data.A] * len(anc_probs_data.paml_all)):
-        Q = AncProbsLayer.make_rate_matrix(R, p)
+        Q = make_rate_matrix(R, p)
         assert_rate_matrix(Q, p)
 
 
-def test_anc_probs() -> None:
+def test_anc_probs_layer() -> None:
     """Test ancestral probability calculations."""
     filename = os.path.dirname(__file__) + "/../tests/data/simple.fa"
     with SequenceDataset(filename) as data:
         sequences = get_simple_seq(data)
     n = sequences.shape[1]
     for case in get_test_configs(sequences):
-        anc_probs_layer = Training.make_anc_probs_layer(n, case["config"])
+        anc_probs_layer = make_anc_probs_layer(
+            case["config"], case["encoder_initializer"], n
+        )
         assert_anc_probs_layer(anc_probs_layer, case["config"])
         anc_prob_seqs = anc_probs_layer(sequences, np.arange(n)[np.newaxis, :]).numpy()
-        shape = (case["config"]["num_models"], n, sequences.shape[2], case["config"]["num_rate_matrices"], len(SequenceDataset.alphabet))
+        shape = (
+            case["config"].training.num_model,
+            n,
+            sequences.shape[2],
+            case["config"].training.num_rate_matrices,
+            len(SequenceDataset.alphabet)
+        )
         anc_prob_seqs = np.reshape(anc_prob_seqs, shape)
         if "expected_anc_probs" in case:
             assert_anc_probs(anc_prob_seqs, case["expected_freq"], case["expected_anc_probs"])
@@ -231,66 +262,101 @@ def test_encoder_model() -> None:
         n = sequences.shape[1]
         ind = np.arange(n)
         model_length = 10
-        batch_gen = Training.DefaultBatchGenerator()
+        batch_gen = training.BatchGenerator()
         config = Configuration()
         config.training.num_model = 1
         config.training.no_sequence_weights = True
-        config = make_legacy_config(config, LearnMSAContext(data, config))
         batch_gen.configure(data, config)
-        ds = Training.make_dataset(ind, batch_gen, batch_size=n, shuffle=False)
+        ds = training.make_dataset(ind, batch_gen, batch_size=n, shuffle=False)
         for case in get_test_configs(sequences):
-            # The default emitter initializers expect 25 as last dimension which is not compatible with num_matrix=3
-            config = dict(case["config"])
-            config["emitter"] = Emitter.ProfileHMMEmitter(
+            # The default emitter initializers expect 25 as last dimension
+            # which is not compatible with num_matrix=3
+            config: Configuration = case["config"]
+            config.training.length_init = [model_length]
+            config.input_output.verbose = False
+            context = LearnMSAContext(data, config)
+            context.encoder_initializer = case["encoder_initializer"]
+            context.emitter = [Emitter.ProfileHMMEmitter(
                 emission_init=Initializers.ConstantInitializer(0.),
                 insertion_init=Initializers.ConstantInitializer(0.)
-            )
-            model = Training.default_model_generator(
-                num_seq=n,
-                effective_num_seq=n,
-                model_lengths=[model_length],
-                config=config,
-                data=data
-            )
-            am = AlignmentModel(
-                data,
-                batch_gen,
-                ind,
-                batch_size=n,
-                model=model
-            )
-            assert_anc_probs_layer(am.encoder_model.layers[-1], case["config"])
+            )]
+            context.effective_num_seq = n
+            model = LearnMSAModel(context)
+            assert_anc_probs_layer(model.anc_probs_layer, config)
+            model.encode_only = True
             for x, _ in ds:
-                anc_prob_seqs = am.encoder_model(x).numpy()[:, :, :-1]
-                shape = (case["config"]["num_models"], n, sequences.shape[2], case["config"]["num_rate_matrices"], len(SequenceDataset.alphabet))
+                anc_prob_seqs = model(x).numpy()[:, :, :-1]
+                shape = (
+                    config.training.num_model,
+                    n,
+                    sequences.shape[2],
+                    config.training.num_rate_matrices,
+                    len(SequenceDataset.alphabet)
+                )
                 anc_prob_seqs = np.reshape(anc_prob_seqs, shape)
             if "expected_anc_probs" in case:
-                assert_anc_probs(anc_prob_seqs, case["expected_freq"], case["expected_anc_probs"])
+                assert_anc_probs(
+                    anc_prob_seqs,
+                    case["expected_freq"],
+                    case["expected_anc_probs"]
+                )
             else:
                 assert_anc_probs(anc_prob_seqs, case["expected_freq"])
 
 
 def test_transposed() -> None:
     """Test transposed ancestral probabilities."""
+    # Load data and prepare sequences
     filename = os.path.dirname(__file__) + "/../tests/data/simple.fa"
     with SequenceDataset(filename) as data:
         sequences = get_simple_seq(data)
     n = sequences.shape[1]
+
+    # Create a configuration
     config = Configuration()
     config.training.num_model = 1
     config.training.no_sequence_weights = True
-    config = make_legacy_config(config, LearnMSAContext(data, config))
-    anc_probs_layer = Training.make_anc_probs_layer(1, config)
-    msa_hmm_layer = Training.make_msa_hmm_layer(n, 10, config)
+    config.training.transposed = False
+
+    # Create ancestral probabilities layer with/without transpose
+    anc_probs_layer = make_anc_probs_layer(
+        config, Initializers.make_default_anc_probs_init(1), n
+    )
+    config.training.transposed = True
+    anc_probs_layer_transposed = make_anc_probs_layer(
+        config, Initializers.make_default_anc_probs_init(1), n
+    )
+
+    context = LearnMSAContext(data, config)
+
+    # Create MsaHmmLayer
+    msa_hmm_cell = MsaHmmCell(
+        context.model_lengths,
+        emitter=context.emitter,
+        transitioner=context.transitioner
+    )
+    msa_hmm_layer = MsaHmmLayer(msa_hmm_cell, num_seqs=n)
     msa_hmm_layer.build((1, None, None, len(SequenceDataset.alphabet)))
+
+    # Compute emission matrix
     B = msa_hmm_layer.cell.emitter[0].make_B()[0]
-    config["transposed"] = True
-    anc_probs_layer_transposed = Training.make_anc_probs_layer(n, config)
-    anc_prob_seqs = anc_probs_layer_transposed(sequences, np.arange(n)[np.newaxis, :]).numpy()
-    shape = (config["num_models"], n, sequences.shape[2], config["num_rate_matrices"], len(SequenceDataset.alphabet))
+
+    # Verify transposed works
+    anc_prob_seqs = anc_probs_layer_transposed(
+        sequences, np.arange(n)[np.newaxis, :]
+    ).numpy()
+    shape = (
+        config.training.num_model,
+        n,
+        sequences.shape[2],
+        config.training.num_rate_matrices,
+        len(SequenceDataset.alphabet)
+    )
     anc_prob_seqs = np.reshape(anc_prob_seqs, shape)
     anc_prob_seqs = tf.cast(anc_prob_seqs, B.dtype)
-    anc_prob_B = anc_probs_layer(B[tf.newaxis, tf.newaxis, :, :20], rate_indices=[[0]])
+    anc_prob_B = anc_probs_layer(
+        B[tf.newaxis, tf.newaxis, :, :20], rate_indices=[[0]]
+    )
     anc_prob_B = tf.squeeze(anc_prob_B)
     prob1 = tf.linalg.matvec(B, anc_prob_seqs)
     oh_seqs = tf.one_hot(sequences, 20, dtype=anc_prob_B.dtype)

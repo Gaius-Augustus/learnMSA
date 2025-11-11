@@ -35,7 +35,6 @@ def make_legacy_config(
         "encoder_initializer" : context.encoder_initializer,
         "model_criterion" : config.training.model_criterion,
         "encoder_weight_extractor" : context.encoder_weight_extractor,
-        "experimental_evolve_upper_half" : False,
         "cluster_seq_id" : config.training.cluster_seq_id,
         "use_language_model" : config.language_model.use_language_model,
         "frozen_insertions" : config.training.frozen_insertions,

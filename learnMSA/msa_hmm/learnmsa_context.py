@@ -11,7 +11,7 @@ import learnMSA.msa_hmm.Emitter as emit
 import learnMSA.msa_hmm.Initializers as initializers
 import learnMSA.msa_hmm.training_util as training_util
 import learnMSA.msa_hmm.Transitioner as trans
-import learnMSA.msa_hmm.Training as train
+import learnMSA.msa_hmm.training as train
 import learnMSA.protein_language_models.Common as Common
 import learnMSA.protein_language_models.EmbeddingBatchGenerator as EmbeddingBatchGenerator
 from learnMSA import Configuration
@@ -42,6 +42,7 @@ class LearnMSAContext:
     """
 
     model_lengths_cb: ModelLengthsCallback
+    model_lengths: np.ndarray
 
     """
     Is created from a Configuration and a SequenceDataset to hold all relevant
@@ -128,7 +129,7 @@ class LearnMSAContext:
             np.ceil(self.config.training.auto_crop_scale * np.mean(self.data.seq_lens))
         )
 
-        self.model_gen, self.batch_gen = self._get_generators()
+        self.batch_gen = self._get_batch_generator()
         self.sequence_weights, self.clusters = self._get_clustering()
 
         # If required, find indices of sequences for a subset
@@ -138,6 +139,12 @@ class LearnMSAContext:
             ])
         else:
             self.subset = np.arange(data.num_seq)
+
+        # Initialize the model lengths
+        self.model_lengths = self.model_lengths_cb(data)
+
+        # todo: Workaround
+        self.effective_num_seq = data.num_seq
 
     def _setup_initializers(self) -> PHMMInitializerSet:
         num_model = self.config.training.num_model
@@ -383,21 +390,14 @@ class LearnMSAContext:
         return scoring_model_config
 
 
-    def _get_generators(self) -> tuple[Callable, Callable]:
+    def _get_batch_generator(self) -> train.BatchGenerator:
         if self.config.language_model.use_language_model:
-            # we have to define a special model- and batch generator if using a
-            # language model because the emission probabilities are computed
-            # differently and the LM requires specific inputs
-            model_gen = EmbeddingBatchGenerator.make_generic_embedding_model_generator(
-                self.scoring_model_config.dim
-            )
             batch_gen = EmbeddingBatchGenerator.EmbeddingBatchGenerator(
                 scoring_model_config=self.scoring_model_config,
             )
         else:
-            model_gen = train.default_model_generator
-            batch_gen = train.DefaultBatchGenerator()
-        return model_gen, batch_gen
+            batch_gen = train.BatchGenerator()
+        return batch_gen
 
 
     def _get_clustering(self) -> tuple[np.ndarray | None, Any]:

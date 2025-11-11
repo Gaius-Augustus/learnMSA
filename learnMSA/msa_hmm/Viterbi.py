@@ -1,6 +1,6 @@
 import tensorflow as tf
 import numpy as np
-import learnMSA.msa_hmm.Training as train
+import learnMSA.msa_hmm.training as train
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 import time
 import math
@@ -329,11 +329,15 @@ def get_state_seqs_max_lik(data : SequenceDataset,
                             bucket_by_seq_length=True,
                             model_lengths=hmm_cell.length)
     seq_len = np.amax(data.seq_lens[indices]+1)
+
     #initialize with terminal states
     state_seqs_max_lik = np.zeros((hmm_cell.num_models, indices.size, seq_len), 
-                                  dtype=np.uint32) 
+                                  dtype=np.uint32)
     if encoder:
-        @tf.function(input_signature=[[tf.TensorSpec(x.shape, dtype=x.dtype) for x in encoder.inputs]])
+        @tf.function(input_signature=[[
+            tf.TensorSpec((None, None, None), dtype=tf.uint8),
+            tf.TensorSpec((None, None), dtype=tf.int64)
+        ]]) #embeddings missing
         def call_viterbi(inputs):
             encoded_seq = encoder(inputs)
             #todo: this can be improved by encoding only for required models, not all

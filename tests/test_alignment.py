@@ -4,14 +4,13 @@ import numpy as np
 import tensorflow as tf
 
 from learnMSA import Configuration
-from learnMSA.msa_hmm import (Emitter, Initializers, Training,
-                              Transitioner, align)
+from learnMSA.msa_hmm import (Emitter, Initializers, Transitioner, align, training)
 from learnMSA.msa_hmm.AlignmentModel import (AlignmentModel,
                                              find_faulty_sequences,
                                              non_homogeneous_mask_func)
 from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
-from learnMSA.msa_hmm.legacy import make_legacy_config
 from learnMSA.msa_hmm.SequenceDataset import AlignedDataset, SequenceDataset
+from learnMSA.msa_hmm.model import LearnMSAModel
 
 
 def string_to_one_hot(s : str) -> tf.Tensor:
@@ -20,20 +19,21 @@ def string_to_one_hot(s : str) -> tf.Tensor:
 
 
 def test_subalignment() -> None:
+    # Load data
     filename = os.path.dirname(__file__)+"/../tests/data/felix.fa"
     fasta_file = SequenceDataset(filename)
-    length = 5
     config = Configuration()
     config.training.num_model = 1
     config.training.no_sequence_weights = True
-    config = make_legacy_config(config, LearnMSAContext(fasta_file, config))
+    config.training.length_init = [5]
+    context = LearnMSAContext(fasta_file, config)
     emission_init = string_to_one_hot("FELIK").numpy()*20
     insert_init = np.squeeze(string_to_one_hot("A") + string_to_one_hot("H") + string_to_one_hot("C"))*20
-    config["emitter"] = Emitter.ProfileHMMEmitter(
+    context.emitter = [Emitter.ProfileHMMEmitter(
         emission_init=Initializers.ConstantInitializer(emission_init),
         insertion_init=Initializers.ConstantInitializer(insert_init)
-    )
-    config["transitioner"] = Transitioner.ProfileHMMTransitioner(
+    )]
+    context.transitioner = Transitioner.ProfileHMMTransitioner(
         transition_init=(
             Initializers.make_default_transition_init(
                 MM=0, MI=0, MD=0, II=0, IM=0, DM=0, DD=0,
@@ -41,23 +41,13 @@ def test_subalignment() -> None:
             )
         )
     )
-    model = Training.default_model_generator(
-        num_seq=8,
-        effective_num_seq=8,
-        model_lengths=[length],
-        config=config,
-        data=fasta_file
-    )
+    model = LearnMSAModel(context)
+    model.build(None)
     # subalignment
     subset = np.array([0, 2, 5])
-    batch_gen = Training.DefaultBatchGenerator()
-    config = Configuration()
-    config.training.num_model = 1
-    config.training.no_sequence_weights = True
-    config = make_legacy_config(config, LearnMSAContext(fasta_file, config))
-    batch_gen.configure(fasta_file, config)
     # create alignment after building model
-    sub_am = AlignmentModel(fasta_file, batch_gen, subset, 32, model)
+    context.batch_gen.configure(fasta_file, config)
+    sub_am = AlignmentModel(fasta_file, context.batch_gen, subset, 32, model)
     subalignment_strings = sub_am.to_string(0, add_block_sep=False)
     ref_subalignment = ["FE...LIK...", "FE...LIKhac", "FEahcLIK..."]
     for s, r in zip(subalignment_strings, ref_subalignment):
@@ -77,7 +67,7 @@ def test_alignment_egf() -> None:
         config.training.epochs = [5, 1, 5]
         config.training.max_iterations = 2
         config.input_output.subset_ids = seq_ids
-        config.input_output.verbose = False
+        config.input_output.verbose = True
         config.training.length_init = [20]
         am = align(data, config)
         # some friendly thresholds to check if the alignment makes sense
