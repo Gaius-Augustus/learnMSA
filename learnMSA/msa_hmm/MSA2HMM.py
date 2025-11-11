@@ -322,6 +322,10 @@ class PHMMValueSet:
 
         self.start += flank_start
 
+        ## add a small number to the out transitions of the last delete state
+        ## to avoid zero rows
+        self.transitions[2*L-1 + (L-1), :] += 1e-8
+
         return self
 
     def normalize(self, log_zero_value=-1e8) -> "PHMMValueSet":

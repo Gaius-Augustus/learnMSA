@@ -1,5 +1,6 @@
 import os
 from dataclasses import dataclass
+from typing import Sequence
 
 import numpy as np
 import tensorflow as tf
@@ -8,8 +9,7 @@ from tensorflow.keras.initializers import Initializer
 import learnMSA.msa_hmm.DirichletMixture as dm
 from learnMSA.msa_hmm.MSA2HMM import PHMMTransitionIndexSet, PHMMValueSet
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
-from learnMSA.msa_hmm.Utility import (LG_paml, deserialize, inverse_softplus,
-                                      parse_paml)
+from learnMSA.msa_hmm.Utility import LG_paml, inverse_softplus, parse_paml
 
 
 class EmissionInitializer(Initializer):
@@ -205,10 +205,10 @@ def make_default_transition_init(MM=1,
 class PHMMInitializerSet:
     """ Initializer collection for a pHMM.
     """
-    match_emissions : list[Initializer]
-    insert_emissions : list[Initializer]
-    transitions : list[dict[str, Initializer]]
-    start : list[Initializer]
+    match_emissions : Sequence[Initializer]
+    insert_emissions : Sequence[Initializer]
+    transitions : Sequence[dict[str, Initializer]]
+    start : Sequence[Initializer]
 
 
 def make_initializers_from(

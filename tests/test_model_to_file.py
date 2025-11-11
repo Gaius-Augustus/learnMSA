@@ -53,7 +53,7 @@ def test_model_to_file() -> None:
 
     data = SequenceDataset("tests/data/simple.fa")
 
-    context = LearnMSAContext(data, config)
+    context = LearnMSAContext(config, data)
     context.transitioner = ProfileHMMTransitioner(custom_transition_init, custom_flank_init)
     context.emitter = ProfileHMMEmitter(custom_emission_init, custom_insertion_init)
     encoder_initializer = Initializers.make_default_anc_probs_init(1)

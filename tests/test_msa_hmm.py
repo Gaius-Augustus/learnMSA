@@ -8,8 +8,6 @@ from learnMSA import Configuration
 from learnMSA.msa_hmm import (Emitter, Initializers, MsaHmmCell,
                               MsaHmmLayer, Transitioner, Viterbi, training)
 from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
-from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
-from learnMSA.msa_hmm.legacy import make_legacy_config
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 from tests import ref
 
@@ -23,11 +21,10 @@ def string_to_one_hot(s : str) -> tf.Tensor:
 def get_all_seqs(data: SequenceDataset, num_models: int) -> np.ndarray:
     """Get all sequences from a dataset."""
     indices = np.arange(data.num_seq)
-    batch_generator = training.DefaultBatchGenerator()
+    batch_generator = training.BatchGenerator()
     config = Configuration()
     config.training.num_model = num_models
     config.training.no_sequence_weights = True
-    config = make_legacy_config(config, LearnMSAContext(data, config))
     batch_generator.configure(data, config)
     ds = training.make_dataset(indices,
                                batch_generator,
@@ -175,19 +172,18 @@ def test_viterbi() -> None:
         assert_vec(state_seqs_max_lik, ref_seqs)
         # This produces a result identical to above, but runs viterbi batch wise
         # to avoid memory overflow
-        batch_generator = training.DefaultBatchGenerator(return_only_sequences=True)
+        batch_generator = training.BatchGenerator()
         config = Configuration()
         config.training.num_model = 2
         config.training.no_sequence_weights = True
-        config = make_legacy_config(config, LearnMSAContext(data, config))
         batch_generator.configure(data, config)
         state_seqs_max_lik2 = Viterbi.get_state_seqs_max_lik(
             data,
             batch_generator,
             np.arange(data.num_seq),
             batch_size=2,
+            hmm_cell=hmm_cell,
             model_ids=[0, 1],
-            hmm_cell=hmm_cell
         )
         assert_vec(state_seqs_max_lik2, ref_seqs)
         indices = np.array([0, 4, 5])
@@ -196,8 +192,8 @@ def test_viterbi() -> None:
             batch_generator,
             indices,  # try a subset
             batch_size=2,
+            hmm_cell=hmm_cell,
             model_ids=[0, 1],
-            hmm_cell=hmm_cell
         )
         max_len = np.amax(data.seq_lens[indices]) + 1
 
@@ -575,8 +571,7 @@ def test_posterior_state_probabilities() -> None:
         config = Configuration()
         config.training.num_model = 1
         config.training.no_sequence_weights = True
-        config = make_legacy_config(config, LearnMSAContext(data, config))
-        batch_gen = training.DefaultBatchGenerator()
+        batch_gen = training.BatchGenerator()
         batch_gen.configure(data, config)
         indices = tf.range(data.num_seq, dtype=tf.int64)
         ds = training.make_dataset(indices, batch_gen, batch_size=data.num_seq, shuffle=False)

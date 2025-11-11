@@ -6,7 +6,6 @@ import numpy as np
 import tensorflow as tf
 
 import learnMSA.msa_hmm.Initializers as initializers
-import learnMSA.msa_hmm.training as train
 from learnMSA.msa_hmm.model import LearnMSAModel
 import learnMSA.msa_hmm.training_util as training_util
 from learnMSA import Configuration
@@ -36,7 +35,7 @@ def align(data : SequenceDataset, config : Configuration) -> AlignmentModel:
         config.input_output.input_file = data.filepath
 
     # Create a context that automatically sets up data-dependent parameters
-    context = LearnMSAContext(data, config)
+    context = LearnMSAContext(config, data)
 
     if config.input_output.verbose:
         print(
@@ -57,9 +56,9 @@ def align(data : SequenceDataset, config : Configuration) -> AlignmentModel:
         try:
             t_a = time.time()
             if config.visualization.logo_gif:
-                am = _fit_and_align_with_logo_gif(context)
+                am = _fit_and_align_with_logo_gif(data, context)
             else:
-                am = _fit_and_align(context)
+                am = _fit_and_align(data, context)
             if config.input_output.verbose:
                 print("Time for alignment:", "%.4f" % (time.time()-t_a))
         except tf.errors.ResourceExhaustedError as e:
@@ -133,8 +132,11 @@ Args:
 Returns:
     An AlignmentModel object.
 """
-def _fit_and_align(context : LearnMSAContext) -> AlignmentModel:
-    data, config = context.data, context.config
+def _fit_and_align(
+    data: SequenceDataset,
+    context : LearnMSAContext
+) -> AlignmentModel:
+    config = context.config
     if config.input_output.verbose:
         _dataset_messages(data)
 
@@ -188,9 +190,7 @@ def _fit_and_align(context : LearnMSAContext) -> AlignmentModel:
     # architecture with surgery
     for i in range(config.training.max_iterations):
         if callable(context.batch_size):
-            batch_size = context.batch_size(
-                context.model_lengths, min(data.max_len, config.training.crop) # type: ignore
-            )
+            batch_size = context.batch_size(data)
         else:
             batch_size = context.batch_size
         #set the batch size to something smaller than the dataset size even though
@@ -212,7 +212,7 @@ def _fit_and_align(context : LearnMSAContext) -> AlignmentModel:
         model.build(batch_size)
 
         # Run training
-        model.fit(train_indices, i, batch_size)
+        model.fit(data, train_indices, i, batch_size)
 
         if config.input_output.verbose:
             print("Creating alignment model...")
@@ -247,7 +247,11 @@ def _fit_and_align(context : LearnMSAContext) -> AlignmentModel:
                     "Used the encoder_weight_extractor callback to pass "\
                     "the encoder parameters to the next iteration."
                 )
-            context.encoder_initializer = context.encoder_weight_extractor(am.encoder_model)
+            raise NotImplementedError(
+                "Encoder re-initialization after surgery is currently not "\
+                "supported."
+            )
+            #context.encoder_initializer = context.encoder_weight_extractor(am.encoder_model)
         elif config.input_output.verbose:
             print("Re-initialized the encoder parameters.")
         if config.input_output.verbose and surgery_converged:
@@ -256,9 +260,12 @@ def _fit_and_align(context : LearnMSAContext) -> AlignmentModel:
     return am
 
 
-def _fit_and_align_with_logo_gif(context : LearnMSAContext) -> AlignmentModel:
+def _fit_and_align_with_logo_gif(
+    data: SequenceDataset,
+    context : LearnMSAContext
+) -> AlignmentModel:
     from learnMSA.msa_hmm.Visualize import LogoPlotterCallback, make_logo_gif
-    data, config = context.data, context.config
+    config = context.config
     indices = np.arange(data.num_seq)
     logo_dir = config.visualization.logo_gif.parent if config.visualization.logo_gif else "", # type: ignore
     if callable(context.batch_size):
@@ -279,7 +286,7 @@ def _fit_and_align_with_logo_gif(context : LearnMSAContext) -> AlignmentModel:
     model.compile()
 
     # Run training
-    model.fit(indices, 0, batch_size, [logo_plotter_callback])
+    model.fit(data, indices, 0, batch_size, [logo_plotter_callback])
 
     make_logo_gif(logo_plotter_callback.frame_dir, logo_dir / "training.gif") # type: ignore
     am = AlignmentModel(data, context.batch_gen, indices, batch_size=batch_size, model=model)
@@ -298,13 +305,13 @@ def get_model_scores(am, model_criterion, verbose):
     return selection_criteria[model_criterion](am, verbose)
 
 
-def select_model(am, model_criterion, verbose):
+def select_model(am, model_criterion, verbose) -> int:
     scores = get_model_scores(am, model_criterion, verbose)
     best = np.argmax(scores)
     if verbose:
         print("Selection criterion:", model_criterion)
         print("Best model: ", best, "(0-based)")
-    return best
+    return int(best)
 
 
 def select_model_posterior(am, verbose=False):

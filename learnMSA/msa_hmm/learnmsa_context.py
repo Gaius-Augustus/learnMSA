@@ -1,6 +1,5 @@
 import os
 import warnings
-from functools import partial
 from pathlib import Path
 from typing import Any, Callable
 
@@ -9,9 +8,9 @@ import tensorflow as tf
 
 import learnMSA.msa_hmm.Emitter as emit
 import learnMSA.msa_hmm.Initializers as initializers
+import learnMSA.msa_hmm.training as train
 import learnMSA.msa_hmm.training_util as training_util
 import learnMSA.msa_hmm.Transitioner as trans
-import learnMSA.msa_hmm.training as train
 import learnMSA.protein_language_models.Common as Common
 import learnMSA.protein_language_models.EmbeddingBatchGenerator as EmbeddingBatchGenerator
 from learnMSA import Configuration
@@ -28,11 +27,18 @@ from .SequenceDataset import AlignedDataset, SequenceDataset
 
 # Type alias for model length callback
 ModelLengthsCallback = Callable[[SequenceDataset], np.ndarray]
+BatchSizeCallback = Callable[[SequenceDataset], int]
 
 
 class LearnMSAContext:
     """
-    Sets up data-dependent context for learning a profile HMM for alignment.
+    Sets up data-dependent context for learning a profile HMM.
+
+    Either a SequenceDataset must be provided or the number of sequences along
+    with a configuration that includes initial lengths must be specified.
+    A context that is created with a SequenceDataset will be independent of
+    the dataset after initialization. In particular, the data is not a
+    dependency when serializing the context.
 
     Attributes:
         data: SequenceDataset containing the sequences to align.
@@ -41,21 +47,63 @@ class LearnMSAContext:
             and returns an array of initial model lengths.
     """
 
+    config: Configuration
+    num_seq: int
     model_lengths_cb: ModelLengthsCallback
     model_lengths: np.ndarray
+    scoring_model_config: Common.ScoringModelConfig #legacy, will be removed in future
+    initializers: PHMMInitializerSet
+    emitter: list[tf.keras.Layer]
+    transitioner: tf.keras.Layer
+    batch_size: int | Callable[[SequenceDataset], int]
+    batch_gen: train.BatchGenerator
+    sequence_weights: np.ndarray | None
+    clusters: Any
+    subset: np.ndarray
 
     """
     Is created from a Configuration and a SequenceDataset to hold all relevant
     context for training a profile model and decoding an alignment.
     """
-    def __init__(self, data: SequenceDataset, config: Configuration) -> None:
+    def __init__(
+        self,
+        config: Configuration,
+        data: SequenceDataset | None = None,
+        num_seq: int | None = None,
+        sequence_weights: np.ndarray | None = None,
+        clusters: Any = None,
+    ) -> None:
         """
         Args:
-            dataset: SequenceDataset containing the sequences to align.
             config: Immutable configuration object with all settings.
+            dataset: SequenceDataset containing the sequences to align. Must be
+                provided when the remaining parameters are not provided.
+            num_seq: Number of sequences for which this context is created.
+                Must only be provided when data is None.
+            sequence_weights: Array of sequence weights that can optionally be
+                provided when data is None. If not provided, sequence weights
+                will be 1.
+            clusters: Cluster array with the same length as num_seq. Can be
+                provided when data is None.
         """
-        self.data = data
         self.config = config
+
+        if data is None:
+            assert num_seq is not None, (
+                "When no data is provided, num_seq must be specified."
+            )
+            assert config.training.length_init is not None, (
+                "When no data is provided, length_init must be specified in "\
+                "the configuration."
+            )
+            self.num_seq = num_seq
+        else:
+            if num_seq is not None:
+                warnings.warn(
+                    "num_seq is provided but data is not None. "\
+                    "It will be ignored."
+                )
+            self.num_seq = data.num_seq
 
         # Needed for legacy reasons, may cleanup in the future
         self.scoring_model_config = self._get_scoring_model_config()
@@ -90,7 +138,24 @@ class LearnMSAContext:
 
         self.model_lengths_cb = model_len_cb
 
-        self._setup_batch_size_cb()
+        # Initialize the model lengths
+        if data is not None:
+            self.model_lengths = self.model_lengths_cb(data)
+        else:
+            self.model_lengths = np.array(
+                self.config.training.length_init, dtype=np.int32
+            )
+
+        if data is not None:
+            if self.config.training.auto_crop:
+                # Setup cropping length if auto_crop is enabled based on data
+                # Has to be done before the batch size setup
+                self.config.training.crop = int(np.ceil(
+                    self.config.training.auto_crop_scale * np.mean(data.seq_lens)
+                ))
+        assert isinstance(self.config.training.crop, int)
+
+        self.batch_size = self._setup_batch_size_cb()
 
         if self.config.language_model.use_language_model:
             self._setup_language_model_specific_settings()
@@ -124,27 +189,101 @@ class LearnMSAContext:
             self.config.training.max_iterations = 1
             self.config.training.epochs = [0]*3
 
-        # Setup cropping length if auto_crop is enabled based on data
-        self.config.training.crop = int(
-            np.ceil(self.config.training.auto_crop_scale * np.mean(self.data.seq_lens))
-        )
-
         self.batch_gen = self._get_batch_generator()
-        self.sequence_weights, self.clusters = self._get_clustering()
+        if data is not None:
+            self.sequence_weights, self.clusters = self._get_clustering(data)
+        else:
+            if sequence_weights is None:
+                sequence_weights = np.ones((self.num_seq,), dtype=np.float32)
+            else:
+                assert len(sequence_weights) == self.num_seq, (
+                    "Length of sequence_weights does not match num_seq."
+                )
+            if clusters is not None:
+                assert len(clusters) == self.num_seq, (
+                    "Length of clusters does not match num_seq."
+                )
+            self.sequence_weights = sequence_weights
+            self.clusters = clusters
 
         # If required, find indices of sequences for a subset
-        if config.input_output.subset_ids:
+        if data is not None and config.input_output.subset_ids:
             self.subset = np.array([
                 data.seq_ids.index(sid) for sid in config.input_output.subset_ids
             ])
         else:
-            self.subset = np.arange(data.num_seq)
-
-        # Initialize the model lengths
-        self.model_lengths = self.model_lengths_cb(data)
+            self.subset = np.arange(self.num_seq)
 
         # todo: Workaround
-        self.effective_num_seq = data.num_seq
+        self.effective_num_seq = self.num_seq
+
+    def get_config(self) -> dict:
+        """
+        Returns a serializable configuration dictionary for this context.
+
+        Note: Callbacks (model_lengths_cb, batch_size if callable) cannot be
+        serialized directly. When deserializing, these will be reconstructed
+        based on the configuration settings.
+        """
+        config_dict = {
+            "config": self.config.model_dump(),
+            "num_seq": int(self.num_seq),
+            "model_lengths": self.model_lengths.tolist(),
+            "sequence_weights": self.sequence_weights.tolist() if self.sequence_weights is not None else None,
+            "clusters": self.clusters.tolist() if isinstance(self.clusters, np.ndarray) else self.clusters,
+            "subset": self.subset.tolist(),
+            "effective_num_seq": int(self.effective_num_seq),
+            # Store whether batch_size is callable or int
+            "batch_size_is_callable": callable(self.batch_size),
+            "batch_size_value": None if callable(self.batch_size) else int(self.batch_size),
+        }
+        return config_dict
+
+    @classmethod
+    def from_config(cls, config_dict: dict) -> 'LearnMSAContext':
+        """
+        Reconstructs a LearnMSAContext from a configuration dictionary.
+
+        Args:
+            config_dict: Dictionary returned by get_config()
+
+        Returns:
+            A new LearnMSAContext instance with the same configuration.
+        """
+        # Reconstruct the Configuration object
+        config = Configuration(**config_dict["config"])
+
+        # Set the model lengths
+        config.training.length_init = config_dict["model_lengths"]
+
+        # Convert lists back to numpy arrays
+        if config_dict["sequence_weights"] is not None:
+            sequence_weights = np.array(
+                config_dict["sequence_weights"], dtype=np.float32
+            )
+        else:
+            sequence_weights = None
+        clusters = config_dict["clusters"]
+        if clusters is not None and isinstance(clusters, list):
+            clusters = np.array(clusters)
+
+        # Create the context (this will reconstruct callbacks)
+        context = cls(
+            config=config,
+            num_seq=config_dict["num_seq"],
+            sequence_weights=sequence_weights,
+            clusters=clusters,
+        )
+
+        # Restore stored values that might differ from defaults
+        context.subset = np.array(config_dict["subset"], dtype=np.int32)
+        context.effective_num_seq = config_dict["effective_num_seq"]
+
+        # Restore batch_size if it was a fixed integer
+        if not config_dict["batch_size_is_callable"]:
+            context.batch_size = config_dict["batch_size_value"]
+
+        return context
 
     def _setup_initializers(self) -> PHMMInitializerSet:
         num_model = self.config.training.num_model
@@ -305,38 +444,43 @@ class LearnMSAContext:
         return [emitter], transitioner
 
 
-    def _setup_batch_size_cb(self) -> None:
+    def _setup_batch_size_cb(self) -> BatchSizeCallback | int:
         """ Check if a custom batch size or tokens per batch is set.
         If not, setup a callback to automatically scale the batch size based
         on sequence lengths and available GPU memory.
         """
-
         if self.config.training.tokens_per_batch > 0:
-            self.batch_size = partial(
-                training_util.tokens_per_batch_to_batch_size,
-                tokens_per_batch=self.config.training.tokens_per_batch
-            )
+            def _batch_size_cb_with_tokens(data: SequenceDataset):
+                return training_util.tokens_per_batch_to_batch_size(
+                    self.model_lengths.tolist(),
+                    min(data.max_len, int(self.config.training.crop)),
+                    tokens_per_batch=self.config.training.tokens_per_batch
+                )
+            return _batch_size_cb_with_tokens
         elif self.config.training.batch_size > 0:
-            self.batch_size = self.config.training.batch_size
+            return self.config.training.batch_size
 
         use_language_model = self.config.language_model.use_language_model
-        small_gpu = False
-        if len([x.name for x in tf.config.list_logical_devices() if x.device_type == 'GPU']) > 0:
-            #if there is at least one GPU, check its memory
-            gpu_mem = get_gpu_memory()
-            small_gpu = gpu_mem[0] < 32000 if len(gpu_mem) > 0 else False
+        #if there is at least one GPU, check its memory
+        gpu_mem = get_gpu_memory()
+        small_gpu = gpu_mem[0] < 32000 if len(gpu_mem) > 0 else False
         if use_language_model:
-            self.batch_size = partial(
-                training_util.get_adaptive_batch_size_with_language_model,
-                embedding_dim=self.scoring_model_config.dim,
-                small_gpu=small_gpu,
-            )
+            def _batch_size_cb_with_plm(data: SequenceDataset):
+                return training_util.get_adaptive_batch_size_with_language_model(
+                    self.model_lengths.tolist(),
+                    min(data.max_len, int(self.config.training.crop)),
+                    embedding_dim=self.scoring_model_config.dim,
+                    small_gpu=small_gpu,
+                )
+            return _batch_size_cb_with_plm
         else:
-            self.batch_size = partial(
-                training_util.get_adaptive_batch_size,
-                small_gpu=small_gpu,
-            )
-
+            def _batch_size_cb(data: SequenceDataset):
+                return training_util.get_adaptive_batch_size(
+                    self.model_lengths.tolist(),
+                    min(data.max_len, int(self.config.training.crop)),
+                    small_gpu=small_gpu,
+                )
+            return _batch_size_cb
 
     def _setup_visualization(self) -> None:
         """Set up visualization file paths based on configuration."""
@@ -400,7 +544,9 @@ class LearnMSAContext:
         return batch_gen
 
 
-    def _get_clustering(self) -> tuple[np.ndarray | None, Any]:
+    def _get_clustering(
+        self, data: SequenceDataset
+    ) -> tuple[np.ndarray | None, Any]:
         from ..msa_hmm import SequenceDataset
         if not self.config.training.no_sequence_weights:
             os.makedirs(self.config.input_output.work_dir, exist_ok=True)
@@ -412,7 +558,7 @@ class LearnMSAContext:
                         self.config.input_output.work_dir,
                         "temp_for_clustering.fasta"
                     )
-                    self.data.write(cluster_file, "fasta")
+                    data.write(cluster_file, "fasta")
                 elif self.config.input_output.input_format == "fasta":
                     # When the input file is fasta: all good
                     cluster_file = self.config.input_output.input_file

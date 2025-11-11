@@ -146,4 +146,4 @@ def tokens_per_batch_to_batch_size(
     _model_length = max(model_lengths) if len(model_lengths) > 0 else 0  # unused
     if max_seq_len < 1:
         return 1
-    return max(1, tokens_per_batch // max_seq_len)
+    return int(max(1, tokens_per_batch // max_seq_len))

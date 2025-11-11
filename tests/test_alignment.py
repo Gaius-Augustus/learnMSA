@@ -21,12 +21,12 @@ def string_to_one_hot(s : str) -> tf.Tensor:
 def test_subalignment() -> None:
     # Load data
     filename = os.path.dirname(__file__)+"/../tests/data/felix.fa"
-    fasta_file = SequenceDataset(filename)
+    data = SequenceDataset(filename)
     config = Configuration()
     config.training.num_model = 1
     config.training.no_sequence_weights = True
     config.training.length_init = [5]
-    context = LearnMSAContext(fasta_file, config)
+    context = LearnMSAContext(config, data)
     emission_init = string_to_one_hot("FELIK").numpy()*20
     insert_init = np.squeeze(string_to_one_hot("A") + string_to_one_hot("H") + string_to_one_hot("C"))*20
     context.emitter = [Emitter.ProfileHMMEmitter(
@@ -46,8 +46,8 @@ def test_subalignment() -> None:
     # subalignment
     subset = np.array([0, 2, 5])
     # create alignment after building model
-    context.batch_gen.configure(fasta_file, config)
-    sub_am = AlignmentModel(fasta_file, context.batch_gen, subset, 32, model)
+    context.batch_gen.configure(data, config)
+    sub_am = AlignmentModel(data, context.batch_gen, subset, 32, model)
     subalignment_strings = sub_am.to_string(0, add_block_sep=False)
     ref_subalignment = ["FE...LIK...", "FE...LIKhac", "FEahcLIK..."]
     for s, r in zip(subalignment_strings, ref_subalignment):
@@ -67,7 +67,7 @@ def test_alignment_egf() -> None:
         config.training.epochs = [5, 1, 5]
         config.training.max_iterations = 2
         config.input_output.subset_ids = seq_ids
-        config.input_output.verbose = True
+        config.input_output.verbose = False
         config.training.length_init = [20]
         am = align(data, config)
         # some friendly thresholds to check if the alignment makes sense

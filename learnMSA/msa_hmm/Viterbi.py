@@ -344,6 +344,15 @@ def get_state_seqs_max_lik(data : SequenceDataset,
             encoded_seq = tf.gather(encoded_seq, model_ids, axis=0)
             viterbi_seq = viterbi(encoded_seq, hmm_cell, parallel_factor=parallel_factor, non_homogeneous_mask_func=non_homogeneous_mask_func)
             return viterbi_seq
+    else:
+        @tf.function(input_signature=[[
+            tf.TensorSpec((None, None, None), dtype=tf.uint8),
+            tf.TensorSpec((None, None), dtype=tf.int64)
+        ]]) #embeddings missing
+        def call_viterbi(inputs):
+            seq = tf.transpose(inputs[0], [1,0,2])
+            viterbi_seq = viterbi(seq, hmm_cell, parallel_factor=parallel_factor, non_homogeneous_mask_func=non_homogeneous_mask_func)
+            return viterbi_seq
     
     @tf.function(input_signature=(tf.TensorSpec(shape=[None, hmm_cell.num_models, None], dtype=tf.uint8),))
     def call_viterbi_single(inputs):

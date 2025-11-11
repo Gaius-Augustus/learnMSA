@@ -4,29 +4,44 @@ from typing import override
 import numpy as np
 import tensorflow as tf
 
+import learnMSA.msa_hmm.Viterbi as viterbi
 from learnMSA.msa_hmm.AncProbsLayer import AncProbsLayer
 from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
 from learnMSA.msa_hmm.MsaHmmCell import MsaHmmCell
 from learnMSA.msa_hmm.MsaHmmLayer import MsaHmmLayer
-from learnMSA.msa_hmm.training import make_dataset
-import learnMSA.msa_hmm.Viterbi as viterbi
 from learnMSA.msa_hmm.posterior import get_state_expectations
+from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
+from learnMSA.msa_hmm.training import make_dataset
 
 
 class LearnMSAModel(tf.keras.Model):
     """
     Main LearnMSA model for training and decoding.
     """
+    def __new__(cls, *args, **kwargs) -> "LearnMSAModel":
+        instance = super().__new__(cls)
+        return instance # type: ignore[return-value]
 
-    def __init__(self, context : LearnMSAContext) -> None:
+    def __init__(self, context: LearnMSAContext | None = None, **kwargs) -> None:
         """
         Initialize the LearnMSA model.
 
         Args:
-            context (LearnMSAContext)
+            context (LearnMSAContext): The context containing model configuration.
+                Can be None only during deserialization.
+            **kwargs: Additional keyword arguments for the base Model class
+                (e.g., trainable, dtype, name). These are used during deserialization.
         """
-        super().__init__()
+        # Filter out base Model kwargs before calling super().__init__()
+        super().__init__(**kwargs)
 
+        # If context is None, we're in deserialization mode
+        # The model structure will be restored from the saved file
+        if context is None:
+            self._in_deserialization = True
+            return
+
+        self._in_deserialization = False
         self.context = context
         train_cfg = context.config.training
 
@@ -40,7 +55,7 @@ class LearnMSAModel(tf.keras.Model):
                 matrix_rate_init = None
             self.anc_probs_layer = AncProbsLayer(
                 train_cfg.num_model,
-                context.data.num_seq,
+                context.num_seq,
                 train_cfg.num_rate_matrices,
                 equilibrium_init=context.encoder_initializer[2],
                 rate_init=context.encoder_initializer[0],
@@ -173,6 +188,7 @@ class LearnMSAModel(tf.keras.Model):
     @override
     def fit(  # type: ignore[override]
         self,
+        data: SequenceDataset,
         indices: np.ndarray,
         iteration: int,
         batch_size: int,
@@ -182,6 +198,7 @@ class LearnMSAModel(tf.keras.Model):
         Fit the LearnMSA model on the specified sequences.
 
         Args:
+            data: SequenceDataset containing the sequences to train on
             indices: Array of sequence indices to train on
             iteration: Current iteration number in the training loop
             batch_size: Number of sequences per batch
@@ -194,7 +211,7 @@ class LearnMSAModel(tf.keras.Model):
         tf.keras.backend.clear_session() #frees occupied memory
         tf.get_logger().setLevel('ERROR')
 
-        self.context.batch_gen.configure(self.context.data, self.context.config)
+        self.context.batch_gen.configure(data, self.context.config)
         if self.context.config.input_output.verbose:
             print(
                 "Fitting models of lengths",
@@ -208,9 +225,9 @@ class LearnMSAModel(tf.keras.Model):
                 print("Using sequence weights ", self.context.sequence_weights, ".")
             else:
                 print("Don't use sequence weights.")
-            if self.context.batch_gen.crop_long_seqs < math.inf:
+            if int(self.context.batch_gen.crop_long_seqs) < math.inf:
                 num_cropped = np.sum(
-                    self.context.data.seq_lens[indices] >\
+                    data.seq_lens[indices] >\
                         self.context.batch_gen.crop_long_seqs
                     )
                 if num_cropped > 0:
@@ -273,6 +290,7 @@ class LearnMSAModel(tf.keras.Model):
 
     def decode(
         self,
+        data: SequenceDataset,
         indices: np.ndarray,
         batch_size: int,
         models: list[int],
@@ -289,7 +307,7 @@ class LearnMSAModel(tf.keras.Model):
         )
         self.encode_only = True
         viterbi_seqs =  viterbi.get_state_seqs_max_lik(
-            self.context.data,
+            data,
             self.context.batch_gen,
             indices,
             batch_size,
@@ -303,12 +321,13 @@ class LearnMSAModel(tf.keras.Model):
 
     def posterior(
         self,
+        data: SequenceDataset,
         indices: np.ndarray,
         batch_size: int,
     ) -> np.ndarray:
         self.encode_only = True
         expected_states = get_state_expectations(
-            self.context.data,
+            data,
             self.context.batch_gen,
             indices,
             batch_size,
@@ -363,6 +382,50 @@ class LearnMSAModel(tf.keras.Model):
         self.loglik_tracker.reset_state()
         self.prior_tracker.reset_state()
         self.aux_loss_tracker.reset_state()
+
+    def get_config(self):
+        """
+        Returns the config of the model.
+
+        A model config is a Python dictionary (serializable) containing the
+        configuration of the model. The same config can be used to reinstantiate
+        the model via `from_config()`.
+        """
+        # Get the base class config which includes 'trainable', 'dtype', etc.
+        base_config = super().get_config()
+        # We cannot serialize the context object, so we only include
+        # a marker that indicates this model needs special handling
+        base_config['_needs_context'] = True
+        return base_config
+
+    @classmethod
+    def from_config(cls, config, custom_objects=None):
+        """
+        Creates a model from its config.
+
+        This method is the reverse of `get_config`, capable of instantiating the
+        same model from the config dictionary.
+
+        Note: Since LearnMSAModel requires a LearnMSAContext object which cannot
+        be serialized, this method creates a placeholder instance during
+        deserialization. The actual model structure and weights are restored by
+        Keras from the saved file.
+
+        Args:
+            config: A Python dictionary, typically the output of get_config.
+            custom_objects: Optional dictionary mapping names to custom classes
+                          or functions.
+
+        Returns:
+            A LearnMSAModel instance (in deserialization mode).
+        """
+        # Remove our custom marker
+        config_copy = config.copy()
+        config_copy.pop('_needs_context', None)
+
+        # Create an instance with context=None to signal deserialization mode
+        # Keras will restore the model structure and weights from the saved file
+        return cls(context=None, **config_copy)
 
 
 class PermuteSeqs(tf.keras.layers.Layer):

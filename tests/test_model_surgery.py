@@ -35,7 +35,7 @@ def make_test_alignment(data: SequenceDataset) -> AlignmentModel:
     config.training.num_model = 1
     config.training.no_sequence_weights = True
     config.training.length_init = [5]
-    context = LearnMSAContext(data, config)
+    context = LearnMSAContext(config, data)
     context.effective_num_seq = 10
     emission_init = string_to_one_hot("FELIC").numpy() * 10
     insert_init = np.squeeze(

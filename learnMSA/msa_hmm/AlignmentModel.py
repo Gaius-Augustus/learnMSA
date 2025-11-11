@@ -8,6 +8,7 @@ import learnMSA.msa_hmm.training as train
 import learnMSA.msa_hmm.Priors as priors
 import learnMSA.msa_hmm.Transitioner as trans
 import learnMSA.msa_hmm.Emitter as emit
+from learnMSA.msa_hmm.model import LearnMSAModel
 import json
 import shutil
 from packaging import version
@@ -16,6 +17,7 @@ from pathlib import Path
 # utility class used in AlignmentModel storing useful information on a
 # specific alignment
 class AlignmentMetaData():
+
     def __init__(
         self, 
         core_blocks, 
@@ -57,8 +59,8 @@ class AlignmentMetaData():
             np.sum(self.unannotated_segment_lens_total) +
             self.right_flank_len_total
         )
-        
-        
+
+
 class AlignedInsertions():
     def __init__(self, 
                  aligned_insertions = None,
@@ -203,22 +205,14 @@ class AlignedInsertions():
 
 
 class AlignmentModel():
-    """ Decodes alignments from a number of models, stores them in a memory 
-        friendly representation and generates table-form (memory unfriendly) 
-        alignments on demand (batch-wise mode possible).
-    Args:
-        data: The dataset of sequences.
-        batch_generator: An already configured batch generator.
-        indices: (A subset of) The sequence indices from the dataset to align 
-            (1D).
-        batch_size: Controls memory consumption of viterbi.
-        model: A learnMSA model which internally might represent multiple 
-            pHMM models.
-        gap_symbol: Character used to denote missing match positions.
-        gap_symbol_insertions: Character used to denote insertions in other 
-            sequences.
-        A2M: DEPRECATED. Use format="a2m" or format="fasta" in to_file() method
     """
+    Decodes alignments from a number of models, stores them in a memory
+    friendly representation and generates table-form (memory unfriendly)
+    alignments on demand (batch-wise mode possible).
+    """
+
+    best_model: int
+
     def __init__(self, 
                  data : SequenceDataset, 
                  batch_generator,
@@ -228,6 +222,20 @@ class AlignmentModel():
                  gap_symbol="-",
                  gap_symbol_insertions=".",
                  A2M=None):
+        """
+        Args:
+            data: The dataset of sequences.
+            batch_generator: An already configured batch generator.
+            indices: (A subset of) The sequence indices from the dataset to align 
+                (1D).
+            batch_size: Controls memory consumption of viterbi.
+            model: A learnMSA model which internally might represent multiple 
+                pHMM models.
+            gap_symbol: Character used to denote missing match positions.
+            gap_symbol_insertions: Character used to denote insertions in other 
+                sequences.
+            A2M: DEPRECATED. Use format="a2m" or format="fasta" in to_file() method
+        """
         self.data = data
         self.batch_generator = batch_generator
         self.indices = indices
@@ -256,13 +264,14 @@ class AlignmentModel():
         assert len(models), "Not implemented for multiple models."
 
         state_seqs_max_lik = self.model.decode(
-            self.indices, self.batch_size, models
+            self.data, self.indices, self.batch_size, models
         )
         state_seqs_max_lik = self._clean_up_viterbi_seqs(
             state_seqs_max_lik, models
         )
-        for i,l,max_lik_seqs in zip(models, self.model.context.model_lengths, state_seqs_max_lik):
-            decoded_data = AlignmentModel.decode(l,max_lik_seqs)
+        for i,max_lik_seqs in zip(models, state_seqs_max_lik):
+            model_len = self.model.context.model_lengths[i]
+            decoded_data = AlignmentModel.decode(model_len, max_lik_seqs)
             self.metadata[i] = AlignmentMetaData(*decoded_data)
 
     def _clean_up_viterbi_seqs(self, state_seqs_max_lik, models):
@@ -277,7 +286,11 @@ class AlignmentModel():
             # repeat Viterbi with a masking that prevents certain transitions
             # that can cause problems
             fixed_state_seqs = self.model.decode(
-                faulty_sequences, self.batch_size, models, non_homogeneous_mask_func
+                self.data,
+                faulty_sequences,
+                self.batch_size,
+                models,
+                non_homogeneous_mask_func,
             )
             if state_seqs_max_lik.shape[-1] < fixed_state_seqs.shape[-1]:
                 state_seqs_max_like = np.pad(
@@ -698,6 +711,7 @@ class AlignmentModel():
         model = tf.keras.models.load_model(
             filepath+".keras", 
             custom_objects={
+                "LearnMSAModel": LearnMSAModel,
                 "AncProbsLayer": anc_probs.AncProbsLayer, 
                 "MsaHmmLayer": msa_hmm_layer.MsaHmmLayer,
                 "MsaHmmCell": msa_hmm_cell.MsaHmmCell, 
@@ -717,19 +731,16 @@ class AlignmentModel():
         # todo: this is currently a bit limited because it creates a default
         # batch gen from a default config
         if custom_batch_gen is None:
-            batch_gen = train.DefaultBatchGenerator()
+            batch_gen = train.BatchGenerator()
         else:
             batch_gen = custom_batch_gen
         if custom_config is None:
             # temporary solution to get a legacy config on the fly
             from learnMSA import Configuration
-            from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
-            from learnMSA.msa_hmm.legacy import make_legacy_config
 
             config = Configuration()
             config.training.num_model = d["num_models"]
             config.training.no_sequence_weights = True
-            configuration = make_legacy_config(config, LearnMSAContext(data, config))
         else:
             configuration = custom_config
         batch_gen.configure(data, configuration)

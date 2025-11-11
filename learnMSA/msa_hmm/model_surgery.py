@@ -1,6 +1,8 @@
-from attr import dataclass
+from typing import Sequence
+
 import numpy as np
 import tensorflow as tf
+from attr import dataclass
 
 import learnMSA.msa_hmm.Initializers as initializers
 from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
@@ -19,7 +21,7 @@ def get_discard_or_expand_positions(am, del_t=0.5, ins_t=0.5):
         pos_discard: A list of arrays with match positions to discard.
     """
     # num_models x max_num_states
-    expected_state = am.model.posterior(am.indices, am.batch_size)
+    expected_state = am.model.posterior(am.data, am.indices, am.batch_size)
     pos_expand = []
     expansion_lens = []
     pos_discard = []
@@ -238,7 +240,7 @@ def do_model_surgery(
     am: AlignmentModel,
     surgery_del: float,
     surgery_ins: float,
-    emission_dummy: list[initializers.Initializer],
+    emission_dummy: Sequence[initializers.Initializer],
     transition_dummy: dict[str, initializers.Initializer],
     flank_init_dummy: initializers.Initializer,
     verbose: bool=False
@@ -297,6 +299,6 @@ def do_model_surgery(
     return ModelSurgeryResult(
         emitter=emitter,
         transitioner=transitioner,
-        model_lengths=model_lengths,
+        model_lengths=np.array(model_lengths, dtype=np.int32),
         surgery_converged=surgery_converged
     )

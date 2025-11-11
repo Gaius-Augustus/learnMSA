@@ -21,9 +21,9 @@ class BatchGenerator():
         self.configured = False
 
     def configure(
-            self,
-            data : SequenceDataset,
-            config: Configuration,
+        self,
+        data : SequenceDataset,
+        config: Configuration,
     ):
         self.data = data
         self.config = config

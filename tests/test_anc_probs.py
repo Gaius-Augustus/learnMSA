@@ -274,7 +274,7 @@ def test_encoder_model() -> None:
             config: Configuration = case["config"]
             config.training.length_init = [model_length]
             config.input_output.verbose = False
-            context = LearnMSAContext(data, config)
+            context = LearnMSAContext(config, data)
             context.encoder_initializer = case["encoder_initializer"]
             context.emitter = [Emitter.ProfileHMMEmitter(
                 emission_init=Initializers.ConstantInitializer(0.),
@@ -327,7 +327,7 @@ def test_transposed() -> None:
         config, Initializers.make_default_anc_probs_init(1), n
     )
 
-    context = LearnMSAContext(data, config)
+    context = LearnMSAContext(config, data)
 
     # Create MsaHmmLayer
     msa_hmm_cell = MsaHmmCell(
