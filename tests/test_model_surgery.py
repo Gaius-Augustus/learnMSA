@@ -70,7 +70,7 @@ def make_test_alignment(data: SequenceDataset) -> AlignmentModel:
     )
     model = LearnMSAModel(context)
     model.build()
-    context.batch_gen.configure(data, config)
+    context.batch_gen.configure(data, context)
     am = AlignmentModel(
         data,
         context.batch_gen,

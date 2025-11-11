@@ -1,13 +1,20 @@
-from functools import partial
-import os
 import gc
+import os
+from functools import partial
+from typing import TYPE_CHECKING
+
 import numpy as np
 import tensorflow as tf
-from learnMSA.msa_hmm.training import BatchGenerator
-from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
-from learnMSA.protein_language_models.BilinearSymmetric import make_scoring_model
+
 import learnMSA.protein_language_models.Common as Common
+from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
+from learnMSA.msa_hmm.training import BatchGenerator
+from learnMSA.protein_language_models.BilinearSymmetric import \
+    make_scoring_model
 from learnMSA.protein_language_models.EmbeddingCache import EmbeddingCache
+
+if TYPE_CHECKING:
+    from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
 
 
 class EmbeddingBatchGenerator(BatchGenerator):
@@ -39,8 +46,13 @@ class EmbeddingBatchGenerator(BatchGenerator):
         return self._call_lm_scoring_model(lm_inputs, language_model)
 
 
-    def configure(self, data : SequenceDataset, config, verbose=False):
-        super().configure(data, config)
+    def configure(
+        self,
+        data: SequenceDataset,
+        context: "LearnMSAContext",
+        verbose: bool=False
+    ) -> None:
+        super().configure(data, context)
 
         # nothing to do if embeddings are already computed
         if self.cache is not None and self.cache.is_filled():
@@ -48,10 +60,12 @@ class EmbeddingBatchGenerator(BatchGenerator):
 
         # load the language model and the scoring model
         # initialize the weights correctly and make sure they are not trainable
-        language_model, encoder = Common.get_language_model(self.scoring_model_config.lm_name,
-                                                            max_len = data.max_len+2,
-                                                            trainable=False,
-                                                            cache_dir=config["plm_cache_dir"])
+        language_model, encoder = Common.get_language_model(
+            self.scoring_model_config.lm_name,
+            max_len = data.max_len+2,
+            trainable=False,
+            cache_dir=self.config.language_model.plm_cache_dir
+        )
         self.scoring_model = make_scoring_model(self.scoring_model_config, dropout=0.0, trainable=False)
         scoring_model_path = Common.get_scoring_model_path(self.scoring_model_config)
         self.scoring_model.load_weights(os.path.dirname(__file__)+f"/../protein_language_models/"+scoring_model_path)
@@ -61,10 +75,10 @@ class EmbeddingBatchGenerator(BatchGenerator):
         if self.cache_embeddings:
             self.cache = EmbeddingCache(self.data.seq_lens, self.scoring_model_config.dim)
             compute_emb_func = partial(self._compute_reduced_embeddings, language_model=language_model, encoder=encoder)
-            if callable(config["batch_size"]):
-                batch_size_callback = (lambda L: max(1, config["batch_size"]([0], L)//2))
+            if callable(context.batch_size):
+                batch_size_callback = (lambda L: max(1, context.batch_size(data)//2))
             else:
-                batch_size_callback = (lambda L: max(1, config["batch_size"]//2))
+                batch_size_callback = (lambda L: max(1, context.batch_size//2))
             print("Computing all embeddings (this may take a while).")
             self.cache.fill_cache(compute_emb_func, batch_size_callback, verbose=verbose)
             # once we have cached the embeddings do a cleanup to erase the LM from memory

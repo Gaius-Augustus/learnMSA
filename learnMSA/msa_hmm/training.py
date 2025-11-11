@@ -1,10 +1,13 @@
 import math
+from typing import TYPE_CHECKING
 
 import numpy as np
 import tensorflow as tf
 
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
-from learnMSA import Configuration
+
+if TYPE_CHECKING:
+    from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
 
 
 class BatchGenerator():
@@ -23,12 +26,12 @@ class BatchGenerator():
     def configure(
         self,
         data : SequenceDataset,
-        config: Configuration,
+        context: "LearnMSAContext",
     ):
         self.data = data
-        self.config = config
-        self.num_models = config.training.num_model
-        self.crop_long_seqs = config.training.crop
+        self.config = context.config
+        self.num_models = self.config.training.num_model
+        self.crop_long_seqs = self.config.training.crop
         self.permutations = [np.arange(data.num_seq) for _ in range(self.num_models)]
         for p in self.permutations:
             np.random.shuffle(p)
@@ -36,7 +39,10 @@ class BatchGenerator():
 
     def __call__(self, indices, return_crop_boundaries=False):
         if not self.configured:
-            raise ValueError("A batch generator must be configured with the configure(data, config) method.")
+            raise ValueError(
+                "A batch generator must be configured with the "\
+                "configure(data, config) method."
+            )
         #use a different permutation of the sequences per trained model
         if self.shuffle:
             permutated_indices = np.stack([perm[indices] for perm in self.permutations], axis=1)

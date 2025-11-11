@@ -1,18 +1,22 @@
-import tensorflow as tf
-import numpy as np
-import learnMSA.msa_hmm.AncProbsLayer as anc_probs
-import learnMSA.msa_hmm.MsaHmmLayer as msa_hmm_layer
-import learnMSA.msa_hmm.MsaHmmCell as msa_hmm_cell
-from learnMSA.msa_hmm.SequenceDataset import SequenceDataset, AlignedDataset
-import learnMSA.msa_hmm.training as train
-import learnMSA.msa_hmm.Priors as priors
-import learnMSA.msa_hmm.Transitioner as trans
-import learnMSA.msa_hmm.Emitter as emit
-from learnMSA.msa_hmm.model import LearnMSAModel
 import json
 import shutil
-from packaging import version
 from pathlib import Path
+
+import numpy as np
+import tensorflow as tf
+from packaging import version
+
+import learnMSA.msa_hmm.AncProbsLayer as anc_probs
+import learnMSA.msa_hmm.Emitter as emit
+import learnMSA.msa_hmm.MsaHmmCell as msa_hmm_cell
+import learnMSA.msa_hmm.MsaHmmLayer as msa_hmm_layer
+import learnMSA.msa_hmm.Priors as priors
+import learnMSA.msa_hmm.training as train
+import learnMSA.msa_hmm.Transitioner as trans
+from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
+from learnMSA.msa_hmm.model import LearnMSAModel
+from learnMSA.msa_hmm.SequenceDataset import AlignedDataset, SequenceDataset
+
 
 # utility class used in AlignmentModel storing useful information on a
 # specific alignment
@@ -742,7 +746,7 @@ class AlignmentModel():
             config.training.no_sequence_weights = True
         else:
             config = custom_config
-        batch_gen.configure(data, config)
+        batch_gen.configure(data, LearnMSAContext(config, data))
         am = cls(
             data,
             batch_gen,

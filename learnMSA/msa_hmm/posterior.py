@@ -14,7 +14,9 @@ def get_state_expectations(
     batch_size,
     msa_hmm_layer,
     encoder,
-    reduce=True
+    reduce=True,
+    with_plm=False,
+    plm_dim=0
 ) -> tf.Tensor:
     """ Computes the expected number of occurences per model and state.
     Args:
@@ -26,6 +28,8 @@ def get_state_expectations(
         encoder: Encoder model that is applied to the sequences before Viterbi.
         reduce: If true (default), the posterior state probs are summed up over
         the dataset size. Otherwise the posteriors for each sequence are returned.
+        with_plm: If true, use protein language model embeddings.
+        plm_dim: Dimension of the protein language model embeddings.
     Returns:
         The expected number of occurences per model state. Shape (num_model, max_num_states)
     """
@@ -48,10 +52,18 @@ def get_state_expectations(
                             bucket_by_seq_length=True,
                             model_lengths=cell.length)
 
-    @tf.function(input_signature=[[
-        tf.TensorSpec((None, None, None), dtype=tf.uint8),
-        tf.TensorSpec((None, None), dtype=tf.int64)
-    ]]) #embeddings missing
+    if with_plm:
+        signature = [[
+            tf.TensorSpec((None, None, None), dtype=tf.uint8),
+            tf.TensorSpec((None, None), dtype=tf.int64),
+            tf.TensorSpec((None, None, None, plm_dim+1), dtype=cell.dtype)
+        ]]
+    else:
+        signature = [[
+            tf.TensorSpec((None, None, None), dtype=tf.uint8),
+            tf.TensorSpec((None, None), dtype=tf.int64)
+        ]]
+    @tf.function(input_signature=signature)
     def batch_posterior_state_probs(inputs):
         encoded_seq = encoder(inputs)
         posterior_probs = msa_hmm_layer.state_posterior_log_probs(encoded_seq)

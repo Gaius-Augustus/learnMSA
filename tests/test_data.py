@@ -4,6 +4,7 @@ import numpy as np
 
 from learnMSA import Configuration
 from learnMSA.msa_hmm import training
+from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 
 
@@ -14,7 +15,7 @@ def test_default_batch_gen() -> None:
         config = Configuration()
         config.training.num_model = 1
         config.training.no_sequence_weights = True
-        batch_gen.configure(data, config)
+        batch_gen.configure(data, LearnMSAContext(config, data))
         test_batches = [[0], [1], [4], [0, 2], [0, 1, 2, 3, 4], [2, 3, 4]]
         alphabet = np.array(list(SequenceDataset.alphabet))
         for ind in test_batches:

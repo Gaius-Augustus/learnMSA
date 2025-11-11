@@ -206,7 +206,7 @@ class LearnMSAModel(tf.keras.Model):
         tf.keras.backend.clear_session() #frees occupied memory
         tf.get_logger().setLevel('ERROR')
 
-        self.context.batch_gen.configure(data, self.context.config)
+        self.context.batch_gen.configure(data, self.context)
         if self.context.config.input_output.verbose:
             print(
                 "Fitting models of lengths",
@@ -309,7 +309,9 @@ class LearnMSAModel(tf.keras.Model):
             cell_copy,
             models,
             self,
-            non_homogeneous_mask_func
+            non_homogeneous_mask_func,
+            with_plm=self.context.config.language_model.use_language_model,
+            plm_dim=self.context.scoring_model_config.dim
         )
         self.encode_only = False
         return viterbi_seqs
@@ -327,7 +329,9 @@ class LearnMSAModel(tf.keras.Model):
             indices,
             batch_size,
             self.msa_hmm_layer,
-            self
+            self,
+            with_plm=self.context.config.language_model.use_language_model,
+            plm_dim=self.context.scoring_model_config.dim
         ).numpy()
         self.encode_only = False
         return expected_states

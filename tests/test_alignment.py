@@ -46,7 +46,7 @@ def test_subalignment() -> None:
     # subalignment
     subset = np.array([0, 2, 5])
     # create alignment after building model
-    context.batch_gen.configure(data, config)
+    context.batch_gen.configure(data, context)
     sub_am = AlignmentModel(data, context.batch_gen, subset, 32, model)
     subalignment_strings = sub_am.to_string(0, add_block_sep=False)
     ref_subalignment = ["FE...LIK...", "FE...LIKhac", "FEahcLIK..."]

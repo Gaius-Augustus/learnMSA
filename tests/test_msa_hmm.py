@@ -5,9 +5,10 @@ import numpy as np
 import tensorflow as tf
 
 from learnMSA import Configuration
-from learnMSA.msa_hmm import (Emitter, Initializers, MsaHmmCell,
-                              MsaHmmLayer, Transitioner, Viterbi, training)
+from learnMSA.msa_hmm import (Emitter, Initializers, MsaHmmCell, MsaHmmLayer,
+                              Transitioner, Viterbi, training)
 from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
+from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 from tests import ref
 
@@ -25,7 +26,7 @@ def get_all_seqs(data: SequenceDataset, num_models: int) -> np.ndarray:
     config = Configuration()
     config.training.num_model = num_models
     config.training.no_sequence_weights = True
-    batch_generator.configure(data, config)
+    batch_generator.configure(data, LearnMSAContext(config, data))
     ds = training.make_dataset(indices,
                                batch_generator,
                                batch_size=data.num_seq,
@@ -176,7 +177,7 @@ def test_viterbi() -> None:
         config = Configuration()
         config.training.num_model = 2
         config.training.no_sequence_weights = True
-        batch_generator.configure(data, config)
+        batch_generator.configure(data, LearnMSAContext(config, data))
         state_seqs_max_lik2 = Viterbi.get_state_seqs_max_lik(
             data,
             batch_generator,
@@ -572,7 +573,7 @@ def test_posterior_state_probabilities() -> None:
         config.training.num_model = 1
         config.training.no_sequence_weights = True
         batch_gen = training.BatchGenerator()
-        batch_gen.configure(data, config)
+        batch_gen.configure(data, LearnMSAContext(config, data))
         indices = tf.range(data.num_seq, dtype=tf.int64)
         ds = training.make_dataset(indices, batch_gen, batch_size=data.num_seq, shuffle=False)
         for x, _ in ds:

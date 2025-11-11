@@ -292,15 +292,19 @@ def viterbi(sequences, hmm_cell, end_hints=None, parallel_factor=1, return_varia
         return viterbi_paths
 
 
-def get_state_seqs_max_lik(data : SequenceDataset,
-                           batch_generator,
-                           indices,
-                           batch_size,
-                           hmm_cell, 
-                           model_ids,
-                           encoder=None,
-                           non_homogeneous_mask_func=None,
-                           parallel_factor=1):
+def get_state_seqs_max_lik(
+    data : SequenceDataset,
+    batch_generator,
+    indices,
+    batch_size,
+    hmm_cell, 
+    model_ids,
+    encoder=None,
+    non_homogeneous_mask_func=None,
+    parallel_factor=1,
+    with_plm=False,
+    plm_dim=0
+):
     """ Runs batch-wise viterbi on all sequences in the dataset as specified by indices.
     Args:
         data: The sequence dataset.
@@ -312,6 +316,8 @@ def get_state_seqs_max_lik(data : SequenceDataset,
         non_homogeneous_mask_func: Optional function that maps a sequence index i to a num_model x batch x q x q mask that specifies which transitions are allowed.
         parallel_factor: Increasing this number allows computing likelihoods and posteriors chunk-wise in parallel at the cost of memory usage.
                         The parallel factor has to be a divisor of the sequence length.
+        with_plm: If true, use protein language model embeddings.
+        plm_dim: Dimension of the protein language model embeddings.
     Returns:
         A dense integer representation of the most likely state sequences. Shape: (num_model, num_seq, L)
     """
@@ -333,11 +339,19 @@ def get_state_seqs_max_lik(data : SequenceDataset,
     #initialize with terminal states
     state_seqs_max_lik = np.zeros((hmm_cell.num_models, indices.size, seq_len), 
                                   dtype=np.uint32)
-    if encoder:
-        @tf.function(input_signature=[[
+    if with_plm:
+        signature = [[
+            tf.TensorSpec((None, None, None), dtype=tf.uint8),
+            tf.TensorSpec((None, None), dtype=tf.int64),
+            tf.TensorSpec((None, None, None, plm_dim+1), dtype=tf.float32)
+    ]]
+    else:
+        signature = [[
             tf.TensorSpec((None, None, None), dtype=tf.uint8),
             tf.TensorSpec((None, None), dtype=tf.int64)
-        ]]) #embeddings missing
+        ]]
+    if encoder:
+        @tf.function(input_signature=signature)
         def call_viterbi(inputs):
             encoded_seq = encoder(inputs)
             #todo: this can be improved by encoding only for required models, not all
@@ -345,10 +359,7 @@ def get_state_seqs_max_lik(data : SequenceDataset,
             viterbi_seq = viterbi(encoded_seq, hmm_cell, parallel_factor=parallel_factor, non_homogeneous_mask_func=non_homogeneous_mask_func)
             return viterbi_seq
     else:
-        @tf.function(input_signature=[[
-            tf.TensorSpec((None, None, None), dtype=tf.uint8),
-            tf.TensorSpec((None, None), dtype=tf.int64)
-        ]]) #embeddings missing
+        @tf.function(input_signature=signature)
         def call_viterbi(inputs):
             seq = tf.transpose(inputs[0], [1,0,2])
             viterbi_seq = viterbi(seq, hmm_cell, parallel_factor=parallel_factor, non_homogeneous_mask_func=non_homogeneous_mask_func)

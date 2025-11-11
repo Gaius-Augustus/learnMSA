@@ -188,7 +188,7 @@ def get_simple_seq(data: SequenceDataset) -> np.ndarray:
     config = Configuration()
     config.training.num_model = 1
     config.training.no_sequence_weights = True
-    batch_generator.configure(data, config)
+    batch_generator.configure(data, LearnMSAContext(config, data))
     ds = training.make_dataset(indices,
                                batch_generator,
                                batch_size=data.num_seq,
@@ -262,11 +262,14 @@ def test_encoder_model() -> None:
         n = sequences.shape[1]
         ind = np.arange(n)
         model_length = 10
-        batch_gen = training.BatchGenerator()
+        # this test is currently a bit messy, although it works...
+        # this sets up data once instead of within the loop,
+        # but this requires resetting a dummy config and context here
         config = Configuration()
         config.training.num_model = 1
         config.training.no_sequence_weights = True
-        batch_gen.configure(data, config)
+        batch_gen = training.BatchGenerator()
+        batch_gen.configure(data, LearnMSAContext(config, data))
         ds = training.make_dataset(ind, batch_gen, batch_size=n, shuffle=False)
         for case in get_test_configs(sequences):
             # The default emitter initializers expect 25 as last dimension

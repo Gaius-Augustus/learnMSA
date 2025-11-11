@@ -77,7 +77,7 @@ def test_model_to_file() -> None:
     loglik = model([seq, np.array([[0]])])[1].numpy()
 
     #make alignment and save
-    context.batch_gen.configure(data, config)
+    context.batch_gen.configure(data, context)
     ind = np.array([0,1])
     batch_size = 2
     am = AlignmentModel(data, context.batch_gen, ind, batch_size, model)
