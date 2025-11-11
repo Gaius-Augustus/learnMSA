@@ -9,6 +9,7 @@ import tensorflow as tf
 import learnMSA.protein_language_models.Common as Common
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 from learnMSA.msa_hmm.training import BatchGenerator
+from learnMSA.msa_hmm.training_util import get_adaptive_batch_size_with_language_model
 from learnMSA.protein_language_models.BilinearSymmetric import \
     make_scoring_model
 from learnMSA.protein_language_models.EmbeddingCache import EmbeddingCache
@@ -74,11 +75,18 @@ class EmbeddingBatchGenerator(BatchGenerator):
 
         if self.cache_embeddings:
             self.cache = EmbeddingCache(self.data.seq_lens, self.scoring_model_config.dim)
-            compute_emb_func = partial(self._compute_reduced_embeddings, language_model=language_model, encoder=encoder)
-            if callable(context.batch_size):
-                batch_size_callback = (lambda L: max(1, context.batch_size(data)//2))
-            else:
-                batch_size_callback = (lambda L: max(1, context.batch_size//2))
+            compute_emb_func = partial(
+                self._compute_reduced_embeddings,
+                language_model=language_model,
+                encoder=encoder
+            )
+            batch_size_callback = lambda seq_len:\
+                get_adaptive_batch_size_with_language_model(
+                    model_lengths=[0],
+                    max_seq_len=seq_len,
+                    embedding_dim=self.scoring_model_config.dim,
+                    small_gpu=context.small_gpu
+                )//2 # half batch size here to avoid OOM
             print("Computing all embeddings (this may take a while).")
             self.cache.fill_cache(compute_emb_func, batch_size_callback, verbose=verbose)
             # once we have cached the embeddings do a cleanup to erase the LM from memory

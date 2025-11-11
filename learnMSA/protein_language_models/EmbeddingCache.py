@@ -18,7 +18,9 @@ class EmbeddingCache:
         self._filled = False
 
 
-    def fill_cache(self, compute_emb_func, batch_size_callback, verbose=True):
+    def fill_cache(
+        self, compute_emb_func, batch_size_callback, verbose=True
+    ):
         """ Fill the cache with embeddings.
         Args:
             compute_emb_func: A function that computes the embeddings for a batch of sequence indices of the same dtype as the cache.
@@ -32,7 +34,6 @@ class EmbeddingCache:
         while i < n:
             batch_size = batch_size_callback(self.seq_lens[sorted_indices[i]])
             batch_size *= batch_size_mul
-            print("batch_size", batch_size)
             batch_indices = sorted_indices[i:i+batch_size]
             embeddings = compute_emb_func(batch_indices)
             for j,k in enumerate(batch_indices):
