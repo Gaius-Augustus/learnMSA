@@ -49,8 +49,8 @@ def get_state_expectations(
                             model_lengths=cell.length)
 
     @tf.function(input_signature=[[
-        tf.TensorSpec((None, msa_hmm_layer.cell.num_models, None), dtype=tf.uint8),
-        tf.TensorSpec((None, msa_hmm_layer.cell.num_models), dtype=tf.int64)
+        tf.TensorSpec((None, None, None), dtype=tf.uint8),
+        tf.TensorSpec((None, None), dtype=tf.int64)
     ]]) #embeddings missing
     def batch_posterior_state_probs(inputs):
         encoded_seq = encoder(inputs)

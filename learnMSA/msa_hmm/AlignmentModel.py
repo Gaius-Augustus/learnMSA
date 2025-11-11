@@ -563,14 +563,11 @@ class AlignmentModel():
             ll_subset = np.array(
                 [i for l,i in sorted(zip(self.data.seq_lens, range(n)))]
             )
-        ds = train.make_dataset(ll_subset, 
-                                self.batch_generator,
-                                self.batch_size, 
-                                shuffle=False)
-        loglik = np.zeros((self.msa_hmm_layer.cell.num_models))
-        for x, _ in ds:
-            loglik += np.sum(self.model(x)[0], axis=0)
-        loglik /= ll_subset.size
+        ds = train.make_dataset(
+            ll_subset, self.batch_generator, self.batch_size, shuffle=False
+        )
+        loglik = self.model.predict(ds, verbose=0)[0]
+        loglik = np.mean(loglik, axis=0)
         return loglik
     
     def compute_log_prior(self):
