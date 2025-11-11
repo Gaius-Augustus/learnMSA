@@ -709,7 +709,7 @@ class AlignmentModel():
         indices = np.loadtxt(filepath+"/indices", dtype=int)
         #load the model
         model = tf.keras.models.load_model(
-            filepath+".keras", 
+            filepath+".keras",
             custom_objects={
                 "LearnMSAModel": LearnMSAModel,
                 "AncProbsLayer": anc_probs.AncProbsLayer, 
@@ -734,6 +734,8 @@ class AlignmentModel():
             batch_gen = train.BatchGenerator()
         else:
             batch_gen = custom_batch_gen
+        # ensure that the model uses the same batch generator
+        model.context.batch_gen = batch_gen
         if custom_config is None:
             # temporary solution to get a legacy config on the fly
             from learnMSA import Configuration
@@ -742,8 +744,8 @@ class AlignmentModel():
             config.training.num_model = d["num_models"]
             config.training.no_sequence_weights = True
         else:
-            configuration = custom_config
-        batch_gen.configure(data, configuration)
+            config = custom_config
+        batch_gen.configure(data, config)
         am = cls(
             data,
             batch_gen,

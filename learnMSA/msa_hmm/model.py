@@ -18,11 +18,13 @@ class LearnMSAModel(tf.keras.Model):
     """
     Main LearnMSA model for training and decoding.
     """
+    # enable proper type checking for __new__
+    # otherwise the tf type stubs package causes trouble
     def __new__(cls, *args, **kwargs) -> "LearnMSAModel":
         instance = super().__new__(cls)
         return instance # type: ignore[return-value]
 
-    def __init__(self, context: LearnMSAContext | None = None, **kwargs) -> None:
+    def __init__(self, context: LearnMSAContext, **kwargs) -> None:
         """
         Initialize the LearnMSA model.
 
@@ -35,13 +37,6 @@ class LearnMSAModel(tf.keras.Model):
         # Filter out base Model kwargs before calling super().__init__()
         super().__init__(**kwargs)
 
-        # If context is None, we're in deserialization mode
-        # The model structure will be restored from the saved file
-        if context is None:
-            self._in_deserialization = True
-            return
-
-        self._in_deserialization = False
         self.context = context
         train_cfg = context.config.training
 
@@ -393,9 +388,7 @@ class LearnMSAModel(tf.keras.Model):
         """
         # Get the base class config which includes 'trainable', 'dtype', etc.
         base_config = super().get_config()
-        # We cannot serialize the context object, so we only include
-        # a marker that indicates this model needs special handling
-        base_config['_needs_context'] = True
+        base_config["learnmsa_context"] = self.context
         return base_config
 
     @classmethod
@@ -421,11 +414,12 @@ class LearnMSAModel(tf.keras.Model):
         """
         # Remove our custom marker
         config_copy = config.copy()
-        config_copy.pop('_needs_context', None)
+        learnmsa_context_dict = config_copy.pop("learnmsa_context")
+        context = LearnMSAContext.from_config(learnmsa_context_dict)
 
         # Create an instance with context=None to signal deserialization mode
         # Keras will restore the model structure and weights from the saved file
-        return cls(context=None, **config_copy)
+        return cls(context, **config_copy)
 
 
 class PermuteSeqs(tf.keras.layers.Layer):

@@ -225,8 +225,9 @@ class LearnMSAContext:
         serialized directly. When deserializing, these will be reconstructed
         based on the configuration settings.
         """
+        # Use model_dump with mode='json' to ensure Path objects are serialized as strings
         config_dict = {
-            "config": self.config.model_dump(),
+            "config": self.config.model_dump(mode='json'),
             "num_seq": int(self.num_seq),
             "model_lengths": self.model_lengths.tolist(),
             "sequence_weights": self.sequence_weights.tolist() if self.sequence_weights is not None else None,
@@ -245,43 +246,52 @@ class LearnMSAContext:
         Reconstructs a LearnMSAContext from a configuration dictionary.
 
         Args:
-            config_dict: Dictionary returned by get_config()
+            config_dict: Dictionary returned by get_config() or wrapped by Keras
 
         Returns:
             A new LearnMSAContext instance with the same configuration.
         """
+        # When called by Keras, config_dict is wrapped with metadata
+        # Extract the actual config if it's wrapped
+        if 'config' in config_dict and 'module' in config_dict:
+            # This is a Keras-wrapped config, extract the inner config
+            actual_config = config_dict['config']
+        else:
+            # This is a direct config from get_config()
+            actual_config = config_dict
+
         # Reconstruct the Configuration object
-        config = Configuration(**config_dict["config"])
+        config = Configuration(**actual_config["config"])
 
         # Set the model lengths
-        config.training.length_init = config_dict["model_lengths"]
+        config.training.length_init = actual_config["model_lengths"]
 
         # Convert lists back to numpy arrays
-        if config_dict["sequence_weights"] is not None:
+        if actual_config["sequence_weights"] is not None:
             sequence_weights = np.array(
-                config_dict["sequence_weights"], dtype=np.float32
+                actual_config["sequence_weights"], dtype=np.float32
             )
         else:
             sequence_weights = None
-        clusters = config_dict["clusters"]
+        clusters = actual_config["clusters"]
         if clusters is not None and isinstance(clusters, list):
             clusters = np.array(clusters)
 
         # Create the context (this will reconstruct callbacks)
         context = cls(
             config=config,
-            num_seq=config_dict["num_seq"],
+            num_seq=actual_config["num_seq"],
             sequence_weights=sequence_weights,
             clusters=clusters,
         )
 
         # Restore stored values that might differ from defaults
-        context.subset = np.array(config_dict["subset"], dtype=np.int32)
-        context.effective_num_seq = config_dict["effective_num_seq"]
+        context.subset = np.array(actual_config["subset"], dtype=np.int32)
+        context.effective_num_seq = actual_config["effective_num_seq"]
 
         # Restore batch_size if it was a fixed integer
-        if not config_dict["batch_size_is_callable"]:
-            context.batch_size = config_dict["batch_size_value"]
+        if not actual_config["batch_size_is_callable"]:
+            context.batch_size = actual_config["batch_size_value"]
 
         return context
 
@@ -584,3 +594,7 @@ class LearnMSAContext:
         else:
             sequence_weights, clusters = None, None
         return sequence_weights, clusters
+
+
+# Register LearnMSAContext as a serializable Keras object
+tf.keras.utils.get_custom_objects()["LearnMSAContext"] = LearnMSAContext

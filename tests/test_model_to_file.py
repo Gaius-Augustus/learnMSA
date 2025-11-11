@@ -95,7 +95,9 @@ def test_model_to_file() -> None:
     del am
 
     #load again
-    deserialized_am = AlignmentModel.load_models_from_file(test_filepath, data, custom_batch_gen=context.batch_gen)
+    deserialized_am = AlignmentModel.load_models_from_file(
+        test_filepath, data, custom_batch_gen=context.batch_gen
+    )
 
     #test if parameters are the same
     deserialized_emission_kernel = deserialized_am.model.msa_hmm_cell.emitter[0].emission_kernel[0].numpy()
