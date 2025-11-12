@@ -2,7 +2,7 @@ from typing import Sequence
 
 import numpy as np
 import tensorflow as tf
-from attr import dataclass
+from dataclasses import dataclass
 
 import learnMSA.msa_hmm.Initializers as initializers
 from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
