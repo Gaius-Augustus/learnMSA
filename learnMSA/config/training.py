@@ -1,5 +1,4 @@
 import sys
-import warnings
 from collections.abc import Sequence
 from typing import Any, ClassVar
 
@@ -261,11 +260,9 @@ class TrainingConfig(BaseModel):
         When tokens_per_batch > 0, it takes precedence and batch_size is ignored.
         """
         if self.batch_size > 0 and self.tokens_per_batch > 0:
-            warnings.warn(
-                f"Both batch_size ({self.batch_size}) and tokens_per_batch "
+            print(
+                f"Warning: Both batch_size ({self.batch_size}) and tokens_per_batch "
                 f"({self.tokens_per_batch}) are set. tokens_per_batch will be used "
-                "and batch_size will be ignored.",
-                UserWarning,
-                stacklevel=2
+                "and batch_size will be ignored."
             )
         return self

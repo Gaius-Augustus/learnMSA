@@ -1,6 +1,5 @@
 import os
 import subprocess as sp
-import warnings
 from pathlib import Path
 
 
@@ -47,10 +46,10 @@ def setup_devices(
 
     # Check if multiple GPUs are installed / set in the environment variable
     if get_num_gpus() > 1:
-        warnings.warn(
-            "Multiple GPUs detected. learnMSA currently does not "\
-            "support multi-GPU training. Only the first GPU will be used. "\
-            "However, you can distribute multiple learnMSA jobs to your GPUs "\
+        print(
+            "Warning: Multiple GPUs detected. learnMSA currently does not "
+            "support multi-GPU training. Only the first GPU will be used. "
+            "However, you can distribute multiple learnMSA jobs to your GPUs "
             "by setting the parameter '-d'."
         )
 

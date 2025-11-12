@@ -1,5 +1,4 @@
 import os
-import warnings
 from pathlib import Path
 from typing import Any, Callable
 
@@ -99,8 +98,8 @@ class LearnMSAContext:
             self.num_seq = num_seq
         else:
             if num_seq is not None:
-                warnings.warn(
-                    "num_seq is provided but data is not None. "\
+                print(
+                    "Warning: num_seq is provided but data is not None. "
                     "It will be ignored."
                 )
             self.num_seq = data.num_seq
@@ -511,18 +510,18 @@ class LearnMSAContext:
         Overrides some settings when using a language model.
         """
         if self.config.training.learning_rate != 0.1:
-            warnings.warn(
-                "A non-default learning rate is set while using a "\
+            print(
+                "Warning: A non-default learning rate is set while using a "
                 "language model. This setting is overridden to 0.05."
             )
         if self.config.training.epochs != [10, 2, 10]:
-            warnings.warn(
-                "A non-default number of epochs is set while using "\
+            print(
+                "Warning: A non-default number of epochs is set while using "
                 "a language model. This setting is overridden to [10, 4, 20]."
             )
         if self.config.training.cluster_seq_id != 0.9:
-            warnings.warn(
-                "A non-default cluster_seq_id is set while using a "
+            print(
+                "Warning: A non-default cluster_seq_id is set while using a "
                 "language model. This setting is overridden to 0.9."
             )
         self.config.training.learning_rate = 0.05
