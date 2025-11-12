@@ -266,23 +266,24 @@ def test_subset_without_data(config: Configuration) -> None:
 
     np.testing.assert_array_equal(context.subset, np.arange(num_seq))
 
-def test_num_seq_warning_when_data_provided(tmp_path, config):
+def test_num_seq_warning_when_data_provided(tmp_path, config, capsys):
     """Test warning when num_seq is provided with data."""
     # Create a temporary fasta file
     fasta_file = tmp_path / "test.fasta"
     fasta_file.write_text(">seq1\nACGT\n>seq2\nTGCA\n")
 
-    with pytest.warns(
-        UserWarning, match="num_seq is provided but data is not None"
-    ):
-        with SequenceDataset(str(fasta_file), "fasta") as data:
-            context = LearnMSAContext(
-                config=config,
-                data=data,
-                num_seq=100  # Will be ignored
-            )
-            # Should use data.num_seq, not the provided num_seq
-            assert context.num_seq == data.num_seq
+    with SequenceDataset(str(fasta_file), "fasta") as data:
+        context = LearnMSAContext(
+            config=config,
+            data=data,
+            num_seq=100  # Will be ignored
+        )
+        # Should use data.num_seq, not the provided num_seq
+        assert context.num_seq == data.num_seq
+
+        # Check that warning was printed
+        captured = capsys.readouterr()
+        assert "num_seq is provided but data is not None" in captured.out
 
 @pytest.fixture
 def aligned_msa(tmp_path) -> str:
