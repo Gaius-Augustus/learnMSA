@@ -30,7 +30,8 @@ setup(
         "transformers",
         "imageio",
         "tf-keras==2.19",
-        "SentencePiece"
+        "SentencePiece",
+        "pydantic"
     ],
     include_package_data=True,
     package_data={'learnMSA': [
