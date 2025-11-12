@@ -1,5 +1,6 @@
 import os
 import subprocess as sp
+import warnings
 from pathlib import Path
 
 
@@ -34,11 +35,20 @@ def setup_devices(
     This function should be called after parsing the command line arguments,
     otherwise just showing the help message will be slow.
     """
-    # import only if needed
-    import tensorflow as tf
-
     if not cuda_visible_devices == "default":
         os.environ["CUDA_VISIBLE_DEVICES"] = cuda_visible_devices
+
+    # Check if multiple GPUs are installed / set in the environment variable
+    value = os.environ.get("CUDA_VISIBLE_DEVICES")
+    if value is not None:
+        # Split on commas and filter out empty strings or invalid entries
+        devices = [d.strip() for d in value.split(",") if d.strip().isdigit()]
+        if len(devices) > 1:
+            warnings.warn(
+                "Multiple GPUs detected. learnMSA currently does not "\
+                "support multi-GPU training. Only the first GPU will be used."
+            )
+            os.environ["CUDA_VISIBLE_DEVICES"] = devices[0]
 
     import tensorflow as tf
 
@@ -58,7 +68,7 @@ def setup_devices(
             if cuda_visible_devices == "-1" or \
                 cuda_visible_devices == "":
                 print(
-                    "GPUs disabled by user. Running on CPU instead. "\
+                    "GPU disabled by user. Running on CPU instead. "\
                     "Expect slower performance especially for longer models."
                 )
             else:
@@ -68,7 +78,7 @@ def setup_devices(
                     "longer models."
                 )
         else:
-            print("Using GPU(s):", GPUS)
+            print("Using GPU.")
         print("Found tensorflow version", tf.__version__)
 
 

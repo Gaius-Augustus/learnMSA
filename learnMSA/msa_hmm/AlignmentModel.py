@@ -265,7 +265,7 @@ class AlignmentModel():
     #in a memory friendly manner to file
     def _build_alignment(self, models):
 
-        assert len(models), "Not implemented for multiple models."
+        assert len(models) == 1, "Not implemented for multiple models."
 
         state_seqs_max_lik = self.model.decode(
             self.data, self.indices, self.batch_size, models
@@ -279,10 +279,13 @@ class AlignmentModel():
             self.metadata[i] = AlignmentMetaData(*decoded_data)
 
     def _clean_up_viterbi_seqs(self, state_seqs_max_lik, models):
+
+        assert len(models) == 1, "Not implemented for multiple models."
+
         # state_seqs_max_lik has shape (num_model, num_seq, L)
         faulty_sequences = find_faulty_sequences(
             state_seqs_max_lik,
-            self.model.context.model_lengths[0],
+            self.model.context.model_lengths[models[0]],
             self.data.seq_lens[self.indices]
         )
         self.fixed_viterbi_seqs = faulty_sequences
