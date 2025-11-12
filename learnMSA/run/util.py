@@ -38,25 +38,21 @@ def setup_devices(
     if not cuda_visible_devices == "default":
         os.environ["CUDA_VISIBLE_DEVICES"] = cuda_visible_devices
 
-    # Check if multiple GPUs are installed / set in the environment variable
-    value = os.environ.get("CUDA_VISIBLE_DEVICES")
-    if value is not None:
-        # Split on commas and filter out empty strings or invalid entries
-        devices = [d.strip() for d in value.split(",") if d.strip().isdigit()]
-        if len(devices) > 1:
-            warnings.warn(
-                "Multiple GPUs detected. learnMSA currently does not "\
-                "support multi-GPU training. Only the first GPU will be used."
-            )
-            os.environ["CUDA_VISIBLE_DEVICES"] = devices[0]
-
-    import tensorflow as tf
-
     # IMPORTANT: Memory growth must be set before any TensorFlow operations
     if grow_mem:
         os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
 
+    import tensorflow as tf
     from tensorflow.python.client import device_lib
+
+    # Check if multiple GPUs are installed / set in the environment variable
+    if get_num_gpus() > 1:
+        warnings.warn(
+            "Multiple GPUs detected. learnMSA currently does not "\
+            "support multi-GPU training. Only the first GPU will be used. "\
+            "However, you can distribute multiple learnMSA jobs to your GPUs "\
+            "by setting the parameter '-d'."
+        )
 
     if verbose:
         GPUS = [
