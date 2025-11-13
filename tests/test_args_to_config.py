@@ -167,6 +167,7 @@ class TestArgsToConfig:
         assert config.language_model.L2_match == 0.5
         assert config.language_model.L2_insert == 500.0
         assert config.language_model.embedding_prior_components == 64
+        assert config.training.trainable_distances is True
 
     def test_args_to_config_with_visualization_args(self):
         """Test conversion with visualization arguments."""
@@ -214,9 +215,9 @@ class TestArgsToConfig:
         assert config.advanced.alpha_global_compl == 4
         assert config.advanced.inverse_gamma_alpha == 2.0
         assert config.advanced.inverse_gamma_beta == 1.0
-        assert config.advanced.frozen_distances is True
         assert config.advanced.initial_distance == 0.1
         assert config.training.trainable_rate_matrices is True
+        assert config.training.trainable_distances is False
 
     def test_args_to_config_num_model_from_length_init(self):
         """Test that num_model is computed from length_init when provided."""
@@ -308,7 +309,7 @@ class TestArgsToConfig:
         assert config.init_msa.pseudocounts is True
         assert config.language_model.use_language_model is True
         assert config.language_model.use_L2 is True
-        assert config.advanced.frozen_distances is True
+        assert config.training.trainable_distances is False
         assert config.training.trainable_rate_matrices is True
 
     def test_args_to_config_short_options(self):

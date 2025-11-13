@@ -66,7 +66,7 @@ def args_to_config(args: Namespace) -> Configuration:
         no_sequence_weights=args.no_sequence_weights,
         skip_training=args.skip_training,
         trainable_rate_matrices=args.trainable_rate_matrices,
-        trainable_distances=args.trainable_rate_matrices,
+        trainable_distances=not args.frozen_distances,
         equilibrium_sample=args.trainable_rate_matrices,
     )
 
@@ -108,7 +108,6 @@ def args_to_config(args: Namespace) -> Configuration:
         alpha_global_compl=args.alpha_global_compl,
         inverse_gamma_alpha=args.inverse_gamma_alpha,
         inverse_gamma_beta=args.inverse_gamma_beta,
-        frozen_distances=args.frozen_distances,
         initial_distance=args.initial_distance,
         grow_mem=args.grow_mem,
     )

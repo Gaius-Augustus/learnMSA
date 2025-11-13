@@ -592,7 +592,6 @@ class TestAdvancedConfig:
         assert config.alpha_global_compl == 1
         assert config.inverse_gamma_alpha == 3.0
         assert config.inverse_gamma_beta == 0.5
-        assert config.frozen_distances is False
         assert config.initial_distance == 0.05
 
     def test_advanced_config_custom_values(self):
@@ -607,7 +606,6 @@ class TestAdvancedConfig:
             alpha_global_compl=4,
             inverse_gamma_alpha=2.0,
             inverse_gamma_beta=1.0,
-            frozen_distances=True,
             initial_distance=0.1,
         )
         assert config.dist_out == "distributions.txt"
@@ -619,7 +617,6 @@ class TestAdvancedConfig:
         assert config.alpha_global_compl == 4
         assert config.inverse_gamma_alpha == 2.0
         assert config.inverse_gamma_beta == 1.0
-        assert config.frozen_distances is True
         assert config.initial_distance == 0.1
 
     def test_alpha_flank_validation(self):
@@ -767,13 +764,11 @@ class TestAdvancedConfig:
         config = AdvancedConfig(
             dist_out="output.txt",
             alpha_flank=8000,
-            frozen_distances=True
         )
         config_dict = config.model_dump()
 
         assert config_dict["dist_out"] == "output.txt"
         assert config_dict["alpha_flank"] == 8000
-        assert config_dict["frozen_distances"] is True
 
     def test_advanced_deserialization(self):
         """Test AdvancedConfig deserialization from dict."""
@@ -794,13 +789,11 @@ class TestAdvancedConfig:
             advanced=AdvancedConfig(
                 alpha_flank=6000,
                 alpha_global=2e4,
-                frozen_distances=True
             )
         )
 
         assert config.advanced.alpha_flank == 6000
         assert config.advanced.alpha_global == 2e4
-        assert config.advanced.frozen_distances is True
 
     def test_all_alpha_parameters_positive(self):
         """Test that all alpha parameters accept positive values."""

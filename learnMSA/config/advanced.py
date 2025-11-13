@@ -31,9 +31,6 @@ class AdvancedConfig(BaseModel):
     inverse_gamma_beta: float = 0.5
     """Inverse gamma beta parameter."""
 
-    frozen_distances: bool = False
-    """Freeze distances during training."""
-
     initial_distance: float = 0.05
     """Initial distance value."""
 
