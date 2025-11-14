@@ -1,6 +1,4 @@
-import json
 import os
-from pathlib import Path
 
 import learnMSA.run.util as util
 from learnMSA import Configuration
@@ -29,15 +27,6 @@ def run_main():
     if config.input_output.convert:
         convert_file(config)
         return
-
-    # Write the config to file in the working directory
-    work_dir = Path(config.input_output.work_dir)
-    work_dir.mkdir(parents=True, exist_ok=True)
-    config_path = work_dir / "config.json"
-    with open(config_path, 'w') as f:
-        json.dump(config.model_dump(mode='json'), f, indent=2)
-    if config.input_output.verbose:
-        print(f"Configuration saved to {config_path}")
 
     # Set up devices (CPU/GPU)
     util.setup_devices(

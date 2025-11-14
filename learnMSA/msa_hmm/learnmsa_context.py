@@ -527,6 +527,7 @@ class LearnMSAContext:
         self.config.training.learning_rate = 0.05
         self.config.training.epochs = [10, 4, 20]
         self.config.training.cluster_seq_id = 0.5
+        self.config.training.frozen_insertions = True
 
 
     def _get_scoring_model_config(self) -> Common.ScoringModelConfig:

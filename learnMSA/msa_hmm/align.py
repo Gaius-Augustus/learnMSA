@@ -1,3 +1,4 @@
+import json
 import sys
 import time
 from pathlib import Path
@@ -6,18 +7,17 @@ import numpy as np
 import tensorflow as tf
 
 import learnMSA.msa_hmm.Initializers as initializers
-from learnMSA.msa_hmm.model import LearnMSAModel
 import learnMSA.msa_hmm.training_util as training_util
 from learnMSA import Configuration
 from learnMSA.msa_hmm.AlignInsertions import make_aligned_insertions
 from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
 from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
+from learnMSA.msa_hmm.model import LearnMSAModel
 from learnMSA.msa_hmm.model_surgery import do_model_surgery
 from learnMSA.msa_hmm.posterior import get_state_expectations
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 from learnMSA.protein_language_models.MvnEmitter import \
     AminoAcidPlusMvnEmissionInitializer
-
 
 np.set_printoptions(legacy='1.21')
 
@@ -34,8 +34,19 @@ def align(data : SequenceDataset, config : Configuration) -> AlignmentModel:
     if config.input_output.input_file == Path():
         config.input_output.input_file = data.filepath
 
+    # Create working directory if it does not exist
+    work_dir = Path(config.input_output.work_dir)
+    work_dir.mkdir(parents=True, exist_ok=True)
+
     # Create a context that automatically sets up data-dependent parameters
     context = LearnMSAContext(config, data)
+
+    # Write the config to file in the working directory
+    config_path = work_dir / "config.json"
+    with open(config_path, 'w') as f:
+        json.dump(config.model_dump(mode='json'), f, indent=2)
+    if config.input_output.verbose:
+        print(f"Configuration saved to {config_path}")
 
     if config.input_output.verbose:
         print(
