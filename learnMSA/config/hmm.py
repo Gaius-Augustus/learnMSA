@@ -7,10 +7,6 @@ from pydantic import BaseModel, field_validator
 class HMMConfig(BaseModel):
     """HMM parameters."""
 
-    lengths: Sequence[int]
-    """The number of match states in each head of the pHMM.
-    """
-
     p_begin_match: float | Sequence[float] | Sequence[Sequence[float]]\
         = 0.5
     """If provided a scalar value, is interpreted as ``P(Match 1 | Begin)``.
