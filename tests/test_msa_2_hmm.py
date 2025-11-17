@@ -3,42 +3,8 @@
 import numpy as np
 import pytest
 
-from learnMSA.msa_hmm.MSA2HMM import PHMMTransitionIndexSet, PHMMValueSet
+from learnMSA.msa_hmm.MSA2HMM import PHMMValueSet
 from learnMSA.msa_hmm.SequenceDataset import AlignedDataset
-
-
-def test_index_set() -> None:
-    """Test PHMMTransitionIndexSet initialization and structure."""
-    ind = PHMMTransitionIndexSet(3)
-    assert ind.L == 3
-    np.testing.assert_equal(ind.begin_to_match, [[9, 0], [9, 1], [9, 2]])
-    np.testing.assert_equal(ind.match_to_match, [[0, 1], [1, 2]])
-    np.testing.assert_equal(ind.match_to_insert, [[0, 3], [1, 4]])
-    np.testing.assert_equal(ind.match_to_delete, [[0, 6], [1, 7]])
-    np.testing.assert_equal(ind.insert_to_match, [[3, 1], [4, 2]])
-    np.testing.assert_equal(ind.insert_to_insert, [[3, 3], [4, 4]])
-    np.testing.assert_equal(ind.delete_to_match, [[5, 1], [6, 2]])
-    np.testing.assert_equal(ind.delete_to_delete, [[5, 6], [6, 7]])
-    np.testing.assert_equal(ind.match_to_end, [[0, 10], [1, 10], [2, 10]])
-    np.testing.assert_equal(ind.left_flank, [[8, 8], [8, 9]])
-    np.testing.assert_equal(ind.unannotated, [[11, 11], [11, 9]])
-    np.testing.assert_equal(ind.end, [[10, 11], [10, 12], [10, 13]])
-    np.testing.assert_equal(ind.mask(), [
-        [1., 0, 1, 0, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1],
-        [1, 1, 0, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 1],
-        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1],
-        [1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-        [1, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-        [1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1],
-        [1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1],
-        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1],
-        [1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1],
-        [0, 0, 0, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1],
-        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0],
-        [1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 1],
-        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
-        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0],
-    ])
 
 
 def test_msa_to_counts() -> None:
@@ -191,14 +157,14 @@ def test_add_pseudocounts() -> None:
             [0, 7, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0, 0],
             [0, 0, 7, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0],
             [0, 0, 0, 7, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0],
-            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1e-8, 0, 0, 0],
             # L, B, E, C, R, T
             [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 103, 104, 0, 0, 0, 0],
             [101, 102, 102, 102, 0, 0, 0, 767, 0, 0, 0, 0, 0, 0, 0, 0, 0],
             [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 300, 301, 302],
             [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 108, 0, 107, 0, 0],
             [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 105, 106],
-            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1e-8],
         ])
     )
     np.testing.assert_equal(

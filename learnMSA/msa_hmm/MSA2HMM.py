@@ -1,9 +1,9 @@
 from dataclasses import dataclass
-from typing import Callable, Dict
 
 import numpy as np
 
 from learnMSA.msa_hmm.SequenceDataset import AlignedDataset
+from learnMSA.hmm.transition_index_set import PHMMTransitionIndexSet
 
 
 @dataclass
@@ -323,8 +323,9 @@ class PHMMValueSet:
         self.start += flank_start
 
         ## add a small number to the out transitions of the last delete state
-        ## to avoid zero rows
-        self.transitions[2*L-1 + (L-1), :] += 1e-8
+        ## and the terminal self loop to avoid zero rows
+        self.transitions[2*L-1 + (L-1), 3*L+1] += 1e-8
+        self.transitions[3*L+4, 3*L+4] += 1e-8
 
         return self
 
@@ -388,86 +389,6 @@ def safe_log(x: np.ndarray, log_zero_value: float = -1e8) -> np.ndarray:
         log_x = np.log(x)
     log_x[~np.isfinite(log_x)] = log_zero_value
     return log_x
-
-
-@dataclass
-class PHMMTransitionIndexSet:
-    """ Indices for accessing groups of values in a PHMM transition matrix.
-
-    Args:
-        L: Number of match states.
-    """
-    def __init__(self, L: int, dtype=np.int32) -> None:
-        self.L = L
-        self.matches_plus = np.arange(L, dtype=dtype)
-        self.matches = self.matches_plus[:-1]
-        self.begin_to_match = np.stack(
-            (np.zeros(L, dtype=dtype) + 3*L, self.matches_plus),
-            axis=1,
-        )
-        self.begin_to_delete = np.array([[3*L, 2*L-1]], dtype=dtype)
-        self.match_to_match = np.stack(
-            (self.matches, self.matches+1), axis=1
-        )
-        self.match_to_insert = np.stack(
-            (self.matches, self.matches+self.L), axis=1
-        )
-        self.match_to_delete = np.stack(
-            (self.matches, self.matches+2*self.L), axis=1
-        )
-        self.match_to_end = np.stack(
-            (self.matches_plus, np.zeros(self.L, dtype=dtype)+(3*self.L+1)),
-            axis=1,
-        )
-        self.insert_to_insert = np.stack(
-            (self.matches+self.L, self.matches+self.L), axis=1
-        )
-        self.insert_to_match = np.stack(
-            (self.matches+self.L, self.matches+1), axis=1
-        )
-        self.delete_to_match = np.stack(
-            (self.matches+2*self.L-1, self.matches+1), axis=1
-        )
-        self.delete_to_delete = np.stack(
-            (self.matches+2*self.L-1, self.matches+2*self.L), axis=1
-        )
-        self.left_flank = np.array(
-            [[3*L-1, 3*L-1], [3*L-1, 3*L]], dtype=dtype
-        )
-        self.right_flank = np.array(
-            [[3*L+3, 3*L+3], [3*L+3, 3*L+4]], dtype=dtype
-        )
-        self.unannotated = np.array(
-            [[3*L+2, 3*L+2], [3*L+2, 3*L]], dtype=dtype
-        )
-        self.end = np.array(
-            [[3*L+1, 3*L+2], [3*L+1, 3*L+3], [3*L+1, 3*L+4]], dtype=dtype
-        )
-
-
-    def mask(self, dtype=np.float32) -> np.ndarray:
-        """
-        Returns a mask matrix of shape `(3L+5, 3L+5)` with ones for invalid
-        transitions and zeros for valid transitions.
-        """
-        M = np.ones((3*self.L+5, 3*self.L+5), dtype=dtype)
-        M[self.begin_to_match[:,0], self.begin_to_match[:,1]] = 0
-        M[self.begin_to_delete[0,0], self.begin_to_delete[0,1]] = 0
-        M[self.match_to_match[:,0], self.match_to_match[:,1]] = 0
-        M[self.match_to_insert[:,0], self.match_to_insert[:,1]] = 0
-        M[self.match_to_delete[:,0], self.match_to_delete[:,1]] = 0
-        M[self.insert_to_insert[:,0], self.insert_to_insert[:,1]] = 0
-        M[self.insert_to_match[:,0], self.insert_to_match[:,1]] = 0
-        M[self.delete_to_delete[:,0], self.delete_to_delete[:,1]] = 0
-        M[self.delete_to_match[:,0], self.delete_to_match[:,1]] = 0
-        M[3*self.L-2, 3*self.L+1] = 0 # D_L to E
-        M[self.match_to_end[:,0], self.match_to_end[:,1]] = 0
-        M[self.left_flank[:,0], self.left_flank[:,1]] = 0
-        M[self.right_flank[:,0], self.right_flank[:,1]] = 0
-        M[self.unannotated[:,0], self.unannotated[:,1]] = 0
-        M[self.end[:,0], self.end[:,1]] = 0
-        M[-1, -1] = 0 # terminal state can loop to itself
-        return M
 
 
 def _count_transitions(state_seqs: np.ndarray, L: int) -> np.ndarray:
