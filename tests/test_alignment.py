@@ -4,7 +4,8 @@ import numpy as np
 import tensorflow as tf
 
 from learnMSA import Configuration
-from learnMSA.msa_hmm import (Emitter, Initializers, Transitioner, align, training)
+from learnMSA.msa_hmm import Emitter, Initializers, Transitioner
+from learnMSA.msa_hmm.align import align
 from learnMSA.msa_hmm.AlignmentModel import (AlignmentModel,
                                              find_faulty_sequences,
                                              non_homogeneous_mask_func)

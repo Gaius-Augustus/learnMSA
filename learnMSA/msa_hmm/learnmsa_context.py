@@ -5,6 +5,7 @@ from typing import Any, Callable
 import numpy as np
 import tensorflow as tf
 
+from ..hmm import value_set
 import learnMSA.msa_hmm.Emitter as emit
 import learnMSA.msa_hmm.Initializers as initializers
 import learnMSA.msa_hmm.training as train
@@ -19,7 +20,7 @@ from learnMSA.protein_language_models.MvnEmitter import (
 from learnMSA.run.util import get_gpu_memory, validate_filepath
 
 from ..msa_hmm.AncProbsLayer import inverse_softplus
-from . import MSA2HMM, Priors
+from . import Priors
 from .Initializers import (ConstantInitializer, PHMMInitializerSet,
                            make_initializers_from)
 from .SequenceDataset import AlignedDataset, SequenceDataset
@@ -357,7 +358,7 @@ class LearnMSAContext:
 
         # Load the MSA and count
         with AlignedDataset(from_msa, "fasta") as input_msa:
-            values = MSA2HMM.PHMMValueSet.from_msa(
+            values = value_set.PHMMValueSet.from_msa(
                 input_msa,
                 match_threshold=self.config.init_msa.match_threshold,
                 global_factor=self.config.init_msa.global_factor,

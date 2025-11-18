@@ -8,13 +8,41 @@ class PHMMTransitionIndexSet:
     if not folded, and otherwise\\
     M1 ... ML I1 ... IL-1 L C R T.
 
-    Args:
+    Attributes:
         L: Number of match states.
         folded: Whether the model is folded (does not contain silent states for
             deletions).
-        dtype: The data type for the indices.
+        match_to_match: Transition indices from match state i to match state i+1.
+        match_to_insert: Transition indices from match state i to insert state i.
+        insert_to_insert: Transition indices for insert state self-loops.
+        insert_to_match: Transition indices from insert state i to match state i+1.
+        match_to_delete: Transition indices from match state i to delete state i (unfolded only).
+        delete_to_delete: Transition indices from delete state i to delete state i+1 (unfolded only).
+        delete_to_match: Transition indices from delete state i to match state i+1 (unfolded only).
+        begin_to_match: Transition indices from begin state to all match states (unfolded only).
+        begin_to_delete: Transition indices from begin state to first delete state (unfolded only).
+        match_to_end: Transition indices from all match states to end state (unfolded only).
+        delete_to_end: Transition indices from last delete state to end state (unfolded only).
+        end: Transition indices from end state to flanking states (unfolded only).
+        match_to_match_jump: Transition indices from match state i to match state j where j > i+1 (folded only).
+        match_to_unannotated: Transition indices from all match states to unannotated state (folded only).
+        match_to_right: Transition indices from all match states to right flank state (folded only).
+        match_to_terminal: Transition indices from all match states to terminal state (folded only).
+        left_flank: Transition indices from left flank state to other states.
+        right_flank: Transition indices from right flank state (self-loop and to terminal).
+        unannotated: Transition indices from unannotated state to other states.
+        terminal: Transition indices for terminal state self-loop.
+        num_states: Total number of states in the PHMM.
+        num_transitions: Total number of transitions in the PHMM.
     """
     def __init__(self, L: int, folded: bool = False, dtype=np.int32) -> None:
+        """
+        Args:
+            L: Number of match states.
+            folded: Whether the model is folded (does not contain silent states for
+                deletions).
+            dtype: The data type for the indices.
+        """
         self.L = L
         self._folded = folded
         self._dtype = dtype
@@ -243,82 +271,102 @@ class PHMMTransitionIndexSet:
     # Properties for all transition types
     @property
     def match_to_match(self) -> np.ndarray:
+        """Transition indices from match state i to match state i+1."""
         return self._get_slice('match_to_match')
 
     @property
     def match_to_insert(self) -> np.ndarray:
+        """Transition indices from match state i to insert state i."""
         return self._get_slice('match_to_insert')
 
     @property
     def insert_to_insert(self) -> np.ndarray:
+        """Transition indices for insert state self-loops."""
         return self._get_slice('insert_to_insert')
 
     @property
     def insert_to_match(self) -> np.ndarray:
+        """Transition indices from insert state i to match state i+1."""
         return self._get_slice('insert_to_match')
 
     @property
     def match_to_delete(self) -> np.ndarray:
+        """Transition indices from match state i to delete state i (unfolded only)."""
         return self._get_slice('match_to_delete')
 
     @property
     def delete_to_delete(self) -> np.ndarray:
+        """Transition indices from delete state i to delete state i+1 (unfolded only)."""
         return self._get_slice('delete_to_delete')
 
     @property
     def delete_to_match(self) -> np.ndarray:
+        """Transition indices from delete state i to match state i+1 (unfolded only)."""
         return self._get_slice('delete_to_match')
 
     @property
     def begin_to_match(self) -> np.ndarray:
+        """Transition indices from begin state to all match states (unfolded only)."""
         return self._get_slice('begin_to_match')
 
     @property
     def begin_to_delete(self) -> np.ndarray:
+        """Transition indices from begin state to first delete state (unfolded only)."""
         return self._get_slice('begin_to_delete')
 
     @property
     def match_to_end(self) -> np.ndarray:
+        """Transition indices from all match states to end state (unfolded only)."""
         return self._get_slice('match_to_end')
 
     @property
     def delete_to_end(self) -> np.ndarray:
+        """Transition indices from last delete state to end state (unfolded only)."""
         return self._get_slice('delete_to_end')
 
     @property
     def end(self) -> np.ndarray:
+        """Transition indices from end state to flanking states (unfolded only)."""
         return self._get_slice('end')
 
     @property
     def match_to_match_jump(self) -> np.ndarray:
+        """Transition indices from match state i to match state j where j > i+1 (folded only)."""
         return self._get_slice('match_to_match_jump')
 
     @property
     def match_to_unannotated(self) -> np.ndarray:
+        """Transition indices from all match states to unannotated state (folded only)."""
         return self._get_slice('match_to_unannotated')
 
     @property
     def match_to_right(self) -> np.ndarray:
+        """Transition indices from all match states to right flank state (folded only)."""
         return self._get_slice('match_to_right')
 
     @property
     def match_to_terminal(self) -> np.ndarray:
+        """Transition indices from all match states to terminal state (folded only)."""
         return self._get_slice('match_to_terminal')
 
     @property
     def left_flank(self) -> np.ndarray:
+        """Transition indices from left flank state to other states."""
         return self._get_slice('left_flank')
 
     @property
     def right_flank(self) -> np.ndarray:
+        """Transition indices from right flank state (self-loop and to terminal)."""
         return self._get_slice('right_flank')
 
     @property
     def unannotated(self) -> np.ndarray:
+        """Transition indices from unannotated state to other states."""
         return self._get_slice('unannotated')
 
     @property
     def terminal(self) -> np.ndarray:
+        """Transition indices for terminal state self-loop."""
         return self._get_slice('terminal')
 
     @property

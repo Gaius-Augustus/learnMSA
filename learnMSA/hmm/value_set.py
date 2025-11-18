@@ -4,6 +4,7 @@ import numpy as np
 
 from learnMSA.msa_hmm.SequenceDataset import AlignedDataset
 from learnMSA.hmm.transition_index_set import PHMMTransitionIndexSet
+from learnMSA.config.hmm import HMMConfig
 
 
 @dataclass
@@ -23,6 +24,150 @@ class PHMMValueSet:
     insert_emissions : np.ndarray
     transitions : np.ndarray
     start : np.ndarray
+
+
+    @classmethod
+    def from_config(cls, L: int, h: int, config: HMMConfig) -> "PHMMValueSet":
+        """Creates a PHMMValueSet from a HMMConfig object.
+
+        Args:
+            length: The number of match states (L).
+            h: The head index.
+            config: An HMMConfig object containing the transition probabilities.
+
+        Returns:
+            A PHMMValueSet object with transitions initialized from config.
+        """
+        from learnMSA.config.hmm import get_value
+        from collections.abc import Sequence
+
+        q = 3*L + 5
+        s = len(config.alphabet)
+
+        # Initialize empty arrays
+        transitions = np.zeros((q, q), dtype=np.float32)
+        ind = PHMMTransitionIndexSet(L)
+
+        # Left flank: self-loop and to begin
+        transitions[ind.left_flank[0, 0], ind.left_flank[0, 1]] = \
+            get_value(config.p_left_left, h)
+        transitions[ind.left_flank[1, 0], ind.left_flank[1, 1]] = \
+            1 - get_value(config.p_left_left, h)
+
+        # Begin to match 1
+        transitions[ind.begin_to_match[0, 0], ind.begin_to_match[0, 1]] = \
+            get_value(config.p_begin_match, h, 0)
+
+        # Check if transition probs to other match states are provided
+        if isinstance(config.p_begin_match, Sequence) and \
+                isinstance(config.p_begin_match[h], Sequence):
+            p_begin_match_head = config.p_begin_match[h]
+            assert isinstance(p_begin_match_head, Sequence)  # Type guard
+            p_begin_match_inner = p_begin_match_head[1:]
+            p_sum_prob_begin_match = sum(p_begin_match_head)
+            assert p_sum_prob_begin_match <= 1, (
+                f"Sum of p_begin_match is {p_sum_prob_begin_match}, which is > 1"
+            )
+            p_begin_delete = 1 - p_sum_prob_begin_match
+        else:
+            p = get_value(config.p_begin_match, h, 0)
+            p_begin_match_inner = (1 - p) / (L - 1) if L > 1 else 0
+            p_begin_delete = get_value(config.p_begin_delete, h)
+
+        # Begin to delete 1
+        transitions[ind.begin_to_delete[0, 0], ind.begin_to_delete[0, 1]] = \
+            p_begin_delete
+
+        for i in range(L - 1):
+            # Begin to match i+1
+            p_val = (p_begin_match_inner[i]
+                    if isinstance(p_begin_match_inner, Sequence)
+                    else p_begin_match_inner)
+            transitions[ind.begin_to_match[i + 1, 0], ind.begin_to_match[i + 1, 1]] = \
+                p_val
+
+            # Match to match
+            transitions[ind.match_to_match[i, 0], ind.match_to_match[i, 1]] = \
+                get_value(config.p_match_match, h, i)
+
+            # Match to insert
+            transitions[ind.match_to_insert[i, 0], ind.match_to_insert[i, 1]] = \
+                get_value(config.p_match_insert, h, i)
+
+            # Insert self-loop
+            transitions[ind.insert_to_insert[i, 0], ind.insert_to_insert[i, 1]] = \
+                get_value(config.p_insert_insert, h, i)
+
+            # Insert to match
+            transitions[ind.insert_to_match[i, 0], ind.insert_to_match[i, 1]] = \
+                1 - get_value(config.p_insert_insert, h, i)
+
+            # Match to delete
+            transitions[ind.match_to_delete[i, 0], ind.match_to_delete[i, 1]] = (
+                1 - get_value(config.p_match_match, h, i)
+                - get_value(config.p_match_insert, h, i)
+                - get_value(config.p_match_end, h, i)
+            )
+
+            # Delete to delete
+            transitions[ind.delete_to_delete[i, 0], ind.delete_to_delete[i, 1]] = \
+                get_value(config.p_delete_delete, h, i)
+
+            # Delete to match
+            transitions[ind.delete_to_match[i, 0], ind.delete_to_match[i, 1]] = \
+                1 - get_value(config.p_delete_delete, h, i)
+
+        # Match L to end
+        transitions[ind.match_to_end[-1, 0], ind.match_to_end[-1, 1]] = 1.0
+
+        # Delete L to end
+        transitions[ind.delete_to_end[0, 0], ind.delete_to_end[0, 1]] = 1.0
+
+        # End to unannotated
+        transitions[ind.end[0, 0], ind.end[0, 1]] = \
+            get_value(config.p_end_unannot, h)
+
+        # Unannotated self-loop
+        transitions[ind.unannotated[0, 0], ind.unannotated[0, 1]] = \
+            get_value(config.p_unannot_unannot, h)
+
+        # Unannotated to begin
+        transitions[ind.unannotated[1, 0], ind.unannotated[1, 1]] = \
+            1 - get_value(config.p_unannot_unannot, h)
+
+        # End to right flank
+        transitions[ind.end[1, 0], ind.end[1, 1]] = \
+            get_value(config.p_end_right, h)
+
+        # End to terminal
+        transitions[ind.end[2, 0], ind.end[2, 1]] = (
+            1 - get_value(config.p_end_unannot, h)
+            - get_value(config.p_end_right, h)
+        )
+
+        # Right flank self-loop
+        transitions[ind.right_flank[0, 0], ind.right_flank[0, 1]] = \
+            get_value(config.p_right_right, h)
+
+        # Right flank to terminal
+        transitions[ind.right_flank[1, 0], ind.right_flank[1, 1]] = \
+            1 - get_value(config.p_right_right, h)
+
+        # Terminal self-loop
+        transitions[ind.terminal[0, 0], ind.terminal[0, 1]] = 1.0
+
+        # Starting probabilities
+        start = np.array([
+            get_value(config.p_start_left_flank, h),
+            1 - get_value(config.p_start_left_flank, h)
+        ], dtype=np.float32)
+
+        return cls(
+            match_emissions=np.zeros((L, s), dtype=np.float32),
+            insert_emissions=np.zeros((s,), dtype=np.float32),
+            transitions=transitions,
+            start=start,
+        )
 
     @classmethod
     def from_msa(

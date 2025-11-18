@@ -35,7 +35,8 @@ def run_main():
         config.advanced.grow_mem,
     )
 
-    from learnMSA.msa_hmm import SequenceDataset, align, plot_and_save_logo
+    from learnMSA.msa_hmm import SequenceDataset, plot_and_save_logo
+    from learnMSA.msa_hmm.align import align
 
     # Call the main method that runs learnMSA
     with SequenceDataset(
