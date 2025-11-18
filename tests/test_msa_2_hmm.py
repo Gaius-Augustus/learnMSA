@@ -191,14 +191,14 @@ def test_add_pseudocounts() -> None:
             [0, 7, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0, 0],
             [0, 0, 7, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0],
             [0, 0, 0, 7, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0],
-            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1e-8, 0, 0, 0],
             # L, B, E, C, R, T
             [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 103, 104, 0, 0, 0, 0],
             [101, 102, 102, 102, 0, 0, 0, 767, 0, 0, 0, 0, 0, 0, 0, 0, 0],
             [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 300, 301, 302],
             [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 108, 0, 107, 0, 0],
             [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 105, 106],
-            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1e-8],
         ])
     )
     np.testing.assert_equal(
@@ -286,3 +286,36 @@ def test_threshold_very_low() -> None:
         counts = PHMMValueSet.from_msa(data, match_threshold=0.0)
         # all columns are match states
         assert counts.matches() == len(sequences[0][1])
+
+
+def test_gapless_msa_to_counts() -> None:
+    """Test conversion of MSA to HMM counts."""
+    sequences = [
+        ("seq1", "ACGTACGT"),
+        ("seq2", "ACGTACGT"),
+        ("seq3", "ACGTACGT"),
+        ("seq4", "ACGTACGT"),
+        ("seq5", "ACGTACGT"),
+    ]
+    with AlignedDataset(aligned_sequences=sequences) as data:
+        counts = PHMMValueSet.from_msa(data)
+
+    assert counts.matches() == 8
+
+    # Try to normalize counts, should not raise any warnings/errors
+    counts.add_pseudocounts(
+        aa=1e-8,
+        match_transition=1e-8,
+        insert_transition=1e-8,
+        delete_transition=1e-8,
+        begin_to_match=1e-8,
+        begin_to_delete=1e-8,
+        match_to_end=1e-2,
+        left_flank=1e-8,
+        right_flank=1e-8,
+        unannotated=1e-8,
+        end=1e-8,
+        flank_start=1e-8,
+    ).normalize()
+
+    assert not np.any(np.isnan(counts.transitions))

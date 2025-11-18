@@ -79,6 +79,7 @@ def run_main():
                 insert_transition=ins_psc,
                 delete_transition=del_psc,
                 begin_to_match=1e-2,
+                begin_to_delete=1e-8,
                 match_to_end=1e-2,
                 left_flank=ins_psc,
                 right_flank=ins_psc,
