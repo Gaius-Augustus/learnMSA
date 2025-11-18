@@ -370,6 +370,21 @@ class PHMMTransitionIndexSet:
         return self._get_slice('terminal')
 
     @property
+    def start(self) -> np.ndarray:
+        """Allowed starting states."""
+        if self.folded:
+            # Can start in M1, ..., ML, L, R, C or T
+            start = np.arange(self.L+4)
+            start[-4] = 2*self.L - 1  # L
+            start[-3] = 2*self.L      # C
+            start[-2] = 2*self.L + 1  # R
+            start[-1] = 2*self.L + 2  # T
+            return start
+        else:
+            # Can start in L or B
+            return np.array([3*self.L-1, 3*self.L])  # L, B
+
+    @property
     def num_states(self) -> int:
         """
         Returns the total number of states in the PHMM.

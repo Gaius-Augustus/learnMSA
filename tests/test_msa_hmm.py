@@ -10,7 +10,7 @@ from learnMSA.msa_hmm import (Emitter, Initializers, MsaHmmCell, MsaHmmLayer,
 from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
 from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
-from tests import ref
+from tests.hmm import ref
 
 
 def string_to_one_hot(s : str) -> tf.Tensor:

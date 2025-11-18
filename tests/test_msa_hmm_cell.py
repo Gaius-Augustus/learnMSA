@@ -7,7 +7,8 @@ from learnMSA.msa_hmm.Emitter import ProfileHMMEmitter
 from learnMSA.msa_hmm.MsaHmmCell import MsaHmmCell
 from learnMSA.msa_hmm.MsaHmmLayer import MsaHmmLayer
 from learnMSA.msa_hmm.Transitioner import ProfileHMMTransitioner
-from tests import ref, supervised_training
+from tests import supervised_training
+from tests.hmm import ref
 
 
 # Fixture to set up test data (replaces __init__ in unittest)

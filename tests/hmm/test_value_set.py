@@ -116,6 +116,7 @@ def test_add_pseudocounts() -> None:
     L = 4
     S = 3
     counts = PHMMValueSet(
+        L=L,
         match_emissions=np.zeros((L, S)),
         insert_emissions=np.zeros((S,)),
         transitions=np.zeros((3 * L + 5, 3 * L + 5)),

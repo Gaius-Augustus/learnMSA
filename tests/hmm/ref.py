@@ -1,29 +1,31 @@
 import numpy as np
-from learnMSA.msa_hmm import Initializers 
+
+from learnMSA.msa_hmm import Initializers
+
 
 def make_transition_init_A():
     d = {"begin_to_match" : [0.6, 0.1, 0.1, 0.1],
               "match_to_end" : [0.01, 0.05, 0.05, 1],
-              "match_to_match" : [0.97, 0.5, 0.6], 
+              "match_to_match" : [0.97, 0.5, 0.6],
               "match_to_insert" : [0.01, 0.05, 0.3],
-              "insert_to_match" : [0.5, 0.5, 0.5], 
+              "insert_to_match" : [0.5, 0.5, 0.5],
               "insert_to_insert" : [0.5, 0.5, 0.5],
-              "match_to_delete" : [0.1, 0.01, 0.4, 0.05], 
+              "match_to_delete" : [0.1, 0.01, 0.4, 0.05],
                "delete_to_match" : [0.8, 0.5, 0.8, 1],
                "delete_to_delete" : [0.2, 0.5, 0.2],
                #must assume that flaking probs are tied
-               "left_flank_loop" : [0.6], 
+               "left_flank_loop" : [0.6],
                "left_flank_exit" : [0.4],
-               "right_flank_loop" : [0.6], 
+               "right_flank_loop" : [0.6],
                "right_flank_exit" : [0.4],
-               "unannotated_segment_loop" : [0.9], 
+               "unannotated_segment_loop" : [0.9],
                "unannotated_segment_exit" : [0.1],
-               "end_to_unannotated_segment" : [0.2], 
-              "end_to_right_flank" : [0.7], 
+               "end_to_unannotated_segment" : [0.2],
+              "end_to_right_flank" : [0.7],
               "end_to_terminal" : [0.1]}
     return {part_name : Initializers.ConstantInitializer(np.log(p))
-                              for part_name,p in d.items()} 
-    
+                              for part_name,p in d.items()}
+
 def make_emission_init_A():
     emission_kernel_initializer = np.log([[0.5, 0.5], [0.1, 0.9], [0.7, 0.3], [0.9, 0.1]])
     return Initializers.ConstantInitializer(emission_kernel_initializer)
@@ -31,35 +33,35 @@ def make_emission_init_A():
 def make_insertion_init():
     insertion_kernel_initializer = np.log([0.5, 0.5])
     return Initializers.ConstantInitializer(insertion_kernel_initializer)
-    
+
 def make_transition_init_B():
     d = {"begin_to_match" : [0.7, 0.1, 0.1],
               "match_to_end" : [0.01, 0.05, 1],
-              "match_to_match" : [0.97, 0.5], 
+              "match_to_match" : [0.97, 0.5],
               "match_to_insert" : [0.01, 0.05],
-              "insert_to_match" : [0.5, 0.9], 
+              "insert_to_match" : [0.5, 0.9],
               "insert_to_insert" : [0.5, 0.1],
-              "match_to_delete" : [0.1, 0.01, 0.4], 
+              "match_to_delete" : [0.1, 0.01, 0.4],
                "delete_to_match" : [0.8, 0.5, 1],
                "delete_to_delete" : [0.2, 0.5],
                #must assume that flaking probs are tied
-               "left_flank_loop" : [0.6], 
+               "left_flank_loop" : [0.6],
                "left_flank_exit" : [0.4],
-               "right_flank_loop" : [0.6], 
+               "right_flank_loop" : [0.6],
                "right_flank_exit" : [0.4],
-               "unannotated_segment_loop" : [0.9], 
+               "unannotated_segment_loop" : [0.9],
                "unannotated_segment_exit" : [0.1],
-               "end_to_unannotated_segment" : [0.2], 
-              "end_to_right_flank" : [0.7], 
+               "end_to_unannotated_segment" : [0.2],
+              "end_to_right_flank" : [0.7],
               "end_to_terminal" : [0.1]}
     return {part_name : Initializers.ConstantInitializer(np.log(p))
-                              for part_name,p in d.items()} 
-    
+                              for part_name,p in d.items()}
+
 def make_emission_init_B():
     emission_kernel_initializer = np.log([[0.5, 0.5], [0.1, 0.9], [0.7, 0.3]])
     return Initializers.ConstantInitializer(emission_kernel_initializer)
 
-    
+
 def get_ref_model_A():
     return (np.array([[6.0000e-01, 2.4000e-01, 7.2000e-02, 4.4000e-02, 4.3200e-02,
          0.0000e+00, 0.0000e+00, 0.0000e+00, 1.6000e-04, 5.6000e-04,
@@ -107,8 +109,8 @@ def get_ref_model_A():
         [0. , 0. , 1. ]]),
  np.array([5.0e-01, 3.0e-01, 9.0e-02, 5.5e-02, 5.4e-02, 0.0e+00, 0.0e+00,
         0.0e+00, 2.0e-04, 7.0e-04, 1.0e-04]))
-            
-    
+
+
 def get_ref_model_B():
     return (np.array([[6.000e-01, 2.800e-01, 7.200e-02, 4.400e-02, 0.000e+00, 0.000e+00,
          8.000e-04, 2.800e-03, 4.000e-04],
@@ -203,7 +205,7 @@ def get_ref_scaled_forward_A():
        [0.00000000e+00, 0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
         0.00000000e+00, 0.00000000e+00, 0.00000000e+00, 0.00000000e+00,
         0.00000000e+00, 0.00000000e+00, 1.00000000e+00]])
-    
+
 
 def get_ref_viterbi_variables_A():
     return np.array([[2.5000000e-01, 1.5000000e-01, 9.0000000e-03, 3.8500000e-02,
@@ -223,7 +225,7 @@ def get_ref_viterbi_variables_A():
 def get_ref_viterbi_path_A():
     return np.array([ 1,  2,  4, 10])
 
-    
+
 def get_ref_forward_B():
     return np.array([[2.50000000e-01, 1.75000000e-01, 9.00000000e-03, 3.85000000e-02,
         0.00000000e+00, 0.00000000e+00, 5.00000000e-04, 1.75000000e-03,

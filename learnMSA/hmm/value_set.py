@@ -20,6 +20,7 @@ class PHMMValueSet:
         start : np.ndarray of shape `(2,)` counts of either starting in `B` or
             `L`.
     """
+    L: int
     match_emissions : np.ndarray
     insert_emissions : np.ndarray
     transitions : np.ndarray
@@ -163,6 +164,7 @@ class PHMMValueSet:
         ], dtype=np.float32)
 
         return cls(
+            L=L,
             match_emissions=np.zeros((L, s), dtype=np.float32),
             insert_emissions=np.zeros((s,), dtype=np.float32),
             transitions=transitions,
@@ -352,6 +354,7 @@ class PHMMValueSet:
         start = np.array([flank_start, N - flank_start], dtype=np.float32)
 
         return cls(
+            L=L,
             match_emissions=match_counts,
             insert_emissions=insert_counts,
             transitions=transitions,
