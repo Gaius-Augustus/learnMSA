@@ -252,3 +252,36 @@ def test_threshold_very_low() -> None:
         counts = PHMMValueSet.from_msa(data, match_threshold=0.0)
         # all columns are match states
         assert counts.matches() == len(sequences[0][1])
+
+
+def test_gapless_msa_to_counts() -> None:
+    """Test conversion of MSA to HMM counts."""
+    sequences = [
+        ("seq1", "ACGTACGT"),
+        ("seq2", "ACGTACGT"),
+        ("seq3", "ACGTACGT"),
+        ("seq4", "ACGTACGT"),
+        ("seq5", "ACGTACGT"),
+    ]
+    with AlignedDataset(aligned_sequences=sequences) as data:
+        counts = PHMMValueSet.from_msa(data)
+
+    assert counts.matches() == 8
+
+    # Try to normalize counts, should not raise any warnings/errors
+    counts.add_pseudocounts(
+        aa=1e-8,
+        match_transition=1e-8,
+        insert_transition=1e-8,
+        delete_transition=1e-8,
+        begin_to_match=1e-8,
+        begin_to_delete=1e-8,
+        match_to_end=1e-2,
+        left_flank=1e-8,
+        right_flank=1e-8,
+        unannotated=1e-8,
+        end=1e-8,
+        flank_start=1e-8,
+    ).normalize()
+
+    assert not np.any(np.isnan(counts.transitions))
