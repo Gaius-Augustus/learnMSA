@@ -390,9 +390,23 @@ class PHMMTransitionIndexSet:
         Returns the total number of states in the PHMM.
         """
         if self.folded:
-            return 2*self.L + 3
+            return self.num_states_folded(self.L)
         else:
-            return 3*self.L + 5
+            return self.num_states_unfolded(self.L)
+
+    @staticmethod
+    def num_states_folded(L: int) -> int:
+        """
+        Returns the total number of states in a folded PHMM with L match states.
+        """
+        return 2*L + 3
+
+    @staticmethod
+    def num_states_unfolded(L: int) -> int:
+        """
+        Returns the total number of states in an unfolded PHMM with L match states.
+        """
+        return 3*L + 5
 
     @property
     def num_transitions(self) -> int:

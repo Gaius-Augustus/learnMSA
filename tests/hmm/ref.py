@@ -1,65 +1,116 @@
 import numpy as np
 
-from learnMSA.msa_hmm import Initializers
+from learnMSA.config.hmm import HMMConfig
 
 
-def make_transition_init_A():
-    d = {"begin_to_match" : [0.6, 0.1, 0.1, 0.1],
-              "match_to_end" : [0.01, 0.05, 0.05, 1],
-              "match_to_match" : [0.97, 0.5, 0.6],
-              "match_to_insert" : [0.01, 0.05, 0.3],
-              "insert_to_match" : [0.5, 0.5, 0.5],
-              "insert_to_insert" : [0.5, 0.5, 0.5],
-              "match_to_delete" : [0.1, 0.01, 0.4, 0.05],
-               "delete_to_match" : [0.8, 0.5, 0.8, 1],
-               "delete_to_delete" : [0.2, 0.5, 0.2],
-               #must assume that flaking probs are tied
-               "left_flank_loop" : [0.6],
-               "left_flank_exit" : [0.4],
-               "right_flank_loop" : [0.6],
-               "right_flank_exit" : [0.4],
-               "unannotated_segment_loop" : [0.9],
-               "unannotated_segment_exit" : [0.1],
-               "end_to_unannotated_segment" : [0.2],
-              "end_to_right_flank" : [0.7],
-              "end_to_terminal" : [0.1]}
-    return {part_name : Initializers.ConstantInitializer(np.log(p))
-                              for part_name,p in d.items()}
+config: HMMConfig = HMMConfig(
+    p_begin_match=[[0.6, 0.1, 0.1, 0.1], [0.7, 0.1, 0.1]],
+    p_match_match=[[0.97, 0.5, 0.6], [0.97, 0.5]],
+    p_match_insert=[[0.01, 0.05, 0.3], [0.01, 0.05]],
+    p_match_end=[[0.01, 0.05, 0.05, 1], [0.01, 0.05, 1]],
+    p_insert_insert=[[0.5, 0.5, 0.5], [0.5, 0.1]],
+    p_delete_delete=[[0.2, 0.5, 0.2], [0.2, 0.5]],
+    p_begin_delete=[0.1]*2,
+    p_left_left=[0.6]*2,
+    p_right_right=[0.6]*2,
+    p_unannot_unannot=[0.9]*2,
+    p_end_unannot=[0.2]*2,
+    p_end_right=[0.7]*2,
+    p_start_left_flank=[0.5]*2
+)
+"""Configuration for the reference models"""
 
-def make_emission_init_A():
-    emission_kernel_initializer = np.log([[0.5, 0.5], [0.1, 0.9], [0.7, 0.3], [0.9, 0.1]])
-    return Initializers.ConstantInitializer(emission_kernel_initializer)
+unfolded_transitions_a: np.ndarray = np.array([
+    [0, 0.97, 0, 0, 0.01, 0, 0, 0, 0.01, 0, 0, 0, 0, 0.01, 0, 0, 0],    #M1
+    [0, 0, 0.5, 0, 0, 0.05, 0, 0, 0, 0.4, 0, 0, 0, 0.05, 0, 0, 0],      #M2
+    [0, 0, 0, 0.6, 0, 0, 0.3, 0, 0, 0, 0.05, 0, 0, 0.05, 0, 0, 0],      #M3
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],                #M4
+    [0, 0.5, 0, 0, 0.5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],            #I1
+    [0, 0, 0.5, 0, 0, 0.5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],            #I2
+    [0, 0, 0, 0.5, 0, 0, 0.5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],            #I3
+    [0, 0.8, 0, 0, 0, 0, 0, 0, 0.2, 0, 0, 0, 0, 0, 0, 0, 0],            #D1
+    [0, 0, 0.5, 0, 0, 0, 0, 0, 0, 0.5, 0, 0, 0, 0, 0, 0, 0],            #D2
+    [0, 0, 0, 0.8, 0, 0, 0, 0, 0, 0, 0.2, 0, 0, 0, 0, 0, 0],            #D3
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],                #D4
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.6, 0.4, 0, 0, 0, 0],            #L
+    [0.6, 0.1, 0.1, 0.1, 0, 0, 0, 0.1, 0, 0, 0, 0, 0, 0, 0, 0, 0],      #B
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.2, 0.7, 0.1],          #E
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.1, 0, 0.9, 0, 0],            #C
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.6, 0.4],            #R
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],                #T
+])
+"""Unfolded transitions of the first reference model"""
 
-def make_insertion_init():
-    insertion_kernel_initializer = np.log([0.5, 0.5])
-    return Initializers.ConstantInitializer(insertion_kernel_initializer)
+transitions_a: np.ndarray = np.array([
+    [0.0000e+00, 9.7000e-01, 5.0000e-03, 4.0000e-03, 1.0000e-02,
+     0.0000e+00, 0.0000e+00, 0.0000e+00, 2.2000e-03, 7.7000e-03,
+    1.1000e-03],
+    [0.0000e+00, 0.0000e+00, 5.0000e-01, 3.2000e-01, 0.0000e+00,
+     5.0000e-02, 0.0000e+00, 0.0000e+00, 2.6000e-02, 9.1000e-02,
+    1.3000e-02],
+    [0.0000e+00, 0.0000e+00, 0.0000e+00, 6.0000e-01, 0.0000e+00,
+     0.0000e+00, 3.0000e-01, 0.0000e+00, 2.0000e-02, 7.0000e-02,
+    1.0000e-02],
+    [0.0000e+00, 0.0000e+00, 0.0000e+00, 0.0000e+00, 0.0000e+00,
+     0.0000e+00, 0.0000e+00, 0.0000e+00, 2.0000e-01, 7.0000e-01,
+    1.0000e-01],
+    [0.0000e+00, 5.0000e-01, 0.0000e+00, 0.0000e+00, 5.0000e-01,
+    0.0000e+00, 0.0000e+00, 0.0000e+00, 0.0000e+00, 0.0000e+00,
+    0.0000e+00],
+    [0.0000e+00, 0.0000e+00, 5.0000e-01, 0.0000e+00, 0.0000e+00,
+     5.0000e-01, 0.0000e+00, 0.0000e+00, 0.0000e+00, 0.0000e+00,
+    0.0000e+00],
+    [0.0000e+00, 0.0000e+00, 0.0000e+00, 5.0000e-01, 0.0000e+00,
+     0.0000e+00, 5.0000e-01, 0.0000e+00, 0.0000e+00, 0.0000e+00,
+    0.0000e+00],
+    [2.4000e-01, 7.2000e-02, 4.4000e-02, 4.3200e-02, 0.0000e+00,
+     0.0000e+00, 0.0000e+00, 6.0000e-01, 1.6000e-04, 5.6000e-04,
+    8.0000e-05],
+    [6.0000e-02, 1.8000e-02, 1.1000e-02, 1.0800e-02, 0.0000e+00,
+     0.0000e+00, 0.0000e+00, 0.0000e+00, 9.0004e-01, 1.4000e-04,
+    2.0000e-05],
+    [0.0000e+00, 0.0000e+00, 0.0000e+00, 0.0000e+00, 0.0000e+00,
+     0.0000e+00, 0.0000e+00, 0.0000e+00, 0.0000e+00, 6.0000e-01,
+    4.0000e-01],
+    [0.0000e+00, 0.0000e+00, 0.0000e+00, 0.0000e+00, 0.0000e+00,
+     0.0000e+00, 0.0000e+00, 0.0000e+00, 0.0000e+00, 0.0000e+00,
+     1.0000e+00]
+])
+"""Folded transitions of the first reference model"""
 
-def make_transition_init_B():
-    d = {"begin_to_match" : [0.7, 0.1, 0.1],
-              "match_to_end" : [0.01, 0.05, 1],
-              "match_to_match" : [0.97, 0.5],
-              "match_to_insert" : [0.01, 0.05],
-              "insert_to_match" : [0.5, 0.9],
-              "insert_to_insert" : [0.5, 0.1],
-              "match_to_delete" : [0.1, 0.01, 0.4],
-               "delete_to_match" : [0.8, 0.5, 1],
-               "delete_to_delete" : [0.2, 0.5],
-               #must assume that flaking probs are tied
-               "left_flank_loop" : [0.6],
-               "left_flank_exit" : [0.4],
-               "right_flank_loop" : [0.6],
-               "right_flank_exit" : [0.4],
-               "unannotated_segment_loop" : [0.9],
-               "unannotated_segment_exit" : [0.1],
-               "end_to_unannotated_segment" : [0.2],
-              "end_to_right_flank" : [0.7],
-              "end_to_terminal" : [0.1]}
-    return {part_name : Initializers.ConstantInitializer(np.log(p))
-                              for part_name,p in d.items()}
+start_a: np.ndarray = np.array(
+    [3.0e-01, 9.0e-02, 5.5e-02, 5.4e-02, 0.0e+00,
+     0.0e+00, 0.0e+00, 5.0e-01, 2.0e-04, 7.0e-04, 1.0e-04]
+)
+"""Folded start distribution of the first reference model"""
 
-def make_emission_init_B():
-    emission_kernel_initializer = np.log([[0.5, 0.5], [0.1, 0.9], [0.7, 0.3]])
-    return Initializers.ConstantInitializer(emission_kernel_initializer)
+transitions_b: np.ndarray = np.array([
+    [0.000e+00, 9.700e-01, 5.000e-03, 1.000e-02, 0.000e+00,
+    0.000e+00, 3.000e-03, 1.050e-02, 1.500e-03],
+    [0.000e+00, 0.000e+00, 5.000e-01, 0.000e+00, 5.000e-02,
+     0.000e+00, 9.000e-02, 3.150e-01, 4.500e-02],
+    [0.000e+00, 0.000e+00, 0.000e+00, 0.000e+00, 0.000e+00,
+     0.000e+00, 2.000e-01, 7.000e-01, 1.000e-01],
+    [0.000e+00, 5.000e-01, 0.000e+00, 5.000e-01, 0.000e+00,
+     0.000e+00, 0.000e+00, 0.000e+00, 0.000e+00],
+    [0.000e+00, 0.000e+00, 9.000e-01, 0.000e+00, 1.000e-01,
+     0.000e+00, 0.000e+00, 0.000e+00, 0.000e+00],
+    [2.800e-01, 7.200e-02, 4.400e-02, 0.000e+00, 0.000e+00,
+     6.000e-01, 8.000e-04, 2.800e-03, 4.000e-04],
+    [7.000e-02, 1.800e-02, 1.100e-02, 0.000e+00, 0.000e+00,
+     0.000e+00, 9.002e-01, 7.000e-04, 1.000e-04],
+    [0.000e+00, 0.000e+00, 0.000e+00, 0.000e+00, 0.000e+00,
+     0.000e+00, 0.000e+00, 6.000e-01, 4.000e-01],
+    [0.000e+00, 0.000e+00, 0.000e+00, 0.000e+00, 0.000e+00,
+     0.000e+00, 0.000e+00, 0.000e+00, 1.000e+00]
+])
+"""Folded transitions of the second reference model"""
+
+start_b: np.ndarray = np.array([
+    0.35  , 0.09  , 0.055 , 0.    , 0.    ,
+    0.5   , 0.001 , 0.0035, 0.0005
+])
+"""Folded start distribution of the second reference model"""
 
 
 def get_ref_model_A():
@@ -142,6 +193,18 @@ def get_ref_model_B():
  np.array([0.5   , 0.35  , 0.09  , 0.055 , 0.    , 0.    , 0.001 , 0.0035,
         0.0005]))
 
+
+# def make_emission_init_A():
+#     emission_kernel_initializer = np.log([[0.5, 0.5], [0.1, 0.9], [0.7, 0.3], [0.9, 0.1]])
+#     return Initializers.ConstantInitializer(emission_kernel_initializer)
+
+# def make_insertion_init():
+#     insertion_kernel_initializer = np.log([0.5, 0.5])
+#     return Initializers.ConstantInitializer(insertion_kernel_initializer)
+
+# def make_emission_init_B():
+#     emission_kernel_initializer = np.log([[0.5, 0.5], [0.1, 0.9], [0.7, 0.3]])
+#     return Initializers.ConstantInitializer(emission_kernel_initializer)
 
 def get_ref_forward_A():
     return np.array([[2.50000000e-01, 1.50000000e-01, 9.00000000e-03, 3.85000000e-02,

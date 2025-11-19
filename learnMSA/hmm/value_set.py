@@ -118,6 +118,10 @@ class PHMMValueSet:
             transitions[ind.delete_to_match[i, 0], ind.delete_to_match[i, 1]] = \
                 1 - get_value(config.p_delete_delete, h, i)
 
+            # Match i to end
+            transitions[ind.match_to_end[i, 0], ind.match_to_end[i, 1]] = \
+                get_value(config.p_match_end, h, i)
+
         # Match L to end
         transitions[ind.match_to_end[-1, 0], ind.match_to_end[-1, 1]] = 1.0
 

@@ -486,6 +486,9 @@ def test_from_config_position_dependent() -> None:
     expected = 1 - 0.75 - 0.12 - 0.03
     np.testing.assert_almost_equal(value_set.transitions[1, 2*L+1], expected)
 
+    # Check match to end
+    np.testing.assert_almost_equal(value_set.transitions[1, 3*L+1], 0.03)  # M2->E
+
 
 def test_from_config_multi_head_position_dependent() -> None:
     """Test from_config with both multi-head and position-dependent parameters."""
@@ -509,7 +512,6 @@ def test_from_config_multi_head_position_dependent() -> None:
 
     # Test head 0
     value_set_h0 = PHMMValueSet.from_config(L, 0, config)
-    print("value_set_h0", value_set_h0.transitions)
     np.testing.assert_almost_equal(value_set_h0.transitions[3*L, 0], 0.6)  # B->M1
     np.testing.assert_almost_equal(value_set_h0.transitions[3*L, 1], 0.4)  # B->M2
     np.testing.assert_almost_equal(value_set_h0.transitions[3*L, 2*L-1], 0.0)  # B->D1 (sum=1)
@@ -518,7 +520,6 @@ def test_from_config_multi_head_position_dependent() -> None:
 
     # Test head 1
     value_set_h1 = PHMMValueSet.from_config(L, 1, config)
-    print("value_set_h1", value_set_h1.transitions)
     np.testing.assert_almost_equal(value_set_h1.transitions[3*L, 0], 0.7)  # B->M1
     np.testing.assert_almost_equal(value_set_h1.transitions[3*L, 1], 0.3)  # B->M2
     np.testing.assert_almost_equal(value_set_h1.transitions[3*L, 2*L-1], 0.0)  # B->D1 (sum=1)
