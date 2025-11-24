@@ -503,17 +503,18 @@ class AlignmentModel():
         blocks = []  
         if add_block_sep:
             sep = np.zeros((b,1), dtype=np.uint16) + 2*len(self.data.alphabet)
-        left_flank_block = self.get_insertion_block(
-            sequences, 
-            data.left_flank_len[batch_indices],
-            max(data.left_flank_len_total, aligned_insertions.ext_left_flank),
-            data.left_flank_start[batch_indices],
-            adjust_to_right=True,
-            custom_columns=aligned_insertions.left_flank(batch_indices)
-        )
-        blocks.append(left_flank_block)
-        if add_block_sep:
-            blocks.append(sep)
+        if not only_matches:
+            left_flank_block = self.get_insertion_block(
+                sequences,
+                data.left_flank_len[batch_indices],
+                max(data.left_flank_len_total, aligned_insertions.ext_left_flank),
+                data.left_flank_start[batch_indices],
+                adjust_to_right=True,
+                custom_columns=aligned_insertions.left_flank(batch_indices)
+            )
+            blocks.append(left_flank_block)
+            if add_block_sep:
+                blocks.append(sep)
         for i in range(data.num_repeats):
             consensus = data.consensus[i]
             #remove columns consisting only of gaps
@@ -530,12 +531,13 @@ class AlignmentModel():
                 )[i],
                 ins_start[batch_indices],
                 is_non_empty=is_non_empty,
-                custom_columns=aligned_insertions.insertion(batch_indices, i)
+                custom_columns=aligned_insertions.insertion(batch_indices, i),
+                only_matches=only_matches
             )
             blocks.append(alignment_block)
             if add_block_sep:
                 blocks.append(sep)
-            if i < data.num_repeats-1:
+            if i < data.num_repeats-1 and not only_matches:
                 unannotated_segment_l = data.unannotated_segments_len[i]
                 unannotated_segment_s = data.unannotated_segments_start[i]
                 unannotated_block = self.get_insertion_block(
@@ -553,14 +555,15 @@ class AlignmentModel():
                 blocks.append(unannotated_block)
                 if add_block_sep:
                     blocks.append(sep)
-        right_flank_block = self.get_insertion_block(
-            sequences, 
-            data.right_flank_len[batch_indices],
-            max(data.right_flank_len_total, aligned_insertions.ext_right_flank),
-            data.right_flank_start[batch_indices],
-            custom_columns=aligned_insertions.right_flank(batch_indices)
-        )
-        blocks.append(right_flank_block)
+        if not only_matches:
+            right_flank_block = self.get_insertion_block(
+                sequences, 
+                data.right_flank_len[batch_indices],
+                max(data.right_flank_len_total, aligned_insertions.ext_right_flank),
+                data.right_flank_start[batch_indices],
+                custom_columns=aligned_insertions.right_flank(batch_indices)
+            )
+            blocks.append(right_flank_block)
         batch_alignment = np.concatenate(blocks, axis=1)
         return batch_alignment
     
@@ -949,7 +952,8 @@ class AlignmentModel():
         ins_len_total, 
         ins_start, 
         is_non_empty=None, 
-        custom_columns=None
+        custom_columns=None,
+        only_matches=False
     ):
         """ Constructs one core model hit block from an implicitly represented 
             alignment.
@@ -959,7 +963,10 @@ class AlignmentModel():
         Returns:
         """
         A = np.arange(sequences.shape[0])
-        length = consensus.shape[1] + np.sum(ins_len_total)
+        if only_matches:
+            length = consensus.shape[1]
+        else:
+            length = consensus.shape[1] + np.sum(ins_len_total)
         block = np.zeros((sequences.shape[0], length), dtype=np.uint8) 
         block += len(SequenceDataset.alphabet) - 1
         i = 0
@@ -977,18 +984,19 @@ class AlignmentModel():
                 columns_to_remove.append(i)
             i += 1
             #insertion
-            if custom_columns is None:
-                custom_column = None
-            else:
-                custom_column = custom_columns[c]
-            block[:,i:i+ins_l_total] = cls.get_insertion_block(
-                sequences,
-                ins_l,
-                ins_l_total, 
-                ins_s, 
-                custom_columns=custom_column
-            )
-            i += ins_l_total
+            if not only_matches:
+                if custom_columns is None:
+                    custom_column = None
+                else:
+                    custom_column = custom_columns[c]
+                block[:,i:i+ins_l_total] = cls.get_insertion_block(
+                    sequences,
+                    ins_l,
+                    ins_l_total, 
+                    ins_s, 
+                    custom_columns=custom_column
+                )
+                i += ins_l_total
         #final column
         no_gap = consensus[:,-1] != -1
         block[no_gap,i] = sequences[A[no_gap],consensus[:,-1][no_gap]]
