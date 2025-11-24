@@ -180,7 +180,8 @@ def run_main():
                 logo_dir = args.logo_gif.parent if args.logo_gif else "",
                 initial_model_length_callback = initial_model_length_cb,
                 output_format = args.format,
-                load_model = args.load_model
+                load_model = args.load_model,
+                only_matches = args.only_matches,
             )
             if args.save_model:
                 alignment_model.write_models_to_file(args.save_model)

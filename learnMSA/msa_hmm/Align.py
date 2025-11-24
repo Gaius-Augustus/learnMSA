@@ -248,7 +248,8 @@ def run_learnMSA(
     logo_dir=Path(),
     output_format="fasta",
     load_model="",
-    A2M_output=True
+    A2M_output=True,
+    only_matches=False,
 ):
     """ Wraps fit_and_align and adds file parsing, verbosity, model selection, reference file comparison and an outfile file.
     Args:
@@ -267,6 +268,8 @@ def run_learnMSA(
         load_model: Path to a model file that should be loaded instead of training a new model.
         A2M_output: If True, insertions will be indicated by lower case letters in the output and "." will indicate insertions in other sequences.
                     Otherwise all upper case letters and only "-" will be used.
+        only_matches: If true, omit all insertions and write only those amino "\
+            "acids that are assigned to match states."
     Returns:
         An AlignmentModel object.
     """
@@ -312,11 +315,11 @@ def run_learnMSA(
     Path(os.path.dirname(out_filename)).mkdir(parents=True, exist_ok=True)
     t = time.time()
 
-    if align_insertions:
+    if align_insertions and not only_matches:
         aligned_insertions = make_aligned_insertions(am, insertion_aligner, aligner_threads, verbose=verbose)
         am.to_file(out_filename, am.best_model, aligned_insertions = aligned_insertions, format=output_format)
     else:
-        am.to_file(out_filename, am.best_model, format=output_format)
+        am.to_file(out_filename, am.best_model, format=output_format, only_matches=only_matches)
 
     if verbose:
         if am.fixed_viterbi_seqs.size > 0:

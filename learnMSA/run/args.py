@@ -271,6 +271,13 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         action="store_true",
         help="Only decode an alignment from the provided model."
     )
+    train_group.add_argument(
+        "--only_matches",
+        dest="only_matches",
+        action="store_true",
+        help="Omit all insertions and write only those amino acids that are "\
+            "assigned to match states."
+    )
 
     init_msa_group = parser.add_argument_group("Initialize with existing MSA")
     init_msa_group.add_argument(

@@ -404,7 +404,8 @@ class AlignmentModel():
         add_block_sep=False, 
         aligned_insertions : AlignedInsertions = AlignedInsertions(), 
         format="fasta", 
-        fasta_line_limit=80
+        fasta_line_limit=80,
+        only_matches=False,
     ):
         """ Uses one model to decode an alignment and stores it in fasta file 
             format. Currently no other output format is supported.
@@ -428,6 +429,8 @@ class AlignmentModel():
                 stored in memory.
             fasta_line_limit: Maximum number of characters per line in the 
                 fasta file (only applies to sequences).
+            only_matches: If true, omit all insertions and write only those
+                amino acids that are assigned to match states.
         """
         if format == "fasta" or format == "a2m": #streaming batches to file
             output_alphabet = self.get_output_alphabet(format == "a2m")
@@ -440,7 +443,8 @@ class AlignmentModel():
                         model_index,
                         batch_indices,
                         add_block_sep,
-                        aligned_insertions
+                        aligned_insertions,
+                        only_matches,
                     )
                     alignment_strings = self.batch_to_string(
                         batch_alignment, output_alphabet=output_alphabet
@@ -469,7 +473,8 @@ class AlignmentModel():
         model_index, 
         batch_indices, 
         add_block_sep, 
-        aligned_insertions : AlignedInsertions = AlignedInsertions()
+        aligned_insertions : AlignedInsertions = AlignedInsertions(),
+        only_matches=False,
     ):
         """ Returns a dense matrix representing a subset of sequences
             as specified by batch_indices with respect to the alignment of all 
@@ -483,6 +488,8 @@ class AlignmentModel():
                 added to the alignment indicating domain boundaries.
             aligned_insertions: Can be used to override insertion metadata if 
                 insertions are aligned after the main procedure.
+            only_matches: If true, omit all insertions and write only those
+                amino acids that are assigned to match states.
         """
         if not model_index in self.metadata:
             self._build_alignment([model_index])
