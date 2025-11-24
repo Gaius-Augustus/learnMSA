@@ -57,10 +57,10 @@ class PHMMExplicitTransitioner(TFTransitioner):
             ))
             start_values.append(value_set.start)
 
-        self.allow = np.vstack(transitions).tolist()
+        self.allow = np.vstack(transitions)
         self.initializer = np.hstack(value_list)
 
-        self.allow_start = np.vstack(start).tolist()
+        self.allow_start = np.vstack(start)
         self.initializer_start = np.hstack(start_values)
 
 
@@ -106,8 +106,8 @@ class PHMMTransitioner(TFTransitioner):
                 index_set.start[:, np.newaxis], ((0,0),(1,0)), constant_values=h
             ))
 
-        self.allow = np.vstack(transitions).tolist()
-        self.allow_start = np.vstack(start).tolist()
+        self.allow = np.vstack(transitions)
+        self.allow_start = np.vstack(start)
 
     @override
     def build(self) -> None:
