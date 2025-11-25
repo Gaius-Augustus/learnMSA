@@ -34,8 +34,9 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         "--out_file",
         dest="output_file",
         type=str,
-        required=True,
-        help="Output file. Use -f to change format."
+        required=False,
+        default=None,
+        help="Output file. Use -f to change format. Optional when --scores is used."
     )
     io_group.add_argument(
         "-f",

@@ -26,6 +26,10 @@ def run_main():
     if not args.silent and parser.description:
         print(parser.description.split("\n")[0])
 
+    # Validate that either output_file or scores is provided
+    if args.output_file is None and not args.scores:
+        parser.error("Either -o/--out_file or --scores must be provided.")
+
     util.setup_devices(args.cuda_visible_devices, args.silent, args.grow_mem)
 
     if args.convert:
@@ -172,7 +176,7 @@ def run_main():
                 config = config,
                 model_generator=model_gen,
                 batch_generator=batch_gen,
-                align_insertions=not args.unaligned_insertions,
+                align_insertions=not args.unaligned_insertions if args.output_file else False,
                 sequence_weights = sequence_weights,
                 clusters = clusters,
                 verbose = not args.silent,

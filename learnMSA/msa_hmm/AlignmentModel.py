@@ -623,7 +623,7 @@ class AlignmentModel():
                 loglik[batch_indices,:] = batch_loglik
         return loglik
 
-    def compute_null_model_log_probs(self, p: float = 0.995):
+    def compute_null_model_log_probs(self, p: float):
         """ Computes the logarithmic likelihood of each sequence under the
             null model
 
@@ -670,8 +670,8 @@ class AlignmentModel():
         # Compute log probs
         log_probs = np.zeros((n,))
         for (x,_,batch_idx), _ in ds:
-            x = x.numpy()[:,0,:]
-            log_probs[batch_idx.numpy()] = scores[x].sum(axis=1)
+            y = tf.reduce_sum(tf.gather(scores, tf.cast(x[:,0,:], tf.int32)), axis=1)
+            log_probs[batch_idx.numpy()] = y.numpy()
         return log_probs
 
     def compute_log_prior(self):
@@ -767,9 +767,9 @@ class AlignmentModel():
         np.savetxt(filepath+"/indices", self.indices, fmt='%i')
         #save the model
         if version.parse(tf.__version__) < version.parse("2.12.0"):
-            self.model.save(filepath+".keras", save_traces=False) 
+            self.model.save(filepath+".keras", save_traces=False)
         else:
-            self.model.save(filepath+".keras") 
+            self.model.save(filepath+".keras")
         if pack:
             shutil.make_archive(filepath, "zip", filepath)
             try:
@@ -780,7 +780,7 @@ class AlignmentModel():
 
     def write_scores(self, filepath: str, model: int|None = None) -> None:
         """ Writes per-sequence scores (loglik, bitscore) to a
-            tsv file. The bitscore is computed as+
+            tsv file sorted by bitscore. The bitscore is computed as+
             ``loglik(S) - log P(S; nullmodel)``.
         Args:
             filepath: Path of the output file.
@@ -793,22 +793,27 @@ class AlignmentModel():
 
         # Compute the likelihood and bitscores for all sequences
         loglik = self.compute_loglik(self.data.num_seq, reduce=False)[:,model]
-        log_null = self.compute_null_model_log_probs()
+        # Compute the null model log probs with transition probability based
+        # on the length of the model
+        T = self.msa_hmm_layer.cell.length[model]
+        log_null = self.compute_null_model_log_probs(p = T/(T+1))
         bitscore = loglik - log_null
+
+        # Sort by bitscore in descending order
+        sorted_indices = np.argsort(-bitscore)
 
         # Write to file
         with open(filepath, "w") as scorefile:
             scorefile.write(
-                "\t".join(["index", "seq_id", "loglik", "bit_score"]) + "\n"
+                "\t".join(["seq_id", "loglik", "bit_score"]) + "\n"
             )
-            for i in range(self.data.num_seq):
+            for idx in sorted_indices:
                 scorefile.write("\t".join([
-                    f"{i}",
-                    f"{self.data.seq_ids[i]}",
-                    f"{loglik[i]}",
-                    f"{bitscore[i]}"
+                    f"{self.data.seq_ids[idx]}",
+                    f"{loglik[idx]}",
+                    f"{bitscore[idx]}"
                 ]) + "\n")
-    
+
     @classmethod
     def load_models_from_file(cls, 
                               filepath, 

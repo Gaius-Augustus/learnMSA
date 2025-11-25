@@ -97,8 +97,15 @@ def fit_and_align(
     if load_model:
         # Load the alignment model from file and use it as initialization
         am = AlignmentModel.load_models_from_file(
-            load_model, data, custom_batch_gen=batch_generator
+            load_model,
+            data,
+            custom_batch_gen=batch_generator,
+            custom_config=config,
         )
+        # Remove best_model attribute if it exists (from saved model)
+        # We'll select the best model after training again
+        if hasattr(am, "best_model"):
+            delattr(am, "best_model")
         if verbose:
             print("Loaded model from file", load_model)
         # Prevent model surgery from adding or discarding any states,
@@ -243,7 +250,6 @@ def run_learnMSA(
     clusters=None,
     verbose=True,
     initial_model_length_callback=get_initial_model_lengths,
-    select_best_for_comparison=True,
     logo_gif_mode=False,
     logo_dir=Path(),
     output_format="fasta",
@@ -280,7 +286,10 @@ def run_learnMSA(
     subset = np.array([data.seq_ids.index(sid) for sid in subset_ids]) if subset_ids else None
     if load_model and config["epochs"][0] == 0:
         am = AlignmentModel.load_models_from_file(
-            load_model, data, custom_batch_gen=batch_generator
+            load_model,
+            data,
+            custom_batch_gen=batch_generator,
+            custom_config=config,
         )
     else:
         try:
@@ -310,26 +319,30 @@ def run_learnMSA(
             print("Try reducing the batch size (-b). The current batch size was: "+str(config["batch_size"])+".")
             sys.exit(e.error_code)
     tf.keras.backend.clear_session() #not sure if necessary
-    am.best_model = select_model(am, config["model_criterion"], verbose)
 
-    Path(os.path.dirname(out_filename)).mkdir(parents=True, exist_ok=True)
-    t = time.time()
+    if not hasattr(am, "best_model"):
+        # Find the best model unless the model was loaded without any training
+        am.best_model = select_model(am, config["model_criterion"], verbose)
 
-    if align_insertions and not only_matches:
-        aligned_insertions = make_aligned_insertions(am, insertion_aligner, aligner_threads, verbose=verbose)
-        am.to_file(out_filename, am.best_model, aligned_insertions = aligned_insertions, format=output_format)
-    else:
-        am.to_file(out_filename, am.best_model, format=output_format, only_matches=only_matches)
+    if out_filename is not None:
+        Path(os.path.dirname(out_filename)).mkdir(parents=True, exist_ok=True)
+        t = time.time()
 
-    if verbose:
-        if am.fixed_viterbi_seqs.size > 0:
-            max_show_seqs = 5
-            print(f"Fixed {am.fixed_viterbi_seqs.size} Viterbi sequences:")
-            print("\n".join([am.data.seq_ids[i] for i in am.fixed_viterbi_seqs[:max_show_seqs]]))
-            if am.fixed_viterbi_seqs.size > max_show_seqs:
-                print("...")
-        print("time for generating output:", "%.4f" % (time.time()-t))
-        print("Wrote file", out_filename)
+        if align_insertions and not only_matches:
+            aligned_insertions = make_aligned_insertions(am, insertion_aligner, aligner_threads, verbose=verbose)
+            am.to_file(out_filename, am.best_model, aligned_insertions = aligned_insertions, format=output_format)
+        else:
+            am.to_file(out_filename, am.best_model, format=output_format, only_matches=only_matches)
+
+        if verbose:
+            if am.fixed_viterbi_seqs.size > 0:
+                max_show_seqs = 5
+                print(f"Fixed {am.fixed_viterbi_seqs.size} Viterbi sequences:")
+                print("\n".join([am.data.seq_ids[i] for i in am.fixed_viterbi_seqs[:max_show_seqs]]))
+                if am.fixed_viterbi_seqs.size > max_show_seqs:
+                    print("...")
+            print("time for generating output:", "%.4f" % (time.time()-t))
+            print("Wrote file", out_filename)
 
     return am
 
