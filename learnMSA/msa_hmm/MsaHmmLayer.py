@@ -134,7 +134,7 @@ class MsaHmmLayer(tf.keras.layers.Layer):
     
     
     def apply_sequence_weights(self, loglik, indices, aggregate=False):
-        if self.sequence_weights is not None:
+        if self.sequence_weights is not None and indices is not None:
             weights = tf.gather(self.sequence_weights, indices)
             loglik *= weights
             if aggregate:

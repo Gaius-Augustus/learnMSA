@@ -1,3 +1,4 @@
+from json import encoder
 import tensorflow as tf
 import numpy as np
 import learnMSA.msa_hmm.AncProbsLayer as anc_probs
@@ -566,18 +567,19 @@ class AlignmentModel():
             blocks.append(right_flank_block)
         batch_alignment = np.concatenate(blocks, axis=1)
         return batch_alignment
-    
+
     def batch_to_string(self, batch_alignment, output_alphabet):
         """ Converts a dense matrix into string format.
         """
         alignment_arr = output_alphabet[batch_alignment]
         alignment_strings = [''.join(s) for s in alignment_arr]
         return alignment_strings
-    
+
     def compute_loglik(
         self,
         max_seq: int =200000,
         reduce: bool = True,
+        no_anc_probs: bool = False,
     ):
         """ Computes the logarithmic likelihood for each underlying model.
         Args:
@@ -586,9 +588,11 @@ class AlignmentModel():
                 drawn.
             reduce: If true, the loglik will be averaged over the number of
                 sequences.
+            no_anc_probs: If true, the ancestral probabilities will not be
+                computed.
         """
         n = self.data.num_seq
-        if n > max_seq:
+        if n > max_seq and reduce:
             #estimate the ll only on a subset, otherwise for millions of 
             # sequences this step takes rather long for little benefit
             ll_subset = np.arange(n)
@@ -597,10 +601,7 @@ class AlignmentModel():
             ll_subset = np.sort(ll_subset)
             bucket_by_seq_length = False
         else:
-            # Use the sorted indices for optimal length distributions in batches
-            ll_subset = np.array(
-                [i for l,i in sorted(zip(self.data.seq_lens, range(n)))]
-            )
+            ll_subset = np.arange(n)
             # Batch sequences sorted by length for efficiency
             bucket_by_seq_length = True
         ds = train.make_dataset(
@@ -611,19 +612,39 @@ class AlignmentModel():
             bucket_by_seq_length=bucket_by_seq_length,
             model_lengths=self.msa_hmm_layer.cell.length
         )
+        if no_anc_probs:
+            def _fn(x):
+                # split x into sequences and idx (idx are not used here)
+                x, _ = x
+                x = tf.one_hot(x, depth=self.msa_hmm_layer.cell.dim)
+                # learnMSA currently expects model dim first
+                x = tf.keras.ops.swapaxes(x, 0, 1)
+                y = self.msa_hmm_layer(x)[0]
+                y = tf.keras.ops.swapaxes(y, 0, 1)
+                return y
+            model_fn = tf.function(
+                _fn,
+                jit_compile=False, # jit compiling is currently slower here
+                input_signature=[[
+                    tf.TensorSpec((None, None, None), dtype=tf.uint8),
+                    tf.TensorSpec((None, None), dtype=tf.int64),
+                ]]
+            )
+        else:
+            model_fn = lambda x: self.model(x)[0]
         if reduce:
             loglik = np.zeros((self.msa_hmm_layer.cell.num_models))
             for (*x,_), _ in ds:
-                loglik += np.sum(self.model(x)[0], axis=0)
+                loglik += np.sum(model_fn(x), axis=0)
             loglik /= ll_subset.size
         else:
             loglik = np.zeros((n, self.msa_hmm_layer.cell.num_models))
             for (*x, batch_indices), _ in ds:
-                batch_loglik = self.model(x)[0].numpy()
+                batch_loglik = model_fn(x).numpy()
                 loglik[batch_indices,:] = batch_loglik
         return loglik
 
-    def compute_null_model_log_probs(self, p: float):
+    def compute_null_model_log_probs(self):
         """ Computes the logarithmic likelihood of each sequence under the
             null model
 
@@ -639,11 +660,8 @@ class AlignmentModel():
         """
         # Prepare the data
         n = self.data.num_seq
-        idx_sorted_by_length = np.array(
-            [i for l,i in sorted(zip(self.data.seq_lens, range(n)))]
-        )
         ds = train.make_dataset(
-            idx_sorted_by_length,
+            np.arange(n),
             self.batch_generator,
             self.batch_size,
             shuffle=False,
@@ -654,24 +672,27 @@ class AlignmentModel():
         # Prepare the background frequencies
         aa_dist = self.msa_hmm_layer.cell.emitter[0].prior.emission_dirichlet_mix.make_background().numpy()
         # Append ad-hoc probability for non-standard amino acids
-        aa_dist = np.append(aa_dist, [1e-6]*3)
+        aa_dist = np.append(aa_dist, [1e-4]*3)
         aa_dist /= np.sum(aa_dist) #normalize
         # Add the terminal symbol emissions
         aa_dist = np.append(aa_dist, [1.0])
         # Log transition probabilities
         aa_dist = np.log(aa_dist + 1e-10)  # shape (24,)
 
-        # Add transition log probs depending on whether we observe an amino acid
-        # or the terminal symbol
-        trans_dist = np.array([np.log(p)]*(len(aa_dist)-1) + [0.0])
-
-        scores = aa_dist + trans_dist
-
-        # Compute log probs
+        # Compute emission log probs
         log_probs = np.zeros((n,))
         for (x,_,batch_idx), _ in ds:
-            y = tf.reduce_sum(tf.gather(scores, tf.cast(x[:,0,:], tf.int32)), axis=1)
-            log_probs[batch_idx.numpy()] = y.numpy()
+            em = tf.reduce_sum(tf.gather(aa_dist, tf.cast(x[:,0,:], tf.int32)), axis=1)
+            log_probs[batch_idx] = em.numpy()
+
+        # Add transition log probs based on the target sequence lenghts
+        # We'll assume a geometric distribution with the expected length
+        # equal to the length of each target sequence
+        L = self.data.seq_lens
+        M = np.mean(L)
+        trans_scores = L * (np.log(M) - np.log(M+1))
+        log_probs += trans_scores
+
         return log_probs
 
     def compute_log_prior(self):
@@ -792,11 +813,11 @@ class AlignmentModel():
             model = self.best_model if hasattr(self, "best_model") else 0 # type: ignore
 
         # Compute the likelihood and bitscores for all sequences
-        loglik = self.compute_loglik(self.data.num_seq, reduce=False)[:,model]
-        # Compute the null model log probs with transition probability based
-        # on the length of the model
-        T = self.msa_hmm_layer.cell.length[model]
-        log_null = self.compute_null_model_log_probs(p = T/(T+1))
+        loglik = self.compute_loglik(
+            self.data.num_seq, reduce=False, no_anc_probs=True
+        )[:,model]
+        # Compute the bitscore
+        log_null = self.compute_null_model_log_probs()
         bitscore = loglik - log_null
 
         # Sort by bitscore in descending order
