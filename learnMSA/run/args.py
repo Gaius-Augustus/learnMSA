@@ -94,6 +94,13 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         action='store_true',
         help="Convert input files to format specific by --format."
     )
+    io_group.add_argument(
+        "--scores",
+        dest="scores",
+        type=str,
+        default="",
+        help="Additional table file containing per-sequence likelihoods.",
+    )
 
     # Training
     train_group = parser.add_argument_group("Training")

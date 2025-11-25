@@ -574,12 +574,18 @@ class AlignmentModel():
         alignment_strings = [''.join(s) for s in alignment_arr]
         return alignment_strings
     
-    def compute_loglik(self, max_seq=200000):
+    def compute_loglik(
+        self,
+        max_seq: int =200000,
+        reduce: bool = True,
+    ):
         """ Computes the logarithmic likelihood for each underlying model.
         Args:
-            max_seq: Threshold for the number of sequences used to compute the 
-                loglik. If the dataset has more sequences, a random subset is 
+            max_seq: Threshold for the number of sequences used to compute the
+                loglik. If the dataset has more sequences, a random subset is
                 drawn.
+            reduce: If true, the loglik will be averaged over the number of
+                sequences.
         """
         n = self.data.num_seq
         if n > max_seq:
@@ -589,21 +595,85 @@ class AlignmentModel():
             np.random.shuffle(ll_subset)
             ll_subset = ll_subset[:max_seq]
             ll_subset = np.sort(ll_subset)
+            bucket_by_seq_length = False
         else:
-            #use the sorted indices for optimal length distributions in batches
+            # Use the sorted indices for optimal length distributions in batches
             ll_subset = np.array(
                 [i for l,i in sorted(zip(self.data.seq_lens, range(n)))]
             )
-        ds = train.make_dataset(ll_subset, 
-                                self.batch_generator,
-                                self.batch_size, 
-                                shuffle=False)
-        loglik = np.zeros((self.msa_hmm_layer.cell.num_models))
-        for x, _ in ds:
-            loglik += np.sum(self.model(x)[0], axis=0)
-        loglik /= ll_subset.size
+            # Batch sequences sorted by length for efficiency
+            bucket_by_seq_length = True
+        ds = train.make_dataset(
+            ll_subset,
+            self.batch_generator,
+            self.batch_size,
+            shuffle=False,
+            bucket_by_seq_length=bucket_by_seq_length,
+            model_lengths=self.msa_hmm_layer.cell.length
+        )
+        if reduce:
+            loglik = np.zeros((self.msa_hmm_layer.cell.num_models))
+            for (*x,_), _ in ds:
+                loglik += np.sum(self.model(x)[0], axis=0)
+            loglik /= ll_subset.size
+        else:
+            loglik = np.zeros((n, self.msa_hmm_layer.cell.num_models))
+            for (*x, batch_indices), _ in ds:
+                batch_loglik = self.model(x)[0].numpy()
+                loglik[batch_indices,:] = batch_loglik
         return loglik
-    
+
+    def compute_null_model_log_probs(self, p: float = 0.995):
+        """ Computes the logarithmic likelihood of each sequence under the
+            null model
+
+             S ---> T
+            |_^    |_^
+             p
+
+            where the emission probabilities of S are amino acid background
+            frequencies and T is the terminal state.
+
+            Args:
+                p: The probability of staying in the emitting state S.
+        """
+        # Prepare the data
+        n = self.data.num_seq
+        idx_sorted_by_length = np.array(
+            [i for l,i in sorted(zip(self.data.seq_lens, range(n)))]
+        )
+        ds = train.make_dataset(
+            idx_sorted_by_length,
+            self.batch_generator,
+            self.batch_size,
+            shuffle=False,
+            bucket_by_seq_length=True,
+            model_lengths=self.msa_hmm_layer.cell.length
+        )
+
+        # Prepare the background frequencies
+        aa_dist = self.msa_hmm_layer.cell.emitter[0].prior.emission_dirichlet_mix.make_background().numpy()
+        # Append ad-hoc probability for non-standard amino acids
+        aa_dist = np.append(aa_dist, [1e-6]*3)
+        aa_dist /= np.sum(aa_dist) #normalize
+        # Add the terminal symbol emissions
+        aa_dist = np.append(aa_dist, [1.0])
+        # Log transition probabilities
+        aa_dist = np.log(aa_dist + 1e-10)  # shape (24,)
+
+        # Add transition log probs depending on whether we observe an amino acid
+        # or the terminal symbol
+        trans_dist = np.array([np.log(p)]*(len(aa_dist)-1) + [0.0])
+
+        scores = aa_dist + trans_dist
+
+        # Compute log probs
+        log_probs = np.zeros((n,))
+        for (x,_,batch_idx), _ in ds:
+            x = x.numpy()[:,0,:]
+            log_probs[batch_idx.numpy()] = scores[x].sum(axis=1)
+        return log_probs
+
     def compute_log_prior(self):
         """ Computes the logarithmic prior value of each underlying model.
         """
@@ -612,7 +682,7 @@ class AlignmentModel():
             return self.msa_hmm_layer.cell.get_prior_log_density().numpy()/n
         else:
             return 0
-    
+
     def compute_AIC(self, max_seq=200000, loglik=None):
         """ Computes the Akaike information criterion for each underlying model. 
         Args:
@@ -628,7 +698,7 @@ class AlignmentModel():
         num_param = 34 * np.array(self.length) + 25
         aic = -2 * loglik * self.data.num_seq + 2*num_param
         return aic 
-    
+
     def compute_consensus_score(self):
         """ Computes a consensus score that rates how plausible each model is 
             with respect to all other models.
@@ -707,6 +777,37 @@ class AlignmentModel():
             except OSError as e:
                 print("Error: %s - %s." % (e.filename, e.strerror))
 
+
+    def write_scores(self, filepath: str, model: int|None = None) -> None:
+        """ Writes per-sequence scores (loglik, bitscore) to a
+            tsv file. The bitscore is computed as+
+            ``loglik(S) - log P(S; nullmodel)``.
+        Args:
+            filepath: Path of the output file.
+            model: The model for which scores are written. By default, the best
+                model based on the model selection standard criterion is used.
+        """
+        # Find the model index to use
+        if model is None:
+            model = self.best_model if hasattr(self, "best_model") else 0 # type: ignore
+
+        # Compute the likelihood and bitscores for all sequences
+        loglik = self.compute_loglik(self.data.num_seq, reduce=False)[:,model]
+        log_null = self.compute_null_model_log_probs()
+        bitscore = loglik - log_null
+
+        # Write to file
+        with open(filepath, "w") as scorefile:
+            scorefile.write(
+                "\t".join(["index", "seq_id", "loglik", "bit_score"]) + "\n"
+            )
+            for i in range(self.data.num_seq):
+                scorefile.write("\t".join([
+                    f"{i}",
+                    f"{self.data.seq_ids[i]}",
+                    f"{loglik[i]}",
+                    f"{bitscore[i]}"
+                ]) + "\n")
     
     @classmethod
     def load_models_from_file(cls, 

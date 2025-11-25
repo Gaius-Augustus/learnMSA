@@ -185,6 +185,10 @@ def run_main():
             )
             if args.save_model:
                 alignment_model.write_models_to_file(args.save_model)
+            if args.scores:
+                alignment_model.write_scores(args.scores)
+                if not args.silent:
+                    print(f"Wrote sequence scores to {args.scores}.")
             if args.logo:
                 Visualize.plot_and_save_logo(
                     alignment_model,
