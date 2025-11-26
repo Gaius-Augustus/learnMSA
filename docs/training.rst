@@ -33,7 +33,7 @@ differ slighly in their initialization, length (number of match states) and
     shown to each model per training step.
     Prefer ``--tokens_per_batch`` over this option if the input sequences have
     varying lengths.
-    The optimal batch size depends on the length of the input sequences and the 
+    The optimal batch size depends on the length of the input sequences and the
     available GPU memory. Increase this value to speed up training.
     Reduce this value if you run out of GPU memory.
 
@@ -142,6 +142,17 @@ differ slighly in their initialization, length (number of match states) and
     model. This is useful if a pre-trained model is provided via ``--load_model``
     or the model is initialized from an existing MSA via the option ``--init_msa``.
 
+``--only_matches``
+    Large-scale alignments often produce very large output files, depending on how
+    insertions are represented. Although learnMSA aligns insertions, which keeps
+    alignments as compact as possible, substantial numbers of gaps can still occur
+    and increase file size. This option can be used to omit all insertions and write
+    only those amino acids that are assigned to match states while representing
+    deletions with the gap character. The alignment length will be bounded by the
+    model length *ℓ*, unless domain repeat occurs.
+    This can be useful, for example, in phylogenetic downstream analyses where only
+    conserved columns are of interest.
+
 
 Practical tips and example commands
 -----------------------------------
@@ -203,3 +214,18 @@ Reduce batch size and number of models, for example:
 .. code-block:: bash
 
    learnMSA -i INPUT_FILE -o OUTPUT_FILE -n 2 -b 32
+
+
+Compact Output
+^^^^^^^^^^^^^^
+
+**Match states only (no insertions):**
+
+For very large alignments where file size is a concern, omit all insertions:
+
+.. code-block:: bash
+
+   learnMSA -i INPUT_FILE -o OUTPUT_FILE --use_language_model --only_matches
+
+This produces more compact output files where the alignment length equals the model
+length, with only match states and deletions represented.
