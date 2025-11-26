@@ -341,6 +341,7 @@ class AlignmentModel():
         add_block_sep=True,
         aligned_insertions : AlignedInsertions = AlignedInsertions(),
         a2m=True,
+        only_matches=False,
     ):
         """ Uses one model to decode an alignment and returns the sequences
             with gaps in a list.
@@ -361,6 +362,8 @@ class AlignmentModel():
             a2m: Whether to use the a2m format for strings
                 (with lowercase letters for inserted amino acids and dots for
                 gaps in insertions).
+            only_matches: If true, omit all insertions and write only those
+                amino acids that are assigned to match states.
         """
         if model_index is None:
             model_index = self.best_model
@@ -371,7 +374,11 @@ class AlignmentModel():
         while i < n:
             batch_indices = np.arange(i, min(n, i+batch_size))
             batch_alignment = self.get_batch_alignment(
-                model_index, batch_indices, add_block_sep, aligned_insertions
+                model_index=model_index,
+                batch_indices=batch_indices,
+                add_block_sep=add_block_sep,
+                aligned_insertions=aligned_insertions,
+                only_matches=only_matches,
             )
             alignment_strings = self.batch_to_string(
                 batch_alignment, output_alphabet=output_alphabet
@@ -388,7 +395,8 @@ class AlignmentModel():
         add_block_sep=False, 
         aligned_insertions : AlignedInsertions = AlignedInsertions(), 
         format="fasta", 
-        fasta_line_limit=80
+        fasta_line_limit=80,
+        only_matches=False,
     ):
         """ Uses one model to decode an alignment and stores it in fasta file 
             format. Currently no other output format is supported.
@@ -412,6 +420,8 @@ class AlignmentModel():
                 stored in memory.
             fasta_line_limit: Maximum number of characters per line in the 
                 fasta file (only applies to sequences).
+            only_matches: If true, omit all insertions and write only those
+                amino acids that are assigned to match states.
         """
         if model_index is None:
             model_index = self.best_model
@@ -423,10 +433,11 @@ class AlignmentModel():
                 while i < n:
                     batch_indices = np.arange(i, min(n, i+batch_size))
                     batch_alignment = self.get_batch_alignment(
-                        model_index,
-                        batch_indices,
-                        add_block_sep,
-                        aligned_insertions
+                        model_index=model_index,
+                        batch_indices=batch_indices,
+                        add_block_sep=add_block_sep,
+                        aligned_insertions=aligned_insertions,
+                        only_matches=only_matches,
                     )
                     alignment_strings = self.batch_to_string(
                         batch_alignment, output_alphabet=output_alphabet
@@ -455,7 +466,8 @@ class AlignmentModel():
         model_index, 
         batch_indices, 
         add_block_sep, 
-        aligned_insertions : AlignedInsertions = AlignedInsertions()
+        aligned_insertions : AlignedInsertions = AlignedInsertions(),
+        only_matches=False,
     ):
         """ Returns a dense matrix representing a subset of sequences
             as specified by batch_indices with respect to the alignment of all 
@@ -469,6 +481,8 @@ class AlignmentModel():
                 added to the alignment indicating domain boundaries.
             aligned_insertions: Can be used to override insertion metadata if 
                 insertions are aligned after the main procedure.
+            only_matches: If true, omit all insertions and write only those
+                amino acids that are assigned to match states.
         """
         if not model_index in self.metadata:
             self._build_alignment([model_index])
@@ -482,17 +496,18 @@ class AlignmentModel():
         blocks = []  
         if add_block_sep:
             sep = np.zeros((b,1), dtype=np.uint16) + 2*len(self.data.alphabet)
-        left_flank_block = self.get_insertion_block(
-            sequences, 
-            data.left_flank_len[batch_indices],
-            max(data.left_flank_len_total, aligned_insertions.ext_left_flank),
-            data.left_flank_start[batch_indices],
-            adjust_to_right=True,
-            custom_columns=aligned_insertions.left_flank(batch_indices)
-        )
-        blocks.append(left_flank_block)
-        if add_block_sep:
-            blocks.append(sep)
+        if not only_matches:
+            left_flank_block = self.get_insertion_block(
+                sequences,
+                data.left_flank_len[batch_indices],
+                max(data.left_flank_len_total, aligned_insertions.ext_left_flank),
+                data.left_flank_start[batch_indices],
+                adjust_to_right=True,
+                custom_columns=aligned_insertions.left_flank(batch_indices)
+            )
+            blocks.append(left_flank_block)
+            if add_block_sep:
+                blocks.append(sep)
         for i in range(data.num_repeats):
             consensus = data.consensus[i]
             #remove columns consisting only of gaps
@@ -500,21 +515,22 @@ class AlignmentModel():
             ins_len = data.insertion_lens[i]
             ins_start = data.insertion_start[i]
             alignment_block = self.get_alignment_block(
-                sequences, 
-                consensus[batch_indices], 
-                ins_len[batch_indices], 
-                np.maximum(
-                    data.insertion_lens_total, 
+                sequences=sequences,
+                consensus=consensus[batch_indices],
+                ins_len=data.insertion_lens[i][batch_indices],
+                ins_len_total=np.maximum(
+                    data.insertion_lens_total,
                     aligned_insertions.ext_insertions
                 )[i],
-                ins_start[batch_indices],
+                ins_start=data.insertion_start[i][batch_indices],
                 is_non_empty=is_non_empty,
-                custom_columns=aligned_insertions.insertion(batch_indices, i)
+                custom_columns=aligned_insertions.insertion(batch_indices, i),
+                only_matches=only_matches
             )
             blocks.append(alignment_block)
             if add_block_sep:
                 blocks.append(sep)
-            if i < data.num_repeats-1:
+            if i < data.num_repeats-1 and not only_matches:
                 unannotated_segment_l = data.unannotated_segments_len[i]
                 unannotated_segment_s = data.unannotated_segments_start[i]
                 unannotated_block = self.get_insertion_block(
@@ -532,51 +548,161 @@ class AlignmentModel():
                 blocks.append(unannotated_block)
                 if add_block_sep:
                     blocks.append(sep)
-        right_flank_block = self.get_insertion_block(
-            sequences, 
-            data.right_flank_len[batch_indices],
-            max(data.right_flank_len_total, aligned_insertions.ext_right_flank),
-            data.right_flank_start[batch_indices],
-            custom_columns=aligned_insertions.right_flank(batch_indices)
-        )
-        blocks.append(right_flank_block)
+        if not only_matches:
+            right_flank_block = self.get_insertion_block(
+                sequences, 
+                data.right_flank_len[batch_indices],
+                max(data.right_flank_len_total, aligned_insertions.ext_right_flank),
+                data.right_flank_start[batch_indices],
+                custom_columns=aligned_insertions.right_flank(batch_indices)
+            )
+            blocks.append(right_flank_block)
         batch_alignment = np.concatenate(blocks, axis=1)
         return batch_alignment
-    
+
     def batch_to_string(self, batch_alignment, output_alphabet):
         """ Converts a dense matrix into string format.
         """
         alignment_arr = output_alphabet[batch_alignment]
         alignment_strings = [''.join(s) for s in alignment_arr]
         return alignment_strings
-    
-    def compute_loglik(self, max_seq=200000):
+
+    def compute_loglik(
+        self,
+        max_seq: int =200000,
+        reduce: bool = True,
+        use_anc_probs: bool = True,
+    ):
         """ Computes the logarithmic likelihood for each underlying model.
         Args:
-            max_seq: Threshold for the number of sequences used to compute the 
-                loglik. If the dataset has more sequences, a random subset is 
+            max_seq: Threshold for the number of sequences used to compute the
+                loglik. If the dataset has more sequences, a random subset is
                 drawn.
+            reduce: If true, the loglik will be averaged over the number of
+                sequences.
+            use_anc_probs: If false, the ancestral probabilities will not be
+                computed.
         """
         n = self.data.num_seq
-        if n > max_seq:
-            #estimate the ll only on a subset, otherwise for millions of 
+        if n > max_seq and reduce:
+            #estimate the ll only on a subset, otherwise for millions of
             # sequences this step takes rather long for little benefit
             ll_subset = np.arange(n)
             np.random.shuffle(ll_subset)
             ll_subset = ll_subset[:max_seq]
             ll_subset = np.sort(ll_subset)
+            bucket_by_seq_length = False
         else:
             #use the sorted indices for optimal length distributions in batches
-            ll_subset = np.array(
-                [i for l,i in sorted(zip(self.data.seq_lens, range(n)))]
-            )
+            ll_subset = np.arange(n)
+            bucket_by_seq_length = True
+        # Create dataset
         ds = train.make_dataset(
-            ll_subset, self.batch_generator, self.batch_size, shuffle=False
+            ll_subset,
+            self.batch_generator,
+            self.batch_size,
+            shuffle=False,
+            bucket_by_seq_length=bucket_by_seq_length and not reduce,
+            model_lengths=self.msa_hmm_layer.cell.length,
         )
-        loglik = self.model.predict(ds, verbose=0)[0]
-        loglik = np.mean(loglik, axis=0)
+        # The simplest case is the reduce (when keeping sequence order does not
+        # matter) and when ancestral probabilities are used (i.e. no changes
+        # to the model are required)
+        if reduce and use_anc_probs:
+            loglik = self.model.predict(ds, verbose=0)[0]
+            loglik = np.mean(loglik, axis=0)
+            return loglik
+
+        if use_anc_probs:
+            # Use anc probs, but do not reduce, i.e. keep sequence order
+            model_fn = self.model # use call
+        else:
+            # TODO: Better strip the anc probs from the learnMSA model as
+            # a method
+            def _fn(x):
+                # split x into sequences and idx (idx are not used here)
+                x, _ = x
+                x = tf.one_hot(x, depth=self.msa_hmm_layer.cell.dim)
+                # learnMSA currently expects model dim first
+                x = tf.keras.ops.swapaxes(x, 0, 1)
+                y = self.msa_hmm_layer(x)[0]
+                y = tf.keras.ops.swapaxes(y, 0, 1)
+                return y
+            model_fn = tf.function(
+                _fn,
+                jit_compile=False, # jit compiling is currently slower here
+                input_signature=[[
+                    tf.TensorSpec((None, None, None), dtype=tf.uint8),
+                    tf.TensorSpec((None, None), dtype=tf.int64),
+                ]]
+            )
+
+        # Use the model_fn to compute loglik batch-wise and assemble the results
+        # correctly. We may reduce when not using anc probs
+        if reduce:
+            # note: no anc probs used, otherwise we would have returned earlier
+            loglik = np.zeros((self.msa_hmm_layer.cell.num_models))
+            for (*x,_), _ in ds:
+                loglik += np.sum(model_fn(x), axis=0)
+            loglik /= ll_subset.size
+        else:
+            loglik = np.zeros((n, self.msa_hmm_layer.cell.num_models))
+            for (*x, batch_indices), _ in ds:
+                batch_loglik = model_fn(x).numpy()
+                loglik[batch_indices,:] = batch_loglik
         return loglik
-    
+
+    def compute_null_model_log_probs(self):
+        """ Computes the logarithmic likelihood of each sequence under the
+            null model
+
+             S ---> T
+            |_^    |_^
+             p
+
+            where the emission probabilities of S are amino acid background
+            frequencies and T is the terminal state.
+
+            Args:
+                p: The probability of staying in the emitting state S.
+        """
+        # Prepare the data
+        n = self.data.num_seq
+        ds = train.make_dataset(
+            np.arange(n),
+            self.batch_generator,
+            self.batch_size,
+            shuffle=False,
+            bucket_by_seq_length=True,
+            model_lengths=self.msa_hmm_layer.cell.length
+        )
+
+        # Prepare the background frequencies
+        aa_dist = self.msa_hmm_layer.cell.emitter[0].prior.emission_dirichlet_mix.make_background().numpy()
+        # Append ad-hoc probability for non-standard amino acids
+        aa_dist = np.append(aa_dist, [1e-4]*3)
+        aa_dist /= np.sum(aa_dist) #normalize
+        # Add the terminal symbol emissions
+        aa_dist = np.append(aa_dist, [1.0])
+        # Log transition probabilities
+        aa_dist = np.log(aa_dist + 1e-10)  # shape (24,)
+
+        # Compute emission log probs
+        log_probs = np.zeros((n,))
+        for (x,_,batch_idx), _ in ds:
+            em = tf.reduce_sum(tf.gather(aa_dist, tf.cast(x[:,0,:], tf.int32)), axis=1)
+            log_probs[batch_idx] = em.numpy()
+
+        # Add transition log probs based on the target sequence lenghts
+        # We'll assume a geometric distribution with the expected length
+        # equal to the length of each target sequence
+        L = self.data.seq_lens
+        M = np.mean(L)
+        trans_scores = L * (np.log(M) - np.log(M+1))
+        log_probs += trans_scores
+
+        return log_probs
+
     def compute_log_prior(self):
         """ Computes the logarithmic prior value of each underlying model.
         """
@@ -585,7 +711,7 @@ class AlignmentModel():
             return self.msa_hmm_layer.cell.get_prior_log_density().numpy()/n
         else:
             return 0
-    
+
     def compute_AIC(self, max_seq=200000, loglik=None):
         """ Computes the Akaike information criterion for each underlying model. 
         Args:
@@ -601,7 +727,7 @@ class AlignmentModel():
         num_param = 34 * np.array(self.length) + 25
         aic = -2 * loglik * self.data.num_seq + 2*num_param
         return aic 
-    
+
     def compute_consensus_score(self):
         """ Computes a consensus score that rates how plausible each model is 
             with respect to all other models.
@@ -670,9 +796,9 @@ class AlignmentModel():
         np.savetxt(filepath+"/indices", self.indices, fmt='%i')
         #save the model
         if version.parse(tf.__version__) < version.parse("2.12.0"):
-            self.model.save(filepath+".keras", save_traces=False) 
+            self.model.save(filepath+".keras", save_traces=False)
         else:
-            self.model.save(filepath+".keras") 
+            self.model.save(filepath+".keras")
         if pack:
             shutil.make_archive(filepath, "zip", filepath)
             try:
@@ -680,7 +806,43 @@ class AlignmentModel():
             except OSError as e:
                 print("Error: %s - %s." % (e.filename, e.strerror))
 
-    
+
+    def write_scores(self, filepath: Path, model: int|None = None) -> None:
+        """ Writes per-sequence scores (loglik, bitscore) to a
+            tsv file sorted by bitscore. The bitscore is computed as+
+            ``loglik(S) - log P(S; nullmodel)``.
+        Args:
+            filepath: Path of the output file.
+            model: The model for which scores are written. By default, the best
+                model based on the model selection standard criterion is used.
+        """
+        # Find the model index to use
+        if model is None:
+            model = self.best_model if hasattr(self, "best_model") else 0 # type: ignore
+
+        # Compute the likelihood and bitscores for all sequences
+        loglik = self.compute_loglik(
+            self.data.num_seq, reduce=False, use_anc_probs=False
+        )[:,model]
+        # Compute the bitscore
+        log_null = self.compute_null_model_log_probs()
+        bitscore = loglik - log_null
+
+        # Sort by bitscore in descending order
+        sorted_indices = np.argsort(-bitscore)
+
+        # Write to file
+        with open(filepath, "w") as scorefile:
+            scorefile.write(
+                "\t".join(["seq_id", "loglik", "bit_score"]) + "\n"
+            )
+            for idx in sorted_indices:
+                scorefile.write("\t".join([
+                    f"{self.data.seq_ids[idx]}",
+                    f"{loglik[idx]}",
+                    f"{bitscore[idx]}"
+                ]) + "\n")
+
     @classmethod
     def load_models_from_file(cls, 
                               filepath, 
@@ -933,7 +1095,8 @@ class AlignmentModel():
         ins_len_total, 
         ins_start, 
         is_non_empty=None, 
-        custom_columns=None
+        custom_columns=None,
+        only_matches=False
     ):
         """ Constructs one core model hit block from an implicitly represented 
             alignment.
@@ -943,7 +1106,10 @@ class AlignmentModel():
         Returns:
         """
         A = np.arange(sequences.shape[0])
-        length = consensus.shape[1] + np.sum(ins_len_total)
+        if only_matches:
+            length = consensus.shape[1]
+        else:
+            length = consensus.shape[1] + np.sum(ins_len_total)
         block = np.zeros((sequences.shape[0], length), dtype=np.uint8) 
         block += len(SequenceDataset.alphabet) - 1
         i = 0
@@ -961,18 +1127,19 @@ class AlignmentModel():
                 columns_to_remove.append(i)
             i += 1
             #insertion
-            if custom_columns is None:
-                custom_column = None
-            else:
-                custom_column = custom_columns[c]
-            block[:,i:i+ins_l_total] = cls.get_insertion_block(
-                sequences,
-                ins_l,
-                ins_l_total, 
-                ins_s, 
-                custom_columns=custom_column
-            )
-            i += ins_l_total
+            if not only_matches:
+                if custom_columns is None:
+                    custom_column = None
+                else:
+                    custom_column = custom_columns[c]
+                block[:,i:i+ins_l_total] = cls.get_insertion_block(
+                    sequences,
+                    ins_l,
+                    ins_l_total, 
+                    ins_s, 
+                    custom_columns=custom_column
+                )
+                i += ins_l_total
         #final column
         no_gap = consensus[:,-1] != -1
         block[no_gap,i] = sequences[A[no_gap],consensus[:,-1][no_gap]]

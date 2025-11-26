@@ -39,6 +39,10 @@ class InputOutputConfig(BaseModel):
     load_model: str = ""
     """If set, learnMSA will load the model parameters from the specified file."""
 
+    scores: PathField = Path()
+    """If set, the per-sequence likelihoods and bit scores will be saved to the
+    specified file."""
+
     verbose: bool = True
     """If False, all output messages will be disabled."""
 

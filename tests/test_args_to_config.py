@@ -72,6 +72,8 @@ class TestArgsToConfig:
             "--skip_training",
             "--grow_mem",
             "--silent",
+            "--only_matches",
+            "--scores", "scores.tsv",
         ])
 
         config = args_to_config(args)
@@ -97,8 +99,10 @@ class TestArgsToConfig:
         assert config.training.frozen_insertions is True
         assert config.training.no_sequence_weights is True
         assert config.training.skip_training is True
+        assert config.training.only_matches is True
         assert config.advanced.grow_mem is True
         assert config.input_output.verbose is False
+        assert config.input_output.scores == Path("scores.tsv")
 
     def test_args_to_config_with_epochs_single_value(self):
         """Test that single epoch value is expanded to 3."""

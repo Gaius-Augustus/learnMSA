@@ -1,5 +1,6 @@
 import os
 
+from pathlib import Path
 import learnMSA.run.util as util
 from learnMSA import Configuration
 from learnMSA.run import args_to_config, handle_help_command, parse_args
@@ -50,8 +51,10 @@ def run_main():
         # Run a training to align the sequences
         alignment_model = align(data, config)
 
-        if args.save_model:
-            alignment_model.write_models_to_file(args.save_model)
+        if config.input_output.save_model:
+            alignment_model.write_models_to_file(config.input_output.save_model)
+        if config.input_output.scores != Path():
+            alignment_model.write_scores(config.input_output.scores)
         if args.logo:
             plot_and_save_logo(
                 alignment_model,

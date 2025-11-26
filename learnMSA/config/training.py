@@ -120,6 +120,10 @@ class TrainingConfig(BaseModel):
     transposed: bool = False
     """Whether to use transposed rate matrices."""
 
+    only_matches: bool = False
+    """Omit all insertions in the output and write only those amino
+        acids that are assigned to match states."""
+
 
     @field_validator("learning_rate")
     def validate_learning_rate(cls, v: float) -> float:

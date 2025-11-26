@@ -35,6 +35,7 @@ def args_to_config(args: Namespace) -> Configuration:
         input_format=args.input_format,
         save_model=args.save_model,
         load_model=args.load_model,
+        scores=args.scores,
         verbose=not args.silent,
         cuda_visible_devices=args.cuda_visible_devices,
         work_dir=args.work_dir,
@@ -68,6 +69,8 @@ def args_to_config(args: Namespace) -> Configuration:
         trainable_rate_matrices=args.trainable_rate_matrices,
         trainable_distances=not args.frozen_distances,
         equilibrium_sample=args.trainable_rate_matrices,
+        transposed=False,
+        only_matches=args.only_matches,
     )
 
     init_msa_config = InitMSAConfig(

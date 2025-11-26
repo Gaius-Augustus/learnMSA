@@ -35,8 +35,9 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         "--out_file",
         dest="output_file",
         type=str,
-        required=True,
-        help="Output file. Use -f to change format."
+        required=False,
+        default=None,
+        help="Output file. Use -f to change format. Optional when --scores is used."
     )
     io_group.add_argument(
         "-f",
@@ -94,6 +95,13 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         dest="convert",
         action='store_true',
         help="Convert input files to format specific by --format."
+    )
+    io_group.add_argument(
+        "--scores",
+        dest="scores",
+        type=str,
+        default="",
+        help="Additional table file containing per-sequence likelihoods.",
     )
 
     # Training
@@ -271,6 +279,13 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         dest="skip_training",
         action="store_true",
         help="Only decode an alignment from the provided model."
+    )
+    train_group.add_argument(
+        "--only_matches",
+        dest="only_matches",
+        action="store_true",
+        help="Omit all insertions in the output and write only those amino "\
+            "acids that are assigned to match states."
     )
 
     init_msa_group = parser.add_argument_group("Initialize with existing MSA")

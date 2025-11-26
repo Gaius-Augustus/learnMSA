@@ -64,6 +64,18 @@ Arguments
     and use them as initialization for training. Use the ``--skip_training`` option
     to directly align the input sequences without further training.
 
+``--scores`` *SCORES_FILE*
+    Writes per-sequence likelihoods and bit scores under the selected model to
+    a file when this parameter is provided
+    (e.g., ``--scores scores.tsv``). For all input sequences *s* it will report
+    *log P(s)* as well as length-normalized bit scores *log P(s)/P₀(s)*, where
+    *P₀* is the probability under a null model. This can be used, for example,
+    to find representative sequences. Note that the raw likelihood is strongly
+    correlated with sequence length. When this option is used, the ``-o / --out_file``
+    parameter becomes optional.
+
+
+
 Practical tips and example commands
 -----------------------------------
 
@@ -101,3 +113,11 @@ the input sequences without further training:
 .. code-block:: bash
 
     learnMSA -i INPUT_FILE -o OUTPUT_FILE --load_model my_model --skip_training
+
+To output sequence likelihoods for all input sequences, use the ``--scores`` option. 
+This produces a tab-separated file containing log likelihoods and length-normalized 
+bitscores for each sequence, which can help identify representative sequences:
+
+.. code-block:: bash
+
+    learnMSA -i INPUT_FILE -o OUTPUT_FILE --use_language_model --scores scores.tsv

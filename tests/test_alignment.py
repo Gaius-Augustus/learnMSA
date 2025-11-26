@@ -1,6 +1,7 @@
 import os
 
 import numpy as np
+import pytest
 import tensorflow as tf
 
 from learnMSA import Configuration
@@ -10,28 +11,40 @@ from learnMSA.msa_hmm.AlignmentModel import (AlignmentModel,
                                              find_faulty_sequences,
                                              non_homogeneous_mask_func)
 from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
-from learnMSA.msa_hmm.SequenceDataset import AlignedDataset, SequenceDataset
 from learnMSA.msa_hmm.model import LearnMSAModel
+from learnMSA.msa_hmm.SequenceDataset import AlignedDataset, SequenceDataset
 
 
 def string_to_one_hot(s : str) -> tf.Tensor:
     i = [SequenceDataset.alphabet.index(aa) for aa in s]
     return tf.one_hot(i, len(SequenceDataset.alphabet)-1)
 
-
-def test_subalignment() -> None:
-    # Load data
+@pytest.fixture
+def simple_data() -> SequenceDataset:
     filename = os.path.dirname(__file__)+"/../tests/data/felix.fa"
     data = SequenceDataset(filename)
+    return data
+
+@pytest.fixture
+def simple_config() -> Configuration:
     config = Configuration()
     config.training.num_model = 1
     config.training.no_sequence_weights = True
     config.training.length_init = [5]
+    return config
+
+def make_simple_context_and_model(
+    data : SequenceDataset,
+    config : Configuration
+) -> tuple[LearnMSAContext, LearnMSAModel]:
+    # Prepare the context based on config and data
     context = LearnMSAContext(config, data)
+    # Create and initialize the model
     emission_init = string_to_one_hot("FELIK").numpy()*20
-    insert_init = np.squeeze(string_to_one_hot("A") + string_to_one_hot("H") + string_to_one_hot("C"))*20
+    insert_init = np.squeeze(string_to_one_hot("A") + string_to_one_hot("H")\
+        + string_to_one_hot("C"))*20
     context.emitter = [Emitter.ProfileHMMEmitter(
-        emission_init=Initializers.ConstantInitializer(emission_init),
+        emission_init=Initializers.ConstantInitializer(emission_init), # type: ignore
         insertion_init=Initializers.ConstantInitializer(insert_init)
     )]
     context.transitioner = Transitioner.ProfileHMMTransitioner(
@@ -44,13 +57,40 @@ def test_subalignment() -> None:
     )
     model = LearnMSAModel(context)
     model.build(None)
+    return context, model
+
+def test_subalignment(
+    simple_data : SequenceDataset,
+    simple_config : Configuration
+) -> None:
+    """Test extraction of subalignments from AlignmentModel"""
+    context, model = make_simple_context_and_model(simple_data, simple_config)
     # subalignment
     subset = np.array([0, 2, 5])
     # create alignment after building model
-    context.batch_gen.configure(data, context)
-    sub_am = AlignmentModel(data, context.batch_gen, subset, 32, model)
+    context.batch_gen.configure(simple_data, context)
+    sub_am = AlignmentModel(simple_data, context.batch_gen, subset, 32, model)
     subalignment_strings = sub_am.to_string(0, add_block_sep=False)
     ref_subalignment = ["FE...LIK...", "FE...LIKhac", "FEahcLIK..."]
+    for s, r in zip(subalignment_strings, ref_subalignment):
+        assert s == r
+
+
+def test_only_matches(
+    simple_data : SequenceDataset,
+    simple_config : Configuration
+) -> None:
+    """Test writing only match columns to file"""
+    context, model = make_simple_context_and_model(simple_data, simple_config)
+    # subalignment
+    subset = np.array([0, 2, 5])
+    # create alignment after building model
+    context.batch_gen.configure(simple_data, context)
+    sub_am = AlignmentModel(simple_data, context.batch_gen, subset, 32, model)
+    subalignment_strings = sub_am.to_string(
+        0, add_block_sep=False, only_matches=True
+    )
+    ref_subalignment = ["FELIK", "FELIK", "FELIK"]
     for s, r in zip(subalignment_strings, ref_subalignment):
         assert s == r
 

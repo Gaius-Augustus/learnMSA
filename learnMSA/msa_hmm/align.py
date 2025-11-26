@@ -90,11 +90,14 @@ def align(data : SequenceDataset, config : Configuration) -> AlignmentModel:
     Path(config.input_output.output_file).parent.mkdir(parents=True, exist_ok=True)
     t = time.time()
 
-    if config.training.unaligned_insertions:
+    if config.training.unaligned_insertions or config.training.only_matches:
+        # Don't align insertions when requested or when only matches need to
+        # be written to the output file
         am.to_file(
             config.input_output.output_file,
             am.best_model,
-            format=config.input_output.format
+            format=config.input_output.format,
+            only_matches=config.training.only_matches
         )
     else:
         aligned_insertions = make_aligned_insertions(
