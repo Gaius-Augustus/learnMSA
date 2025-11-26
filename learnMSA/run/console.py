@@ -55,6 +55,8 @@ def run_main():
             alignment_model.write_models_to_file(config.input_output.save_model)
         if config.input_output.scores != Path():
             alignment_model.write_scores(config.input_output.scores)
+            if config.input_output.verbose:
+                print(f"Wrote scores to {config.input_output.scores}")
         if args.logo:
             plot_and_save_logo(
                 alignment_model,
