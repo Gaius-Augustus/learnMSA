@@ -4,9 +4,9 @@ from typing import override
 import numpy as np
 import tensorflow as tf
 from hidten.hmm import HMMConfig as HidtenHMMConfig
-from hidten.tf.transitioner import (T_TFTensor, TFTransitioner, shared_tensor,
-                                    TransitionMode)
-from hidten.tf.util import zero_row_softmax, log_zero
+from hidten.tf.transitioner import (T_TFTensor, TFTransitioner, TransitionMode,
+                                    shared_tensor)
+from hidten.tf.util import log_zero
 
 from learnMSA.hmm.transition_index_set import PHMMTransitionIndexSet
 from learnMSA.hmm.value_set import PHMMValueSet
@@ -26,10 +26,6 @@ class PHMMExplicitTransitioner(TFTransitioner):
     M1 ... ML I1 ... IL-1 D1 ... DL L B E C R T.
 
     where L is the number of match states in that head.
-
-    Args:
-        values (Sequence[PHMMValueSet]): A sequence of value sets, one per head.
-        hidten_hmm_config (HidtenHMMConfig): The configuration of the hidten HMM.
     """
     def __init__(
         self,
@@ -37,6 +33,12 @@ class PHMMExplicitTransitioner(TFTransitioner):
         hidten_hmm_config: HidtenHMMConfig,
         **kwargs
     ) -> None:
+        """
+        Args:
+            values (Sequence[PHMMValueSet]): A sequence of value sets,
+                one per head, with probabilities.
+            hidten_hmm_config (HidtenHMMConfig): The configuration of the hidten HMM.
+        """
         super().__init__(**kwargs)
         self.hmm_config = hidten_hmm_config
         transitions, value_list = [], []

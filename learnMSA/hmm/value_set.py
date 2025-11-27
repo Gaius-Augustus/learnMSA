@@ -167,10 +167,18 @@ class PHMMValueSet:
             1 - get_value(config.p_start_left_flank, h)
         ], dtype=np.float32)
 
+        match_emissions = np.stack(
+            [config.amino_acid_background_distribution]*L, axis=0
+        ).astype(np.float32)
+        insert_emissions = np.array(
+            config.amino_acid_background_distribution,
+            dtype=np.float32
+        )
+
         return cls(
             L=L,
-            match_emissions=np.zeros((L, s), dtype=np.float32),
-            insert_emissions=np.zeros((s,), dtype=np.float32),
+            match_emissions=match_emissions,
+            insert_emissions=insert_emissions,
             transitions=transitions,
             start=start,
         )

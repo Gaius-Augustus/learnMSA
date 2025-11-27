@@ -10,6 +10,16 @@ class HMMConfig(BaseModel):
     alphabet: str = "ARNDCQEGHILKMFPSTWYVXUO"
     """The alphabet used in the HMM emissions."""
 
+    amino_acid_background_distribution: Sequence[float] = [
+        8.34333437e-02, 5.19266823e-02, 4.93510863e-02, 4.65871696e-02,
+        2.24936164e-02, 5.06824822e-02, 6.29644485e-02, 4.72142352e-02,
+        3.34919201e-02, 5.26777168e-02, 7.33173001e-02, 6.35075307e-02,
+        3.52617111e-02, 3.60992714e-02, 3.46065678e-02, 7.21237089e-02,
+        6.52571875e-02, 1.77631364e-02, 3.39407154e-02, 6.65086610e-02,
+        7.91449952e-04, 5.83794314e-08, 9.99208434e-33
+    ]
+    """Default, background distribution over the amino acid alphabet."""
+
     p_begin_match: float | Sequence[float] | Sequence[Sequence[float]]\
         = 0.5
     """If provided a scalar value, is interpreted as ``P(Match 1 | Begin)``.

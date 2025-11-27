@@ -5,6 +5,7 @@ from hidten import HMMMode
 from hidten.tf import TFHMM, TFCategoricalEmitter, TFPaddingEmitter
 
 from learnMSA.config.hmm import HMMConfig
+from learnMSA.hmm.transitioner import PHMMTransitioner
 
 from learnMSA.phmm_config import ProfileHMMConfig
 from learnMSA.msa_hmm.phmm_util import make_phmm_transitions
@@ -39,7 +40,7 @@ class ProfileHMMLayer(tf.keras.Layer):
             lengths: The number of match states in each head of the pHMM.
             config: HMM configuration parameters.
         """
-        super().__init__()
+        super().__init__(**kwargs)
         self.lengths = lengths
         self.config = config
 
