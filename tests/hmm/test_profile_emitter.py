@@ -7,7 +7,6 @@ from learnMSA.config.hmm import HMMConfig
 from learnMSA.hmm.profile_emitter import ProfileEmitter
 from learnMSA.hmm.value_set import PHMMValueSet
 
-
 @pytest.fixture
 def emitter() -> ProfileEmitter:
     lengths = [4, 3]
@@ -74,7 +73,7 @@ def test_call(emitter: ProfileEmitter) -> None:
     )
 
     # Construct an emitter with two heads from the initial values
-    emitter = ProfileEmitter([values_1, values_2])
+    emitter = ProfileEmitter([values_1, values_2], use_prior_aa_dist=False)
     emitter.build()
 
     inputs_1_list = [0, 1, 2, 3, 9]
@@ -119,6 +118,11 @@ def test_call(emitter: ProfileEmitter) -> None:
     # See HidTen docs on how padding works
     # We expect the emitter to add a new, rightmost padding state
     np.testing.assert_allclose(emission_scores[..., -1], 1.0)
+
+
+def test_dirichlet_prior(emitter: ProfileEmitter) -> None:
+    print(emitter.matrix().numpy()[:,0])
+    print(emitter.prior_scores().numpy())
 
 
 def test_construct_big_emitter() -> None:
