@@ -1,5 +1,4 @@
 import numpy as np
-from hidten.hmm import HMMConfig as HidtenHMMConfig
 
 import tests.hmm.ref as ref
 from learnMSA.config.hmm import HMMConfig
@@ -21,10 +20,9 @@ def test_explicit_transitioner_matrix() -> None:
     # We need to manually create a Hidten HMMConfig because the transitioner is
     # not added to an HMM here.
     states = [PHMMTransitionIndexSet.num_states_unfolded(L=L) for L in lengths]
-    hidten_hmm_config = HidtenHMMConfig(states=states)
 
     # Construct a transitioner with two heads from the initial values
-    transitioner = PHMMExplicitTransitioner(values, hidten_hmm_config)
+    transitioner = PHMMExplicitTransitioner(values)
     transitioner.build()
 
     S = transitioner.start_dist()
@@ -67,11 +65,7 @@ def test_folded_transitioner_matrix() -> None:
         PHMMTransitionIndexSet(L=L, folded=True).num_states
         for L in lengths
     ]
-    hidten_hmm_config = HidtenHMMConfig(states=states)
-    transitioner = PHMMTransitioner(
-        values=values,
-        hidten_hmm_config=hidten_hmm_config
-    )
+    transitioner = PHMMTransitioner(values=values)
     transitioner.build()
 
     S = transitioner.start_dist()
@@ -87,6 +81,9 @@ def test_folded_transitioner_matrix() -> None:
         A[1, :states[1], :states[1]], ref.transitions_b, atol=1e-6
     )
 
+def test_prior() -> None:
+    pass
+
 def test_construct_big_transitioner() -> None:
     import time
 
@@ -95,17 +92,9 @@ def test_construct_big_transitioner() -> None:
     values = [
         PHMMValueSet.from_config(L, h, config) for h, L in enumerate(lengths)
     ]
-    states= [
-        PHMMTransitionIndexSet(L=L, folded=True).num_states
-        for L in lengths
-    ]
-    hidten_hmm_config = HidtenHMMConfig(states=states)
 
     t0 = time.perf_counter()
-    transitioner = PHMMTransitioner(
-        values=values,
-        hidten_hmm_config=hidten_hmm_config
-    )
+    transitioner = PHMMTransitioner(values=values)
     t1 = time.perf_counter()
     print(f"Constructor time: {t1-t0:.4f}s")
 

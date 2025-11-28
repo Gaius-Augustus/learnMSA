@@ -30,7 +30,6 @@ class PHMMExplicitTransitioner(TFTransitioner):
     def __init__(
         self,
         values: Sequence[PHMMValueSet],
-        hidten_hmm_config: HidtenHMMConfig,
         **kwargs
     ) -> None:
         """
@@ -40,9 +39,9 @@ class PHMMExplicitTransitioner(TFTransitioner):
             hidten_hmm_config (HidtenHMMConfig): The configuration of the hidten HMM.
         """
         super().__init__(**kwargs)
-        self.hmm_config = hidten_hmm_config
         transitions, value_list = [], []
         start, start_values = [], []
+        states = []
         for h, value_set in enumerate(values):
             index_set = PHMMTransitionIndexSet(value_set.L, folded=False)
             # Transitions
@@ -58,6 +57,13 @@ class PHMMExplicitTransitioner(TFTransitioner):
                 index_set.start[:,np.newaxis], ((0,0), (1,0)), constant_values=h
             ))
             start_values.append(value_set.start)
+
+            states.append(
+                PHMMTransitionIndexSet.num_states_unfolded(L=value_set.L)
+            )
+
+        # Set a custom HMMConfig for the explicit model
+        self.hmm_config = HidtenHMMConfig(states=states)
 
         self.allow = np.vstack(transitions)
         self.initializer = np.hstack(value_list)
@@ -80,20 +86,18 @@ class PHMMTransitioner(TFTransitioner):
     def __init__(
         self,
         values: Sequence[PHMMValueSet],
-        hidten_hmm_config: HidtenHMMConfig,
         **kwargs
     ) -> None:
         """
         Args:
             values (Sequence[PHMMValueSet]): A sequence of value sets, one per head.
-            hidten_hmm_config (HidtenHMMConfig): The configuration of the hidten HMM.
         """
         super().__init__(**kwargs)
         self.explicit_transitioner = self._make_explicit_transitioner(values)
-        self.hmm_config = hidten_hmm_config
         self.lengths = [value_set.L for value_set in values]
         # Construct allow indices for the folded models
         transitions, start = [], []
+        states = []
         for h, L in enumerate(self.lengths):
             index_set = PHMMTransitionIndexSet(L, folded=True)
             # Transitions
@@ -107,6 +111,10 @@ class PHMMTransitioner(TFTransitioner):
             start.append(np.pad(
                 index_set.start[:, np.newaxis], ((0,0),(1,0)), constant_values=h
             ))
+
+            states.append(PHMMTransitionIndexSet.num_states_folded(L=L))
+
+        self.hmm_config = HidtenHMMConfig(states=states)
 
         self.allow = np.vstack(transitions)
         self.allow_start = np.vstack(start)
@@ -426,13 +434,4 @@ class PHMMTransitioner(TFTransitioner):
         self, values: Sequence[PHMMValueSet]
     ) -> PHMMExplicitTransitioner:
         """Helper to create the explicit transitioner with the same parameters."""
-        # Since the explicit transitioner has more states (including the silent
-        # ones) we need to create a new HMMConfig for it
-        states = [
-            PHMMTransitionIndexSet.num_states_unfolded(L=value_set.L)
-            for value_set in values
-        ]
-        return PHMMExplicitTransitioner(
-            values=values,
-            hidten_hmm_config=HidtenHMMConfig(states=states),
-        )
+        return PHMMExplicitTransitioner(values=values)

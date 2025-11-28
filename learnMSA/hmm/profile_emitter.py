@@ -1,5 +1,5 @@
 from collections.abc import Sequence
-from typing import override, cast
+from typing import override
 
 import numpy as np
 import tensorflow as tf
@@ -8,7 +8,7 @@ from hidten.tf.emitter.categorical import (T_shapelike, T_TFTensor,
                                            TFCategoricalEmitter)
 from hidten.tf.prior.dirichlet import TFDirichletPrior
 
-from learnMSA.hmm.tf_util import load_weight_resource, make_dirichlet_model
+from learnMSA.hmm.tf_util import load_dirichlet
 from learnMSA.hmm.value_set import PHMMValueSet
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 
@@ -43,9 +43,10 @@ class ProfileEmitter(TFCategoricalEmitter):
         self.lengths = [value_set.L for value_set in values]
 
         # Set up the Dirichlet prior
-        model = make_dirichlet_model()
-        load_weight_resource(model, "amino_acid_dirichlet.weights")
-        self.prior: TFDirichletPrior = cast(TFDirichletPrior, model.layers[1])
+        self.prior: TFDirichletPrior = load_dirichlet(
+            "amino_acid_dirichlet.weights",
+            dim = len(SequenceDataset.alphabet)-1
+        )
         # Assign custom config for broadcasting
         self.prior.hmm_config = HidtenHMMConfig(states=[1])
 
