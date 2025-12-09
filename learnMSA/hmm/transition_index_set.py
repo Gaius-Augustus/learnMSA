@@ -113,7 +113,7 @@ class PHMMTransitionIndexSet:
             # Match to terminal
             n_trans = L
             self._buffer[idx:idx+n_trans] = np.stack(
-                (matches_plus, np.zeros(L, dtype=dtype)+(2*L+2)), axis=1
+                (matches_plus, np.full(L, -1, dtype=dtype)), axis=1
             )
             self._row_offsets['match_to_terminal'] = (idx, idx+n_trans)
             idx += n_trans
@@ -130,7 +130,7 @@ class PHMMTransitionIndexSet:
             idx += 1
             self._buffer[idx] = [2*L - 1, 2*L + 1]  # to right
             idx += 1
-            self._buffer[idx] = [2*L - 1, 2*L + 2]  # to terminal
+            self._buffer[idx] = [2*L - 1, -1]  # to terminal
             idx += 1
             self._row_offsets['left_flank'] = (start_idx, idx)
 
@@ -138,7 +138,7 @@ class PHMMTransitionIndexSet:
             start_idx = idx
             self._buffer[idx] = [2*L+1, 2*L+1]  # self-loop
             idx += 1
-            self._buffer[idx] = [2*L+1, 2*L+2]  # to terminal
+            self._buffer[idx] = [2*L+1, -1]  # to terminal
             idx += 1
             self._row_offsets['right_flank'] = (start_idx, idx)
 
@@ -152,12 +152,12 @@ class PHMMTransitionIndexSet:
             idx += L
             self._buffer[idx] = [2*L, 2*L + 1]  # to right
             idx += 1
-            self._buffer[idx] = [2*L, 2*L + 2]  # to terminal
+            self._buffer[idx] = [2*L, -1]  # to terminal
             idx += 1
             self._row_offsets['unannotated'] = (start_idx, idx)
 
             # Terminal
-            self._buffer[idx] = [2*L+2, 2*L+2]
+            self._buffer[idx] = [-1, -1]
             self._row_offsets['terminal'] = (idx, idx+1)
             idx += 1
 
@@ -225,7 +225,7 @@ class PHMMTransitionIndexSet:
             start_idx = idx
             self._buffer[idx] = [3*L+3, 3*L+3]
             idx += 1
-            self._buffer[idx] = [3*L+3, 3*L+4]
+            self._buffer[idx] = [3*L+3, -1]
             idx += 1
             self._row_offsets['right_flank'] = (start_idx, idx)
 
@@ -243,12 +243,12 @@ class PHMMTransitionIndexSet:
             idx += 1
             self._buffer[idx] = [3*L+1, 3*L+3]
             idx += 1
-            self._buffer[idx] = [3*L+1, 3*L+4]
+            self._buffer[idx] = [3*L+1, -1]
             idx += 1
             self._row_offsets['end'] = (start_idx, idx)
 
             # Terminal
-            self._buffer[idx] = [3*L+4, 3*L+4]
+            self._buffer[idx] = [-1, -1]
             self._row_offsets['terminal'] = (idx, idx+1)
             idx += 1
 
@@ -378,7 +378,7 @@ class PHMMTransitionIndexSet:
             start[-4] = 2*self.L - 1  # L
             start[-3] = 2*self.L      # C
             start[-2] = 2*self.L + 1  # R
-            start[-1] = 2*self.L + 2  # T
+            start[-1] = -1  # T
             return start
         else:
             # Can start in L or B

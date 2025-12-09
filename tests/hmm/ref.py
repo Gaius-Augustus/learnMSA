@@ -5,6 +5,20 @@ from learnMSA.msa_hmm import Initializers
 
 
 config: HMMConfig = HMMConfig(
+    alphabet="AB",
+    match_emissions=[
+        # Head 1
+        [[0.5, 0.5],
+        [0.1, 0.9],
+        [0.7, 0.3],
+        [0.9, 0.1]],
+        # Head 2
+        [[0.5, 0.5],
+        [0.1, 0.9],
+        [0.7, 0.3]],
+    ],
+    # Head 1 and Head 2 use the same initialization for insert emissions
+    insert_emissions=[0.5, 0.5],
     p_begin_match=[[0.6, 0.1, 0.1, 0.1], [0.7, 0.1, 0.1]],
     p_match_match=[[0.97, 0.5, 0.6], [0.97, 0.5]],
     p_match_insert=[[0.01, 0.05, 0.3], [0.01, 0.05]],
@@ -85,6 +99,15 @@ start_a: np.ndarray = np.array(
 )
 """Folded start distribution of the first reference model"""
 
+emissions_a: np.ndarray = np.array([
+    [0.5, 0.5],
+    [0.1, 0.9],
+    [0.7, 0.3],
+    [0.9, 0.1],
+    [0.5, 0.5],
+])
+"""Emissions of the first reference model"""
+
 transitions_b: np.ndarray = np.array([
     [0.000e+00, 9.700e-01, 5.000e-03, 1.000e-02, 0.000e+00,
     0.000e+00, 3.000e-03, 1.050e-02, 1.500e-03],
@@ -112,6 +135,15 @@ start_b: np.ndarray = np.array([
     0.5   , 0.001 , 0.0035, 0.0005
 ])
 """Folded start distribution of the second reference model"""
+
+emissions_b: np.ndarray = np.array([
+    [0.5, 0.5],
+    [0.1, 0.9],
+    [0.7, 0.3],
+    [0.5, 0.5],
+])
+
+likelihoods: np.ndarray = np.array([0.0113336505940908, 0.0198336227946755])
 
 
 # for legacy tests

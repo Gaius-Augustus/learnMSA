@@ -6,7 +6,7 @@ import tensorflow as tf
 from hidten.hmm import HMMConfig as HidtenHMMConfig
 from hidten.tf.transitioner import (T_TFTensor, TFTransitioner, TransitionMode,
                                     shared_tensor)
-from hidten.tf.util import log_zero
+from hidten.tf.util import log_zero, safe_log
 
 from learnMSA.hmm.transition_index_set import PHMMTransitionIndexSet
 from learnMSA.hmm.value_set import PHMMValueSet
@@ -23,9 +23,12 @@ class PHMMExplicitTransitioner(TFTransitioner):
 
     The order of states in each head is:
 
-    M1 ... ML I1 ... IL-1 D1 ... DL L B E C R T.
+    M1 ... ML I1 ... IL-1 D1 ... DL L B E C R [... T],
 
     where L is the number of match states in that head.
+    [... T] indicates that the last position is always the terminal state, no
+    matter how many states there are in the head, with optional padding states
+    to fill up to the maximum number of states across all heads.
     """
     def __init__(
         self,
@@ -36,25 +39,36 @@ class PHMMExplicitTransitioner(TFTransitioner):
         Args:
             values (Sequence[PHMMValueSet]): A sequence of value sets,
                 one per head, with probabilities.
-            hidten_hmm_config (HidtenHMMConfig): The configuration of the hidten HMM.
+            hidten_hmm_config (HidtenHMMConfig): The configuration of the
+                hidten HMM.
         """
         super().__init__(**kwargs)
         transitions, value_list = [], []
         start, start_values = [], []
         states = []
+        max_states = PHMMTransitionIndexSet.num_states_unfolded(max(
+            value_set.L for value_set in values
+        ))
         for h, value_set in enumerate(values):
             index_set = PHMMTransitionIndexSet(value_set.L, folded=False)
             # Transitions
             # get all index pairs (i,j) and add head index (h,i,j)
             indices = index_set.as_array()
+            # Add the values
+            value_list.append(value_set.transitions[indices[:,0], indices[:,1]])
+            # Handle negative indices (access from the end)
+            indices[indices < 0] += max_states
+            # Add the indices with head index
             transitions.append(
                np.pad(indices, ((0,0),(1,0)), constant_values=h)
             )
-            value_list.append(value_set.transitions[indices[:,0], indices[:,1]])
 
             # Start distribution
+            start_indices = index_set.start[:, np.newaxis]
+            # Handle negative indices (access from the end)
+            start_indices[start_indices < 0] += max_states
             start.append(np.pad(
-                index_set.start[:,np.newaxis], ((0,0), (1,0)), constant_values=h
+                start_indices, ((0,0), (1,0)), constant_values=h
             ))
             start_values.append(value_set.start)
 
@@ -79,9 +93,12 @@ class PHMMTransitioner(TFTransitioner):
 
     The order of states in each head is:
 
-    M1 ... ML I1 ... IL-1 L B E C R T.
+    M1 ... ML I1 ... IL-1 L C R [... T],
 
     where L is the number of match states in that head.
+    [... T] indicates that the last position is always the terminal state, no
+    matter how many states there are in the head, with optional padding states
+    to fill up to the maximum number of states across all heads.
     """
     def __init__(
         self,
@@ -98,18 +115,24 @@ class PHMMTransitioner(TFTransitioner):
         # Construct allow indices for the folded models
         transitions, start = [], []
         states = []
+        max_states = PHMMTransitionIndexSet.num_states_folded(max(self.lengths))
         for h, L in enumerate(self.lengths):
             index_set = PHMMTransitionIndexSet(L, folded=True)
             # Transitions
             # get all index pairs (i,j) and add head index (h,i,j)
             indices = index_set.as_array()
+            # Handle negative indices (access from the end)
+            indices[indices < 0] += max_states
             transitions.append(
                np.pad(indices, ((0,0),(1,0)), constant_values=h)
             )
 
             # Start distribution
+            start_indices = index_set.start[:, np.newaxis]
+            # Handle negative indices (access from the end)
+            start_indices[start_indices < 0] += max_states
             start.append(np.pad(
-                index_set.start[:, np.newaxis], ((0,0),(1,0)), constant_values=h
+                start_indices, ((0,0),(1,0)), constant_values=h
             ))
 
             states.append(PHMMTransitionIndexSet.num_states_folded(L=L))
@@ -131,14 +154,17 @@ class PHMMTransitioner(TFTransitioner):
     def _launch(
         self,
         mode: TransitionMode = TransitionMode.SUM,
-        use_padding: bool = False,
+        use_padding: bool = True, #not used
     ) -> T_TFTensor:
         # Every time we launch, we need to refresh
         self.refresh()
-        return super()._launch(mode, use_padding)
+        # The HMM will pass `use_padding=True`, but we create the
+        # padding state explicitly and don't want it to be added
+        # automatically here. Pass `use_padding=False`!
+        return super()._launch(mode, use_padding=False)
 
     def refresh(self) -> None:
-        self.log_explicit_matrix = tf.math.log(
+        self.log_explicit_matrix = safe_log(
             self.explicit_transitioner.matrix()
         )
         self.match_skip = []
@@ -188,6 +214,7 @@ class PHMMTransitioner(TFTransitioner):
             ordered according to self.allow indices.
         """
         folded_probs = []
+        max_states = PHMMTransitionIndexSet.num_states_unfolded(max(self.lengths))
 
         for h, L in enumerate(self.lengths):
             idx = PHMMTransitionIndexSet(L, folded=False)
@@ -196,6 +223,7 @@ class PHMMTransitioner(TFTransitioner):
 
             # Helper to extract log prob from matrix
             def get(indices):
+                indices[indices < 0] += max_states
                 return tf.gather_nd(log_mat, indices)
 
             # Get begin and end related transitions
@@ -328,6 +356,7 @@ class PHMMTransitioner(TFTransitioner):
         explicit_start = tf.math.log(self.explicit_transitioner.start_dist())
 
         start_probs = []
+        max_states = PHMMTransitionIndexSet.num_states_unfolded(max(self.lengths))
 
         for h, L in enumerate(self.lengths):
             idx = PHMMTransitionIndexSet(L, folded=False)
@@ -336,6 +365,7 @@ class PHMMTransitioner(TFTransitioner):
 
             # Helper to extract log prob from matrix
             def get(indices):
+                indices[indices < 0] += max_states
                 return tf.gather_nd(log_mat, indices)
 
             log_z = log_zero(log_mat)

@@ -47,8 +47,9 @@ def test_explicit_transitioner_matrix() -> None:
     np.testing.assert_allclose(A[0], ref.unfolded_transitions_a)
     # Head 1 is probabilistic
     np.testing.assert_allclose(
-        np.sum(A[1, :states[1]], axis=-1), 1.0, atol=1e-6
+        np.sum(A[1, :states[1]-1], axis=-1), 1.0, atol=1e-6
     )
+    np.testing.assert_allclose(np.sum(A[1, -1], axis=-1), 1.0, atol=1e-6)
 
 def test_folded_transitioner_matrix() -> None:
     lengths = [4, 3]
@@ -75,10 +76,20 @@ def test_folded_transitioner_matrix() -> None:
     assert A.shape == (2, max(states), max(states))
 
     np.testing.assert_allclose(S[0], ref.start_a, atol=1e-6)
-    np.testing.assert_allclose(S[1, :states[1]], ref.start_b, atol=1e-6)
+    np.testing.assert_allclose(S[1, :states[1]-1], ref.start_b[:-1], atol=1e-6)
+    np.testing.assert_allclose(S[1, -1], ref.start_b[-1], atol=1e-6)
     np.testing.assert_allclose(A[0], ref.transitions_a, atol=1e-6)
+    actual_non_terminal = np.concatenate(
+        [A[1, :states[1]-1, :states[1]-1], A[1, :states[1]-1, -1:]], axis=1
+    )
+    actual_terminal = np.concatenate(
+        [A[1, -1:, :states[1]-1], A[1, -1:, -1:]], axis=1
+    )
+    actual_transitions_b = np.concatenate(
+        [actual_non_terminal, actual_terminal], axis=0
+    )
     np.testing.assert_allclose(
-        A[1, :states[1], :states[1]], ref.transitions_b, atol=1e-6
+        actual_transitions_b, ref.transitions_b, atol=1e-6
     )
 
 def test_prior() -> None:

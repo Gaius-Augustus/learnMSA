@@ -42,8 +42,8 @@ def test_call_shapes(emitter: ProfileEmitter) -> None:
 
     emission_scores = emitter.call(inputs_oh)
     emission_scores_heads = emitter.call(inputs_oh_heads)
-    assert emission_scores.shape == (B, T, H, 2*4+3+1)  # max length is 4
-    assert emission_scores_heads.shape == (B, T, H, 2*4+3+1)
+    assert emission_scores.shape == (B, T, H, 2*4+3)  # max length is 4
+    assert emission_scores_heads.shape == (B, T, H, 2*4+3)
 
 
 def test_call(emitter: ProfileEmitter) -> None:

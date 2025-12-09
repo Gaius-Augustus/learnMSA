@@ -30,8 +30,8 @@ class ProfileEmitter(TFCategoricalEmitter):
             hidten_hmm_config (HidtenHMMConfig): The configuration of the
                 hidten HMM.
             use_prior_aa_dist (bool): Whether to use the amino acid prior
-                distribution for initializing the emissions. If False, uniform
-                distributions are used.
+                distribution for initializing the emissions. If False, the
+                initialization is based on the provided value sets.
         """
         super().__init__(**kwargs)
 
@@ -65,11 +65,11 @@ class ProfileEmitter(TFCategoricalEmitter):
         self.initializer = np.concatenate(init_values)
 
     def build(self, input_shape: T_shapelike | None = None) -> None:
-        # Number of amino acids (including non-standard + X, but excluding gap)
-        s = len(SequenceDataset.alphabet)-1
-        if input_shape is not None:
-            assert input_shape[-1] == s
-        super().build((None, None, s))
+        if input_shape is None:
+            # Number of amino acids (including non-standard + X, but excluding gap)
+            s = len(SequenceDataset.alphabet)
+            input_shape = (None, None, s-1)
+        super().build(input_shape)
 
     @override
     def call(
@@ -77,8 +77,6 @@ class ProfileEmitter(TFCategoricalEmitter):
         emissions: T_TFTensor,
         use_padding: bool = True,
     ) -> T_TFTensor:
-        assert emissions.shape[-1] == len(SequenceDataset.alphabet)-1,\
-            "Input emissions must match the number of amino acids (excluding gap)."
         # Compute the emission scores for matches + single insertion
         emission_scores = super().call(emissions, use_padding=False)
         # emission_scores has the form
@@ -93,11 +91,11 @@ class ProfileEmitter(TFCategoricalEmitter):
         ML = max(self.lengths)
         for L in self.lengths:
             repeats.extend([1]*L)
-            repeats.extend([L+3])  # repeat insertion
+            repeats.extend([L+2])  # repeat insertion
             repeats.extend([L-1]*int(L < ML))  # repeat any padding
             repeats.extend([1]*(ML-L-1))  # keep rest of padding
         emission_scores = tf.repeat(emission_scores, repeats, axis=-1)
-        emission_scores = tf.reshape(emission_scores, (B, T, H, 2*Q+1))
+        emission_scores = tf.reshape(emission_scores, (B, T, H, 2*Q))
         if use_padding:
             emission_scores = tf.pad(
                 emission_scores,

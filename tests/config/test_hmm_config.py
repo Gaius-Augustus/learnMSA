@@ -1,8 +1,10 @@
 """Tests for HMM configuration."""
 
+from collections.abc import Sequence
+from typing import cast
 import pytest
 
-from learnMSA.config.hmm import HMMConfig, get_value
+from learnMSA.config.hmm import HMMConfig, get_value, get_emission_dist
 
 
 def test_hmm_config_scalar_initialization():
@@ -273,3 +275,223 @@ def test_hmm_config_edge_cases():
     assert get_value(config.p_begin_match, 0) == 0.0
     assert get_value(config.p_match_match, 0) == 1.0
     assert get_value(config.p_end_unannot, 0) == 0.0
+
+
+# Tests for emission parameters
+
+def test_hmm_config_default_emissions():
+    """Test HMMConfig with default emission parameters."""
+    config = HMMConfig()
+
+    assert config.match_emissions is None
+    assert config.insert_emissions is None
+    assert len(config.background_distribution) == 23  # Default alphabet size
+
+
+def test_hmm_config_match_emissions_single_distribution():
+    """Test HMMConfig with single emission distribution for all match states."""
+    # Single distribution applied to all match states in all heads
+    dist = [0.05] * 23
+    config = HMMConfig(match_emissions=dist)
+
+    assert config.match_emissions is not None
+    assert len(config.match_emissions) == 23
+
+
+def test_hmm_config_match_emissions_head_specific():
+    """Test HMMConfig with head-specific match emission distributions."""
+    # Different distribution per head, same for all positions within head
+    dist1 = [0.05] * 23
+    dist2 = [0.04] * 23
+    config = HMMConfig(match_emissions=[dist1, dist2])
+
+    assert config.match_emissions is not None
+    assert isinstance(config.match_emissions, Sequence)
+    # Use casts to satisfy type checker
+    match_emissions = cast(Sequence, config.match_emissions)
+    assert len(match_emissions) == 2
+    assert len(cast(Sequence, match_emissions[0])) == 23
+    assert len(cast(Sequence, match_emissions[1])) == 23
+
+
+def test_hmm_config_match_emissions_fully_specified():
+    """Test HMMConfig with fully specified position-dependent emissions."""
+    # Different distribution per position in each head
+    # Head 0: 3 match states
+    dist_h0_m1 = [0.05] * 23
+    dist_h0_m2 = [0.04] * 23
+    dist_h0_m3 = [0.06] * 23
+    # Head 1: 2 match states
+    dist_h1_m1 = [0.045] * 23
+    dist_h1_m2 = [0.055] * 23
+
+    config = HMMConfig(
+        match_emissions=[
+            [dist_h0_m1, dist_h0_m2, dist_h0_m3],
+            [dist_h1_m1, dist_h1_m2]
+        ]
+    )
+
+    assert config.match_emissions is not None
+    assert isinstance(config.match_emissions, Sequence)
+    match_emissions = cast(Sequence, config.match_emissions)
+    assert len(match_emissions) == 2
+    assert len(cast(Sequence, match_emissions[0])) == 3
+    assert len(cast(Sequence, match_emissions[1])) == 2
+    assert len(cast(Sequence, cast(Sequence, match_emissions[0])[0])) == 23
+
+
+def test_hmm_config_insert_emissions_single_distribution():
+    """Test HMMConfig with single insertion emission distribution."""
+    dist = [0.05] * 23
+    config = HMMConfig(insert_emissions=dist)
+
+    assert config.insert_emissions is not None
+    assert len(config.insert_emissions) == 23
+
+
+def test_hmm_config_insert_emissions_head_specific():
+    """Test HMMConfig with head-specific insertion emissions."""
+    dist1 = [0.05] * 23
+    dist2 = [0.04] * 23
+    dist3 = [0.06] * 23
+    config = HMMConfig(insert_emissions=[dist1, dist2, dist3])
+
+    assert config.insert_emissions is not None
+    assert isinstance(config.insert_emissions, Sequence)
+    insert_emissions = cast(Sequence, config.insert_emissions)
+    assert len(insert_emissions) == 3
+    assert len(cast(Sequence, insert_emissions[0])) == 23
+    assert len(cast(Sequence, insert_emissions[1])) == 23
+    assert len(cast(Sequence, insert_emissions[2])) == 23
+
+
+def test_hmm_config_emissions_validation_wrong_alphabet_size():
+    """Test that emissions with wrong alphabet size are rejected."""
+    dist_wrong_size = [0.05] * 20  # Should be 23
+
+    with pytest.raises(ValueError, match="alphabet size"):
+        HMMConfig(match_emissions=dist_wrong_size)
+
+    with pytest.raises(ValueError, match="alphabet size"):
+        HMMConfig(insert_emissions=dist_wrong_size)
+
+
+def test_hmm_config_emissions_with_custom_alphabet():
+    """Test emissions with custom alphabet."""
+    custom_alphabet = "ACGT"
+    dist = [0.25] * 4
+
+    config = HMMConfig(
+        alphabet=custom_alphabet,
+        match_emissions=dist,
+        insert_emissions=dist
+    )
+
+    assert config.alphabet == custom_alphabet
+    assert isinstance(config.match_emissions, Sequence)
+    assert isinstance(config.insert_emissions, Sequence)
+    assert len(config.match_emissions) == 4
+    assert len(config.insert_emissions) == 4
+
+
+def test_get_emission_dist_with_none():
+    """Test get_emission_dist returns default when param is None."""
+    default = [0.05] * 23
+    result = get_emission_dist(None, head=0, default=default)
+    assert result == default
+
+
+def test_get_emission_dist_with_none_no_default():
+    """Test get_emission_dist raises error when no default provided."""
+    with pytest.raises(ValueError, match="No emission distribution"):
+        get_emission_dist(None, head=0)
+
+
+def test_get_emission_dist_single_distribution():
+    """Test get_emission_dist with single distribution for all."""
+    dist = [0.05] * 23
+
+    # Should return same distribution regardless of head
+    assert get_emission_dist(dist, head=0) == dist
+    assert get_emission_dist(dist, head=1) == dist
+    assert get_emission_dist(dist, head=5) == dist
+
+
+def test_get_emission_dist_head_specific():
+    """Test get_emission_dist with head-specific distributions."""
+    dist1 = [0.05] * 23
+    dist2 = [0.04] * 23
+    dist3 = [0.06] * 23
+    param = [dist1, dist2, dist3]
+
+    assert get_emission_dist(param, head=0) == dist1
+    assert get_emission_dist(param, head=1) == dist2
+    assert get_emission_dist(param, head=2) == dist3
+
+
+def test_get_emission_dist_position_specific():
+    """Test get_emission_dist with position-specific distributions."""
+    dist_h0_m0 = [0.05] * 23
+    dist_h0_m1 = [0.04] * 23
+    dist_h1_m0 = [0.06] * 23
+    dist_h1_m1 = [0.045] * 23
+
+    param = [
+        [dist_h0_m0, dist_h0_m1],
+        [dist_h1_m0, dist_h1_m1]
+    ]
+
+    assert get_emission_dist(param, head=0, index=0) == dist_h0_m0
+    assert get_emission_dist(param, head=0, index=1) == dist_h0_m1
+    assert get_emission_dist(param, head=1, index=0) == dist_h1_m0
+    assert get_emission_dist(param, head=1, index=1) == dist_h1_m1
+
+
+def test_get_emission_dist_position_specific_requires_index():
+    """Test that get_emission_dist raises error when index missing."""
+    param = [
+        [[0.05] * 23, [0.04] * 23],
+    ]
+
+    with pytest.raises(ValueError, match="Index must be provided"):
+        get_emission_dist(param, head=0)
+
+
+def test_hmm_config_combined_emissions_and_transitions():
+    """Test HMMConfig with both custom emissions and transitions."""
+    match_dist = [0.05] * 23
+    insert_dist = [0.04] * 23
+
+    config = HMMConfig(
+        match_emissions=match_dist,
+        insert_emissions=insert_dist,
+        p_begin_match=0.6,
+        p_match_match=0.75,
+        p_match_insert=0.15,
+        use_prior_for_emission_init=False,
+    )
+
+    assert config.match_emissions == match_dist
+    assert config.insert_emissions == insert_dist
+    assert config.p_begin_match == 0.6
+    assert config.use_prior_for_emission_init is False
+
+
+def test_hmm_config_use_prior_flag():
+    """Test use_prior_for_emission_init flag behavior."""
+    config_default = HMMConfig()
+    assert config_default.use_prior_for_emission_init is True
+
+    config_explicit = HMMConfig(use_prior_for_emission_init=False)
+    assert config_explicit.use_prior_for_emission_init is False
+
+    # When use_prior is False, custom emissions can still be None
+    # (will use background_distribution)
+    config_with_emissions = HMMConfig(
+        use_prior_for_emission_init=False,
+        match_emissions=None,
+        insert_emissions=None
+    )
+    assert config_with_emissions.match_emissions is None
+    assert config_with_emissions.insert_emissions is None

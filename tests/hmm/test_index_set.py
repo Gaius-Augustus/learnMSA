@@ -20,7 +20,7 @@ def test_index_set() -> None:
     np.testing.assert_equal(ind.match_to_end, [[0, 10], [1, 10], [2, 10]])
     np.testing.assert_equal(ind.left_flank, [[8, 8], [8, 9]])
     np.testing.assert_equal(ind.unannotated, [[11, 11], [11, 9]])
-    np.testing.assert_equal(ind.end, [[10, 11], [10, 12], [10, 13]])
+    np.testing.assert_equal(ind.end, [[10, 11], [10, 12], [10, -1]])
     np.testing.assert_equal(ind.mask(), [
         [1., 0, 1, 0, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1],
         [1, 1, 0, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 1],
@@ -67,7 +67,7 @@ def test_index_set_folded() -> None:
         ind.match_to_right, [[0, 9], [1, 9], [2, 9], [3, 9]]
     )
     np.testing.assert_equal(
-        ind.match_to_terminal, [[0, 10], [1, 10], [2, 10], [3, 10]]
+        ind.match_to_terminal, [[0, -1], [1, -1], [2, -1], [3, -1]]
     )
 
     # Left flank: self-loop, to all matches, to unannotated, to right, to terminal
@@ -79,11 +79,11 @@ def test_index_set_folded() -> None:
         [7, 3],  # L to M4
         [7, 8],  # L to C (unannotated)
         [7, 9],  # L to R (right flank)
-        [7, 10],  # L to T (terminal)
+        [7, -1],  # L to T (terminal)
     ])
 
     # Right flank: self-loop and to terminal
-    np.testing.assert_equal(ind.right_flank, [[9, 9], [9, 10]])
+    np.testing.assert_equal(ind.right_flank, [[9, 9], [9, -1]])
 
     # Unannotated: self-loop, to all matches, to right, to terminal
     np.testing.assert_equal(ind.unannotated, [
@@ -93,11 +93,11 @@ def test_index_set_folded() -> None:
         [8, 2],  # C to M3
         [8, 3],  # C to M4
         [8, 9],  # C to R (right flank)
-        [8, 10],  # C to T (terminal)
+        [8, -1],  # C to T (terminal)
     ])
 
     # Terminal self-loop
-    np.testing.assert_equal(ind.terminal, [[10, 10]])
+    np.testing.assert_equal(ind.terminal, [[-1, -1]])
     np.testing.assert_equal(ind.num_states, 11)
     np.testing.assert_equal(ind.num_transitions, 45)
 
