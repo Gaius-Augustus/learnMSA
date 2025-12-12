@@ -34,6 +34,9 @@ class PHMMLayer(tf.keras.Layer):
         """
         return [3*L+5 for L in self.lengths]
 
+    _mode: HMMMode = HMMMode.LIKELIHOOD_LOG
+    """Determines the return value of the layer."""
+
     def __init__(
         self, lengths: Sequence[int], config : HMMConfig, **kwargs
     ) -> None:
@@ -83,8 +86,23 @@ class PHMMLayer(tf.keras.Layer):
         profile_emitter.hmm_config = emitter_custom_config # restore
         self.hmm.add_emitter(TFPaddingEmitter())
 
+    def loglik_mode(self) -> None:
+        """Makes the layer return log-likelihoods.
+        """
+        self._mode = HMMMode.LIKELIHOOD_LOG
+
+    def viterbi_mode(self) -> None:
+        """Makes the layer return Viterbi paths.
+        """
+        self._mode = HMMMode.VITERBI
+
+    def posterior_mode(self) -> None:
+        """Makes the layer return state posterior probabilities.
+        """
+        self._mode = HMMMode.POSTERIOR
+
     def build(self, input_shape: T_shapelike) -> None:
         self.hmm.build(input_shape)
 
     def call(self, x: tf.Tensor, padding: tf.Tensor) -> tf.Tensor:
-        return self.hmm(x, padding, mode=HMMMode.LIKELIHOOD_LOG)
+        return self.hmm(x, padding, mode=self._mode)
