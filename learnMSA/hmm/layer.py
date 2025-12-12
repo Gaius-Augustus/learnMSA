@@ -34,7 +34,9 @@ class PHMMLayer(tf.keras.Layer):
         """
         return [3*L+5 for L in self.lengths]
 
-    def __init__(self, lengths: Sequence[int], config : HMMConfig, **kwargs) -> None:
+    def __init__(
+        self, lengths: Sequence[int], config : HMMConfig, **kwargs
+    ) -> None:
         """
         Args:
             lengths: The number of match states in each head of the pHMM.
@@ -68,7 +70,8 @@ class PHMMLayer(tf.keras.Layer):
         transitioner = PHMMTransitioner(values = values)
         transitioner_custom_config = transitioner.hmm_config
         self.hmm.transitioner = transitioner # this overwrites hmm_config
-        transitioner.hmm_config = transitioner_custom_config # restore custom config
+        # restore custom config
+        transitioner.hmm_config = transitioner_custom_config
 
         # Add the profile emitter and padding emitter
         profile_emitter = ProfileEmitter(
