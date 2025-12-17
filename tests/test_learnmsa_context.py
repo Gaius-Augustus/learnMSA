@@ -1,14 +1,16 @@
+from pathlib import Path
+from typing import Generator
+
 import numpy as np
 import pytest
 import tensorflow as tf
-from pathlib import Path
-from typing import Generator
 
 from learnMSA import Configuration
 from learnMSA.config import (InitMSAConfig, InputOutputConfig,
                              LanguageModelConfig, TrainingConfig)
 from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
+from learnMSA.run.util import get_batch_multiplicator, is_small_gpu
 
 DIR = "tests/data/"
 
@@ -450,7 +452,10 @@ def test_serialization_with_callable_batch_size(config: Configuration) -> None:
 
     # Should respect cropping (max sequence length is > 150)
     # We should map to the biggest batch size
-    assert context.batch_size(long_data) == 256
+    ref_bs = 512 * get_batch_multiplicator()
+    if is_small_gpu():
+        ref_bs = max(1, ref_bs // 2)
+    assert context.batch_size(long_data) == ref_bs
 
     # Serialize and deserialize
     config_dict = context.get_config()

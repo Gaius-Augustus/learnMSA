@@ -85,13 +85,22 @@ def get_num_gpus() -> int:
     return num_gpu
 
 
+def get_batch_multiplicator() -> int:
+    """Returns the number of devices for batch size scaling.
+    
+    Returns the number of GPUs if at least one GPU is available,
+    otherwise returns 1 (for CPU-only case).
+    """
+    return get_num_gpus() + int(get_num_gpus() == 0)
+
+
 def get_gpu_memory() -> list[int]:
     """Returns a list of total memory (in MB) for each GPU detected."""
     command = "nvidia-smi --query-gpu=memory.total --format=csv"
     try:
         memory_free_info = sp.check_output(command.split()).decode('ascii').split('\n')[:-1][1:]
         memory_free_values = [int(x.split()[0]) for i, x in enumerate(memory_free_info)]
-    except sp.CalledProcessError as e:
+    except (sp.CalledProcessError, FileNotFoundError, OSError) as e:
         print(
             "Warning: There were GPU(s) detected, but nvidia-smi failed to "\
             "run. It is used to infer GPU memory and adapt the batch size. "\
@@ -103,6 +112,17 @@ def get_gpu_memory() -> list[int]:
         )
         return []
     return memory_free_values
+
+
+def is_small_gpu() -> bool:
+    """Check if the first GPU has less than 32GB of memory.
+    
+    Returns:
+        True if the first GPU has less than 32GB memory, False otherwise.
+        Returns False if no GPUs are detected.
+    """
+    gpu_mem = get_gpu_memory()
+    return gpu_mem[0] < 32000 if len(gpu_mem) > 0 else False
 
 
 def validate_filepath(filepath : str, expected_ext : str) -> Path:

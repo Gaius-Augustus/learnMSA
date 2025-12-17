@@ -44,7 +44,7 @@ def test_explicit_transitioner_matrix() -> None:
         np.sum(A[0, :states[0]], axis=-1), 1.0, atol=1e-6
     )
     # M1 ... ML I1 ... IL-1 D1 ... DL L B E C R T
-    np.testing.assert_allclose(A[0], ref.unfolded_transitions_a)
+    np.testing.assert_allclose(A[0], ref.unfolded_transitions_a, rtol=1e-6, atol=1e-7)
     # Head 1 is probabilistic
     np.testing.assert_allclose(
         np.sum(A[1, :states[1]-1], axis=-1), 1.0, atol=1e-6

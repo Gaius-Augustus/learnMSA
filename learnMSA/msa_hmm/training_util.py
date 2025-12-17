@@ -3,7 +3,7 @@ from typing import Sequence
 
 import numpy as np
 
-from learnMSA.run.util import get_num_gpus
+from learnMSA.run.util import get_batch_multiplicator
 
 
 def get_initial_model_lengths(
@@ -68,7 +68,7 @@ def get_low_seq_num_batch_size(num_seq: int) -> int:
     """
     # Compute the number of computing devices, which is the number of GPUs
     # if there is at least one GPU, else 1 (for CPU-only case)
-    num_devices = get_num_gpus() + int(get_num_gpus() == 0)
+    num_devices = get_batch_multiplicator()
     batch_size = int(np.ceil(num_seq*0.5))
     batch_size -= batch_size % num_devices
     return max(batch_size, num_devices)
@@ -83,7 +83,7 @@ def get_adaptive_batch_size(
     """
     # Compute the number of computing devices, which is the number of GPUs
     # if there is at least one GPU, else 1 (for CPU-only case)
-    num_devices = get_num_gpus() + int(get_num_gpus() == 0)
+    num_devices = get_batch_multiplicator()
     model_length = max(model_lengths) if len(model_lengths) > 0 else 0
     if max_seq_len < 200 and model_length < 180:
         batch_size = 512*num_devices
@@ -117,7 +117,7 @@ def get_adaptive_batch_size_with_language_model(
     """
     # Compute the number of computing devices, which is the number of GPUs
     # if there is at least one GPU, else 1 (for CPU-only case)
-    num_devices = get_num_gpus() + int(get_num_gpus() == 0)
+    num_devices = get_batch_multiplicator()
     model_length = max(model_lengths) if len(model_lengths) > 0 else 0
     if max_seq_len < 200 and model_length < 180:
         batch_size = (20 + 180*32//embedding_dim)*num_devices

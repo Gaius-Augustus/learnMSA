@@ -17,7 +17,7 @@ from learnMSA import Configuration
 from learnMSA.msa_hmm import clustering
 from learnMSA.protein_language_models.MvnEmitter import (
     AminoAcidPlusMvnEmissionInitializer, MvnEmitter)
-from learnMSA.run.util import get_gpu_memory, validate_filepath
+from learnMSA.run.util import is_small_gpu, validate_filepath
 
 from ..msa_hmm.AncProbsLayer import inverse_softplus
 from . import Priors
@@ -473,8 +473,7 @@ class LearnMSAContext:
 
         use_language_model = self.config.language_model.use_language_model
         #if there is at least one GPU, check its memory
-        gpu_mem = get_gpu_memory()
-        self.small_gpu = gpu_mem[0] < 32000 if len(gpu_mem) > 0 else False
+        self.small_gpu = is_small_gpu()
         if use_language_model:
             def _batch_size_cb_with_plm(data: SequenceDataset):
                 return training_util.get_adaptive_batch_size_with_language_model(
