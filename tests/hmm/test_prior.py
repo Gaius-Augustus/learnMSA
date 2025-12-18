@@ -29,7 +29,7 @@ def test_transition_prior() -> None:
     ]
     transitioner = PHMMTransitioner(values=values)
     transitioner.build()
-    A = transitioner.matrix()
+    A = transitioner.explicit_transitioner.matrix()
 
     match_scores = prior.compute_transition_prior(
         A, prior.TransitionType.MATCH

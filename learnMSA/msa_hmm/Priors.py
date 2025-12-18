@@ -298,7 +298,7 @@ class ProfileHMMTransitionPrior(tf.keras.layers.Layer):
             hit_prior.append(tf.squeeze(hit))
             #uniform entry/exit prior
             #rescale begin_to_match to sum to 1
-            div = tf.math.maximum(self.epsilon, 1- probs["match_to_delete"][0]) 
+            div = tf.math.maximum(self.epsilon, 1- probs["match_to_delete"][0])
             btm = probs["begin_to_match"] / div
             enex = tf.expand_dims(btm, 1) * tf.expand_dims(probs["match_to_end"], 0)
             enex = tf.linalg.band_part(enex, 0, -1)

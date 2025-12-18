@@ -345,12 +345,12 @@ def test_transitioner_prior_parameters(
     simple_data: SequenceDataset, config: Configuration
 ) -> None:
     """Test that transitioner prior parameters are set correctly."""
-    config.advanced.alpha_flank = 2.0
-    config.advanced.alpha_single = 3.0
-    config.advanced.alpha_global = 4.0
-    config.advanced.alpha_flank_compl = 5.0
-    config.advanced.alpha_single_compl = 6.0
-    config.advanced.alpha_global_compl = 7.0
+    config.hmm_prior.alpha_flank = 2.0
+    config.hmm_prior.alpha_single = 3.0
+    config.hmm_prior.alpha_global = 4.0
+    config.hmm_prior.alpha_flank_compl = 5.0
+    config.hmm_prior.alpha_single_compl = 6.0
+    config.hmm_prior.alpha_global_compl = 7.0
     context = LearnMSAContext(config=config, data=simple_data)
 
     # Check transitioner prior parameters
@@ -467,8 +467,8 @@ def test_serialization_with_callable_batch_size(config: Configuration) -> None:
 
 def test_serialization_preserves_config(config : Configuration) -> None:
     """Test that configuration is fully preserved during serialization."""
-    config.advanced.alpha_flank = 2.5
-    config.advanced.alpha_single = 3.5
+    config.hmm_prior.alpha_flank = 2.5
+    config.hmm_prior.alpha_single = 3.5
     config.training.length_init = [12, 18]
     config.training.learning_rate = 0.05
     context = LearnMSAContext(config=config, num_seq=30)
@@ -478,7 +478,7 @@ def test_serialization_preserves_config(config : Configuration) -> None:
     restored_context = LearnMSAContext.from_config(config_dict)
 
     # Check configuration values
-    assert restored_context.config.advanced.alpha_flank == 2.5
-    assert restored_context.config.advanced.alpha_single == 3.5
+    assert restored_context.config.hmm_prior.alpha_flank == 2.5
+    assert restored_context.config.hmm_prior.alpha_single == 3.5
     assert restored_context.config.training.learning_rate == 0.05
     assert restored_context.config.training.length_init == [12, 18]

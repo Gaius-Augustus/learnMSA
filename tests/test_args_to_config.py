@@ -41,7 +41,7 @@ class TestArgsToConfig:
         assert config.init_msa.from_msa is None
         assert config.language_model.use_language_model is False
         assert config.visualization.logo == ""
-        assert config.advanced.alpha_flank == 7000
+        assert config.hmm_prior.alpha_flank == 7000
         assert config.advanced.grow_mem is False
 
     def test_args_to_config_with_training_args(self):
@@ -211,12 +211,12 @@ class TestArgsToConfig:
         config = args_to_config(args)
 
         assert config.advanced.dist_out == "distributions.txt"
-        assert config.advanced.alpha_flank == 5000
-        assert config.advanced.alpha_single == 1e8
-        assert config.advanced.alpha_global == 5000
-        assert config.advanced.alpha_flank_compl == 2
-        assert config.advanced.alpha_single_compl == 3
-        assert config.advanced.alpha_global_compl == 4
+        assert config.hmm_prior.alpha_flank == 5000
+        assert config.hmm_prior.alpha_single == 1e8
+        assert config.hmm_prior.alpha_global == 5000
+        assert config.hmm_prior.alpha_flank_compl == 2
+        assert config.hmm_prior.alpha_single_compl == 3
+        assert config.hmm_prior.alpha_global_compl == 4
         assert config.advanced.inverse_gamma_alpha == 2.0
         assert config.advanced.inverse_gamma_beta == 1.0
         assert config.advanced.initial_distance == 0.1
@@ -283,7 +283,7 @@ class TestArgsToConfig:
         assert config.language_model.use_language_model is True
         assert config.language_model.language_model == "proteinBERT"
         assert config.visualization.logo == "logo.pdf"
-        assert config.advanced.alpha_flank == 6000
+        assert config.hmm_prior.alpha_flank == 6000
 
     def test_args_to_config_with_all_boolean_flags(self):
         """Test conversion with all boolean flags set."""

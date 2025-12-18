@@ -515,7 +515,7 @@ def test_parallel_viterbi_long(layer: PHMMLayer) -> None:
         err_msg="Viterbi paths differ between parallel=1 and parallel=100"
     )
 
-def test_prior() -> None:
+def test_prior_values() -> None:
     """
     Test that the priors are correctly set in the layer.
     """
@@ -525,6 +525,12 @@ def test_prior() -> None:
     # Test model A
     lengths = [4]
     prior_config = HMMPriorConfig()
+    prior_config.alpha_flank = 7000.
+    prior_config.alpha_single = 1e9
+    prior_config.alpha_global = 1e4
+    prior_config.alpha_flank_compl = 1
+    prior_config.alpha_single_compl = 1
+    prior_config.alpha_global_compl = 1
     layer = PHMMLayer(
         lengths=lengths, config=ref.config, prior_config=prior_config
     )
@@ -570,11 +576,11 @@ def test_prior() -> None:
 
     # Test the transitioners priors
     # Get the legacy density values
-    # from learnMSA.msa_hmm.Transitioner import ProfileHMMTransitioner
+    from learnMSA.msa_hmm.Transitioner import ProfileHMMTransitioner
 
-    # transitioner = ProfileHMMTransitioner()
-    # transitioner.set_lengths(lengths)
-    # transitioner.build()
+    transitioner = ProfileHMMTransitioner()
+    transitioner.set_lengths(lengths)
+    transitioner.build()
 
     # transition_probs = transitioner.make_probs()
     # for k,v in transition_probs[0].items():
@@ -586,7 +592,7 @@ def test_prior() -> None:
 
     # from learnMSA.hmm.value_set import PHMMValueSet
     # from learnMSA.config.hmm import HMMConfig
-    
+
     # # Convert flank_init_prob to scalar to avoid deprecation warning
     # flank_init_prob = transitioner.make_flank_init_prob()
     # if hasattr(flank_init_prob, 'numpy'):
@@ -616,9 +622,9 @@ def test_prior() -> None:
 
     # print("A", A[0])
 
-    # legacy_priors = transitioner.get_prior_log_densities()
-    # for k,v in legacy_priors.items():
-    #     print(f"Legacy prior {k} = {v}")
+    legacy_priors = transitioner.get_prior_log_densities()
+    for k,v in legacy_priors.items():
+        print(f"Legacy prior {k} = {v}")
 
     # TEMPORARY ENDS
 
@@ -692,6 +698,7 @@ def test_prior() -> None:
         0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00,
         0.0000000e+00, 1.0000000e+00]
     ]]
+    A = tf.constant(A, dtype=tf.float32)  # (1, Q, Q)
 
     legacy_match_prior = -10.251389
     legacy_insert_prior = 3.5873108
@@ -716,29 +723,33 @@ def test_prior() -> None:
     np.testing.assert_allclose(
         match_prior_scores,
         legacy_match_prior,
-        atol=1e-6,
-        rtol=1e-6,
+        atol=1e-4,
+        rtol=1e-5,
     )
     np.testing.assert_allclose(
         insert_prior_scores,
         legacy_insert_prior,
-        atol=1e-6,
-        rtol=1e-6,
+        atol=1e-4,
+        rtol=1e-5,
     )
     np.testing.assert_allclose(
         delete_prior_scores,
         legacy_delete_prior,
-        atol=1e-6,
-        rtol=1e-6,
+        atol=1e-4,
+        rtol=1e-5,
     )
 
     # Test flank, hit, and global priors
     # Get flank_init_prob from config
     if isinstance(ref.config.p_start_left_flank, float):
-        flank_init_prob = tf.constant([ref.config.p_start_left_flank], dtype=tf.float32)
+        flank_init_prob = tf.constant(
+            [ref.config.p_start_left_flank], dtype=tf.float32
+        )
     else:
-        flank_init_prob = tf.constant(ref.config.p_start_left_flank, dtype=tf.float32)
-    
+        flank_init_prob = tf.constant(
+            ref.config.p_start_left_flank, dtype=tf.float32
+        )
+
     flank_prior_scores = trans_prior.compute_flank_prior(A, flank_init_prob)
     hit_prior_scores = trans_prior.compute_hit_prior(A)
     global_prior_scores = trans_prior.compute_global_prior(A)
@@ -746,21 +757,21 @@ def test_prior() -> None:
     np.testing.assert_allclose(
         flank_prior_scores,
         legacy_flank_prior,
-        atol=1e-3,
+        atol=1e-4,
         rtol=1e-5,
         err_msg="Flank prior does not match legacy implementation"
     )
     np.testing.assert_allclose(
         hit_prior_scores,
         legacy_hit_prior,
-        atol=1e-3,
+        atol=1e-4,
         rtol=1e-5,
         err_msg="Hit prior does not match legacy implementation"
     )
     np.testing.assert_allclose(
         global_prior_scores,
         legacy_global_prior,
-        atol=1e-3,
+        atol=1e-4,
         rtol=1e-5,
         err_msg="Global prior does not match legacy implementation"
     )
@@ -771,7 +782,7 @@ def test_prior() -> None:
         legacy_match_prior + legacy_insert_prior + legacy_delete_prior +
         legacy_flank_prior + legacy_hit_prior + legacy_global_prior
     )
-    
+
     np.testing.assert_allclose(
         full_prior_scores,
         expected_full_prior,

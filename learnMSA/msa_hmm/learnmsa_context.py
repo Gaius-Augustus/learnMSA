@@ -177,12 +177,12 @@ class LearnMSAContext:
         transitioners = self.transitioner if hasattr(
             self.transitioner, '__iter__') else [self.transitioner]
         for trans in transitioners:
-            trans.prior.alpha_flank = self.config.advanced.alpha_flank
-            trans.prior.alpha_single = self.config.advanced.alpha_single
-            trans.prior.alpha_global = self.config.advanced.alpha_global
-            trans.prior.alpha_flank_compl = self.config.advanced.alpha_flank_compl
-            trans.prior.alpha_single_compl = self.config.advanced.alpha_single_compl
-            trans.prior.alpha_global_compl = self.config.advanced.alpha_global_compl
+            trans.prior.alpha_flank = self.config.hmm_prior.alpha_flank
+            trans.prior.alpha_single = self.config.hmm_prior.alpha_single
+            trans.prior.alpha_global = self.config.hmm_prior.alpha_global
+            trans.prior.alpha_flank_compl = self.config.hmm_prior.alpha_flank_compl
+            trans.prior.alpha_single_compl = self.config.hmm_prior.alpha_single_compl
+            trans.prior.alpha_global_compl = self.config.hmm_prior.alpha_global_compl
 
         # Adjust training settings automatically if skip_training is set
         if self.config.training.skip_training:
