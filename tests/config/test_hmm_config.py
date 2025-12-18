@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from typing import cast
 import pytest
 
-from learnMSA.config.hmm import HMMConfig, get_value, get_emission_dist
+from learnMSA.config.hmm import HMMConfig, HMMPriorConfig, get_value, get_emission_dist
 
 
 def test_hmm_config_scalar_initialization():
@@ -495,3 +495,143 @@ def test_hmm_config_use_prior_flag():
     )
     assert config_with_emissions.match_emissions is None
     assert config_with_emissions.insert_emissions is None
+
+
+def test_hmm_prior_config_alpha_defaults():
+    """Test HMMPriorConfig alpha parameter default values."""
+    config = HMMPriorConfig()
+    assert config.alpha_flank == 7000.0
+    assert config.alpha_single == 1e9
+    assert config.alpha_global == 1e4
+    assert config.alpha_flank_compl == 1.0
+    assert config.alpha_single_compl == 1.0
+    assert config.alpha_global_compl == 1.0
+    assert config.epsilon == 1e-16
+
+
+def test_hmm_prior_config_alpha_custom_values():
+    """Test HMMPriorConfig with custom alpha parameter values."""
+    config = HMMPriorConfig(
+        alpha_flank=5000.0,
+        alpha_single=1e8,
+        alpha_global=5000.0,
+        alpha_flank_compl=2.0,
+        alpha_single_compl=3.0,
+        alpha_global_compl=4.0,
+        epsilon=1e-12,
+    )
+    assert config.alpha_flank == 5000.0
+    assert config.alpha_single == 1e8
+    assert config.alpha_global == 5000.0
+    assert config.alpha_flank_compl == 2.0
+    assert config.alpha_single_compl == 3.0
+    assert config.alpha_global_compl == 4.0
+    assert config.epsilon == 1e-12
+
+
+def test_alpha_flank_validation():
+    """Test that alpha_flank must be positive."""
+    # Valid values
+    HMMPriorConfig(alpha_flank=0.1)
+    HMMPriorConfig(alpha_flank=10000)
+
+    # Invalid values
+    with pytest.raises(
+        ValueError,
+        match="alpha_flank must be greater than 0"
+    ):
+        HMMPriorConfig(alpha_flank=0)
+
+    with pytest.raises(
+        ValueError,
+        match="alpha_flank must be greater than 0"
+    ):
+        HMMPriorConfig(alpha_flank=-100)
+
+
+def test_alpha_single_validation():
+    """Test that alpha_single must be positive."""
+    # Valid values
+    HMMPriorConfig(alpha_single=1)
+    HMMPriorConfig(alpha_single=1e10)
+
+    # Invalid values
+    with pytest.raises(
+        ValueError,
+        match="alpha_single must be greater than 0"
+    ):
+        HMMPriorConfig(alpha_single=0)
+
+    with pytest.raises(
+        ValueError,
+        match="alpha_single must be greater than 0"
+    ):
+        HMMPriorConfig(alpha_single=-1)
+
+
+def test_alpha_global_validation():
+    """Test that alpha_global must be positive."""
+    # Valid values
+    HMMPriorConfig(alpha_global=100)
+    HMMPriorConfig(alpha_global=1e6)
+
+    # Invalid values
+    with pytest.raises(
+        ValueError,
+        match="alpha_global must be greater than 0"
+    ):
+        HMMPriorConfig(alpha_global=0)
+
+    with pytest.raises(
+        ValueError,
+        match="alpha_global must be greater than 0"
+    ):
+        HMMPriorConfig(alpha_global=-500)
+
+
+def test_alpha_complement_validation():
+    """Test that alpha complement parameters must be positive."""
+    # Valid values
+    HMMPriorConfig(alpha_flank_compl=0.5)
+    HMMPriorConfig(alpha_single_compl=10)
+    HMMPriorConfig(alpha_global_compl=100)
+
+    # Invalid values
+    with pytest.raises(
+        ValueError,
+        match="alpha_flank_compl must be greater than 0"
+    ):
+        HMMPriorConfig(alpha_flank_compl=0)
+
+    with pytest.raises(
+        ValueError,
+        match="alpha_single_compl must be greater than 0"
+    ):
+        HMMPriorConfig(alpha_single_compl=-1)
+
+    with pytest.raises(
+        ValueError,
+        match="alpha_global_compl must be greater than 0"
+    ):
+        HMMPriorConfig(alpha_global_compl=-5)
+
+
+def test_epsilon_validation():
+    """Test that epsilon must be positive."""
+    # Valid values
+    HMMPriorConfig(epsilon=1e-20)
+    HMMPriorConfig(epsilon=0.1)
+
+    # Invalid values
+    with pytest.raises(
+        ValueError,
+        match="epsilon must be greater than 0"
+    ):
+        HMMPriorConfig(epsilon=0)
+
+    with pytest.raises(
+        ValueError,
+        match="epsilon must be greater than 0"
+    ):
+        HMMPriorConfig(epsilon=-1e-10)
+

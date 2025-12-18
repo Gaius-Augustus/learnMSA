@@ -5,6 +5,7 @@ import numpy as np
 import tensorflow as tf
 from hidten.tf.prior.dirichlet import T_TFTensor, TFDirichletPrior, TFPrior
 
+from learnMSA.config.hmm import HMMPriorConfig
 from learnMSA.hmm.tf_util import load_dirichlet
 from learnMSA.hmm.transition_index_set import PHMMTransitionIndexSet
 
@@ -15,14 +16,22 @@ class TFPHMMTransitionPrior(TFPrior):
     transitions.
     """
 
-    def __init__(self, lengths: Sequence[int], **kwargs) -> None:
+    def __init__(
+        self,
+        lengths: Sequence[int],
+        prior_config: HMMPriorConfig,
+        **kwargs
+    ) -> None:
         """
         Args:
             lengths (Sequence[int]): The number of match states in each head
                 of the pHMM.
+            prior_config (HMMPriorConfig): Prior configuration containing alpha parameters
+                for transition priors.
         """
         super().__init__(**kwargs)
         self.lengths = lengths
+        self.prior_config = prior_config
         transition_indices = [PHMMTransitionIndexSet(L=L) for L in lengths]
 
         def _pad_head(arr: np.ndarray, h: int) -> np.ndarray:
@@ -105,6 +114,9 @@ class TFPHMMTransitionPrior(TFPrior):
         transitions = tf.reshape(transitions, (dim, -1))
         transitions = tf.transpose(transitions) # (sum_L - num_heads, dim)
 
+        # Normalize (might be necessary when a subset of out-transitions is used)
+        transitions /= tf.reduce_sum(transitions, axis=-1, keepdims=True)
+
         # Apply the prior to the transitions
         scores = prior.log_dirichlet_pdf(transitions)
         scores = tf.squeeze(scores) # (sum_L - num_heads)
@@ -116,6 +128,158 @@ class TFPHMMTransitionPrior(TFPrior):
         )
 
         return scores
+    
+    def compute_flank_prior(
+        self, transition_matrix: T_TFTensor, flank_init_prob: T_TFTensor
+    ) -> T_TFTensor:
+        """Compute the prior score for the flanking transitions.
+
+        Args:
+            transition_matrix (Tensor):
+                The transition matrix of shape (H, Q, Q).
+            flank_init_prob (Tensor):
+                The probability of starting in the left flank state for each head.
+                Shape: (H,)
+        Returns:
+            Tensor: The output tensor of shape (H), with prior scores per
+                head.
+        """
+        scores = []
+        
+        for h in range(len(self.lengths)):
+            L = self.lengths[h]
+            # State indices (unfolded model):
+            # L (left flank) = 3*L - 1
+            # C (unannotated) = 3*L + 2
+            # R (right flank) = 3*L + 3
+            # E (end) = 3*L + 1
+            # T (terminal) = -1
+            
+            left_idx = 3*L - 1
+            unannot_idx = 3*L + 2
+            right_idx = 3*L + 3
+            end_idx = 3*L + 1
+            terminal_idx = -1
+            
+            # Extract transition probabilities
+            left_flank_loop = transition_matrix[h, left_idx, left_idx]  # type: ignore
+            unannotated_loop = transition_matrix[h, unannot_idx, unannot_idx] # type: ignore
+            right_flank_loop = transition_matrix[h, right_idx, right_idx] # type: ignore
+            end_to_right_flank = transition_matrix[h, end_idx, right_idx] # type: ignore
+            
+            # Exit probabilities (1 - loop probability)
+            left_flank_exit = 1.0 - left_flank_loop
+            unannotated_exit = 1.0 - unannotated_loop
+            right_flank_exit = 1.0 - right_flank_loop
+            
+            # End state transitions
+            end_to_unannotated = transition_matrix[h, end_idx, unannot_idx] # type: ignore
+            end_to_terminal = transition_matrix[h, end_idx, terminal_idx] # type: ignore
+            
+            # Compute flank prior
+            a = self.prior_config.alpha_flank
+            a_c = self.prior_config.alpha_flank_compl
+            flank = (a - 1) * tf.math.log(unannotated_loop)
+            flank += (a - 1) * tf.math.log(right_flank_loop)
+            flank += (a - 1) * tf.math.log(left_flank_loop)
+            flank += (a - 1) * tf.math.log(end_to_right_flank)
+            flank += (a - 1) * tf.math.log(flank_init_prob[h]) # type: ignore
+            flank += (a_c - 1) * tf.math.log(unannotated_exit)
+            flank += (a_c - 1) * tf.math.log(right_flank_exit)
+            flank += (a_c - 1) * tf.math.log(left_flank_exit)
+            flank += (a_c - 1) * tf.math.log(end_to_unannotated + end_to_terminal)
+            flank += (a_c - 1) * tf.math.log(1 - flank_init_prob[h]) # type: ignore
+            
+            scores.append(flank)
+        
+        return tf.stack(scores)
+    
+    def compute_hit_prior(
+        self, transition_matrix: T_TFTensor
+    ) -> T_TFTensor:
+        """Compute the prior score for single-hit probability.
+
+        Args:
+            transition_matrix (Tensor):
+                The transition matrix of shape (H, Q, Q).
+        Returns:
+            Tensor: The output tensor of shape (H), with prior scores per
+                head.
+        """
+        scores = []
+        
+        for h in range(len(self.lengths)):
+            L = self.lengths[h]
+            # State indices
+            end_idx = 3*L + 1
+            unannotated_idx = 3*L + 2
+            right_idx = 3*L + 3
+            terminal_idx = -1
+            
+            # Extract transition probabilities
+            end_to_right_flank = transition_matrix[h, end_idx, right_idx]
+            end_to_terminal = transition_matrix[h, end_idx, terminal_idx]
+            end_to_unannotated = transition_matrix[h, end_idx, unannotated_idx]
+            
+            # Compute hit prior
+            hit = (self.prior_config.alpha_single - 1) * tf.math.log(
+                end_to_right_flank + end_to_terminal
+            )
+            hit += (self.prior_config.alpha_single_compl - 1) * tf.math.log(end_to_unannotated)
+            
+            scores.append(hit)
+        
+        return tf.stack(scores)
+    
+    def compute_global_prior(
+        self, transition_matrix: T_TFTensor
+    ) -> T_TFTensor:
+        """Compute the prior score for uniform entry/exit.
+
+        Args:
+            transition_matrix (Tensor):
+                The transition matrix of shape (H, Q, Q).
+        Returns:
+            Tensor: The output tensor of shape (H), with prior scores per
+                head.
+        """
+        scores = []
+        
+        for h in range(len(self.lengths)):
+            L = self.lengths[h]
+            # State indices
+            begin_idx = 3*L
+            
+            # Extract begin_to_match and match_to_end probabilities
+            begin_to_match = transition_matrix[h, begin_idx, :L]  # (L,)
+            match_to_end = transition_matrix[h, :L, 3*L + 1]  # (L,)
+            
+            # Get match_to_delete[0] for rescaling
+            match_to_delete_0 = transition_matrix[h, 0, 2*L - 1]
+            
+            # Rescale begin_to_match to sum to 1
+            div = tf.maximum(self.prior_config.epsilon, 1.0 - match_to_delete_0)
+            btm = begin_to_match / div
+            
+            # Compute entry-exit matrix
+            enex = tf.expand_dims(btm, 1) * tf.expand_dims(match_to_end, 0)
+            # Keep only upper triangular part (including diagonal)
+            enex = tf.linalg.band_part(enex, 0, -1)
+            
+            log_enex = tf.math.log(tf.maximum(self.prior_config.epsilon, 1.0 - enex))
+            log_enex_compl = tf.math.log(tf.maximum(self.prior_config.epsilon, enex))
+            
+            # Compute global prior (exclude the [0, -1] element)
+            glob = (self.prior_config.alpha_global - 1) * (
+                tf.reduce_sum(log_enex) - log_enex[0, -1]
+            )
+            glob += (self.prior_config.alpha_global_compl - 1) * (
+                tf.reduce_sum(log_enex_compl) - log_enex_compl[0, -1]
+            )
+            
+            scores.append(glob)
+        
+        return tf.stack(scores)
 
     @override
     def matrix(self) -> T_TFTensor:
@@ -126,17 +290,25 @@ class TFPHMMTransitionPrior(TFPrior):
         )
 
     @override
-    def call(self, transition_matrix: T_TFTensor) -> T_TFTensor:
+    def call(
+        self,
+        transition_matrix: T_TFTensor,
+        flank_init_prob: T_TFTensor | None = None
+    ) -> T_TFTensor:
         """Calls the prior with the given transition_matrix.
 
         Args:
             transition_matrix (Tensor):
                 The transition matrix of shape (H, Q, Q).
+            flank_init_prob (Tensor, optional):
+                The probability of starting in the left flank state for each head.
+                Shape: (H,). If None, defaults to 0.5 for each head.
 
         Returns:
             Tensor: The output tensor of shape (H), with prior scores per
-                head, summed over the match states.
+                head, summed over all prior components.
         """
+        # Compute all prior components
         match_scores = self.compute_transition_prior(
             transition_matrix,
             TFPHMMTransitionPrior.TransitionType.MATCH
@@ -149,5 +321,15 @@ class TFPHMMTransitionPrior(TFPrior):
             transition_matrix,
             TFPHMMTransitionPrior.TransitionType.DELETE
         )
-        # Sum the log densities
-        return match_scores + insert_scores + delete_scores
+        
+        # Default flank_init_prob if not provided
+        if flank_init_prob is None:
+            flank_init_prob = tf.ones(len(self.lengths), dtype=tf.float32) * 0.5
+        
+        flank_scores = self.compute_flank_prior(transition_matrix, flank_init_prob)
+        hit_scores = self.compute_hit_prior(transition_matrix)
+        global_scores = self.compute_global_prior(transition_matrix)
+        
+        # Sum all log densities
+        return (match_scores + insert_scores + delete_scores +
+                flank_scores + hit_scores + global_scores)

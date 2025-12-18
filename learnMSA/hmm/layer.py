@@ -2,10 +2,10 @@ from collections.abc import Sequence
 
 import tensorflow as tf
 from hidten import HMMMode
-from hidten.tf.hmm import TFHMM, T_shapelike
 from hidten.tf.emitter import TFPaddingEmitter
+from hidten.tf.hmm import TFHMM, T_shapelike
 
-from learnMSA.config.hmm import HMMConfig
+from learnMSA.config.hmm import HMMConfig, HMMPriorConfig
 from learnMSA.hmm.profile_emitter import ProfileEmitter
 from learnMSA.hmm.transitioner import PHMMTransitioner
 from learnMSA.hmm.value_set import PHMMValueSet
@@ -38,7 +38,11 @@ class PHMMLayer(tf.keras.Layer):
     """Determines the return value of the layer."""
 
     def __init__(
-        self, lengths: Sequence[int], config : HMMConfig, **kwargs
+        self,
+        lengths: Sequence[int],
+        config : HMMConfig,
+        prior_config: HMMPriorConfig | None = None,
+        **kwargs
     ) -> None:
         """
         Args:
@@ -48,6 +52,9 @@ class PHMMLayer(tf.keras.Layer):
         super().__init__(**kwargs)
         self.lengths = lengths
         self.config = config
+        if prior_config is None:
+            prior_config = HMMPriorConfig()
+        self.prior_config = prior_config
 
         values = [
             PHMMValueSet.from_config(L, h, config)
@@ -70,7 +77,9 @@ class PHMMLayer(tf.keras.Layer):
 
         # Add the transitioner
         # TODO: avoid the hack of keeping the custom config
-        transitioner = PHMMTransitioner(values = values)
+        transitioner = PHMMTransitioner(
+            values = values, prior_config=prior_config
+        )
         transitioner_custom_config = transitioner.hmm_config
         self.hmm.transitioner = transitioner # this overwrites hmm_config
         # restore custom config

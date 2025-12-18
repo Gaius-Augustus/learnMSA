@@ -39,7 +39,10 @@ if __name__ == "__main__":
     legacy_alpha = legacy_prior.emission_dirichlet_mix.make_alpha().numpy().flatten()
 
     # Add alphas for extra amino acids (non-standard + X)
-    legacy_alpha = np.concatenate([legacy_alpha, [0.01, 0.01, 0.01]])
+    # alpha = 1.0 marks a uniform prior for these amino acids (i.e. irrelevant)
+    # This will change the normalization constant compared to the case of only
+    # 20 alphas values, but gradient will remain the same.
+    legacy_alpha = np.concatenate([legacy_alpha, [1.0]*3])
 
     convert_dirichlet("amino_acid_dirichlet", legacy_alpha)
 

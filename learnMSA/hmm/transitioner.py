@@ -10,6 +10,8 @@ from hidten.tf.util import log_zero, safe_log
 
 from learnMSA.hmm.transition_index_set import PHMMTransitionIndexSet
 from learnMSA.hmm.value_set import PHMMValueSet
+from learnMSA.hmm.prior import TFPHMMTransitionPrior
+from learnMSA.config.hmm import HMMPriorConfig
 
 
 def logsumexp(x: T_TFTensor, y: T_TFTensor) -> T_TFTensor:
@@ -33,22 +35,28 @@ class PHMMExplicitTransitioner(TFTransitioner):
     def __init__(
         self,
         values: Sequence[PHMMValueSet],
+        prior_config: HMMPriorConfig | None = None,
         **kwargs
     ) -> None:
         """
         Args:
             values (Sequence[PHMMValueSet]): A sequence of value sets,
                 one per head, with probabilities.
+            prior_config (HMMPriorConfig | None): Prior configuration for
+                transition priors.
+                If None, uses default HMMPriorConfig.
             hidten_hmm_config (HidtenHMMConfig): The configuration of the
                 hidten HMM.
         """
         super().__init__(**kwargs)
+        if prior_config is None:
+            prior_config = HMMPriorConfig()
+        self.prior_config = prior_config
         transitions, value_list = [], []
         start, start_values = [], []
         states = []
-        max_states = PHMMTransitionIndexSet.num_states_unfolded(max(
-            value_set.L for value_set in values
-        ))
+        lengths = [value_set.L for value_set in values]
+        max_states = PHMMTransitionIndexSet.num_states_unfolded(max(lengths))
         for h, value_set in enumerate(values):
             index_set = PHMMTransitionIndexSet(value_set.L, folded=False)
             # Transitions
@@ -85,6 +93,9 @@ class PHMMExplicitTransitioner(TFTransitioner):
         self.allow_start = np.vstack(start)
         self.initializer_start = np.hstack(start_values)
 
+        # Load the prior
+        self.prior = TFPHMMTransitionPrior(lengths, self.prior_config)
+
 
 class PHMMTransitioner(TFTransitioner):
     """A transitioner for folded pHMMs without deletion states. Wraps an
@@ -103,13 +114,20 @@ class PHMMTransitioner(TFTransitioner):
     def __init__(
         self,
         values: Sequence[PHMMValueSet],
+        prior_config: HMMPriorConfig | None = None,
         **kwargs
     ) -> None:
         """
         Args:
             values (Sequence[PHMMValueSet]): A sequence of value sets, one per head.
+            prior_config (HMMPriorConfig | None): Prior configuration for
+                transition priors.
+                If None, uses default HMMPriorConfig.
         """
         super().__init__(**kwargs)
+        if prior_config is None:
+            prior_config = HMMPriorConfig()
+        self.prior_config = prior_config
         self.explicit_transitioner = self._make_explicit_transitioner(values)
         self.lengths = [value_set.L for value_set in values]
         # Construct allow indices for the folded models
@@ -204,6 +222,10 @@ class PHMMTransitioner(TFTransitioner):
             ),
             share=None,
         ))
+
+    @override
+    def prior_scores(self) -> T_TFTensor:
+        return self.explicit_transitioner.prior_scores()
 
     def _get_folded_transition_probs(self) -> T_TFTensor:
         """Computes folded transition probabilities by marginalizing over
@@ -464,4 +486,4 @@ class PHMMTransitioner(TFTransitioner):
         self, values: Sequence[PHMMValueSet]
     ) -> PHMMExplicitTransitioner:
         """Helper to create the explicit transitioner with the same parameters."""
-        return PHMMExplicitTransitioner(values=values)
+        return PHMMExplicitTransitioner(values=values, prior_config=self.prior_config)

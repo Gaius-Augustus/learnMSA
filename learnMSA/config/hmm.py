@@ -4,6 +4,45 @@ from typing import ClassVar
 from pydantic import BaseModel, field_validator
 
 
+class HMMPriorConfig(BaseModel):
+    """HMM prior parameters for transition priors."""
+
+    alpha_flank: float = 7000.0
+    """Alpha parameter for flank prior. Favors high probability of staying in flanking states."""
+
+    alpha_single: float = 1e9
+    """Alpha parameter for single-hit prior. Favors high probability for a single main model hit."""
+
+    alpha_global: float = 1e4
+    """Alpha parameter for global prior. Favors models with high prob. to enter at the first match and exit after the last match."""
+
+    alpha_flank_compl: float = 1.0
+    """Complement parameter for alpha_flank."""
+
+    alpha_single_compl: float = 1.0
+    """Complement parameter for alpha_single."""
+
+    alpha_global_compl: float = 1.0
+    """Complement parameter for alpha_global."""
+
+    epsilon: float = 1e-16
+    """A small constant for numerical stability in prior computations."""
+
+    @field_validator(
+        "alpha_flank",
+        "alpha_single",
+        "alpha_global",
+        "alpha_flank_compl",
+        "alpha_single_compl",
+        "alpha_global_compl",
+        "epsilon",
+    )
+    def validate_alpha_params(cls, v: float, info) -> float:
+        if not v > 0:
+            raise ValueError(f"{info.field_name} must be greater than 0.")
+        return v
+
+
 class HMMConfig(BaseModel):
     """HMM parameters."""
 

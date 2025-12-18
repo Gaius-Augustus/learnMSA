@@ -7,24 +7,6 @@ class AdvancedConfig(BaseModel):
     dist_out: str = ""
     """Distribution output file."""
 
-    alpha_flank: float = 7000
-    """Alpha parameter for flank."""
-
-    alpha_single: float = 1e9
-    """Alpha parameter for single."""
-
-    alpha_global: float = 1e4
-    """Alpha parameter for global."""
-
-    alpha_flank_compl: float = 1
-    """Alpha parameter for flank complement."""
-
-    alpha_single_compl: float = 1
-    """Alpha parameter for single complement."""
-
-    alpha_global_compl: float = 1
-    """Alpha parameter for global complement."""
-
     inverse_gamma_alpha: float = 3.0
     """Inverse gamma alpha parameter."""
 
@@ -44,12 +26,6 @@ class AdvancedConfig(BaseModel):
     """Number of threads to use for the aligner."""
 
     @field_validator(
-        "alpha_flank",
-        "alpha_single",
-        "alpha_global",
-        "alpha_flank_compl",
-        "alpha_single_compl",
-        "alpha_global_compl",
         "inverse_gamma_alpha",
         "inverse_gamma_beta",
         "initial_distance",

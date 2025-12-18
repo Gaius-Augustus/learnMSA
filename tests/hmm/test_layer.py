@@ -3,7 +3,9 @@ import pytest
 import tensorflow as tf
 
 import tests.hmm.ref as ref
+from learnMSA.hmm import prior
 from learnMSA.hmm.layer import PHMMLayer
+from learnMSA.config.hmm import HMMPriorConfig
 
 
 @pytest.fixture
@@ -511,4 +513,270 @@ def test_parallel_viterbi_long(layer: PHMMLayer) -> None:
         viterbi_path_1,
         viterbi_path_100,
         err_msg="Viterbi paths differ between parallel=1 and parallel=100"
+    )
+
+def test_prior() -> None:
+    """
+    Test that the priors are correctly set in the layer.
+    """
+
+    # Set up the new layer
+
+    # Test model A
+    lengths = [4]
+    prior_config = HMMPriorConfig()
+    layer = PHMMLayer(
+        lengths=lengths, config=ref.config, prior_config=prior_config
+    )
+
+    # Build the layer by providing shapes for observations and padding
+    layer.build(input_shape=((None, None, 23), (None, None, 1)))
+
+    # Test whether computing the prior scores of the layer does not error
+    prior_scores = layer.hmm.prior_scores()
+
+    # The the emitter's Dirichlet priors
+    # Battle-tested gradients computed with legacy learnMSA of dirichlet(p)
+    # where p is an amino acid background distribution
+    # The new implementation should give the same gradients, but will differ
+    # by a constant offset, because it's normalized differently.
+    p = tf.constant([
+        8.3433352e-02, 5.1926684e-02, 4.9351085e-02, 4.6587169e-02, 2.2493618e-02,
+        5.0682485e-02, 6.2964454e-02, 4.7214236e-02, 3.3491924e-02, 5.2677721e-02,
+        7.3317297e-02, 6.3507542e-02, 3.5261709e-02, 3.6099266e-02, 3.4606576e-02,
+        7.2123714e-02, 6.5257192e-02, 1.7763134e-02, 3.3940718e-02, 6.6508673e-02,
+        7.9144974e-04, 5.8379495e-08, 9.9920245e-33
+    ])
+    expected_grads = np.array([
+        16.196707, 8.924403, 7.9193473, 6.7171874, -16.274733,
+        8.451642, 12.300347, 7.002275, -1.6756237, 9.198967,
+        14.542977, 12.436159, -0.17705068, 0.48093507, -0.71392107,
+        14.317257, 12.858342, -28.114046, -1.2808125, 13.146688,
+        0., 0., 0.
+    ])
+
+    # Compute gradients with the new implementation
+    assert layer.hmm.emitter[0].prior is not None
+    with tf.GradientTape() as tape:
+        tape.watch(p)
+        prior_score = layer.hmm.emitter[0].prior(p) # type: ignore
+    grads = tape.gradient(prior_score, p)
+    assert isinstance(grads, tf.Tensor)
+    np.testing.assert_allclose(grads, expected_grads, atol=1e-6, rtol=1e-6)
+
+
+
+    # TEMPORARY, only to get refererence values for transition priors
+
+    # Test the transitioners priors
+    # Get the legacy density values
+    # from learnMSA.msa_hmm.Transitioner import ProfileHMMTransitioner
+
+    # transitioner = ProfileHMMTransitioner()
+    # transitioner.set_lengths(lengths)
+    # transitioner.build()
+
+    # transition_probs = transitioner.make_probs()
+    # for k,v in transition_probs[0].items():
+    #     transition_probs[0][k] = v.numpy().tolist()
+    #     if len(transition_probs[0][k]) > 1:
+    #         # wrap for first head
+    #         transition_probs[0][k] = [transition_probs[0][k]]
+    #     print(k, transition_probs[0][k])
+
+    # from learnMSA.hmm.value_set import PHMMValueSet
+    # from learnMSA.config.hmm import HMMConfig
+    
+    # # Convert flank_init_prob to scalar to avoid deprecation warning
+    # flank_init_prob = transitioner.make_flank_init_prob()
+    # if hasattr(flank_init_prob, 'numpy'):
+    #     flank_init_prob = float(flank_init_prob.numpy())
+    # elif isinstance(flank_init_prob, np.ndarray):
+    #     flank_init_prob = float(flank_init_prob)
+
+    # transfer_config = HMMConfig(
+    #     p_begin_match = transition_probs[0]["begin_to_match"],
+    #     p_match_end = transition_probs[0]["match_to_end"],
+    #     p_match_match = transition_probs[0]["match_to_match"],
+    #     p_match_insert = transition_probs[0]["match_to_insert"],
+    #     p_insert_insert = transition_probs[0]["insert_to_insert"],
+    #     p_delete_delete = transition_probs[0]["delete_to_delete"],
+    #     p_begin_delete = transition_probs[0]["match_to_delete"][0],
+    #     p_left_left = transition_probs[0]["left_flank_loop"],
+    #     p_right_right = transition_probs[0]["right_flank_loop"],
+    #     p_unannot_unannot = transition_probs[0]["unannotated_segment_loop"],
+    #     p_end_unannot = transition_probs[0]["end_to_unannotated_segment"],
+    #     p_end_right = transition_probs[0]["end_to_right_flank"],
+    #     p_start_left_flank = flank_init_prob
+    # )
+
+    # value_set = PHMMValueSet.from_config(4, 0, transfer_config)
+    # A = value_set.transitions
+    # A = tf.constant(A)[None]  # (1, Q, Q)
+
+    # print("A", A[0])
+
+    # legacy_priors = transitioner.get_prior_log_densities()
+    # for k,v in legacy_priors.items():
+    #     print(f"Legacy prior {k} = {v}")
+
+    # TEMPORARY ENDS
+
+    A = [[
+        [0.0000000e+00, 6.3772297e-01, 0.0000000e+00, 0.0000000e+00, 8.6306415e-02,
+        0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 9.5895998e-02, 0.0000000e+00,
+        0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 1.8007462e-01, 0.0000000e+00,
+        0.0000000e+00, 0.0000000e+00],
+        [0.0000000e+00, 0.0000000e+00, 6.3772297e-01, 0.0000000e+00, 0.0000000e+00,
+        8.6306415e-02, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 9.5895998e-02,
+        0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 1.8007462e-01, 0.0000000e+00,
+        0.0000000e+00, 0.0000000e+00],
+        [0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 6.3772297e-01, 0.0000000e+00,
+        0.0000000e+00, 8.6306415e-02, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00,
+        9.5895998e-02, 0.0000000e+00, 0.0000000e+00, 1.8007462e-01, 0.0000000e+00,
+        0.0000000e+00, 0.0000000e+00],
+        [0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00,
+        0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00,
+        0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 1.0000000e+00, 0.0000000e+00,
+        0.0000000e+00, 0.0000000e+00],
+        [0.0000000e+00, 5.7180440e-01, 0.0000000e+00, 0.0000000e+00, 4.2819563e-01,
+        0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00,
+        0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00,
+        0.0000000e+00, 0.0000000e+00],
+        [0.0000000e+00, 0.0000000e+00, 6.1526734e-01, 0.0000000e+00, 0.0000000e+00,
+        3.8473266e-01, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00,
+        0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00,
+        0.0000000e+00, 0.0000000e+00],
+        [0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 6.2823641e-01, 0.0000000e+00,
+        0.0000000e+00, 3.7176356e-01, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00,
+        0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00,
+        0.0000000e+00, 0.0000000e+00],
+        [0.0000000e+00, 6.6576588e-01, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00,
+        0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 3.3423415e-01, 0.0000000e+00,
+        0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00,
+        0.0000000e+00, 0.0000000e+00],
+        [0.0000000e+00, 0.0000000e+00, 6.7859656e-01, 0.0000000e+00, 0.0000000e+00,
+        0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 3.2140344e-01,
+        0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00,
+        0.0000000e+00, 0.0000000e+00],
+        [0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 6.3755649e-01, 0.0000000e+00,
+        0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00,
+        3.6244351e-01, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00,
+        0.0000000e+00, 0.0000000e+00],
+        [0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00,
+        0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00,
+        0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 1.0000000e+00, 0.0000000e+00,
+        0.0000000e+00, 0.0000000e+00],
+        [0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00,
+        0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00,
+        0.0000000e+00, 7.0727462e-01, 2.9272538e-01, 0.0000000e+00, 0.0000000e+00,
+        0.0000000e+00, 0.0000000e+00],
+        [4.7875389e-01, 1.5958464e-01, 1.5958464e-01, 1.5958464e-01, 0.0000000e+00,
+        0.0000000e+00, 0.0000000e+00, 4.2492181e-02, 0.0000000e+00, 0.0000000e+00,
+        0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00,
+        0.0000000e+00, 0.0000000e+00],
+        [0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00,
+        0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00,
+        0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 7.1023889e-05,
+        5.3933340e-01, 4.6059558e-01],
+        [0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00,
+        0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00,
+        0.0000000e+00, 0.0000000e+00, 2.6544642e-01, 0.0000000e+00, 7.3455358e-01,
+        0.0000000e+00, 0.0000000e+00],
+        [0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00,
+        0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00,
+        0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00,
+        7.0727462e-01, 2.9272538e-01],
+        [0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00,
+        0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00,
+        0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 0.0000000e+00,
+        0.0000000e+00, 1.0000000e+00]
+    ]]
+
+    legacy_match_prior = -10.251389
+    legacy_insert_prior = 3.5873108
+    legacy_delete_prior = 4.169487
+    legacy_flank_prior = -16179.822
+    legacy_hit_prior = -71051.26
+    legacy_global_prior = -9213.436
+
+    # Run the new prior
+    trans_prior = layer.hmm.transitioner.explicit_transitioner.prior
+    assert isinstance(trans_prior, prior.TFPHMMTransitionPrior)
+    match_prior_scores = trans_prior.compute_transition_prior(
+        A, prior.TFPHMMTransitionPrior.TransitionType.MATCH
+    )
+    insert_prior_scores = trans_prior.compute_transition_prior(
+        A, prior.TFPHMMTransitionPrior.TransitionType.INSERT
+    )
+    delete_prior_scores = trans_prior.compute_transition_prior(
+        A, prior.TFPHMMTransitionPrior.TransitionType.DELETE
+    )
+
+    np.testing.assert_allclose(
+        match_prior_scores,
+        legacy_match_prior,
+        atol=1e-6,
+        rtol=1e-6,
+    )
+    np.testing.assert_allclose(
+        insert_prior_scores,
+        legacy_insert_prior,
+        atol=1e-6,
+        rtol=1e-6,
+    )
+    np.testing.assert_allclose(
+        delete_prior_scores,
+        legacy_delete_prior,
+        atol=1e-6,
+        rtol=1e-6,
+    )
+
+    # Test flank, hit, and global priors
+    # Get flank_init_prob from config
+    if isinstance(ref.config.p_start_left_flank, float):
+        flank_init_prob = tf.constant([ref.config.p_start_left_flank], dtype=tf.float32)
+    else:
+        flank_init_prob = tf.constant(ref.config.p_start_left_flank, dtype=tf.float32)
+    
+    flank_prior_scores = trans_prior.compute_flank_prior(A, flank_init_prob)
+    hit_prior_scores = trans_prior.compute_hit_prior(A)
+    global_prior_scores = trans_prior.compute_global_prior(A)
+
+    np.testing.assert_allclose(
+        flank_prior_scores,
+        legacy_flank_prior,
+        atol=1e-3,
+        rtol=1e-5,
+        err_msg="Flank prior does not match legacy implementation"
+    )
+    np.testing.assert_allclose(
+        hit_prior_scores,
+        legacy_hit_prior,
+        atol=1e-3,
+        rtol=1e-5,
+        err_msg="Hit prior does not match legacy implementation"
+    )
+    np.testing.assert_allclose(
+        global_prior_scores,
+        legacy_global_prior,
+        atol=1e-3,
+        rtol=1e-5,
+        err_msg="Global prior does not match legacy implementation"
+    )
+
+    # Test the full prior call (sum of all components)
+    full_prior_scores = trans_prior(A, flank_init_prob)
+    expected_full_prior = (
+        legacy_match_prior + legacy_insert_prior + legacy_delete_prior +
+        legacy_flank_prior + legacy_hit_prior + legacy_global_prior
+    )
+    
+    np.testing.assert_allclose(
+        full_prior_scores,
+        expected_full_prior,
+        atol=1e-3,
+        rtol=1e-5,
+        err_msg="Full prior (sum of all components) does not match expected "
+        "value"
     )

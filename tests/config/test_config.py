@@ -584,12 +584,6 @@ class TestAdvancedConfig:
         """Test AdvancedConfig default values."""
         config = AdvancedConfig()
         assert config.dist_out == ""
-        assert config.alpha_flank == 7000
-        assert config.alpha_single == 1e9
-        assert config.alpha_global == 1e4
-        assert config.alpha_flank_compl == 1
-        assert config.alpha_single_compl == 1
-        assert config.alpha_global_compl == 1
         assert config.inverse_gamma_alpha == 3.0
         assert config.inverse_gamma_beta == 0.5
         assert config.initial_distance == 0.05
@@ -598,109 +592,14 @@ class TestAdvancedConfig:
         """Test AdvancedConfig with custom values."""
         config = AdvancedConfig(
             dist_out="distributions.txt",
-            alpha_flank=5000,
-            alpha_single=1e8,
-            alpha_global=5000,
-            alpha_flank_compl=2,
-            alpha_single_compl=3,
-            alpha_global_compl=4,
             inverse_gamma_alpha=2.0,
             inverse_gamma_beta=1.0,
             initial_distance=0.1,
         )
         assert config.dist_out == "distributions.txt"
-        assert config.alpha_flank == 5000
-        assert config.alpha_single == 1e8
-        assert config.alpha_global == 5000
-        assert config.alpha_flank_compl == 2
-        assert config.alpha_single_compl == 3
-        assert config.alpha_global_compl == 4
         assert config.inverse_gamma_alpha == 2.0
         assert config.inverse_gamma_beta == 1.0
         assert config.initial_distance == 0.1
-
-    def test_alpha_flank_validation(self):
-        """Test that alpha_flank must be positive."""
-        # Valid values
-        AdvancedConfig(alpha_flank=0.1)
-        AdvancedConfig(alpha_flank=10000)
-
-        # Invalid values
-        with pytest.raises(
-            ValidationError,
-            match="alpha_flank must be greater than 0"
-        ):
-            AdvancedConfig(alpha_flank=0)
-
-        with pytest.raises(
-            ValidationError,
-            match="alpha_flank must be greater than 0"
-        ):
-            AdvancedConfig(alpha_flank=-100)
-
-    def test_alpha_single_validation(self):
-        """Test that alpha_single must be positive."""
-        # Valid values
-        AdvancedConfig(alpha_single=1)
-        AdvancedConfig(alpha_single=1e10)
-
-        # Invalid values
-        with pytest.raises(
-            ValidationError,
-            match="alpha_single must be greater than 0"
-        ):
-            AdvancedConfig(alpha_single=0)
-
-        with pytest.raises(
-            ValidationError,
-            match="alpha_single must be greater than 0"
-        ):
-            AdvancedConfig(alpha_single=-1)
-
-    def test_alpha_global_validation(self):
-        """Test that alpha_global must be positive."""
-        # Valid values
-        AdvancedConfig(alpha_global=100)
-        AdvancedConfig(alpha_global=1e6)
-
-        # Invalid values
-        with pytest.raises(
-            ValidationError,
-            match="alpha_global must be greater than 0"
-        ):
-            AdvancedConfig(alpha_global=0)
-
-        with pytest.raises(
-            ValidationError,
-            match="alpha_global must be greater than 0"
-        ):
-            AdvancedConfig(alpha_global=-500)
-
-    def test_alpha_complement_validation(self):
-        """Test that alpha complement parameters must be positive."""
-        # Valid values
-        AdvancedConfig(alpha_flank_compl=0.5)
-        AdvancedConfig(alpha_single_compl=10)
-        AdvancedConfig(alpha_global_compl=100)
-
-        # Invalid values
-        with pytest.raises(
-            ValidationError,
-            match="alpha_flank_compl must be greater than 0"
-        ):
-            AdvancedConfig(alpha_flank_compl=0)
-
-        with pytest.raises(
-            ValidationError,
-            match="alpha_single_compl must be greater than 0"
-        ):
-            AdvancedConfig(alpha_single_compl=-1)
-
-        with pytest.raises(
-            ValidationError,
-            match="alpha_global_compl must be greater than 0"
-        ):
-            AdvancedConfig(alpha_global_compl=-5)
 
     def test_inverse_gamma_alpha_validation(self):
         """Test that inverse_gamma_alpha must be positive."""
@@ -763,54 +662,37 @@ class TestAdvancedConfig:
         """Test AdvancedConfig serialization to dict."""
         config = AdvancedConfig(
             dist_out="output.txt",
-            alpha_flank=8000,
+            inverse_gamma_alpha=4.0,
         )
         config_dict = config.model_dump()
 
         assert config_dict["dist_out"] == "output.txt"
-        assert config_dict["alpha_flank"] == 8000
+        assert config_dict["inverse_gamma_alpha"] == 4.0
 
     def test_advanced_deserialization(self):
         """Test AdvancedConfig deserialization from dict."""
         config_dict = {
             "dist_out": "results.txt",
-            "alpha_single": 5e8,
             "inverse_gamma_alpha": 4.0,
+            "inverse_gamma_beta": 1.5,
         }
         config = AdvancedConfig(**config_dict)
 
         assert config.dist_out == "results.txt"
-        assert config.alpha_single == 5e8
         assert config.inverse_gamma_alpha == 4.0
+        assert config.inverse_gamma_beta == 1.5
 
     def test_advanced_in_configuration(self):
         """Test AdvancedConfig as part of Configuration."""
         config = Configuration(
             advanced=AdvancedConfig(
-                alpha_flank=6000,
-                alpha_global=2e4,
+                inverse_gamma_alpha=4.0,
+                initial_distance=0.1,
             )
         )
 
-        assert config.advanced.alpha_flank == 6000
-        assert config.advanced.alpha_global == 2e4
-
-    def test_all_alpha_parameters_positive(self):
-        """Test that all alpha parameters accept positive values."""
-        config = AdvancedConfig(
-            alpha_flank=1.0,
-            alpha_single=1.0,
-            alpha_global=1.0,
-            alpha_flank_compl=1.0,
-            alpha_single_compl=1.0,
-            alpha_global_compl=1.0
-        )
-        assert config.alpha_flank == 1.0
-        assert config.alpha_single == 1.0
-        assert config.alpha_global == 1.0
-        assert config.alpha_flank_compl == 1.0
-        assert config.alpha_single_compl == 1.0
-        assert config.alpha_global_compl == 1.0
+        assert config.advanced.inverse_gamma_alpha == 4.0
+        assert config.advanced.initial_distance == 0.1
 
 
 class TestInputOutputConfig:

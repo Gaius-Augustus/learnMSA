@@ -1,9 +1,11 @@
 import sys
 from argparse import Namespace
 
-from learnMSA.config import (AdvancedConfig, Configuration, InitMSAConfig,
-                             InputOutputConfig, LanguageModelConfig,
-                             TrainingConfig, VisualizationConfig)
+from learnMSA.config import (AdvancedConfig, Configuration, HMMConfig,
+                             InitMSAConfig, InputOutputConfig,
+                             LanguageModelConfig, TrainingConfig,
+                             VisualizationConfig)
+from learnMSA.config.hmm import HMMPriorConfig
 
 
 def args_to_config(args: Namespace) -> Configuration:
@@ -101,14 +103,19 @@ def args_to_config(args: Namespace) -> Configuration:
         logo_gif=args.logo_gif,
     )
 
-    advanced_config = AdvancedConfig(
-        dist_out=args.dist_out,
+    hmm_config = HMMConfig()
+
+    hmm_prior_config = HMMPriorConfig(
         alpha_flank=args.alpha_flank,
         alpha_single=args.alpha_single,
         alpha_global=args.alpha_global,
         alpha_flank_compl=args.alpha_flank_compl,
         alpha_single_compl=args.alpha_single_compl,
         alpha_global_compl=args.alpha_global_compl,
+    )
+
+    advanced_config = AdvancedConfig(
+        dist_out=args.dist_out,
         inverse_gamma_alpha=args.inverse_gamma_alpha,
         inverse_gamma_beta=args.inverse_gamma_beta,
         initial_distance=args.initial_distance,
@@ -119,6 +126,8 @@ def args_to_config(args: Namespace) -> Configuration:
     config = Configuration(
         input_output=input_output_config,
         training=training_config,
+        hmm=hmm_config,
+        hmm_prior=hmm_prior_config,
         init_msa=init_msa_config,
         language_model=language_model_config,
         visualization=visualization_config,
