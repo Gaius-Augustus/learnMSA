@@ -85,6 +85,7 @@ class PHMMExplicitTransitioner(TFTransitioner):
             )
 
         # Set a custom HMMConfig for the explicit model
+        # because the state count differs from the folded model
         self.hmm_config = HidtenHMMConfig(states=states)
 
         self.allow = np.vstack(transitions)
@@ -111,6 +112,16 @@ class PHMMTransitioner(TFTransitioner):
     matter how many states there are in the head, with optional padding states
     to fill up to the maximum number of states across all heads.
     """
+    @property
+    def max_states(self) -> int:
+        """The maximum number of states across all heads."""
+        return self.hmm_config.max_states + 1
+
+    @property
+    def states(self) -> list[int]:
+        """The number of states for each head."""
+        return [Q+1 for Q in self.hmm_config.states]
+
     def __init__(
         self,
         values: Sequence[PHMMValueSet],
@@ -125,11 +136,13 @@ class PHMMTransitioner(TFTransitioner):
                 If None, uses default HMMPriorConfig.
         """
         super().__init__(**kwargs)
+
         if prior_config is None:
             prior_config = PHMMPriorConfig()
         self.prior_config = prior_config
         self.explicit_transitioner = self._make_explicit_transitioner(values)
         self.lengths = [value_set.L for value_set in values]
+
         # Construct allow indices for the folded models
         transitions, start = [], []
         states = []
@@ -154,8 +167,6 @@ class PHMMTransitioner(TFTransitioner):
             ))
 
             states.append(PHMMTransitionIndexSet.num_states_folded(L=L))
-
-        self.hmm_config = HidtenHMMConfig(states=states)
 
         self.allow = np.vstack(transitions)
         self.allow_start = np.vstack(start)
@@ -186,7 +197,7 @@ class PHMMTransitioner(TFTransitioner):
             self.explicit_transitioner.matrix()
         )
         self.match_skip = []
-        for h in range(self.hmm_config.heads):
+        for h in range(self.heads):
             self.match_skip.append(
                 self._compute_match_skip_matrix(h)
             )
@@ -199,11 +210,7 @@ class PHMMTransitioner(TFTransitioner):
             indices=tf.constant(self.allow, dtype=tf.int64),
             values=self._get_folded_transition_probs(),
             shape=tf.constant(
-                [
-                    self.hmm_config.heads,
-                    self.hmm_config.max_states,
-                    self.matrix_dim,
-                ],
+                [self.heads, self.max_states, self.matrix_dim],
                 dtype=tf.int64,
             ),
             share=None,
@@ -217,7 +224,7 @@ class PHMMTransitioner(TFTransitioner):
             indices=tf.constant(self.allow_start, dtype=tf.int64),
             values=self._get_folded_start_probs(),
             shape=tf.constant(
-                [self.hmm_config.heads, self.hmm_config.max_states],
+                [self.heads, self.max_states],
                 dtype=tf.int64,
             ),
             share=None,

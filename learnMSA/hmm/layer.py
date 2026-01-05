@@ -64,46 +64,23 @@ class PHMMLayer(tf.keras.Layer):
             for h, L in enumerate(lengths)
         ]
 
-        # TODO: clean this mess up
-        # 3 different HMM configs are currently needed
-        # the HMM has a config with 2L + 2 states, excluding terminal, because
-        # hidten expects the configuration to not count the padding state
-
-        # the transitioner needs a custom configuration with 2L + 3 states,
-        # because it handles the padding/terminal state explicitly
-
-        # the emitter needs another custom config with L + 1 states, because it
-        # shares all insertion states and does not use hidten's share system
-        # for performance reasons
-
+        # Create the HMM, with 2*L+2 states per head
         self.hmm = TFHMM(states=self.states, heads=self.heads)
 
         # Add the transitioner
-        # TODO: avoid the hack of keeping the custom config
-        transitioner = PHMMTransitioner(
+        self.hmm.transitioner = PHMMTransitioner(
             values = values, prior_config=prior_config
         )
-        transitioner_custom_config = transitioner.hmm_config
-        self.hmm.transitioner = transitioner # this overwrites hmm_config
-        # restore custom config
-        transitioner.hmm_config = transitioner_custom_config
 
         # Add the profile emitter
-        profile_emitter = ProfileEmitter(
+        self.hmm.add_emitter(ProfileEmitter(
             values = values,
             use_prior_aa_dist=config.use_prior_for_emission_init
-        )
-        emitter_custom_config = profile_emitter.hmm_config
-        self.hmm.add_emitter(profile_emitter) # this overwrites hmm_config
-        profile_emitter.hmm_config = emitter_custom_config # restore
+        ))
 
         # Add the MVN emitter
         if self.plm_config is not None:
-            emb_emitter = EmbeddingEmitter()
-            emitter_custom_config = emb_emitter.hmm_config
-            self.hmm.add_emitter(emb_emitter) # this overwrites hmm_config
-            emb_emitter.hmm_config = emitter_custom_config # restore
-
+            self.hmm.add_emitter(EmbeddingEmitter())
 
         # Add the padding emitter
         self.hmm.add_emitter(TFPaddingEmitter())

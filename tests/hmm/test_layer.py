@@ -86,7 +86,7 @@ def test_matrices(
         err_msg="Emission matrix does not match reference for model A"
     )
     np.testing.assert_allclose(
-        B[1, :layer.lengths[1]+1, :],
+        B[1, :2*layer.lengths[1]+2, :],
         ref.emissions_b,
         atol=1e-6,
         err_msg="Emission matrix does not match reference for model B"

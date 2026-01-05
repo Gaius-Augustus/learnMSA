@@ -1,14 +1,21 @@
 import numpy as np
 import pytest
 import tensorflow as tf
+from hidten.hmm import HMMConfig as HidtenHMMConfig
 
 import tests.hmm.ref as ref
 from learnMSA.config.hmm import PHMMConfig
 from learnMSA.hmm.profile_emitter import ProfileEmitter
 from learnMSA.hmm.value_set import PHMMValueSet
 
+
 @pytest.fixture
-def emitter() -> ProfileEmitter:
+def hmm_config() -> HidtenHMMConfig:
+    lengths = [4, 3]
+    return HidtenHMMConfig(states=[2*L+2 for L in lengths])
+
+@pytest.fixture
+def emitter(hmm_config: HidtenHMMConfig) -> ProfileEmitter:
     lengths = [4, 3]
 
     # Create value sets for different heads
@@ -19,6 +26,7 @@ def emitter() -> ProfileEmitter:
 
     # Construct an emitter with two heads from the initial values
     emitter = ProfileEmitter(values)
+    emitter.hmm_config = hmm_config
     emitter.build()
     return emitter
 
@@ -26,9 +34,9 @@ def test_matrix(emitter: ProfileEmitter) -> None:
     B = emitter.matrix()
 
     # Check basic matrix properties
-    assert B.shape == (2, 5, 23)
+    assert B.shape == (2, 10, 23)
     np.testing.assert_allclose(np.sum(B[0], axis=-1), 1.0)
-    np.testing.assert_allclose(np.sum(B[1, :4], axis=-1), 1.0)
+    np.testing.assert_allclose(np.sum(B[1, :8], axis=-1), 1.0)
 
 
 def test_call_shapes(emitter: ProfileEmitter) -> None:
@@ -46,7 +54,7 @@ def test_call_shapes(emitter: ProfileEmitter) -> None:
     assert emission_scores_heads.shape == (B, T, H, 2*4+3)
 
 
-def test_call(emitter: ProfileEmitter) -> None:
+def test_call(emitter: ProfileEmitter, hmm_config: HidtenHMMConfig) -> None:
     # Create two value sets for different heads
     values_1 = PHMMValueSet(
         L=4,
@@ -74,6 +82,7 @@ def test_call(emitter: ProfileEmitter) -> None:
 
     # Construct an emitter with two heads from the initial values
     emitter = ProfileEmitter([values_1, values_2], use_prior_aa_dist=False)
+    emitter.hmm_config = hmm_config
     emitter.build()
 
     inputs_1_list = [0, 1, 2, 3, 9]
@@ -125,7 +134,7 @@ def test_dirichlet_prior(emitter: ProfileEmitter) -> None:
     print(emitter.prior_scores().numpy())
 
 
-def test_construct_big_emitter() -> None:
+def test_construct_big_emitter(hmm_config: HidtenHMMConfig) -> None:
     import time
 
     lengths = [500]*10
@@ -137,6 +146,7 @@ def test_construct_big_emitter() -> None:
     # Construct an emitter with two heads from the initial values
     t0 = time.perf_counter()
     emitter = ProfileEmitter(values)
+    emitter.hmm_config = hmm_config
     t1 = time.perf_counter()
     print(f"Constructor time: {t1-t0:.4f}s")
 

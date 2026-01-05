@@ -105,6 +105,11 @@ emissions_a: np.ndarray = np.array([
     [0.7, 0.3],
     [0.9, 0.1],
     [0.5, 0.5],
+    [0.5, 0.5],
+    [0.5, 0.5],
+    [0.5, 0.5],
+    [0.5, 0.5],
+    [0.5, 0.5],
 ])
 """Emissions of the first reference model"""
 
@@ -140,6 +145,10 @@ emissions_b: np.ndarray = np.array([
     [0.5, 0.5],
     [0.1, 0.9],
     [0.7, 0.3],
+    [0.5, 0.5],
+    [0.5, 0.5],
+    [0.5, 0.5],
+    [0.5, 0.5],
     [0.5, 0.5],
 ])
 """Emissions of the second reference model"""

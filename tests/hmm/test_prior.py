@@ -7,7 +7,12 @@ from learnMSA.hmm.transitioner import PHMMTransitioner
 from learnMSA.hmm.value_set import PHMMValueSet
 
 
-def test_transition_prior() -> None:
+@pytest.fixture
+def hmm_config() -> HidtenHMMConfig:
+    lengths = [4, 3]
+    return HidtenHMMConfig(states=[2*L+2 for L in lengths])
+
+def test_transition_prior(hmm_config: HidtenHMMConfig) -> None:
     lengths = [4, 3]
     prior_config = PHMMPriorConfig()
     prior = TFPHMMTransitionPrior(lengths, prior_config)
@@ -28,6 +33,7 @@ def test_transition_prior() -> None:
         for h, L in enumerate(lengths)
     ]
     transitioner = PHMMTransitioner(values=values)
+    transitioner.hmm_config = hmm_config
     transitioner.build()
     A = transitioner.explicit_transitioner.matrix()
 

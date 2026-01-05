@@ -3,7 +3,6 @@ from typing import override
 
 import numpy as np
 import tensorflow as tf
-from hidten.hmm import HMMConfig as HidtenHMMConfig
 from hidten.tf.emitter.categorical import (T_shapelike, T_TFTensor,
                                            TFCategoricalEmitter)
 from hidten.tf.prior.dirichlet import TFDirichletPrior
@@ -27,28 +26,24 @@ class ProfileEmitter(TFCategoricalEmitter):
         Args:
             values (Sequence[PHMMValueSet]): A sequence of value sets,
                 one per head, with probabilities.
-            hidten_hmm_config (HidtenHMMConfig): The configuration of the
-                hidten HMM.
             use_prior_aa_dist (bool): Whether to use the amino acid prior
                 distribution for initializing the emissions. If False, the
                 initialization is based on the provided value sets.
         """
         super().__init__(**kwargs)
 
-        # The profile emitter has less states than the HMM since it does not
-        # model all insertion states explicitly.
-        # We create a special HMMConfig so HidTen will correctly construct the
-        # matrix for the lower number of states.
-        self.hmm_config = HidtenHMMConfig(states = [v.L+1 for v in values])
-        self.lengths = [value_set.L for value_set in values]
+        self.lengths = np.array([value_set.L for value_set in values])
 
         # Set up the Dirichlet prior
         self.prior: TFDirichletPrior = load_dirichlet(
             "amino_acid_dirichlet.weights",
             dim = len(SequenceDataset.alphabet)-1
         )
-        # Assign custom config for broadcasting
-        self.prior.hmm_config = HidtenHMMConfig(states=[1])
+        # Share concentrations across all states
+        self.prior.share = np.tile(
+            np.arange(len(SequenceDataset.alphabet)-1),
+            reps=2 * sum(self.lengths) + 2 * len(self.lengths)
+        )
 
         init_values = []
         if use_prior_aa_dist:
@@ -67,9 +62,52 @@ class ProfileEmitter(TFCategoricalEmitter):
     def build(self, input_shape: T_shapelike | None = None) -> None:
         if input_shape is None:
             # Number of amino acids (including non-standard + X, but excluding gap)
-            s = len(SequenceDataset.alphabet)
-            input_shape = (None, None, s-1)
+            s = len(SequenceDataset.alphabet)-1
+            input_shape = (None, None, s)
+        else:
+            s = input_shape[-1]
+
+        # Share all insertion emissions across positions
+        # We need to provide an array with indices into the emitter's kernel
+        # values, which is flat and sorted by head, states, emissions (major
+        # to minor).
+        i_sum = 0
+        indices = []
+        for L in self.lengths:
+            # Nothing is shared for match states (L per head)
+            share_match = np.arange(i_sum, i_sum + L*s)
+            i_sum += L*s
+            # Each head shares its insert state emissions (1 per head)
+            share_insert = np.tile(
+                share_match[-1] + 1 + np.arange(s),
+                reps=L + 2
+            )
+            i_sum += s
+            indices.extend([share_match, share_insert])
+        self.share = np.concatenate(indices)
+
         super().build(input_shape)
+
+    def emission_scores(self, observations: T_TFTensor) -> T_TFTensor:
+        # Override to handle insertion state via copying instead of
+        # explicit computations
+        # Keep match states + single insertion state
+        reduced_matrix = self.matrix()[:, :self.lengths.max()+1, :]
+        if observations.ndim == 3:
+            emission_scores = tf.einsum(
+                "btd,hqd->bthq", observations, reduced_matrix
+            )
+        else:
+            emission_scores = tf.einsum(
+                "bthd,hqd->bthq", observations, reduced_matrix
+            )
+
+        # Mask invalid positions in shorter heads
+        emission_scores *= tf.sequence_mask(
+            self.lengths+1, dtype=emission_scores.dtype
+        )
+
+        return emission_scores
 
     @override
     def call(

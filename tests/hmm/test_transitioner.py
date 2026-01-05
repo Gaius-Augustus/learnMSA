@@ -1,4 +1,6 @@
 import numpy as np
+import pytest
+from hidten.hmm import HMMConfig as HidtenHMMConfig
 
 import tests.hmm.ref as ref
 from learnMSA.config.hmm import PHMMConfig
@@ -7,6 +9,11 @@ from learnMSA.hmm.transitioner import (PHMMExplicitTransitioner,
                                        PHMMTransitioner)
 from learnMSA.hmm.value_set import PHMMValueSet
 
+
+@pytest.fixture
+def hmm_config() -> HidtenHMMConfig:
+    lengths = [4, 3]
+    return HidtenHMMConfig(states=[2*L+2 for L in lengths])
 
 def test_explicit_transitioner_matrix() -> None:
     lengths = [4, 3]
@@ -51,7 +58,7 @@ def test_explicit_transitioner_matrix() -> None:
     )
     np.testing.assert_allclose(np.sum(A[1, -1], axis=-1), 1.0, atol=1e-6)
 
-def test_folded_transitioner_matrix() -> None:
+def test_folded_transitioner_matrix(hmm_config: HidtenHMMConfig) -> None:
     lengths = [4, 3]
 
     # Create value sets for different heads
@@ -67,6 +74,7 @@ def test_folded_transitioner_matrix() -> None:
         for L in lengths
     ]
     transitioner = PHMMTransitioner(values=values)
+    transitioner.hmm_config = hmm_config
     transitioner.build()
 
     S = transitioner.start_dist()
@@ -95,7 +103,7 @@ def test_folded_transitioner_matrix() -> None:
 def test_prior() -> None:
     pass
 
-def test_construct_big_transitioner() -> None:
+def test_construct_big_transitioner(hmm_config: HidtenHMMConfig) -> None:
     import time
 
     lengths = [500]*10
@@ -106,6 +114,7 @@ def test_construct_big_transitioner() -> None:
 
     t0 = time.perf_counter()
     transitioner = PHMMTransitioner(values=values)
+    transitioner.hmm_config = HidtenHMMConfig(states=[2*L+2 for L in lengths])
     t1 = time.perf_counter()
     print(f"Constructor time: {t1-t0:.4f}s")
 
