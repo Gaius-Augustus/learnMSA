@@ -4,17 +4,17 @@ import numpy as np
 
 from learnMSA.msa_hmm.SequenceDataset import AlignedDataset
 from learnMSA.hmm.transition_index_set import PHMMTransitionIndexSet
-from learnMSA.config.hmm import HMMConfig
+from learnMSA.config.hmm import PHMMConfig
 
 
 @dataclass
 class PHMMValueSet:
-    """ Parameter collection for a pHMM of length `n` with  `q=3n+5` states
+    """ Parameter collection for a pHMM of length `L` with  `q=3L+5` states
     over an emission alphabet of size `s`.
     Uses the state order M1 ... ML I1 ... IL-1 D1 ... DL L B E C R T.
 
     Attributes:
-        match_emissions (np.ndarray). Emission counts of shape `(n, s)`.
+        match_emissions (np.ndarray). Emission counts of shape `(L, s)`.
         insert_emissions (np.ndarray). Emission counts of shape `(s)`.
         transitions : np.ndarray of shape `(q, q)`.
         start : np.ndarray of shape `(2,)` counts of either starting in `B` or
@@ -28,16 +28,17 @@ class PHMMValueSet:
 
 
     @classmethod
-    def from_config(cls, L: int, h: int, config: HMMConfig) -> "PHMMValueSet":
+    def from_config(cls, L: int, h: int, config: PHMMConfig) -> "PHMMValueSet":
         """Creates a PHMMValueSet from a HMMConfig object.
 
         Args:
             length: The number of match states (L).
             h: The head index.
-            config: An HMMConfig object containing the transition probabilities.
+            config: An HMMConfig object containing the transition and
+                emission probabilities.
 
         Returns:
-            A PHMMValueSet object with transitions initialized from config.
+            A PHMMValueSet object with parameters initialized from the config.
         """
         from learnMSA.config.hmm import get_value
         from collections.abc import Sequence

@@ -4,12 +4,12 @@ from collections.abc import Sequence
 from typing import cast
 import pytest
 
-from learnMSA.config.hmm import HMMConfig, HMMPriorConfig, get_value, get_emission_dist
+from learnMSA.config.hmm import PHMMConfig, PHMMPriorConfig, get_value, get_emission_dist
 
 
 def test_hmm_config_scalar_initialization():
     """Test HMMConfig with scalar values for all parameters."""
-    config = HMMConfig(
+    config = PHMMConfig(
         p_begin_match=0.5,
         p_match_match=0.7,
         p_match_insert=0.1,
@@ -42,7 +42,7 @@ def test_hmm_config_scalar_initialization():
 
 def test_hmm_config_sequence_single_head():
     """Test HMMConfig with sequence values for single head."""
-    config = HMMConfig(
+    config = PHMMConfig(
         p_begin_match=[0.6],
         p_match_match=[0.75],
         p_match_insert=[0.15],
@@ -65,7 +65,7 @@ def test_hmm_config_sequence_single_head():
 
 def test_hmm_config_sequence_multiple_heads():
     """Test HMMConfig with sequence values for multiple heads."""
-    config = HMMConfig(
+    config = PHMMConfig(
         p_begin_match=[0.5, 0.6, 0.7],
         p_match_match=[0.7, 0.75, 0.8],
         p_match_insert=[0.1, 0.15, 0.1],
@@ -91,7 +91,7 @@ def test_hmm_config_sequence_multiple_heads():
 def test_hmm_config_nested_sequence():
     """Test HMMConfig with nested sequences for position-dependent parameters."""
     # For a model with 1 head and 3 match states
-    config = HMMConfig(
+    config = PHMMConfig(
         p_begin_match=[[0.5, 0.3, 0.1]],  # P(Match i | Begin) for i=1,2,3
         p_match_match=[[0.7, 0.75, 0.8]],  # P(Match i+1 | Match i) for i=1,2,3
         p_match_insert=[[0.1, 0.15]],  # P(Insert i | Match i) for i=1,2
@@ -111,7 +111,7 @@ def test_hmm_config_nested_sequence():
 
 def test_hmm_config_mixed_scalar_and_sequence():
     """Test HMMConfig with mixed scalar and sequence parameters."""
-    config = HMMConfig(
+    config = PHMMConfig(
         p_begin_match=[0.5, 0.6],  # Sequence for 2 heads
         p_match_match=0.7,  # Scalar (same for all)
         p_match_insert=[0.1, 0.15],  # Sequence for 2 heads
@@ -171,7 +171,7 @@ def test_get_value_invalid_parameter():
 
 def test_hmm_config_default_values():
     """Test HMMConfig with default values."""
-    config = HMMConfig()
+    config = PHMMConfig()
 
     assert config.p_begin_match == 0.5
     assert config.p_match_match == 0.7
@@ -191,7 +191,7 @@ def test_hmm_config_default_values():
 def test_hmm_config_complex_multi_head():
     """Test HMMConfig with complex multi-head configuration."""
     # 3 heads with varying lengths
-    config = HMMConfig(
+    config = PHMMConfig(
         # Head-specific scalar values
         p_begin_match=[0.5, 0.55, 0.6],
         p_match_match=[0.7, 0.75, 0.8],
@@ -228,7 +228,7 @@ def test_hmm_config_complex_multi_head():
 def test_hmm_config_position_dependent_multi_head():
     """Test HMMConfig with position-dependent parameters across multiple heads."""
     # 2 heads with position-dependent match transitions
-    config = HMMConfig(
+    config = PHMMConfig(
         p_begin_match=[
             [0.5, 0.3, 0.2],  # Head 0: P(M1|B), P(M2|B), P(M3|B)
             [0.6, 0.25, 0.15]  # Head 1: P(M1|B), P(M2|B), P(M3|B)
@@ -261,7 +261,7 @@ def test_hmm_config_position_dependent_multi_head():
 
 def test_hmm_config_edge_cases():
     """Test HMMConfig with edge case values."""
-    config = HMMConfig(
+    config = PHMMConfig(
         p_begin_match=0.0,  # Minimum probability
         p_match_match=1.0,  # Maximum probability
         p_end_unannot=0.0,  # Zero probability
@@ -281,7 +281,7 @@ def test_hmm_config_edge_cases():
 
 def test_hmm_config_default_emissions():
     """Test HMMConfig with default emission parameters."""
-    config = HMMConfig()
+    config = PHMMConfig()
 
     assert config.match_emissions is None
     assert config.insert_emissions is None
@@ -292,7 +292,7 @@ def test_hmm_config_match_emissions_single_distribution():
     """Test HMMConfig with single emission distribution for all match states."""
     # Single distribution applied to all match states in all heads
     dist = [0.05] * 23
-    config = HMMConfig(match_emissions=dist)
+    config = PHMMConfig(match_emissions=dist)
 
     assert config.match_emissions is not None
     assert len(config.match_emissions) == 23
@@ -303,7 +303,7 @@ def test_hmm_config_match_emissions_head_specific():
     # Different distribution per head, same for all positions within head
     dist1 = [0.05] * 23
     dist2 = [0.04] * 23
-    config = HMMConfig(match_emissions=[dist1, dist2])
+    config = PHMMConfig(match_emissions=[dist1, dist2])
 
     assert config.match_emissions is not None
     assert isinstance(config.match_emissions, Sequence)
@@ -325,7 +325,7 @@ def test_hmm_config_match_emissions_fully_specified():
     dist_h1_m1 = [0.045] * 23
     dist_h1_m2 = [0.055] * 23
 
-    config = HMMConfig(
+    config = PHMMConfig(
         match_emissions=[
             [dist_h0_m1, dist_h0_m2, dist_h0_m3],
             [dist_h1_m1, dist_h1_m2]
@@ -344,7 +344,7 @@ def test_hmm_config_match_emissions_fully_specified():
 def test_hmm_config_insert_emissions_single_distribution():
     """Test HMMConfig with single insertion emission distribution."""
     dist = [0.05] * 23
-    config = HMMConfig(insert_emissions=dist)
+    config = PHMMConfig(insert_emissions=dist)
 
     assert config.insert_emissions is not None
     assert len(config.insert_emissions) == 23
@@ -355,7 +355,7 @@ def test_hmm_config_insert_emissions_head_specific():
     dist1 = [0.05] * 23
     dist2 = [0.04] * 23
     dist3 = [0.06] * 23
-    config = HMMConfig(insert_emissions=[dist1, dist2, dist3])
+    config = PHMMConfig(insert_emissions=[dist1, dist2, dist3])
 
     assert config.insert_emissions is not None
     assert isinstance(config.insert_emissions, Sequence)
@@ -371,10 +371,10 @@ def test_hmm_config_emissions_validation_wrong_alphabet_size():
     dist_wrong_size = [0.05] * 20  # Should be 23
 
     with pytest.raises(ValueError, match="alphabet size"):
-        HMMConfig(match_emissions=dist_wrong_size)
+        PHMMConfig(match_emissions=dist_wrong_size)
 
     with pytest.raises(ValueError, match="alphabet size"):
-        HMMConfig(insert_emissions=dist_wrong_size)
+        PHMMConfig(insert_emissions=dist_wrong_size)
 
 
 def test_hmm_config_emissions_with_custom_alphabet():
@@ -382,7 +382,7 @@ def test_hmm_config_emissions_with_custom_alphabet():
     custom_alphabet = "ACGT"
     dist = [0.25] * 4
 
-    config = HMMConfig(
+    config = PHMMConfig(
         alphabet=custom_alphabet,
         match_emissions=dist,
         insert_emissions=dist
@@ -463,7 +463,7 @@ def test_hmm_config_combined_emissions_and_transitions():
     match_dist = [0.05] * 23
     insert_dist = [0.04] * 23
 
-    config = HMMConfig(
+    config = PHMMConfig(
         match_emissions=match_dist,
         insert_emissions=insert_dist,
         p_begin_match=0.6,
@@ -480,15 +480,15 @@ def test_hmm_config_combined_emissions_and_transitions():
 
 def test_hmm_config_use_prior_flag():
     """Test use_prior_for_emission_init flag behavior."""
-    config_default = HMMConfig()
+    config_default = PHMMConfig()
     assert config_default.use_prior_for_emission_init is True
 
-    config_explicit = HMMConfig(use_prior_for_emission_init=False)
+    config_explicit = PHMMConfig(use_prior_for_emission_init=False)
     assert config_explicit.use_prior_for_emission_init is False
 
     # When use_prior is False, custom emissions can still be None
     # (will use background_distribution)
-    config_with_emissions = HMMConfig(
+    config_with_emissions = PHMMConfig(
         use_prior_for_emission_init=False,
         match_emissions=None,
         insert_emissions=None
@@ -499,7 +499,7 @@ def test_hmm_config_use_prior_flag():
 
 def test_hmm_prior_config_alpha_defaults():
     """Test HMMPriorConfig alpha parameter default values."""
-    config = HMMPriorConfig()
+    config = PHMMPriorConfig()
     assert config.alpha_flank == 7000.0
     assert config.alpha_single == 1e9
     assert config.alpha_global == 1e4
@@ -511,7 +511,7 @@ def test_hmm_prior_config_alpha_defaults():
 
 def test_hmm_prior_config_alpha_custom_values():
     """Test HMMPriorConfig with custom alpha parameter values."""
-    config = HMMPriorConfig(
+    config = PHMMPriorConfig(
         alpha_flank=5000.0,
         alpha_single=1e8,
         alpha_global=5000.0,
@@ -532,106 +532,106 @@ def test_hmm_prior_config_alpha_custom_values():
 def test_alpha_flank_validation():
     """Test that alpha_flank must be positive."""
     # Valid values
-    HMMPriorConfig(alpha_flank=0.1)
-    HMMPriorConfig(alpha_flank=10000)
+    PHMMPriorConfig(alpha_flank=0.1)
+    PHMMPriorConfig(alpha_flank=10000)
 
     # Invalid values
     with pytest.raises(
         ValueError,
         match="alpha_flank must be greater than 0"
     ):
-        HMMPriorConfig(alpha_flank=0)
+        PHMMPriorConfig(alpha_flank=0)
 
     with pytest.raises(
         ValueError,
         match="alpha_flank must be greater than 0"
     ):
-        HMMPriorConfig(alpha_flank=-100)
+        PHMMPriorConfig(alpha_flank=-100)
 
 
 def test_alpha_single_validation():
     """Test that alpha_single must be positive."""
     # Valid values
-    HMMPriorConfig(alpha_single=1)
-    HMMPriorConfig(alpha_single=1e10)
+    PHMMPriorConfig(alpha_single=1)
+    PHMMPriorConfig(alpha_single=1e10)
 
     # Invalid values
     with pytest.raises(
         ValueError,
         match="alpha_single must be greater than 0"
     ):
-        HMMPriorConfig(alpha_single=0)
+        PHMMPriorConfig(alpha_single=0)
 
     with pytest.raises(
         ValueError,
         match="alpha_single must be greater than 0"
     ):
-        HMMPriorConfig(alpha_single=-1)
+        PHMMPriorConfig(alpha_single=-1)
 
 
 def test_alpha_global_validation():
     """Test that alpha_global must be positive."""
     # Valid values
-    HMMPriorConfig(alpha_global=100)
-    HMMPriorConfig(alpha_global=1e6)
+    PHMMPriorConfig(alpha_global=100)
+    PHMMPriorConfig(alpha_global=1e6)
 
     # Invalid values
     with pytest.raises(
         ValueError,
         match="alpha_global must be greater than 0"
     ):
-        HMMPriorConfig(alpha_global=0)
+        PHMMPriorConfig(alpha_global=0)
 
     with pytest.raises(
         ValueError,
         match="alpha_global must be greater than 0"
     ):
-        HMMPriorConfig(alpha_global=-500)
+        PHMMPriorConfig(alpha_global=-500)
 
 
 def test_alpha_complement_validation():
     """Test that alpha complement parameters must be positive."""
     # Valid values
-    HMMPriorConfig(alpha_flank_compl=0.5)
-    HMMPriorConfig(alpha_single_compl=10)
-    HMMPriorConfig(alpha_global_compl=100)
+    PHMMPriorConfig(alpha_flank_compl=0.5)
+    PHMMPriorConfig(alpha_single_compl=10)
+    PHMMPriorConfig(alpha_global_compl=100)
 
     # Invalid values
     with pytest.raises(
         ValueError,
         match="alpha_flank_compl must be greater than 0"
     ):
-        HMMPriorConfig(alpha_flank_compl=0)
+        PHMMPriorConfig(alpha_flank_compl=0)
 
     with pytest.raises(
         ValueError,
         match="alpha_single_compl must be greater than 0"
     ):
-        HMMPriorConfig(alpha_single_compl=-1)
+        PHMMPriorConfig(alpha_single_compl=-1)
 
     with pytest.raises(
         ValueError,
         match="alpha_global_compl must be greater than 0"
     ):
-        HMMPriorConfig(alpha_global_compl=-5)
+        PHMMPriorConfig(alpha_global_compl=-5)
 
 
 def test_epsilon_validation():
     """Test that epsilon must be positive."""
     # Valid values
-    HMMPriorConfig(epsilon=1e-20)
-    HMMPriorConfig(epsilon=0.1)
+    PHMMPriorConfig(epsilon=1e-20)
+    PHMMPriorConfig(epsilon=0.1)
 
     # Invalid values
     with pytest.raises(
         ValueError,
         match="epsilon must be greater than 0"
     ):
-        HMMPriorConfig(epsilon=0)
+        PHMMPriorConfig(epsilon=0)
 
     with pytest.raises(
         ValueError,
         match="epsilon must be greater than 0"
     ):
-        HMMPriorConfig(epsilon=-1e-10)
+        PHMMPriorConfig(epsilon=-1e-10)
 

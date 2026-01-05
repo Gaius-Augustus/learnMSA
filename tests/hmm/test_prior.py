@@ -1,7 +1,7 @@
 import pytest
 from hidten.hmm import HMMConfig as HidtenHMMConfig
 
-from learnMSA.config.hmm import HMMConfig, HMMPriorConfig
+from learnMSA.config.hmm import PHMMConfig, PHMMPriorConfig
 from learnMSA.hmm.prior import TFPHMMTransitionPrior
 from learnMSA.hmm.transitioner import PHMMTransitioner
 from learnMSA.hmm.value_set import PHMMValueSet
@@ -9,7 +9,7 @@ from learnMSA.hmm.value_set import PHMMValueSet
 
 def test_transition_prior() -> None:
     lengths = [4, 3]
-    prior_config = HMMPriorConfig()
+    prior_config = PHMMPriorConfig()
     prior = TFPHMMTransitionPrior(lengths, prior_config)
     prior.hmm_config = HidtenHMMConfig(states = [1])
     prior.build()
@@ -24,7 +24,7 @@ def test_transition_prior() -> None:
 
     # Create a transitioner to get a transition matrix
     values = [
-        PHMMValueSet.from_config(L, h, HMMConfig())
+        PHMMValueSet.from_config(L, h, PHMMConfig())
         for h, L in enumerate(lengths)
     ]
     transitioner = PHMMTransitioner(values=values)

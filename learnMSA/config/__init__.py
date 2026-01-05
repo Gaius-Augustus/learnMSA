@@ -6,7 +6,7 @@ from .language_model import LanguageModelConfig
 from .visualization import VisualizationConfig
 from .advanced import AdvancedConfig
 from .input_output import InputOutputConfig
-from .hmm import HMMConfig, get_value
+from .hmm import PHMMConfig, PHMMPriorConfig, get_value
 from .config import Configuration
 
 __all__ = [
@@ -16,7 +16,7 @@ __all__ = [
     "VisualizationConfig",
     "AdvancedConfig",
     "InputOutputConfig",
-    "HMMConfig",
+    "PHMMConfig",
     "get_value",
     "Configuration",
 ]

@@ -3,7 +3,7 @@ import pytest
 import tensorflow as tf
 
 import tests.hmm.ref as ref
-from learnMSA.config.hmm import HMMConfig
+from learnMSA.config.hmm import PHMMConfig
 from learnMSA.hmm.profile_emitter import ProfileEmitter
 from learnMSA.hmm.value_set import PHMMValueSet
 
@@ -129,7 +129,7 @@ def test_construct_big_emitter() -> None:
     import time
 
     lengths = [500]*10
-    config = HMMConfig()
+    config = PHMMConfig()
     values = [
         PHMMValueSet.from_config(L, h, config) for h, L in enumerate(lengths)
     ]

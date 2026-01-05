@@ -11,7 +11,7 @@ from hidten.tf.util import log_zero, safe_log
 from learnMSA.hmm.transition_index_set import PHMMTransitionIndexSet
 from learnMSA.hmm.value_set import PHMMValueSet
 from learnMSA.hmm.prior import TFPHMMTransitionPrior
-from learnMSA.config.hmm import HMMPriorConfig
+from learnMSA.config.hmm import PHMMPriorConfig
 
 
 def logsumexp(x: T_TFTensor, y: T_TFTensor) -> T_TFTensor:
@@ -35,7 +35,7 @@ class PHMMExplicitTransitioner(TFTransitioner):
     def __init__(
         self,
         values: Sequence[PHMMValueSet],
-        prior_config: HMMPriorConfig | None = None,
+        prior_config: PHMMPriorConfig | None = None,
         **kwargs
     ) -> None:
         """
@@ -50,7 +50,7 @@ class PHMMExplicitTransitioner(TFTransitioner):
         """
         super().__init__(**kwargs)
         if prior_config is None:
-            prior_config = HMMPriorConfig()
+            prior_config = PHMMPriorConfig()
         self.prior_config = prior_config
         transitions, value_list = [], []
         start, start_values = [], []
@@ -114,7 +114,7 @@ class PHMMTransitioner(TFTransitioner):
     def __init__(
         self,
         values: Sequence[PHMMValueSet],
-        prior_config: HMMPriorConfig | None = None,
+        prior_config: PHMMPriorConfig | None = None,
         **kwargs
     ) -> None:
         """
@@ -126,7 +126,7 @@ class PHMMTransitioner(TFTransitioner):
         """
         super().__init__(**kwargs)
         if prior_config is None:
-            prior_config = HMMPriorConfig()
+            prior_config = PHMMPriorConfig()
         self.prior_config = prior_config
         self.explicit_transitioner = self._make_explicit_transitioner(values)
         self.lengths = [value_set.L for value_set in values]

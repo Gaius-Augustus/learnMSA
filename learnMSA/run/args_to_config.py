@@ -1,11 +1,11 @@
 import sys
 from argparse import Namespace
 
-from learnMSA.config import (AdvancedConfig, Configuration, HMMConfig,
+from learnMSA.config import (AdvancedConfig, Configuration, PHMMConfig,
                              InitMSAConfig, InputOutputConfig,
                              LanguageModelConfig, TrainingConfig,
                              VisualizationConfig)
-from learnMSA.config.hmm import HMMPriorConfig
+from learnMSA.config.hmm import PHMMPriorConfig
 
 
 def args_to_config(args: Namespace) -> Configuration:
@@ -103,9 +103,9 @@ def args_to_config(args: Namespace) -> Configuration:
         logo_gif=args.logo_gif,
     )
 
-    hmm_config = HMMConfig()
+    hmm_config = PHMMConfig()
 
-    hmm_prior_config = HMMPriorConfig(
+    hmm_prior_config = PHMMPriorConfig(
         alpha_flank=args.alpha_flank,
         alpha_single=args.alpha_single,
         alpha_global=args.alpha_global,

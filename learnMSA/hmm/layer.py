@@ -5,8 +5,9 @@ from hidten import HMMMode
 from hidten.tf.emitter import TFPaddingEmitter
 from hidten.tf.hmm import TFHMM, T_shapelike
 
-from learnMSA.config.hmm import HMMConfig, HMMPriorConfig
+from learnMSA.config import PHMMConfig, PHMMPriorConfig, LanguageModelConfig
 from learnMSA.hmm.profile_emitter import ProfileEmitter
+from learnMSA.hmm.embedding_emitter import EmbeddingEmitter
 from learnMSA.hmm.transitioner import PHMMTransitioner
 from learnMSA.hmm.value_set import PHMMValueSet
 
@@ -40,8 +41,9 @@ class PHMMLayer(tf.keras.Layer):
     def __init__(
         self,
         lengths: Sequence[int],
-        config : HMMConfig,
-        prior_config: HMMPriorConfig | None = None,
+        config : PHMMConfig,
+        prior_config: PHMMPriorConfig | None = None,
+        plm_config: LanguageModelConfig | None = None,
         **kwargs
     ) -> None:
         """
@@ -53,8 +55,9 @@ class PHMMLayer(tf.keras.Layer):
         self.lengths = lengths
         self.config = config
         if prior_config is None:
-            prior_config = HMMPriorConfig()
+            prior_config = PHMMPriorConfig()
         self.prior_config = prior_config
+        self.plm_config = plm_config
 
         values = [
             PHMMValueSet.from_config(L, h, config)
@@ -85,7 +88,7 @@ class PHMMLayer(tf.keras.Layer):
         # restore custom config
         transitioner.hmm_config = transitioner_custom_config
 
-        # Add the profile emitter and padding emitter
+        # Add the profile emitter
         profile_emitter = ProfileEmitter(
             values = values,
             use_prior_aa_dist=config.use_prior_for_emission_init
@@ -93,6 +96,16 @@ class PHMMLayer(tf.keras.Layer):
         emitter_custom_config = profile_emitter.hmm_config
         self.hmm.add_emitter(profile_emitter) # this overwrites hmm_config
         profile_emitter.hmm_config = emitter_custom_config # restore
+
+        # Add the MVN emitter
+        if self.plm_config is not None:
+            emb_emitter = EmbeddingEmitter()
+            emitter_custom_config = emb_emitter.hmm_config
+            self.hmm.add_emitter(emb_emitter) # this overwrites hmm_config
+            emb_emitter.hmm_config = emitter_custom_config # restore
+
+
+        # Add the padding emitter
         self.hmm.add_emitter(TFPaddingEmitter())
 
     def loglik_mode(self) -> None:

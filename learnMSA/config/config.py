@@ -8,7 +8,7 @@ from .input_output import InputOutputConfig
 from .language_model import LanguageModelConfig
 from .training import TrainingConfig
 from .visualization import VisualizationConfig
-from .hmm import HMMConfig, HMMPriorConfig
+from .hmm import PHMMConfig, PHMMPriorConfig
 
 
 class Configuration(BaseModel):
@@ -26,10 +26,10 @@ class Configuration(BaseModel):
     training: TrainingConfig = TrainingConfig()
     """Training parameters."""
 
-    hmm: HMMConfig = HMMConfig()
+    hmm: PHMMConfig = PHMMConfig()
     """HMM parameters."""
 
-    hmm_prior: HMMPriorConfig = HMMPriorConfig()
+    hmm_prior: PHMMPriorConfig = PHMMPriorConfig()
     """HMM prior parameters for transition scoring."""
 
     init_msa: InitMSAConfig = InitMSAConfig()

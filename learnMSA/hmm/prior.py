@@ -6,7 +6,7 @@ import tensorflow as tf
 from hidten.tf.prior.dirichlet import T_TFTensor, TFDirichletPrior, TFPrior
 from hidten.tf.util import epsilon
 
-from learnMSA.config.hmm import HMMPriorConfig
+from learnMSA.config.hmm import PHMMPriorConfig
 from learnMSA.hmm.tf_util import load_dirichlet
 from learnMSA.hmm.transition_index_set import PHMMTransitionIndexSet
 
@@ -20,7 +20,7 @@ class TFPHMMTransitionPrior(TFPrior):
     def __init__(
         self,
         lengths: Sequence[int],
-        prior_config: HMMPriorConfig,
+        prior_config: PHMMPriorConfig,
         **kwargs
     ) -> None:
         """

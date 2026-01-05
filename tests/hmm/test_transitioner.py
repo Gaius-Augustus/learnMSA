@@ -1,7 +1,7 @@
 import numpy as np
 
 import tests.hmm.ref as ref
-from learnMSA.config.hmm import HMMConfig
+from learnMSA.config.hmm import PHMMConfig
 from learnMSA.hmm.transition_index_set import PHMMTransitionIndexSet
 from learnMSA.hmm.transitioner import (PHMMExplicitTransitioner,
                                        PHMMTransitioner)
@@ -99,7 +99,7 @@ def test_construct_big_transitioner() -> None:
     import time
 
     lengths = [500]*10
-    config = HMMConfig()
+    config = PHMMConfig()
     values = [
         PHMMValueSet.from_config(L, h, config) for h, L in enumerate(lengths)
     ]

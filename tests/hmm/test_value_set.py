@@ -290,9 +290,9 @@ def test_gapless_msa_to_counts() -> None:
 
 def test_from_config_scalar_params() -> None:
     """Test from_config with scalar parameters."""
-    from learnMSA.config.hmm import HMMConfig
+    from learnMSA.config.hmm import PHMMConfig
 
-    config = HMMConfig(
+    config = PHMMConfig(
         p_begin_match=0.5,
         p_match_match=0.7,
         p_match_insert=0.1,
@@ -399,9 +399,9 @@ def test_from_config_scalar_params() -> None:
 
 def test_from_config_multi_head() -> None:
     """Test from_config with head-dependent parameters."""
-    from learnMSA.config.hmm import HMMConfig
+    from learnMSA.config.hmm import PHMMConfig
 
-    config = HMMConfig(
+    config = PHMMConfig(
         p_begin_match=[0.4, 0.5, 0.6],  # Different for each head
         p_match_match=[0.65, 0.7, 0.75],
         p_match_insert=[0.15, 0.1, 0.08],
@@ -438,10 +438,10 @@ def test_from_config_multi_head() -> None:
 
 def test_from_config_position_dependent() -> None:
     """Test from_config with position-dependent parameters."""
-    from learnMSA.config.hmm import HMMConfig
+    from learnMSA.config.hmm import PHMMConfig
 
     L = 3
-    config = HMMConfig(
+    config = PHMMConfig(
         p_begin_match=[[0.5, 0.3, 0.2]],  # Position-dependent for 1 head
         p_match_match=[[0.7, 0.75, 0.8]],  # Different for each position
         p_match_insert=[[0.1, 0.12]],  # L-1 positions
@@ -492,10 +492,10 @@ def test_from_config_position_dependent() -> None:
 
 def test_from_config_multi_head_position_dependent() -> None:
     """Test from_config with both multi-head and position-dependent parameters."""
-    from learnMSA.config.hmm import HMMConfig
+    from learnMSA.config.hmm import PHMMConfig
 
     L = 2
-    config = HMMConfig(
+    config = PHMMConfig(
         p_begin_match=[
             [0.6, 0.4],  # Head 0: P(M1|B), P(M2|B)
             [0.7, 0.3]   # Head 1: P(M1|B), P(M2|B)
@@ -529,10 +529,10 @@ def test_from_config_multi_head_position_dependent() -> None:
 
 def test_from_config_edge_cases() -> None:
     """Test from_config with edge case values."""
-    from learnMSA.config.hmm import HMMConfig
+    from learnMSA.config.hmm import PHMMConfig
 
     # Test with L=1 (single match state)
-    config = HMMConfig(p_begin_match=1.0)
+    config = PHMMConfig(p_begin_match=1.0)
     value_set = PHMMValueSet.from_config(L=1, h=0, config=config)
 
     assert value_set.match_emissions.shape == (1, len(config.alphabet))
@@ -541,7 +541,7 @@ def test_from_config_edge_cases() -> None:
     np.testing.assert_almost_equal(value_set.transitions[0, 4], 1.0)  # M1->E
 
     # Test with minimum probabilities (near zero)
-    config_min = HMMConfig(
+    config_min = PHMMConfig(
         p_begin_match=0.0,
         p_match_match=0.0,
         p_match_insert=0.0,
@@ -553,7 +553,7 @@ def test_from_config_edge_cases() -> None:
     np.testing.assert_almost_equal(value_set_min.transitions[0, 1], 0.0)  # M1->M2
 
     # Test with maximum probabilities
-    config_max = HMMConfig(
+    config_max = PHMMConfig(
         p_begin_match=1.0,
         p_match_match=1.0,
         p_left_left=1.0,

@@ -4,7 +4,7 @@ from typing import ClassVar
 from pydantic import BaseModel, field_validator
 
 
-class HMMPriorConfig(BaseModel):
+class PHMMPriorConfig(BaseModel):
     """HMM prior parameters for transition priors."""
 
     alpha_flank: float = 7000.0
@@ -43,7 +43,7 @@ class HMMPriorConfig(BaseModel):
         return v
 
 
-class HMMConfig(BaseModel):
+class PHMMConfig(BaseModel):
     """HMM parameters."""
 
     alphabet: str = "ARNDCQEGHILKMFPSTWYVXUO"

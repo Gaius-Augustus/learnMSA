@@ -2,7 +2,7 @@ import pytest
 from pathlib import Path
 from pydantic import ValidationError
 
-from learnMSA.config import (AdvancedConfig, Configuration, HMMConfig,
+from learnMSA.config import (AdvancedConfig, Configuration, PHMMConfig,
                              InitMSAConfig, InputOutputConfig, LanguageModelConfig,
                              TrainingConfig, VisualizationConfig, get_value)
 

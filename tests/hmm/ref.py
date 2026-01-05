@@ -1,10 +1,10 @@
 import numpy as np
 
-from learnMSA.config.hmm import HMMConfig
+from learnMSA.config.hmm import PHMMConfig
 from learnMSA.msa_hmm import Initializers
 
 
-config: HMMConfig = HMMConfig(
+config: PHMMConfig = PHMMConfig(
     alphabet="AB",
     match_emissions=[
         # Head 1

@@ -5,7 +5,7 @@ import tensorflow as tf
 import tests.hmm.ref as ref
 from learnMSA.hmm import prior
 from learnMSA.hmm.layer import PHMMLayer
-from learnMSA.config.hmm import HMMPriorConfig
+from learnMSA.config.hmm import PHMMPriorConfig
 
 
 @pytest.fixture
@@ -524,7 +524,7 @@ def test_prior_values() -> None:
 
     # Test model A
     lengths = [4]
-    prior_config = HMMPriorConfig()
+    prior_config = PHMMPriorConfig()
     prior_config.alpha_flank = 7000.
     prior_config.alpha_single = 1e9
     prior_config.alpha_global = 1e4
