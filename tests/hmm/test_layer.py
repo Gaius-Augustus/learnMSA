@@ -539,7 +539,7 @@ def test_prior_values() -> None:
     layer.build(input_shape=((None, None, 23), (None, None, 1)))
 
     # Test whether computing the prior scores of the layer does not error
-    prior_scores = layer.hmm.prior_scores()
+    prior_scores = layer.prior_scores()
 
     # The the emitter's Dirichlet priors
     # Battle-tested gradients computed with legacy learnMSA of dirichlet(p)

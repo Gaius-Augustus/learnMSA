@@ -105,3 +105,12 @@ class PHMMLayer(tf.keras.Layer):
 
     def call(self, x: tf.Tensor, padding: tf.Tensor) -> tf.Tensor:
         return self.hmm(x, padding, mode=self._mode)
+
+    def prior_scores(self) -> tf.Tensor:
+        """Calculates the prior scores for all parameters in the pHMM.
+
+        Returns:
+            Tensor: The prior scores of shape ``(H,)``, where ``H`` is the
+                number of heads in the pHMM.
+        """
+        return self.hmm.prior_scores()
