@@ -34,7 +34,7 @@ def make_dirichlet_model(
         n_dim = int(dim)
     prior = TFDirichletPrior()
     prior.hmm_config = HidtenHMMConfig(states=[1])
-    if initializer:
+    if initializer is not None:
         prior.initializer = initializer
     else:
         prior.initializer = np.ones((n_dim,))
@@ -72,7 +72,10 @@ def make_mvn_model(
     if initializer is not None:
         prior.initializer = initializer
     else:
-        prior.initializer = np.zeros((components * 2 * dim + components,))
+        if components == 1:
+            prior.initializer = np.zeros((2 * dim,))
+        else:
+            prior.initializer = np.zeros((components * 2 * dim + components,))
     prior.build((None, None, 2 * dim))
     return make_model(dim, prior)
 

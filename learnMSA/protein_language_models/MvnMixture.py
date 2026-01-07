@@ -134,7 +134,7 @@ class MvnMixture():
         log_pdf = -0.5 * (self.constant + log_det[:, tf.newaxis] + MD_sq_components)
         return log_pdf
 
-    
+
     def mixture_coefficients(self):
         """Computes the mixture coefficients.
         Returns:
