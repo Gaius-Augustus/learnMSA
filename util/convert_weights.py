@@ -7,7 +7,7 @@ import tensorflow as tf
 
 import learnMSA.msa_hmm.Priors as priors
 import learnMSA.protein_language_models.Common as common
-from learnMSA.hmm.tf_util import make_dirichlet_model
+from learnMSA.hmm.tf_util import make_dirichlet_model, make_mvn_model
 from learnMSA.protein_language_models.MvnPrior import (get_mvn_layer,
                                                        make_pdf_model)
 
@@ -37,15 +37,76 @@ def convert_dirichlet(name: str, legacy_alpha: np.ndarray) -> None:
     )
 
 def convert_mvn(
-        name: str, legacy_expectation: np.ndarray, legacy_variances: np.ndarray
+    name: str,
+    legacy_expectation: np.ndarray,
+    legacy_variances: np.ndarray,
+    legacy_mixture_coefficients: np.ndarray,
 ) -> None:
     """Convert the legacy MVN prior to the new format
     and save it as a weight file.
+
+    Args:
+        legacy_expectation: Shape (components, dim)
+        legacy_variances: Shape (components, dim)
+        legacy_mixture_coefficients: Shape (components,)
     """
-    pass
+    # Extract dimensions
+    num_components, dim = legacy_expectation.shape
+
+    # Concatenate all parameters into initializer array
+    initializer = np.concatenate([
+        legacy_expectation.flatten(),
+        legacy_variances.flatten(),
+        legacy_mixture_coefficients.flatten(),
+    ], axis=0)
+
+    # Create model with initializer
+    model1 = make_mvn_model(dim, initializer, components=num_components)
+    prior = model1.layers[1]
+
+    # Verify the conversion matches the legacy values
+    reconstructed_mean = prior.mean().numpy()[0, 0]
+    reconstructed_var = prior.variance().numpy()[0, 0]
+    reconstructed_coef = prior.mixture_coefficients().numpy()[0, 0]
+
+    np.testing.assert_allclose(
+        reconstructed_mean, legacy_expectation, atol=1e-6
+    )
+    np.testing.assert_allclose(
+        reconstructed_var, legacy_variances, atol=1e-6
+    )
+    np.testing.assert_allclose(
+        reconstructed_coef, legacy_mixture_coefficients, atol=1e-6
+    )
+
+    # Save the weights
+    model_path = WEIGHTS_PATH + name + ".weights.h5"
+    model1.save_weights(model_path)
+
+    # Load back and verify
+    model2 = make_mvn_model(dim=dim, components=num_components)
+    model2.load_weights(model_path)
+    prior2 = model2.layers[1]
+
+    reconstructed_mean2 = prior2.mean().numpy()[0, 0]
+    reconstructed_var2 = prior2.variance().numpy()[0, 0]
+    reconstructed_coef2 = prior2.mixture_coefficients().numpy()[0, 0]
+
+    np.testing.assert_allclose(
+        reconstructed_mean2, legacy_expectation, atol=1e-6
+    )
+    np.testing.assert_allclose(
+        reconstructed_var2, legacy_variances, atol=1e-6
+    )
+    np.testing.assert_allclose(
+        reconstructed_coef2, legacy_mixture_coefficients, atol=1e-6
+    )
+
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Convert legacy priors to new format")
+    parser = argparse.ArgumentParser(
+        description="Convert legacy priors to new format"
+    )
     parser.add_argument(
         "--dirichlet", action="store_true", help="Convert Dirichlet priors"
     )
@@ -58,7 +119,8 @@ if __name__ == "__main__":
         # load the legacy amino acid prior
         legacy_prior = priors.AminoAcidPrior(dtype=tf.float32)
         legacy_prior.build()
-        legacy_alpha = legacy_prior.emission_dirichlet_mix.make_alpha().numpy().flatten()
+        legacy_alpha = legacy_prior.emission_dirichlet_mix
+        legacy_alpha = legacy_alpha.make_alpha().numpy().flatten()
 
         # Add alphas for extra amino acids (non-standard + X)
         # alpha = 1.0 marks a uniform prior for these amino acids (i.e. irrelevant)
@@ -84,7 +146,7 @@ if __name__ == "__main__":
 
     if args.mvn:
         sm_config = common.ScoringModelConfig()
-        num_comp = 1
+        num_comp = 32
         prior_path = common.get_prior_path(sm_config, num_comp)
         pdf_model = make_pdf_model(sm_config, num_comp, trainable=False)
         pdf_model.load_weights(
@@ -95,7 +157,8 @@ if __name__ == "__main__":
         mvn_layer = get_mvn_layer(pdf_model)
         assert mvn_layer is not None
         mix = mvn_layer.get_mixture()
-        expectation = mix.component_expectations()[0,0]
-        variances = mix.component_covariances()[0,0]
+        expectation = np.squeeze(mix.component_expectations(), axis=(0,1))
+        variances = np.squeeze(mix.component_covariances(), axis=(0,1))
+        coefficients = np.squeeze(mix.mixture_coefficients(), axis=(0,1))
         name = Path(prior_path).stem # e.g. protT5_16_reduced_mix1_sigmoid
-        convert_mvn(name, expectation.numpy(), variances.numpy())
+        convert_mvn(name, expectation, variances, coefficients)
