@@ -5,9 +5,7 @@ import numpy as np
 import tensorflow as tf
 from hidten.tf.emitter.categorical import (T_shapelike, T_TFTensor,
                                            TFCategoricalEmitter)
-from hidten.tf.prior.dirichlet import TFDirichletPrior
 
-from learnMSA.hmm.tf_util import load_dirichlet
 from learnMSA.hmm.value_set import PHMMValueSet
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 
@@ -19,44 +17,22 @@ class ProfileEmitter(TFCategoricalEmitter):
     def __init__(
         self,
         values: Sequence[PHMMValueSet],
-        use_prior_aa_dist: bool = True,
         **kwargs
     ) -> None:
         """
         Args:
             values (Sequence[PHMMValueSet]): A sequence of value sets,
                 one per head, with probabilities.
-            use_prior_aa_dist (bool): Whether to use the amino acid prior
-                distribution for initializing the emissions. If False, the
-                initialization is based on the provided value sets.
         """
         super().__init__(**kwargs)
 
         self.lengths = np.array([value_set.L for value_set in values])
 
-        # Set up the Dirichlet prior
-        self.prior: TFDirichletPrior = load_dirichlet(
-            "amino_acid_dirichlet.weights",
-            dim = len(SequenceDataset.alphabet)-1
-        )
-        # Share concentrations across all states
-        self.prior.share = np.tile(
-            np.arange(len(SequenceDataset.alphabet)-1),
-            reps=2 * sum(self.lengths) + 2 * len(self.lengths)
-        )
-
         init_values = []
-        if use_prior_aa_dist:
-            # Initialization based on prior distribution
-            prior_dist = self.prior.matrix().numpy().flatten()
-            for value_set in values:
-                init_values.append(np.tile(prior_dist, value_set.L).flatten())
-                init_values.append(prior_dist)
-        else:
-            # Initialization based on provided value sets
-            for value_set in values:
-                init_values.append(value_set.match_emissions.flatten())
-                init_values.append(value_set.insert_emissions)
+        # Initialization based on provided value sets
+        for value_set in values:
+            init_values.append(value_set.match_emissions.flatten())
+            init_values.append(value_set.insert_emissions)
         self.initializer = np.concatenate(init_values)
 
     def build(self, input_shape: T_shapelike | None = None) -> None:

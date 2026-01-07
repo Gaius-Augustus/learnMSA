@@ -4,14 +4,13 @@ from typing import override
 import numpy as np
 import tensorflow as tf
 from hidten.hmm import HMMConfig as HidtenHMMConfig
+from hidten.prior import Prior
 from hidten.tf.transitioner import (T_TFTensor, TFTransitioner, TransitionMode,
                                     shared_tensor)
 from hidten.tf.util import log_zero, safe_log
 
 from learnMSA.hmm.transition_index_set import PHMMTransitionIndexSet
 from learnMSA.hmm.value_set import PHMMValueSet
-from learnMSA.hmm.prior import TFPHMMTransitionPrior
-from learnMSA.config.hmm import PHMMPriorConfig
 
 
 def logsumexp(x: T_TFTensor, y: T_TFTensor) -> T_TFTensor:
@@ -35,23 +34,16 @@ class PHMMExplicitTransitioner(TFTransitioner):
     def __init__(
         self,
         values: Sequence[PHMMValueSet],
-        prior_config: PHMMPriorConfig | None = None,
         **kwargs
     ) -> None:
         """
         Args:
             values (Sequence[PHMMValueSet]): A sequence of value sets,
                 one per head, with probabilities.
-            prior_config (HMMPriorConfig | None): Prior configuration for
-                transition priors.
-                If None, uses default HMMPriorConfig.
             hidten_hmm_config (HidtenHMMConfig): The configuration of the
                 hidten HMM.
         """
         super().__init__(**kwargs)
-        if prior_config is None:
-            prior_config = PHMMPriorConfig()
-        self.prior_config = prior_config
         transitions, value_list = [], []
         start, start_values = [], []
         states = []
@@ -94,9 +86,6 @@ class PHMMExplicitTransitioner(TFTransitioner):
         self.allow_start = np.vstack(start)
         self.initializer_start = np.hstack(start_values)
 
-        # Load the prior
-        self.prior = TFPHMMTransitionPrior(lengths, self.prior_config)
-
 
 class PHMMTransitioner(TFTransitioner):
     """A transitioner for folded pHMMs without deletion states. Wraps an
@@ -122,24 +111,25 @@ class PHMMTransitioner(TFTransitioner):
         """The number of states for each head."""
         return [Q+1 for Q in self.hmm_config.states]
 
+    @property
+    def prior(self) -> "Prior[T_TFTensor] | None":
+        return self.explicit_transitioner.prior
+
+    @prior.setter
+    def prior(self, prior: "Prior[T_TFTensor]") -> None:
+        self.explicit_transitioner.prior = prior
+
     def __init__(
         self,
         values: Sequence[PHMMValueSet],
-        prior_config: PHMMPriorConfig | None = None,
         **kwargs
     ) -> None:
         """
         Args:
             values (Sequence[PHMMValueSet]): A sequence of value sets, one per head.
-            prior_config (HMMPriorConfig | None): Prior configuration for
-                transition priors.
-                If None, uses default HMMPriorConfig.
         """
         super().__init__(**kwargs)
 
-        if prior_config is None:
-            prior_config = PHMMPriorConfig()
-        self.prior_config = prior_config
         self.explicit_transitioner = self._make_explicit_transitioner(values)
         self.lengths = [value_set.L for value_set in values]
 
@@ -492,5 +482,8 @@ class PHMMTransitioner(TFTransitioner):
     def _make_explicit_transitioner(
         self, values: Sequence[PHMMValueSet]
     ) -> PHMMExplicitTransitioner:
-        """Helper to create the explicit transitioner with the same parameters."""
-        return PHMMExplicitTransitioner(values=values, prior_config=self.prior_config)
+        """Helper to create the explicit transitioner with the same
+        parameters."""
+        return PHMMExplicitTransitioner(
+            values=values
+        )

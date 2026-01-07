@@ -1,5 +1,6 @@
 from collections.abc import Sequence
 
+import numpy as np
 import tensorflow as tf
 from hidten import HMMMode
 from hidten.tf.emitter import TFPaddingEmitter
@@ -10,6 +11,9 @@ from learnMSA.hmm.profile_emitter import ProfileEmitter
 from learnMSA.hmm.embedding_emitter import EmbeddingEmitter
 from learnMSA.hmm.transitioner import PHMMTransitioner
 from learnMSA.hmm.value_set import PHMMValueSet
+from learnMSA.hmm.prior import TFPHMMTransitionPrior
+from learnMSA.hmm.tf_util import load_dirichlet
+from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 
 
 class PHMMLayer(tf.keras.Layer):
@@ -64,19 +68,36 @@ class PHMMLayer(tf.keras.Layer):
             for h, L in enumerate(lengths)
         ]
 
+        # Set up the Dirichlet prior for emissions
+        emission_prior = load_dirichlet(
+            "amino_acid_dirichlet.weights",
+            dim = len(SequenceDataset.alphabet)-1
+        )
+        # Share concentrations across all states
+        emission_prior.share = np.tile(
+            np.arange(len(SequenceDataset.alphabet)-1),
+            reps=2 * sum(lengths) + 2 * len(lengths)
+        )
+
+        # Override emission values with prior distribution if requested
+        if config.use_prior_for_emission_init:
+            values = self._override_emissions_with_prior(values, emission_prior)
+
         # Create the HMM, with 2*L+2 states per head
         self.hmm = TFHMM(states=self.states, heads=self.heads)
 
-        # Add the transitioner
+        # Add the transitioner and prior
         self.hmm.transitioner = PHMMTransitioner(
-            values = values, prior_config=prior_config
+            values = values
+        )
+        self.hmm.transitioner.prior = TFPHMMTransitionPrior(
+            lengths, prior_config
         )
 
         # Add the profile emitter
-        self.hmm.add_emitter(ProfileEmitter(
-            values = values,
-            use_prior_aa_dist=config.use_prior_for_emission_init
-        ))
+        profile_emitter = ProfileEmitter(values=values)
+        self.hmm.add_emitter(profile_emitter)
+        profile_emitter.prior = emission_prior
 
         # Add the MVN emitter
         if self.plm_config is not None:
@@ -114,3 +135,29 @@ class PHMMLayer(tf.keras.Layer):
                 number of heads in the pHMM.
         """
         return self.hmm.prior_scores()
+
+    @staticmethod
+    def _override_emissions_with_prior(
+        values: Sequence[PHMMValueSet],
+        prior
+    ) -> list[PHMMValueSet]:
+        """Override emission values in value sets with prior distribution.
+
+        Args:
+            values: The original value sets.
+            prior: The Dirichlet prior for emissions.
+
+        Returns:
+            New value sets with emissions replaced by prior distribution.
+        """
+        prior_dist = prior.matrix().numpy().flatten()
+        updated_values = []
+        for value_set in values:
+            updated_values.append(PHMMValueSet(
+                L=value_set.L,
+                match_emissions=np.tile(prior_dist, (value_set.L, 1)),
+                insert_emissions=prior_dist,
+                transitions=value_set.transitions,
+                start=value_set.start,
+            ))
+        return updated_values

@@ -45,6 +45,18 @@ class LanguageModelConfig(BaseModel):
     """Whether to use conditionally independent emissions."""
 
 
+    def id_string(self) -> str:
+        """Generate an identifier string for the language model configuration.
+
+        Returns:
+            A string that uniquely identifies the language model configuration.
+        """
+        return (
+            f"{self.language_model}_{self.scoring_model_dim}_reduced_"
+            f"_mix{self.embedding_prior_components}_"
+            f"{self.scoring_model_activation}"
+        )
+
     @field_validator("language_model")
     def validate_language_model(cls, v: str) -> str:
         if not v in {"protT5", "esm2", "proteinBERT"}:

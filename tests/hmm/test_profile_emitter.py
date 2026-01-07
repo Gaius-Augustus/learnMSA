@@ -3,10 +3,11 @@ import pytest
 import tensorflow as tf
 from hidten.hmm import HMMConfig as HidtenHMMConfig
 
-import tests.hmm.ref as ref
+from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 from learnMSA.config.hmm import PHMMConfig
 from learnMSA.hmm.profile_emitter import ProfileEmitter
 from learnMSA.hmm.value_set import PHMMValueSet
+from learnMSA.hmm.tf_util import load_dirichlet
 
 
 @pytest.fixture
@@ -20,14 +21,28 @@ def emitter(hmm_config: HidtenHMMConfig) -> ProfileEmitter:
 
     # Create value sets for different heads
     values = [
-        PHMMValueSet.from_config(L, h, ref.config)
+        PHMMValueSet.from_config(L, h, PHMMConfig())
         for h, L in enumerate(lengths)
     ]
 
     # Construct an emitter with two heads from the initial values
     emitter = ProfileEmitter(values)
+
+    # Add the prior for tests that need it
+    alphabet_size = len(SequenceDataset.alphabet)-1
+    emission_prior = load_dirichlet(
+        "amino_acid_dirichlet.weights",
+        dim=alphabet_size
+    )
+    emission_prior.share = np.tile(
+        np.arange(alphabet_size),
+        reps=2 * sum(lengths) + 2 * len(lengths)
+    )
+    emitter.prior = emission_prior
     emitter.hmm_config = hmm_config
+
     emitter.build()
+
     return emitter
 
 def test_matrix(emitter: ProfileEmitter) -> None:
@@ -81,7 +96,7 @@ def test_call(emitter: ProfileEmitter, hmm_config: HidtenHMMConfig) -> None:
     )
 
     # Construct an emitter with two heads from the initial values
-    emitter = ProfileEmitter([values_1, values_2], use_prior_aa_dist=False)
+    emitter = ProfileEmitter([values_1, values_2])
     emitter.hmm_config = hmm_config
     emitter.build()
 
