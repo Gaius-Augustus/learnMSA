@@ -120,6 +120,7 @@ def args_to_config(args: Namespace) -> Configuration:
         dist_out=args.dist_out,
         initial_distance=args.initial_distance,
         grow_mem=args.grow_mem,
+        jit_compile=args.jit_compile,
     )
 
     # Create main Configuration object

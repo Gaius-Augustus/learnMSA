@@ -1,5 +1,5 @@
 import math
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Sequence
 
 import numpy as np
 import tensorflow as tf
@@ -79,10 +79,26 @@ class BatchGenerator():
         else:
             return (tf.uint8, tf.int64)
 
+def make_dataset(
+    indices: np.ndarray,
+    batch_generator: BatchGenerator,
+    batch_size:int = 512,
+    shuffle:bool = True,
+    bucket_by_seq_length:bool = False,
+    model_lengths:Sequence[int] = [0],
+) -> tf.data.Dataset:
+    """
+    Creates a dataset for training and inference.
 
-# batch_generator is a callable object that maps a vector of sequence indices to
-# inputs compatible with the model
-def make_dataset(indices, batch_generator, batch_size=512, shuffle=True, bucket_by_seq_length=False, model_lengths=[0]):
+    Args:
+        indices: The indices of the sequences to include in the dataset.
+        batch_generator: The batch generator that consumes sequence indices
+            and produces batches.
+        batch_size: The batch size to use.
+        shuffle: Whether to shuffle the dataset.
+        bucket_by_seq_length: Whether to use bucketing by sequence length.
+        model_lengths: List of model lengths for adaptive batching.
+    """
     shuffle = shuffle and not bucket_by_seq_length
     batch_generator.shuffle = shuffle
     ds = tf.data.Dataset.from_tensor_slices(indices)

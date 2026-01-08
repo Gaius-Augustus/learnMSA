@@ -13,6 +13,8 @@ from learnMSA.msa_hmm.posterior import get_state_expectations
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 from learnMSA.msa_hmm.training import make_dataset
 
+from learnMSA.hmm.layer import PHMMLayer
+
 
 class LearnMSAModel(tf.keras.Model):
     """
@@ -67,29 +69,17 @@ class LearnMSAModel(tf.keras.Model):
             )
             self.encoder_layers.append(self.anc_probs_layer)
 
-        # Create the HMM cell and -layer
-        self.msa_hmm_cell = MsaHmmCell(
+        self.phmm_layer = PHMMLayer(
             context.model_lengths,
-            dim = 24 * train_cfg.num_rate_matrices,
-            emitter = context.emitter,
-            transitioner = context.transitioner
-        )
-        self.msa_hmm_layer = MsaHmmLayer(
-            self.msa_hmm_cell,
-            num_seqs=context.effective_num_seq,
-            use_prior=train_cfg.use_prior,
-            sequence_weights=context.sequence_weights,
-            dtype=tf.float32
+            config = context.config.hmm,
+            prior_config = context.config.hmm_prior,
+            plm_config = context.config.language_model,
         )
 
         # Metrics trackers
         self.loss_tracker = tf.keras.metrics.Mean(name='loss')
         self.loglik_tracker = tf.keras.metrics.Mean(name='loglik')
         self.prior_tracker = tf.keras.metrics.Mean(name='prior')
-        self.aux_loss_tracker = tf.keras.metrics.Mean(name='aux_loss')
-        self.use_prior = False
-
-        self.encode_only = False
 
     def call(self, inputs, training=None):
         """
@@ -118,40 +108,32 @@ class LearnMSAModel(tf.keras.Model):
         # In the input pipeline, we need the batch dimension to come first to
         # make multi GPU work we transpose here, because all learnMSA layers
         # require the model dimension to come first
+        # TODO: clean this up; hidten does not use heads first order anymore;
+        # needs merging of tree branch first
         transposed_sequences = tf.transpose(sequences, [1, 0, 2])
         transposed_indices = tf.transpose(indices, [1, 0])
-        if embeddings is not None:
-            transposed_embeddings = tf.transpose(embeddings, [1, 0, 2, 3])
 
         # Pass through encoder layers
         forward_seq = transposed_sequences
         for layer in self.encoder_layers:
             forward_seq = layer(forward_seq, transposed_indices, training=training)
 
+        # transpose back
+        # TODO: clean up later
+        forward_seq = tf.transpose(forward_seq, [1, 0, 2, 3])
+
+        padding = 1 - forward_seq[:, :, :, -1:]
+        forward_seq = forward_seq[:, :, :, :-1]
+
         if embeddings is not None:
-            forward_seq = tf.concat([forward_seq, transposed_embeddings], -1)
-
-        if self.encode_only:
-            return forward_seq
-
-        # Pass through MSA HMM layer
-        if self.msa_hmm_layer.use_prior:
-            loglik, aggregated_loglik, prior, aux_loss = self.msa_hmm_layer(
-                forward_seq, transposed_indices, training=training
-            )
-            # Transpose loglik back: (num_models, batch) -> (batch, num_models)
-            loglik = tf.transpose(loglik, [1, 0])
-            return loglik, aggregated_loglik, prior, aux_loss
+            hmm_inputs = [forward_seq, embeddings, padding]
         else:
-            loglik, aggregated_loglik = self.msa_hmm_layer(
-                forward_seq, transposed_indices, training=training
-            )
-            # Transpose loglik back: (num_models, batch) -> (batch, num_models)
-            loglik = tf.transpose(loglik, [1, 0])
-            return loglik, aggregated_loglik
+            hmm_inputs = [forward_seq, padding]
+
+        return self.phmm_layer(hmm_inputs)
 
     @override
-    def build(self, batch_size: int | None = None):  # type: ignore[override]
+    def build(self, batch_size: int | None = None):
         """
         Build the model based on the input shape.
 
@@ -161,27 +143,45 @@ class LearnMSAModel(tf.keras.Model):
         n = self.context.config.training.num_model
         seq_shape_t = (n, batch_size, None)
         ind_shape_t = (n, batch_size)
-        if self.context.config.language_model.use_language_model:
-            msa_hmm_shape_t = (n, batch_size, None, 23 + self.context.scoring_model_config.dim+1)
-        else:
-            msa_hmm_shape_t = (n, batch_size, None, 23)
         if self.context.config.training.use_anc_probs:
             self.anc_probs_layer.build([seq_shape_t, ind_shape_t])
-        self.msa_hmm_layer.build(msa_hmm_shape_t)
+
+        # Build the pHMM layer
+        if self.context.config.language_model.use_language_model:
+            emb_dim = self.context.config.language_model.scoring_model_dim
+            self.phmm_layer.build(
+                input_shape=(
+                    (batch_size, None, n, len(SequenceDataset.alphabet)-1),
+                    (batch_size, None, n, emb_dim),
+                    (batch_size, None, n, 1),
+                )
+            )
+        else:
+            self.phmm_layer.build(
+                input_shape=(
+                    (batch_size, None, n, len(SequenceDataset.alphabet)-1),
+                    (batch_size, None, n, 1),
+                )
+            )
 
     @override
-    def compile(self) -> None:  # type: ignore[override]
+    def compile(self) -> None:
         """
         Compile the model with Adam optimizer.
 
         This method compiles the LearnMSA model using the Adam optimizer
         with the learning rate specified in the configuration.
         """
-        optimizer = tf.keras.optimizers.Adam(self.context.config.training.learning_rate)
-        super().compile(optimizer=optimizer, jit_compile=False)
+        optimizer = tf.keras.optimizers.Adam(
+            self.context.config.training.learning_rate
+        )
+        super().compile(
+            optimizer=optimizer,
+            jit_compile=self.context.config.advanced.jit_compile,
+        )
 
     @override
-    def fit(  # type: ignore[override]
+    def fit(
         self,
         data: SequenceDataset,
         indices: np.ndarray,
@@ -202,45 +202,10 @@ class LearnMSAModel(tf.keras.Model):
         Returns:
             Training history object containing loss and metrics
         """
-
-        tf.keras.backend.clear_session() #frees occupied memory
-        tf.get_logger().setLevel('ERROR')
-
+        self.phmm_layer.loglik_mode()
         self.context.batch_gen.configure(data, self.context)
-        if self.context.config.input_output.verbose:
-            print(
-                "Fitting models of lengths",
-                self.context.model_lengths, "on", indices.shape[0], "sequences."
-            )
-            print(
-                "Batch size=", batch_size,
-                "Learning rate=", self.context.config.training.learning_rate
-            )
-            if self.context.sequence_weights is not None:
-                print("Using sequence weights ", self.context.sequence_weights, ".")
-            else:
-                print("Don't use sequence weights.")
-            if int(self.context.batch_gen.crop_long_seqs) < math.inf:
-                num_cropped = np.sum(
-                    data.seq_lens[indices] >\
-                        self.context.batch_gen.crop_long_seqs
-                    )
-                if num_cropped > 0:
-                    print(
-                        f"{num_cropped} sequences are longer than "
-                        f"{self.context.batch_gen.crop_long_seqs} and will be "\
-                        "cropped for training.\nTo disable cropping, use "\
-                        "--crop disable. To change the cropping limit to X, "\
-                        "use --crop X."
-                    )
-        num_gpu = len([x.name for x in tf.config.list_logical_devices() if x.device_type == 'GPU'])
-        if self.context.config.input_output.verbose:
-            if num_gpu == 0:
-                print("Using CPU.")
-            else:
-                print("Using GPU.")
+        self._print_train_header(indices, batch_size, data)
 
-        steps = min(max(10, int(100*np.sqrt(indices.shape[0])/batch_size)), 500)
         dataset = make_dataset(
             indices,
             self.context.batch_gen,
@@ -259,6 +224,7 @@ class LearnMSAModel(tf.keras.Model):
             0 if iteration==0 else 1 if not last_iteration else 2
         ]
         verbose_level: int = 2 if self.context.config.input_output.verbose else 0
+        steps = min(max(10, int(100*np.sqrt(indices.shape[0])/batch_size)), 500)
         history = super().fit(
             dataset,
             epochs=epochs,
@@ -273,13 +239,10 @@ class LearnMSAModel(tf.keras.Model):
             if math.isnan(final_loss):
                 error_msg = "Training terminated: Final loss is NaN. Loss history: "\
                     f"{history.history['loss']}"
-                tf.get_logger().setLevel('INFO')
                 raise ValueError(error_msg)
 
         if self.context.config.input_output.verbose:
             print("Fitted model successfully.")
-
-        tf.get_logger().setLevel('INFO')
 
         return history
 
@@ -291,30 +254,16 @@ class LearnMSAModel(tf.keras.Model):
         models: list[int],
         non_homogeneous_mask_func=None,
     ) -> np.ndarray:
-        if tf.distribute.has_strategy():
-            with tf.distribute.get_strategy().scope():
-                cell_copy = self.msa_hmm_layer.cell.duplicate(models)
-        else:
-            cell_copy = self.msa_hmm_layer.cell.duplicate(models)
-
-        cell_copy.build(
-            (self.context.config.training.num_model, None, None, self.msa_hmm_layer.cell.dim)
-        )
-        self.encode_only = True
-        viterbi_seqs =  viterbi.get_state_seqs_max_lik(
-            data,
-            self.context.batch_gen,
-            indices,
+        self.phmm_layer.viterbi_mode()
+        data = make_dataset(
+            sorted_indices[:,0],
+            batch_generator,
             batch_size,
-            cell_copy,
-            models,
-            self,
-            non_homogeneous_mask_func,
-            with_plm=self.context.config.language_model.use_language_model,
-            plm_dim=self.context.scoring_model_config.dim
+            shuffle=False,
+            bucket_by_seq_length=True,
+            model_lengths=cell.length
         )
-        self.encode_only = False
-        return viterbi_seqs
+        return self.evaluate(data)
 
     def posterior(
         self,
@@ -336,6 +285,18 @@ class LearnMSAModel(tf.keras.Model):
         self.encode_only = False
         return expected_states
 
+    def get_data(
+        self,
+        indices: np.ndarray,
+        batch_size: int,
+    ) -> tf.data.Dataset:
+        make_dataset(
+            indices,
+            self.context.batch_gen,
+            batch_size,
+            shuffle=True
+        )
+
     def loglik(self, y_pred):
         """Extract log-likelihood from predictions."""
         return y_pred[1]
@@ -344,16 +305,12 @@ class LearnMSAModel(tf.keras.Model):
         """Extract prior from predictions."""
         return tf.reduce_mean(y_pred[2])
 
-    def aux_loss(self, y_pred):
-        """Extract auxiliary loss from predictions."""
-        return y_pred[3]
-
     def compute_loss(self, x, y, y_pred, sample_weight):
         """
         Compute the total loss including likelihood, prior, and auxiliary losses.
         """
         if len(y_pred) == 4:
-            loss = -self.loglik(y_pred) - self.prior(y_pred) + self.aux_loss(y_pred)
+            loss = -self.loglik(y_pred) - self.prior(y_pred)
         else:
             loss = -self.loglik(y_pred)
         loss += sum(self.losses)
@@ -424,6 +381,42 @@ class LearnMSAModel(tf.keras.Model):
         # Create an instance with context=None to signal deserialization mode
         # Keras will restore the model structure and weights from the saved file
         return cls(context, **config_copy)
+
+    def _print_train_header(
+        self, indices: np.ndarray, batch_size: int, data: SequenceDataset
+    ) -> None:
+        if self.context.config.input_output.verbose:
+            print(
+                "Fitting models of lengths",
+                self.context.model_lengths, "on", indices.shape[0], "sequences."
+            )
+            print(
+                "Batch size=", batch_size,
+                "Learning rate=", self.context.config.training.learning_rate
+            )
+            if self.context.sequence_weights is not None:
+                print("Using sequence weights ", self.context.sequence_weights, ".")
+            else:
+                print("Don't use sequence weights.")
+            if int(self.context.batch_gen.crop_long_seqs) < math.inf:
+                num_cropped = np.sum(
+                    data.seq_lens[indices] >\
+                        self.context.batch_gen.crop_long_seqs
+                    )
+                if num_cropped > 0:
+                    print(
+                        f"{num_cropped} sequences are longer than "
+                        f"{self.context.batch_gen.crop_long_seqs} and will be "\
+                        "cropped for training.\nTo disable cropping, use "\
+                        "--crop disable. To change the cropping limit to X, "\
+                        "use --crop X."
+                    )
+        num_gpu = len([x.name for x in tf.config.list_logical_devices() if x.device_type == 'GPU'])
+        if self.context.config.input_output.verbose:
+            if num_gpu == 0:
+                print("Using CPU.")
+            else:
+                print("Using GPU.")
 
 
 class PermuteSeqs(tf.keras.layers.Layer):

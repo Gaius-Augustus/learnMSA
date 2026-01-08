@@ -20,7 +20,7 @@ from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 
 class PHMMLayer(tf.keras.Layer):
 
-    lengths: Sequence[int]
+    lengths: np.ndarray
     """The number of match states in each head of the pHMM.
     """
 
@@ -46,7 +46,7 @@ class PHMMLayer(tf.keras.Layer):
 
     def __init__(
         self,
-        lengths: Sequence[int],
+        lengths: Sequence[int] | np.ndarray,
         config : PHMMConfig,
         prior_config: PHMMPriorConfig | None = None,
         plm_config: LanguageModelConfig | None = None,
@@ -58,7 +58,7 @@ class PHMMLayer(tf.keras.Layer):
             config: HMM configuration parameters.
         """
         super().__init__(**kwargs)
-        self.lengths = lengths
+        self.lengths = np.asarray(lengths, dtype=np.int32)
         self.config = config
         if prior_config is None:
             prior_config = PHMMPriorConfig()

@@ -19,19 +19,19 @@ class TFPHMMTransitionPrior(TFPrior):
 
     def __init__(
         self,
-        lengths: Sequence[int],
+        lengths: Sequence[int] | np.ndarray,
         prior_config: PHMMPriorConfig,
         **kwargs
     ) -> None:
         """
         Args:
-            lengths (Sequence[int]): The number of match states in each head
+            lengths (Sequence[int] | np.ndarray): The number of match states in each head
                 of the pHMM.
             prior_config (HMMPriorConfig): Prior configuration containing alpha parameters
                 for transition priors.
         """
         super().__init__(**kwargs)
-        self.lengths = lengths
+        self.lengths = np.asarray(lengths)
         self.prior_config = prior_config
         transition_indices = [PHMMTransitionIndexSet(L=L) for L in lengths]
 

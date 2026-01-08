@@ -19,6 +19,9 @@ class AdvancedConfig(BaseModel):
     aligner_threads: int = 0
     """Number of threads to use for the aligner."""
 
+    jit_compile: bool = False
+    """Enable XLA JIT compilation in TensorFlow."""
+
     @field_validator(
         "initial_distance",
     )

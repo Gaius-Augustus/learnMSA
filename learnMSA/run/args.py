@@ -447,6 +447,14 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
             "training time. Slows down training significantly."
     )
 
+    advanced_group = parser.add_argument_group("Advanced arguments")
+    advanced_group.add_argument(
+        "--jit_compile",
+        dest="jit_compile",
+        action='store_true',
+        help="Enable XLA JIT compilation in TensorFlow."
+    )
+
     deprecated_group = parser.add_argument_group("Deprecated arguments")
     deprecated_group.add_argument(
         "--noA2M",
