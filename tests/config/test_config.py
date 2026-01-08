@@ -255,37 +255,49 @@ class TestInitMSAConfig:
         # Valid match_threshold values
         for val in [0.0, 0.5, 1.0]:
             InitMSAConfig(match_threshold=val)
-        
+
         # Invalid match_threshold values
-        with pytest.raises(ValidationError, match="match_threshold must be in the range"):
+        with pytest.raises(
+            ValidationError, match="match_threshold must be in the range"
+        ):
             InitMSAConfig(match_threshold=-0.1)
-        with pytest.raises(ValidationError, match="match_threshold must be in the range"):
+        with pytest.raises(
+            ValidationError, match="match_threshold must be in the range"
+        ):
             InitMSAConfig(match_threshold=1.5)
 
         # Valid global_factor values
         for val in [0.0, 0.5, 1.0]:
             InitMSAConfig(global_factor=val)
-        
+
         # Invalid global_factor values
-        with pytest.raises(ValidationError, match="global_factor must be in the range"):
+        with pytest.raises(
+            ValidationError, match="global_factor must be in the range"
+        ):
             InitMSAConfig(global_factor=-0.1)
-        with pytest.raises(ValidationError, match="global_factor must be in the range"):
+        with pytest.raises(
+            ValidationError, match="global_factor must be in the range"
+        ):
             InitMSAConfig(global_factor=1.1)
 
         # Valid random_scale values
         for val in [0.001, 1.0, 100.0]:
             InitMSAConfig(random_scale=val)
-        
+
         # Invalid random_scale values
-        with pytest.raises(ValidationError, match="random_scale must be greater than 0"):
+        with pytest.raises(
+            ValidationError, match="random_scale must be greater than 0"
+        ):
             InitMSAConfig(random_scale=0)
-        with pytest.raises(ValidationError, match="random_scale must be greater than 0"):
+        with pytest.raises(
+            ValidationError, match="random_scale must be greater than 0"
+        ):
             InitMSAConfig(random_scale=-0.001)
 
     def test_init_msa_serialization(self):
         """Test InitMSAConfig serialization and deserialization."""
         from pathlib import Path
-        
+
         # Serialization
         config = InitMSAConfig(
             from_msa=Path("/path/to/file.fasta"),
@@ -409,6 +421,8 @@ class TestLanguageModelConfig:
         assert config.L2_match == 0.0
         assert config.L2_insert == 1000.0
         assert config.embedding_prior_components == 32
+        assert config.inverse_gamma_alpha == 3.0
+        assert config.inverse_gamma_beta == 0.5
 
     def test_language_model_config_custom_values(self):
         """Test LanguageModelConfig with custom values."""
@@ -424,7 +438,9 @@ class TestLanguageModelConfig:
             use_L2=True,
             L2_match=0.5,
             L2_insert=500.0,
-            embedding_prior_components=64
+            embedding_prior_components=64,
+            inverse_gamma_alpha=2.0,
+            inverse_gamma_beta=1.0
         )
         assert config.use_language_model is True
         assert config.plm_cache_dir == "/path/to/cache"
@@ -438,6 +454,8 @@ class TestLanguageModelConfig:
         assert config.L2_match == 0.5
         assert config.L2_insert == 500.0
         assert config.embedding_prior_components == 64
+        assert config.inverse_gamma_alpha == 2.0
+        assert config.inverse_gamma_beta == 1.0
 
     def test_language_model_validation(self):
         """Test that language_model must be one of the allowed values."""
@@ -528,6 +546,40 @@ class TestLanguageModelConfig:
         ):
             LanguageModelConfig(L2_insert=-10.0)
 
+        # Valid inverse_gamma_alpha values
+        LanguageModelConfig(inverse_gamma_alpha=0.1)
+        LanguageModelConfig(inverse_gamma_alpha=10.0)
+
+        # Invalid inverse_gamma_alpha values
+        with pytest.raises(
+            ValidationError,
+            match="inverse_gamma_alpha must be greater than 0"
+        ):
+            LanguageModelConfig(inverse_gamma_alpha=0)
+
+        with pytest.raises(
+            ValidationError,
+            match="inverse_gamma_alpha must be greater than 0"
+        ):
+            LanguageModelConfig(inverse_gamma_alpha=-2.0)
+
+        # Valid inverse_gamma_beta values
+        LanguageModelConfig(inverse_gamma_beta=0.01)
+        LanguageModelConfig(inverse_gamma_beta=5.0)
+
+        # Invalid inverse_gamma_beta values
+        with pytest.raises(
+            ValidationError,
+            match="inverse_gamma_beta must be greater than 0"
+        ):
+            LanguageModelConfig(inverse_gamma_beta=0)
+
+        with pytest.raises(
+            ValidationError,
+            match="inverse_gamma_beta must be greater than 0"
+        ):
+            LanguageModelConfig(inverse_gamma_beta=-0.5)
+
     def test_language_model_serialization(self):
         """Test LanguageModelConfig serialization to dict."""
         config = LanguageModelConfig(
@@ -584,60 +636,16 @@ class TestAdvancedConfig:
         """Test AdvancedConfig default values."""
         config = AdvancedConfig()
         assert config.dist_out == ""
-        assert config.inverse_gamma_alpha == 3.0
-        assert config.inverse_gamma_beta == 0.5
         assert config.initial_distance == 0.05
 
     def test_advanced_config_custom_values(self):
         """Test AdvancedConfig with custom values."""
         config = AdvancedConfig(
             dist_out="distributions.txt",
-            inverse_gamma_alpha=2.0,
-            inverse_gamma_beta=1.0,
             initial_distance=0.1,
         )
         assert config.dist_out == "distributions.txt"
-        assert config.inverse_gamma_alpha == 2.0
-        assert config.inverse_gamma_beta == 1.0
         assert config.initial_distance == 0.1
-
-    def test_inverse_gamma_alpha_validation(self):
-        """Test that inverse_gamma_alpha must be positive."""
-        # Valid values
-        AdvancedConfig(inverse_gamma_alpha=0.1)
-        AdvancedConfig(inverse_gamma_alpha=10.0)
-
-        # Invalid values
-        with pytest.raises(
-            ValidationError,
-            match="inverse_gamma_alpha must be greater than 0"
-        ):
-            AdvancedConfig(inverse_gamma_alpha=0)
-
-        with pytest.raises(
-            ValidationError,
-            match="inverse_gamma_alpha must be greater than 0"
-        ):
-            AdvancedConfig(inverse_gamma_alpha=-2.0)
-
-    def test_inverse_gamma_beta_validation(self):
-        """Test that inverse_gamma_beta must be positive."""
-        # Valid values
-        AdvancedConfig(inverse_gamma_beta=0.01)
-        AdvancedConfig(inverse_gamma_beta=5.0)
-
-        # Invalid values
-        with pytest.raises(
-            ValidationError,
-            match="inverse_gamma_beta must be greater than 0"
-        ):
-            AdvancedConfig(inverse_gamma_beta=0)
-
-        with pytest.raises(
-            ValidationError,
-            match="inverse_gamma_beta must be greater than 0"
-        ):
-            AdvancedConfig(inverse_gamma_beta=-0.5)
 
     def test_initial_distance_validation(self):
         """Test that initial_distance must be positive."""
@@ -662,36 +670,34 @@ class TestAdvancedConfig:
         """Test AdvancedConfig serialization to dict."""
         config = AdvancedConfig(
             dist_out="output.txt",
-            inverse_gamma_alpha=4.0,
+            initial_distance=0.1,
         )
         config_dict = config.model_dump()
 
         assert config_dict["dist_out"] == "output.txt"
-        assert config_dict["inverse_gamma_alpha"] == 4.0
+        assert config_dict["initial_distance"] == 0.1
 
     def test_advanced_deserialization(self):
         """Test AdvancedConfig deserialization from dict."""
         config_dict = {
             "dist_out": "results.txt",
-            "inverse_gamma_alpha": 4.0,
-            "inverse_gamma_beta": 1.5,
+            "initial_distance": 0.1,
         }
         config = AdvancedConfig(**config_dict)
 
         assert config.dist_out == "results.txt"
-        assert config.inverse_gamma_alpha == 4.0
-        assert config.inverse_gamma_beta == 1.5
+        assert config.initial_distance == 0.1
 
     def test_advanced_in_configuration(self):
         """Test AdvancedConfig as part of Configuration."""
         config = Configuration(
             advanced=AdvancedConfig(
-                inverse_gamma_alpha=4.0,
+                dist_out="output.txt",
                 initial_distance=0.1,
             )
         )
 
-        assert config.advanced.inverse_gamma_alpha == 4.0
+        assert config.advanced.dist_out == "output.txt"
         assert config.advanced.initial_distance == 0.1
 
 

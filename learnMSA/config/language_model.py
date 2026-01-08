@@ -44,6 +44,15 @@ class LanguageModelConfig(BaseModel):
     conditionally_independent: bool = True
     """Whether to use conditionally independent emissions."""
 
+    variance_init_stdev: float = 0.02
+    """Initial standard deviation for the normal distribution."""
+
+    inverse_gamma_alpha: float = 3.0
+    """Alpha parameter for the inverse gamma prior on variances."""
+
+    inverse_gamma_beta: float = 0.5
+    """Beta parameter for the inverse gamma prior on variances."""
+
 
     def id_string(self) -> str:
         """Generate an identifier string for the language model configuration.
@@ -72,7 +81,7 @@ class LanguageModelConfig(BaseModel):
             raise ValueError(f"{info.field_name} must be greater than 0.")
         return v
 
-    @field_validator("temperature")
+    @field_validator("temperature", "inverse_gamma_alpha", "inverse_gamma_beta")
     def validate_positive_floats(cls, v: float, info) -> float:
         if v <= 0:
             raise ValueError(f"{info.field_name} must be greater than 0.")

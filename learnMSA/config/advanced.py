@@ -7,12 +7,6 @@ class AdvancedConfig(BaseModel):
     dist_out: str = ""
     """Distribution output file."""
 
-    inverse_gamma_alpha: float = 3.0
-    """Inverse gamma alpha parameter."""
-
-    inverse_gamma_beta: float = 0.5
-    """Inverse gamma beta parameter."""
-
     initial_distance: float = 0.05
     """Initial distance value."""
 
@@ -26,8 +20,6 @@ class AdvancedConfig(BaseModel):
     """Number of threads to use for the aligner."""
 
     @field_validator(
-        "inverse_gamma_alpha",
-        "inverse_gamma_beta",
         "initial_distance",
     )
     def validate_quantiles(cls, v: float, info) -> float:

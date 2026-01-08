@@ -155,6 +155,8 @@ class TestArgsToConfig:
             "--L2_match", "0.5",
             "--L2_insert", "500.0",
             "--embedding_prior_components", "64",
+            "--inverse_gamma_alpha", "2.0",
+            "--inverse_gamma_beta", "1.0",
         ])
 
         config = args_to_config(args)
@@ -171,6 +173,8 @@ class TestArgsToConfig:
         assert config.language_model.L2_match == 0.5
         assert config.language_model.L2_insert == 500.0
         assert config.language_model.embedding_prior_components == 64
+        assert config.language_model.inverse_gamma_alpha == 2.0
+        assert config.language_model.inverse_gamma_beta == 1.0
         assert config.training.trainable_distances is True
 
     def test_args_to_config_with_visualization_args(self):
@@ -217,8 +221,8 @@ class TestArgsToConfig:
         assert config.hmm_prior.alpha_flank_compl == 2
         assert config.hmm_prior.alpha_single_compl == 3
         assert config.hmm_prior.alpha_global_compl == 4
-        assert config.advanced.inverse_gamma_alpha == 2.0
-        assert config.advanced.inverse_gamma_beta == 1.0
+        assert config.language_model.inverse_gamma_alpha == 2.0
+        assert config.language_model.inverse_gamma_beta == 1.0
         assert config.advanced.initial_distance == 0.1
         assert config.training.trainable_rate_matrices is True
         assert config.training.trainable_distances is False

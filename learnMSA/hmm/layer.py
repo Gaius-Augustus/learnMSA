@@ -5,14 +5,16 @@ import tensorflow as tf
 from hidten import HMMMode
 from hidten.tf.emitter import TFPaddingEmitter
 from hidten.tf.hmm import TFHMM, T_shapelike
+from hidten.tf.prior import TFCombinedPrior, TFInverseGammaPrior
 
 from learnMSA.config import PHMMConfig, PHMMPriorConfig, LanguageModelConfig
 from learnMSA.hmm.profile_emitter import ProfileEmitter
 from learnMSA.hmm.embedding_emitter import EmbeddingEmitter
 from learnMSA.hmm.transitioner import PHMMTransitioner
 from learnMSA.hmm.value_set import PHMMValueSet
+from learnMSA.hmm.value_set_emb import PHMMEmbeddingValueSet
 from learnMSA.hmm.prior import TFPHMMTransitionPrior
-from learnMSA.hmm.tf_util import load_dirichlet
+from learnMSA.hmm.tf_util import load_dirichlet, load_mvn
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 
 
@@ -99,9 +101,41 @@ class PHMMLayer(tf.keras.Layer):
         self.hmm.add_emitter(profile_emitter)
         profile_emitter.prior = emission_prior
 
-        # Add the MVN emitter
-        if self.plm_config is not None:
-            self.hmm.add_emitter(EmbeddingEmitter())
+        if self.plm_config != None:
+            # Create embedding value sets
+            embedding_values = [
+                PHMMEmbeddingValueSet.from_config(L, h, self.plm_config)
+                for h, L in enumerate(lengths)
+            ]
+
+            # Set up the MVN prior for mean embeddings
+            mvn_prior = load_mvn(
+                self.plm_config.id_string() + ".weights",
+                dim=len(SequenceDataset.alphabet)-1
+            )
+
+            # Override embedding values with prior distribution if requested
+            if config.use_prior_for_emission_init:
+                embedding_values = self._override_embeddings_with_prior(
+                    embedding_values, mvn_prior
+                )
+
+            # Set the inverse gamma prior for embedding variances
+            inv_gamma_prior = TFInverseGammaPrior()
+            inv_gamma_prior.share = [0, 1] * 3
+            inv_gamma_prior.initializer = [
+                self.plm_config.inverse_gamma_alpha,
+                self.plm_config.inverse_gamma_beta,
+            ]
+
+            combined_prior = TFCombinedPrior()
+            combined_prior.add_prior(mvn_prior)
+            combined_prior.add_prior(inv_gamma_prior)
+
+            # Add the embedding emitter
+            embedding_emitter = EmbeddingEmitter(values=embedding_values)
+            self.hmm.add_emitter(embedding_emitter)
+            embedding_emitter.prior = combined_prior
 
         # Add the padding emitter
         self.hmm.add_emitter(TFPaddingEmitter())
@@ -159,5 +193,37 @@ class PHMMLayer(tf.keras.Layer):
                 insert_emissions=prior_dist,
                 transitions=value_set.transitions,
                 start=value_set.start,
+            ))
+        return updated_values
+
+    @staticmethod
+    def _override_embeddings_with_prior(
+        values: Sequence[PHMMEmbeddingValueSet],
+        prior
+    ) -> list[PHMMEmbeddingValueSet]:
+        """Override embedding values with prior distribution.
+
+        Args:
+            values: The original embedding value sets.
+            prior: The MVN prior for embeddings.
+
+        Returns:
+            New value sets with embeddings replaced by prior distribution.
+        """
+        # Get the mean from the mixture model prior
+        mean_per_component = prior.mean().numpy()
+        mix_coef = prior.mixture_coefficients().numpy()
+        mix_coef = np.expand_dims(mix_coef, axis=-1)
+        mean = np.sum(mean_per_component * mix_coef, axis=2)
+        mean = np.squeeze(mean, axis=(0, 1))
+
+        updated_values = []
+        for value_set in values:
+            updated_values.append(PHMMEmbeddingValueSet(
+                L=value_set.L,
+                match_expectations=np.tile(mean, (value_set.L, 1, 1)),
+                match_stddev=value_set.match_stddev,
+                insert_expectation=mean,
+                insert_stddev=value_set.insert_stddev,
             ))
         return updated_values

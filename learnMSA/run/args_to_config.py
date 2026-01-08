@@ -96,6 +96,8 @@ def args_to_config(args: Namespace) -> Configuration:
         L2_match=args.L2_match,
         L2_insert=args.L2_insert,
         embedding_prior_components=args.embedding_prior_components,
+        inverse_gamma_alpha=args.inverse_gamma_alpha,
+        inverse_gamma_beta=args.inverse_gamma_beta,
     )
 
     visualization_config = VisualizationConfig(
@@ -116,8 +118,6 @@ def args_to_config(args: Namespace) -> Configuration:
 
     advanced_config = AdvancedConfig(
         dist_out=args.dist_out,
-        inverse_gamma_alpha=args.inverse_gamma_alpha,
-        inverse_gamma_beta=args.inverse_gamma_beta,
         initial_distance=args.initial_distance,
         grow_mem=args.grow_mem,
     )
