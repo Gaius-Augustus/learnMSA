@@ -101,7 +101,7 @@ class PHMMLayer(tf.keras.Layer):
         self.hmm.add_emitter(profile_emitter)
         profile_emitter.prior = emission_prior
 
-        if self.plm_config != None:
+        if self.plm_config != None and self.plm_config.use_language_model:
             # Create embedding value sets
             embedding_values = [
                 PHMMEmbeddingValueSet.from_config(L, h, self.plm_config)
@@ -111,7 +111,8 @@ class PHMMLayer(tf.keras.Layer):
             # Set up the MVN prior for mean embeddings
             mvn_prior = load_mvn(
                 self.plm_config.id_string() + ".weights",
-                dim=len(SequenceDataset.alphabet)-1
+                dim=self.plm_config.scoring_model_dim,
+                components=self.plm_config.embedding_prior_components,
             )
 
             # Override embedding values with prior distribution if requested
@@ -158,8 +159,16 @@ class PHMMLayer(tf.keras.Layer):
     def build(self, input_shape: T_shapelike) -> None:
         self.hmm.build(input_shape)
 
-    def call(self, x: tf.Tensor, padding: tf.Tensor) -> tf.Tensor:
-        return self.hmm(x, padding, mode=self._mode)
+    def call(
+        self,
+        x: tf.Tensor,
+        padding: tf.Tensor,
+        embeddings: tf.Tensor | None = None,
+    ) -> tf.Tensor:
+        if embeddings is None:
+            return self.hmm(x, padding, mode=self._mode)
+        else:
+            return self.hmm(x, embeddings, padding, mode=self._mode)
 
     def prior_scores(self) -> tf.Tensor:
         """Calculates the prior scores for all parameters in the pHMM.
@@ -221,7 +230,7 @@ class PHMMLayer(tf.keras.Layer):
         for value_set in values:
             updated_values.append(PHMMEmbeddingValueSet(
                 L=value_set.L,
-                match_expectations=np.tile(mean, (value_set.L, 1, 1)),
+                match_expectations=np.tile(mean, (value_set.L, 1)),
                 match_stddev=value_set.match_stddev,
                 insert_expectation=mean,
                 insert_stddev=value_set.insert_stddev,
