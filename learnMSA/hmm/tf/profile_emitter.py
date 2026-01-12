@@ -37,7 +37,8 @@ class ProfileEmitter(TFCategoricalEmitter):
 
     def build(self, input_shape: T_shapelike | None = None) -> None:
         if input_shape is None:
-            # Number of amino acids (including non-standard + X, but excluding gap)
+            # Number of amino acids (including non-standard + X,
+            # but excluding gap)
             s = len(SequenceDataset.alphabet)-1
             input_shape = (None, None, s)
         else:
@@ -106,8 +107,9 @@ class ProfileEmitter(TFCategoricalEmitter):
         for L in self.lengths:
             repeats.extend([1]*L)
             repeats.extend([L+2])  # repeat insertion
-            repeats.extend([L-1]*int(L < ML))  # repeat any padding
-            repeats.extend([1]*(ML-L-1))  # keep rest of padding
+            if L < ML:
+                repeats.extend([ML-L+1])  # repeat any padding
+                repeats.extend([1]*(ML-L-1))  # keep rest of padding
         emission_scores = tf.repeat(emission_scores, repeats, axis=-1)
         emission_scores = tf.reshape(emission_scores, (B, T, H, 2*Q))
         if use_padding:
