@@ -4,10 +4,10 @@ from hidten.hmm import HMMConfig as HidtenHMMConfig
 
 import tests.hmm.ref as ref
 from learnMSA.config.hmm import PHMMConfig
-from learnMSA.hmm.transition_index_set import PHMMTransitionIndexSet
-from learnMSA.hmm.transitioner import (PHMMExplicitTransitioner,
+from learnMSA.hmm.util.transition_index_set import PHMMTransitionIndexSet
+from learnMSA.hmm.tf.transitioner import (PHMMExplicitTransitioner,
                                        PHMMTransitioner)
-from learnMSA.hmm.value_set import PHMMValueSet
+from learnMSA.hmm.util.value_set import PHMMValueSet
 
 
 @pytest.fixture

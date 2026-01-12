@@ -1,6 +1,6 @@
 import argparse
-from itertools import product
 import os
+from itertools import product
 from pathlib import Path
 
 import numpy as np
@@ -8,7 +8,7 @@ import tensorflow as tf
 
 import learnMSA.msa_hmm.Priors as priors
 import learnMSA.protein_language_models.Common as common
-from learnMSA.hmm.tf_util import make_dirichlet_model, make_mvn_model
+from learnMSA.hmm.tf.util import make_dirichlet_model, make_mvn_model
 from learnMSA.protein_language_models.MvnPrior import (get_mvn_layer,
                                                        make_pdf_model)
 

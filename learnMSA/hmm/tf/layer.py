@@ -7,14 +7,14 @@ from hidten.tf.emitter import TFPaddingEmitter
 from hidten.tf.hmm import TFHMM, T_shapelike
 from hidten.tf.prior import TFCombinedPrior, TFInverseGammaPrior
 
-from learnMSA.config import PHMMConfig, PHMMPriorConfig, LanguageModelConfig
-from learnMSA.hmm.profile_emitter import ProfileEmitter
-from learnMSA.hmm.embedding_emitter import EmbeddingEmitter
-from learnMSA.hmm.transitioner import PHMMTransitioner
-from learnMSA.hmm.value_set import PHMMValueSet
-from learnMSA.hmm.value_set_emb import PHMMEmbeddingValueSet
-from learnMSA.hmm.prior import TFPHMMTransitionPrior
-from learnMSA.hmm.tf_util import load_dirichlet, load_mvn
+from learnMSA.config import LanguageModelConfig, PHMMConfig, PHMMPriorConfig
+from learnMSA.hmm.tf.embedding_emitter import EmbeddingEmitter
+from learnMSA.hmm.tf.prior import TFPHMMTransitionPrior
+from learnMSA.hmm.tf.profile_emitter import ProfileEmitter
+from learnMSA.hmm.tf.transitioner import PHMMTransitioner
+from learnMSA.hmm.tf.util import load_dirichlet, load_mvn
+from learnMSA.hmm.util.value_set import PHMMValueSet
+from learnMSA.hmm.util.value_set_emb import PHMMEmbeddingValueSet
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 
 

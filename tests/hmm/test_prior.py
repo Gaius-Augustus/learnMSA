@@ -2,9 +2,9 @@ import pytest
 from hidten.hmm import HMMConfig as HidtenHMMConfig
 
 from learnMSA.config.hmm import PHMMConfig, PHMMPriorConfig
-from learnMSA.hmm.prior import TFPHMMTransitionPrior
-from learnMSA.hmm.transitioner import PHMMTransitioner
-from learnMSA.hmm.value_set import PHMMValueSet
+from learnMSA.hmm.tf.prior import TFPHMMTransitionPrior
+from learnMSA.hmm.tf.transitioner import PHMMTransitioner
+from learnMSA.hmm.util.value_set import PHMMValueSet
 
 
 @pytest.fixture

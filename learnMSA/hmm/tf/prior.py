@@ -7,8 +7,8 @@ from hidten.tf.prior.dirichlet import T_TFTensor, TFDirichletPrior, TFPrior
 from hidten.tf.util import epsilon
 
 from learnMSA.config.hmm import PHMMPriorConfig
-from learnMSA.hmm.tf_util import load_dirichlet
-from learnMSA.hmm.transition_index_set import PHMMTransitionIndexSet
+from learnMSA.hmm.tf.util import load_dirichlet
+from learnMSA.hmm.util.transition_index_set import PHMMTransitionIndexSet
 
 
 class TFPHMMTransitionPrior(TFPrior):
