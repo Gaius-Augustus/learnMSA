@@ -12,7 +12,7 @@ from learnMSA.msa_hmm.training import BatchGenerator
 from learnMSA.msa_hmm.training_util import get_adaptive_batch_size_with_language_model
 from learnMSA.protein_language_models.BilinearSymmetric import \
     make_scoring_model
-from learnMSA.protein_language_models.EmbeddingCache import EmbeddingCache
+from learnMSA.protein_language_models.embedding_cache import EmbeddingCache
 
 if TYPE_CHECKING:
     from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext

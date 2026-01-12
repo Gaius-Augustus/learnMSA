@@ -1,5 +1,5 @@
 import numpy as np
-from learnMSA.protein_language_models import EmbeddingCache
+from learnMSA.protein_language_models import embedding_cache
 from learnMSA.msa_hmm import Priors
 
 
@@ -17,7 +17,7 @@ def test_embedding_cache() -> None:
     # Use float32 to avoid batch size scaling in learnMSA production,
     # float16 (default for dtype) will be used for efficiency and the batch sizes
     # will be automatically increased, which would let this test fail
-    cache = EmbeddingCache.EmbeddingCache(seq_lens, dim, dtype=np.float32)
+    cache = embedding_cache.EmbeddingCache(seq_lens, dim, dtype=np.float32)
     num_calls = [0, 0]
     def batch_size_callback(L):
         if L > 10:

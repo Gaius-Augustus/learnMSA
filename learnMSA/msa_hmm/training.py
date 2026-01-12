@@ -1,5 +1,5 @@
 import math
-from typing import TYPE_CHECKING, Sequence
+from typing import TYPE_CHECKING, Sequence 
 
 import numpy as np
 import tensorflow as tf

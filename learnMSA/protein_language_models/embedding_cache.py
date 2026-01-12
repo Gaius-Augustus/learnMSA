@@ -1,15 +1,23 @@
 import numpy as np
+from typing import Callable
+
 
 class EmbeddingCache:
-    """ A datastructure to store large amounts of embeddings space efficiently in memory by avoiding fragmentation.
-        The embeddings are stored in a single chunk of memory and can be accessed by index.
+    """ A datastructure to store large amounts of embeddings space efficiently
+        in memory by avoiding fragmentation. The embeddings are stored in a
+        single chunk of memory and can be accessed by index.
         Stores embeddings in half-precision per default.
     Args:
         seq_lens: An array that contains the lengths of the sequences.
         dim: The dimensionality of the embeddings returned by compute_emb_func.
         dtype: The data type of the embeddings.
     """
-    def __init__(self, seq_lens, dim, dtype=np.float16):
+    def __init__(
+        self,
+        seq_lens: np.ndarray,
+        dim: int,
+        dtype: type[np.floating] = np.float16,
+    ) -> None:
         self.seq_lens = seq_lens
         self.dim = dim
         self.cum_lens = np.cumsum(seq_lens)
@@ -19,18 +27,21 @@ class EmbeddingCache:
 
 
     def fill_cache(
-        self, compute_emb_func, batch_size_callback, verbose=True
-    ):
+        self, compute_emb_func: Callable, batch_size_callback: Callable, verbose=True
+    ) -> None:
         """ Fill the cache with embeddings.
         Args:
-            compute_emb_func: A function that computes the embeddings for a batch of sequence indices of the same dtype as the cache.
-            batch_size_callback: A function that returns an appropriate batch size for a given sequence length.
+            compute_emb_func: A function that computes the embeddings for a
+            batch of sequence indices of the same dtype as the cache.
+            batch_size_callback: A function that returns an appropriate batch
+            size for a given sequence length.
         """
         sorted_indices = np.argsort(-self.seq_lens)
         i = 0
         last = 0
         n = self.seq_lens.size
-        batch_size_mul = 2 if self.cache.dtype==np.float16 else 1 #double batch size if half precision for speed
+        # double batch size if half precision for speed
+        batch_size_mul = 2 if self.cache.dtype==np.float16 else 1
         while i < n:
             batch_size = batch_size_callback(self.seq_lens[sorted_indices[i]])
             batch_size *= batch_size_mul
@@ -50,7 +61,7 @@ class EmbeddingCache:
         self._filled = True
 
 
-    def get_embedding(self, i):
+    def get_embedding(self, i: int) -> np.ndarray:
         """ Get the embedding for the i-th sequence in the dataset.
         Args:
             i: The index of the sequence.
@@ -61,7 +72,7 @@ class EmbeddingCache:
         return self.cache[start:start+self.seq_lens[i]]
 
 
-    def is_filled(self):
+    def is_filled(self) -> bool:
         """ Return True if the fill_cache method has been called and get_embedding can be used, False otherwise.
         """
         return self._filled
