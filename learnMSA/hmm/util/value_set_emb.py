@@ -3,7 +3,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from learnMSA.msa_hmm.SequenceDataset import AlignedDataset
-from learnMSA.hmm.transition_index_set import PHMMTransitionIndexSet
+from learnMSA.hmm.util.transition_index_set import PHMMTransitionIndexSet
 from learnMSA.config import LanguageModelConfig
 
 

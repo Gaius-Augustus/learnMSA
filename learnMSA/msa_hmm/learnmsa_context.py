@@ -5,7 +5,7 @@ from typing import Any, Callable
 import numpy as np
 import tensorflow as tf
 
-from ..hmm import value_set
+from learnMSA.hmm.util import value_set
 import learnMSA.msa_hmm.Emitter as emit
 import learnMSA.msa_hmm.Initializers as initializers
 import learnMSA.msa_hmm.training as train

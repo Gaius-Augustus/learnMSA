@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from learnMSA.hmm.transition_index_set import PHMMTransitionIndexSet
+from learnMSA.hmm.util.transition_index_set import PHMMTransitionIndexSet
 
 
 def test_index_set() -> None:

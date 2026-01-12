@@ -3,11 +3,11 @@ import pytest
 import tensorflow as tf
 from hidten.hmm import HMMConfig as HidtenHMMConfig
 
-from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 from learnMSA.config.hmm import PHMMConfig
-from learnMSA.hmm.profile_emitter import ProfileEmitter
-from learnMSA.hmm.value_set import PHMMValueSet
-from learnMSA.hmm.tf_util import load_dirichlet
+from learnMSA.hmm.tf.profile_emitter import ProfileEmitter
+from learnMSA.hmm.tf.util import load_dirichlet
+from learnMSA.hmm.util.value_set import PHMMValueSet
+from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 
 
 @pytest.fixture

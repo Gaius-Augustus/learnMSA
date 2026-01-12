@@ -6,7 +6,7 @@ import tensorflow as tf
 from hidten.tf.emitter.multivariate_normal import (T_shapelike, T_TFTensor,
                                                    TFMVNormalEmitter)
 
-from learnMSA.hmm.value_set_emb import PHMMEmbeddingValueSet
+from learnMSA.hmm.util.value_set_emb import PHMMEmbeddingValueSet
 from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
 
 

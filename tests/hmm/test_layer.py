@@ -3,9 +3,9 @@ import pytest
 import tensorflow as tf
 
 import tests.hmm.ref as ref
-from learnMSA.hmm import prior
-from learnMSA.hmm.layer import PHMMLayer
 from learnMSA.config.hmm import PHMMPriorConfig
+from learnMSA.hmm.tf import prior
+from learnMSA.hmm.tf.layer import PHMMLayer
 
 
 @pytest.fixture

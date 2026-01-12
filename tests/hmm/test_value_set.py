@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from learnMSA.hmm.value_set import PHMMValueSet
+from learnMSA.hmm.util.value_set import PHMMValueSet
 from learnMSA.msa_hmm.SequenceDataset import AlignedDataset
 
 
