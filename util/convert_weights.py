@@ -19,6 +19,8 @@ def convert_dirichlet(name: str, legacy_alpha: np.ndarray) -> None:
     """Convert the legacy amino acid Dirichlet prior to the new format
     and save it as a weight file.
     """
+    assert not np.any(np.isnan(legacy_alpha)),\
+        "legacy_alpha contains NaN values"
     model1 = make_dirichlet_model(legacy_alpha)
     prior = model1.layers[1]
 
@@ -55,6 +57,15 @@ def convert_mvn(
     """
     # Extract dimensions
     num_components, dim = legacy_expectation.shape
+
+    # Assert no NaN values in legacy input arrays
+    assert not np.any(np.isnan(legacy_expectation)),\
+        "legacy_expectation contains NaN values"
+    assert not np.any(np.isnan(legacy_variances)),\
+        "legacy_variances contains NaN values"
+    if legacy_mixture_coefficients is not None:
+        assert not np.any(np.isnan(legacy_mixture_coefficients)),\
+            "legacy_mixture_coefficients contains NaN values"
 
     # Concatenate all parameters into initializer array
     if legacy_mixture_coefficients is None:
