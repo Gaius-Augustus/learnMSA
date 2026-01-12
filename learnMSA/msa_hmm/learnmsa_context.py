@@ -37,8 +37,9 @@ class LearnMSAContext:
     Either a SequenceDataset must be provided or the number of sequences along
     with a configuration that includes initial lengths must be specified.
     A context that is created with a SequenceDataset will be independent of
-    the dataset after initialization. In particular, the data is not a
-    dependency when serializing the context.
+    the dataset after initialization. in the sense that the dataset is not
+    stored in the context and all relevant properties depending the statistics
+    of the dataset can be serialized without requiring the original dataset.
 
     Attributes:
         data: SequenceDataset containing the sequences to align.
