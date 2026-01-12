@@ -15,7 +15,7 @@ from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
 from learnMSA.msa_hmm.model import LearnMSAModel
 from learnMSA.msa_hmm.model_surgery import do_model_surgery
 from learnMSA.msa_hmm.posterior import get_state_expectations
-from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
+from learnMSA.util.sequence_dataset import SequenceDataset
 from learnMSA.protein_language_models.MvnEmitter import \
     AminoAcidPlusMvnEmissionInitializer
 

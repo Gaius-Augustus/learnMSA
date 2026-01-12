@@ -6,7 +6,7 @@ from shutil import which
 import numpy as np
 import pandas as pd
 
-from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
+from learnMSA.util.sequence_dataset import SequenceDataset
 
 
 #computes clustering based sequence weights if mmseqs2 is installed

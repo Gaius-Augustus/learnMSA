@@ -1,7 +1,7 @@
 import os
 import tensorflow as tf
 import learnMSA.msa_hmm.DirichletMixture as dm
-from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
+from learnMSA.util.sequence_dataset import SequenceDataset
 #from learnMSA.protein_language_models.MultivariateNormalPrior import MultivariateNormalPrior, make_pdf_model
 from learnMSA.protein_language_models.BilinearSymmetric import make_scoring_model
 from learnMSA.msa_hmm.Utility import deserialize

@@ -7,7 +7,7 @@ from learnMSA.config.hmm import PHMMConfig
 from learnMSA.hmm.tf.profile_emitter import ProfileEmitter
 from learnMSA.hmm.tf.util import load_dirichlet
 from learnMSA.hmm.util.value_set import PHMMValueSet
-from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
+from learnMSA.util.sequence_dataset import SequenceDataset
 
 
 @pytest.fixture

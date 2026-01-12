@@ -7,7 +7,7 @@ from hidten.tf.emitter.categorical import (T_shapelike, T_TFTensor,
                                            TFCategoricalEmitter)
 
 from learnMSA.hmm.util.value_set import PHMMValueSet
-from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
+from learnMSA.util.sequence_dataset import SequenceDataset
 
 
 class ProfileEmitter(TFCategoricalEmitter):

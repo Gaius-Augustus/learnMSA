@@ -7,7 +7,7 @@ import numpy as np
 import tensorflow as tf
 
 import learnMSA.protein_language_models.Common as Common
-from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
+from learnMSA.util.sequence_dataset import SequenceDataset
 from learnMSA.msa_hmm.training import BatchGenerator
 from learnMSA.msa_hmm.training_util import get_adaptive_batch_size_with_language_model
 from learnMSA.protein_language_models.BilinearSymmetric import \

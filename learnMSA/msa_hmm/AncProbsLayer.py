@@ -1,7 +1,7 @@
 import tensorflow as tf
 import numpy as np
 import learnMSA.msa_hmm.Initializers as initializers
-from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
+from learnMSA.util.sequence_dataset import SequenceDataset
 from learnMSA.msa_hmm.Utility import inverse_softplus, deserialize
 
 """Ancestral Probability Layer

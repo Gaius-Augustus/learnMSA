@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from learnMSA.hmm.util.value_set import PHMMValueSet
-from learnMSA.msa_hmm.SequenceDataset import AlignedDataset
+from learnMSA.util.aligned_dataset import AlignedDataset
 
 
 def test_msa_to_counts() -> None:

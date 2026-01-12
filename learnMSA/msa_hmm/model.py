@@ -10,16 +10,17 @@ from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
 from learnMSA.msa_hmm.MsaHmmCell import MsaHmmCell
 from learnMSA.msa_hmm.MsaHmmLayer import MsaHmmLayer
 from learnMSA.msa_hmm.posterior import get_state_expectations
-from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
+from learnMSA.util.sequence_dataset import SequenceDataset
 from learnMSA.msa_hmm.training import make_dataset
 
-from learnMSA.hmm.layer import PHMMLayer
+from learnMSA.hmm.tf.layer import PHMMLayer
 
 
 class LearnMSAModel(tf.keras.Model):
     """
     Main LearnMSA model for training and decoding.
     """
+
     # enable proper type checking for __new__
     # otherwise the tf type stubs package causes trouble
     def __new__(cls, *args, **kwargs) -> "LearnMSAModel":
@@ -31,10 +32,12 @@ class LearnMSAModel(tf.keras.Model):
         Initialize the LearnMSA model.
 
         Args:
-            context (LearnMSAContext): The context containing model configuration.
+            context (LearnMSAContext): The context containing model
+                configuration.
                 Can be None only during deserialization.
             **kwargs: Additional keyword arguments for the base Model class
-                (e.g., trainable, dtype, name). These are used during deserialization.
+                (e.g., trainable, dtype, name). These are used during
+                deserialization.
         """
         # Filter out base Model kwargs before calling super().__init__()
         super().__init__(**kwargs)

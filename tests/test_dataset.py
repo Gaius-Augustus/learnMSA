@@ -5,7 +5,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from learnMSA.msa_hmm.SequenceDataset import AlignedDataset, SequenceDataset
+from learnMSA.util.sequence_dataset import SequenceDataset
+from learnMSA.util.aligned_dataset import AlignedDataset
+
 
 DIR = "tests/data/"
 

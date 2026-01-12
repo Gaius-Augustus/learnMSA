@@ -5,7 +5,6 @@ from typing import Any, Callable
 import numpy as np
 import tensorflow as tf
 
-from learnMSA.hmm.util import value_set
 import learnMSA.msa_hmm.Emitter as emit
 import learnMSA.msa_hmm.Initializers as initializers
 import learnMSA.msa_hmm.training as train
@@ -14,16 +13,18 @@ import learnMSA.msa_hmm.Transitioner as trans
 import learnMSA.protein_language_models.Common as Common
 import learnMSA.protein_language_models.EmbeddingBatchGenerator as EmbeddingBatchGenerator
 from learnMSA import Configuration
+from learnMSA.hmm.util import value_set
 from learnMSA.msa_hmm import clustering
 from learnMSA.protein_language_models.MvnEmitter import (
     AminoAcidPlusMvnEmissionInitializer, MvnEmitter)
 from learnMSA.run.util import is_small_gpu, validate_filepath
 
 from ..msa_hmm.AncProbsLayer import inverse_softplus
+from ..util.aligned_dataset import AlignedDataset
+from ..util.sequence_dataset import SequenceDataset
 from . import Priors
 from .Initializers import (ConstantInitializer, PHMMInitializerSet,
                            make_initializers_from)
-from .SequenceDataset import AlignedDataset, SequenceDataset
 
 # Type alias for model length callback
 ModelLengthsCallback = Callable[[SequenceDataset], np.ndarray]

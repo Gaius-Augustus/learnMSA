@@ -1,5 +1,5 @@
 import numpy as np
-from learnMSA.msa_hmm.SequenceDataset import AlignedDataset
+from learnMSA.util.aligned_dataset import AlignedDataset
 from learnMSA.protein_language_models import DataPipeline
 
 

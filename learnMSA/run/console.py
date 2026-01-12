@@ -92,7 +92,7 @@ def run_main():
 
 
 def convert_file(config : Configuration) -> None:
-    from ..msa_hmm.SequenceDataset import SequenceDataset
+    from ..util.sequence_dataset import SequenceDataset
 
     if config.input_output.format == "a2m":
         raise ValueError("Cannot convert to a2m format.")

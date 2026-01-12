@@ -7,7 +7,7 @@ from hidten.tf.emitter.multivariate_normal import (T_shapelike, T_TFTensor,
                                                    TFMVNormalEmitter)
 
 from learnMSA.hmm.util.value_set_emb import PHMMEmbeddingValueSet
-from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
+from learnMSA.util.sequence_dataset import SequenceDataset
 
 
 class EmbeddingEmitter(TFMVNormalEmitter):

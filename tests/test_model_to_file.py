@@ -12,7 +12,7 @@ from learnMSA.msa_hmm.Emitter import ProfileHMMEmitter
 from learnMSA.msa_hmm.Initializers import ConstantInitializer
 from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
 from learnMSA.msa_hmm.model import LearnMSAModel
-from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
+from learnMSA.util.sequence_dataset import SequenceDataset
 from learnMSA.msa_hmm.Transitioner import ProfileHMMTransitioner
 
 

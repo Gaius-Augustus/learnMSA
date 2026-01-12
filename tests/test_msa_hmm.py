@@ -9,7 +9,7 @@ from learnMSA.msa_hmm import (Emitter, Initializers, MsaHmmCell, MsaHmmLayer,
                               Transitioner, Viterbi, training)
 from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
 from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
-from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
+from learnMSA.util.sequence_dataset import SequenceDataset
 from tests.hmm import ref
 
 

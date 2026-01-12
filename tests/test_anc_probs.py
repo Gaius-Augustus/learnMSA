@@ -12,7 +12,7 @@ from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
 from learnMSA.msa_hmm.AncProbsLayer import AncProbsLayer, make_rate_matrix
 from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
 from learnMSA.msa_hmm.model import LearnMSAModel
-from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
+from learnMSA.util.sequence_dataset import SequenceDataset
 from learnMSA.msa_hmm.MsaHmmCell import MsaHmmCell
 from learnMSA.msa_hmm.MsaHmmLayer import MsaHmmLayer
 

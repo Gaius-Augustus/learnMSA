@@ -4,7 +4,7 @@ import numpy as np
 import tensorflow as tf
 
 import learnMSA.msa_hmm.training as train
-from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
+from learnMSA.util.sequence_dataset import SequenceDataset
 
 
 def get_state_expectations(

@@ -12,7 +12,7 @@ from learnMSA.msa_hmm.AlignmentModel import (AlignmentModel,
                                              non_homogeneous_mask_func)
 from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
 from learnMSA.msa_hmm.model import LearnMSAModel
-from learnMSA.msa_hmm.SequenceDataset import AlignedDataset, SequenceDataset
+from learnMSA.util.aligned_dataset import AlignedDataset, SequenceDataset
 
 
 def string_to_one_hot(s : str) -> tf.Tensor:

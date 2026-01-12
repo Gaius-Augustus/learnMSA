@@ -15,7 +15,7 @@ import learnMSA.msa_hmm.training as train
 import learnMSA.msa_hmm.Transitioner as trans
 from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
 from learnMSA.msa_hmm.model import LearnMSAModel
-from learnMSA.msa_hmm.SequenceDataset import AlignedDataset, SequenceDataset
+from learnMSA.util.aligned_dataset import AlignedDataset, SequenceDataset
 
 
 # utility class used in AlignmentModel storing useful information on a

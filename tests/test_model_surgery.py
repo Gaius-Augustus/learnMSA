@@ -10,7 +10,7 @@ from learnMSA.msa_hmm import Emitter, Initializers, Transitioner, training
 from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
 from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
 from learnMSA.msa_hmm.model import LearnMSAModel
-from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
+from learnMSA.util.sequence_dataset import SequenceDataset
 
 
 def assert_vec(x : np.ndarray, y: np.ndarray) -> None:

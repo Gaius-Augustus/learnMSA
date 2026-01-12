@@ -9,7 +9,7 @@ from learnMSA import Configuration
 from learnMSA.config import (InitMSAConfig, InputOutputConfig,
                              LanguageModelConfig, TrainingConfig)
 from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
-from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
+from learnMSA.util.sequence_dataset import SequenceDataset
 from learnMSA.run.util import get_batch_multiplicator, is_small_gpu
 
 DIR = "tests/data/"

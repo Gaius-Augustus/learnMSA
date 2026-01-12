@@ -8,7 +8,7 @@ from tensorflow.keras.initializers import Initializer
 
 import learnMSA.msa_hmm.DirichletMixture as dm
 from learnMSA.hmm.util.value_set import PHMMTransitionIndexSet, PHMMValueSet
-from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
+from learnMSA.util.sequence_dataset import SequenceDataset
 from learnMSA.msa_hmm.Utility import LG_paml, inverse_softplus, parse_paml
 
 

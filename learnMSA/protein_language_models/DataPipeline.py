@@ -2,7 +2,7 @@ import os
 import numpy as np
 import sys
 sys.path.insert(1, "../..")
-from learnMSA.msa_hmm.SequenceDataset import AlignedDataset
+from learnMSA.util.aligned_dataset import AlignedDataset
 import learnMSA.protein_language_models.Common as Common
 import pandas as pd
 import tensorflow as tf

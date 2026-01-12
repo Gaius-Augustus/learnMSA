@@ -15,7 +15,7 @@ from learnMSA.hmm.tf.transitioner import PHMMTransitioner
 from learnMSA.hmm.tf.util import load_dirichlet, load_mvn
 from learnMSA.hmm.util.value_set import PHMMValueSet
 from learnMSA.hmm.util.value_set_emb import PHMMEmbeddingValueSet
-from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
+from learnMSA.util.sequence_dataset import SequenceDataset
 
 
 class PHMMLayer(tf.keras.Layer):

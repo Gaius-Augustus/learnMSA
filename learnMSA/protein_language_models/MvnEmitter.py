@@ -1,7 +1,7 @@
 import tensorflow as tf
 import numpy as np
 import os
-from learnMSA.msa_hmm.SequenceDataset import SequenceDataset
+from learnMSA.util.sequence_dataset import SequenceDataset
 from learnMSA.msa_hmm.Emitter import ProfileHMMEmitter
 import learnMSA.msa_hmm.Initializers as Initializers
 import learnMSA.msa_hmm.Priors as priors
