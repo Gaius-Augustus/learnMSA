@@ -7,6 +7,9 @@ from pydantic import BaseModel, field_validator
 class PHMMPriorConfig(BaseModel):
     """HMM prior parameters for transition priors."""
 
+    use_amino_acid_prior: bool = True
+    """Whether to use a Dirichlet prior for emissions."""
+
     alpha_flank: float = 7000.0
     """Alpha parameter for flank prior. Favors high probability of staying in flanking states."""
 
@@ -48,6 +51,11 @@ class PHMMConfig(BaseModel):
 
     alphabet: str = "ARNDCQEGHILKMFPSTWYVXUO"
     """The alphabet used in the HMM emissions."""
+
+    @property
+    def alphabet_size(self) -> int:
+        """The size of the alphabet."""
+        return len(self.alphabet)
 
     background_distribution: Sequence[float] = [
         8.34333437e-02, 5.19266823e-02, 4.93510863e-02, 4.65871696e-02,

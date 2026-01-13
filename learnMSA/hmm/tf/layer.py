@@ -50,12 +50,16 @@ class PHMMLayer(tf.keras.Layer):
         config : PHMMConfig,
         prior_config: PHMMPriorConfig | None = None,
         plm_config: LanguageModelConfig | None = None,
+        use_prior: bool = True,
         **kwargs
     ) -> None:
         """
         Args:
             lengths: The number of match states in each head of the pHMM.
             config: HMM configuration parameters.
+            prior_config: Prior configuration parameters.
+            plm_config: Protein language model configuration.
+            use_prior: Whether to use priors for regularization.
         """
         super().__init__(**kwargs)
         self.lengths = np.asarray(lengths, dtype=np.int32)
@@ -64,25 +68,31 @@ class PHMMLayer(tf.keras.Layer):
             prior_config = PHMMPriorConfig()
         self.prior_config = prior_config
         self.plm_config = plm_config
+        self.use_prior = use_prior
 
         values = [
             PHMMValueSet.from_config(L, h, config)
             for h, L in enumerate(lengths)
         ]
 
-        # Set up the Dirichlet prior for emissions
-        emission_prior = load_dirichlet(
-            "amino_acid_dirichlet.weights",
-            dim = len(SequenceDataset.alphabet)-1
-        )
-        # Share concentrations across all states
-        emission_prior.share = np.tile(
-            np.arange(len(SequenceDataset.alphabet)-1),
-            reps=2 * sum(lengths) + 2 * len(lengths)
-        )
+        if self.prior_config.use_amino_acid_prior:
+            # Set up the Dirichlet prior for emissions
+            emission_prior = load_dirichlet(
+                "amino_acid_dirichlet.weights",
+                dim = len(SequenceDataset.alphabet)-1
+            )
+            # Share concentrations across all states
+            emission_prior.share = np.tile(
+                np.arange(len(SequenceDataset.alphabet)-1),
+                reps=2 * sum(lengths) + 2 * len(lengths)
+            )
 
         # Override emission values with prior distribution if requested
         if config.use_prior_for_emission_init:
+            assert self.prior_config.use_amino_acid_prior, (
+                "Cannot use prior for emission initialization if no "
+                "emission prior is set."
+            )
             values = self._override_emissions_with_prior(values, emission_prior)
 
         # Create the HMM, with 2*L+2 states per head
@@ -92,14 +102,16 @@ class PHMMLayer(tf.keras.Layer):
         self.hmm.transitioner = PHMMTransitioner(
             values = values
         )
-        self.hmm.transitioner.prior = TFPHMMTransitionPrior(
-            lengths, prior_config
-        )
+        if self.use_prior:
+            self.hmm.transitioner.prior = TFPHMMTransitionPrior(
+                lengths, prior_config
+            )
 
         # Add the profile emitter
         profile_emitter = ProfileEmitter(values=values)
         self.hmm.add_emitter(profile_emitter)
-        profile_emitter.prior = emission_prior
+        if self.use_prior and self.prior_config.use_amino_acid_prior:
+            profile_emitter.prior = emission_prior
 
         if self.plm_config != None and self.plm_config.use_language_model:
             # Create embedding value sets
@@ -136,7 +148,8 @@ class PHMMLayer(tf.keras.Layer):
             # Add the embedding emitter
             embedding_emitter = EmbeddingEmitter(values=embedding_values)
             self.hmm.add_emitter(embedding_emitter)
-            embedding_emitter.prior = combined_prior
+            if self.use_prior:
+                embedding_emitter.prior = combined_prior
 
         # Add the padding emitter
         self.hmm.add_emitter(TFPaddingEmitter())

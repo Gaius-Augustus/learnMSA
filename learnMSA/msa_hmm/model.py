@@ -1,19 +1,18 @@
 import math
-from typing import override
+from typing import Any, Literal, override
 
 import numpy as np
 import tensorflow as tf
 
 import learnMSA.msa_hmm.Viterbi as viterbi
+from learnMSA.hmm.tf.layer import PHMMLayer
 from learnMSA.msa_hmm.AncProbsLayer import AncProbsLayer
 from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
 from learnMSA.msa_hmm.MsaHmmCell import MsaHmmCell
 from learnMSA.msa_hmm.MsaHmmLayer import MsaHmmLayer
 from learnMSA.msa_hmm.posterior import get_state_expectations
-from learnMSA.util.sequence_dataset import SequenceDataset
 from learnMSA.msa_hmm.training import make_dataset
-
-from learnMSA.hmm.tf.layer import PHMMLayer
+from learnMSA.util.sequence_dataset import SequenceDataset
 
 
 class LearnMSAModel(tf.keras.Model):
@@ -45,8 +44,6 @@ class LearnMSAModel(tf.keras.Model):
         self.context = context
         train_cfg = context.config.training
 
-        self.encoder_layers = []
-
         # Create the ancestor probabilities layer
         if train_cfg.use_anc_probs:
             if len(context.encoder_initializer) > 3:
@@ -70,13 +67,13 @@ class LearnMSAModel(tf.keras.Model):
                 transposed=train_cfg.transposed,
                 clusters=context.clusters
             )
-            self.encoder_layers.append(self.anc_probs_layer)
 
         self.phmm_layer = PHMMLayer(
             context.model_lengths,
             config = context.config.hmm,
             prior_config = context.config.hmm_prior,
             plm_config = context.config.language_model,
+            use_prior = context.config.training.use_prior,
         )
 
         # Metrics trackers
@@ -84,7 +81,11 @@ class LearnMSAModel(tf.keras.Model):
         self.loglik_tracker = tf.keras.metrics.Mean(name='loglik')
         self.prior_tracker = tf.keras.metrics.Mean(name='prior')
 
-    def call(self, inputs, training=None):
+    def call(
+        self,
+        inputs: tuple[tf.Tensor | np.ndarray, ...],
+        training: bool|None=None,
+    ) -> tuple[tf.Tensor, ...]:
         """
         Forward pass of the model.
 
@@ -101,15 +102,65 @@ class LearnMSAModel(tf.keras.Model):
             - Without prior: (loglik, aggregated_loglik)
             - With prior: (loglik, aggregated_loglik, prior, aux_loss)
         """
+        # Pass through encoder layers
+        forward_seq = self.encode_batch(inputs, training=training)
+
+        # transpose back
+        # TODO: clean up later, no transpose should be necessary
+        forward_seq = tf.transpose(forward_seq, [1, 2, 0, 3])
+        if self.context.config.language_model.use_language_model:
+            embeddings = inputs[-1]
+            embeddings = tf.transpose(embeddings, [0, 2, 1, 3])
+        else:
+            embeddings = None
+
+        padding = 1 - forward_seq[:, :, :, -1:]
+        forward_seq = forward_seq[:, :, :, :-1]
+
+        output = self.phmm_layer(
+            forward_seq, embeddings=embeddings, padding=padding
+        )[..., 0]
+
+        return output
+
+    def encode_batch(
+        self,
+        inputs: tuple[tf.Tensor | np.ndarray, ...],
+        training: bool|None=None,
+    ) -> tf.Tensor:
+        """
+        Encodes a batch of sequences with the ancestor probabilities layer,
+        i.e. computes the HMM inputs.
+
+        Args:
+            inputs: Tuple of (sequences, indices) where:
+                   - sequences: shape (batch, num_models, seq_length)
+                   - indices: shape (batch, num_models)
+                   - embeddings: shape (batch, num_models, seq_length, dim)
+                        If in language model mode. (not used)
+            training: Boolean indicating training mode.
+
+        Returns:
+            A tensor with the ancestral probabilities of the input sequences
+            as inputs to the pHMM layer.
+        """
         if self.context.config.language_model.use_language_model:
             sequences, indices, embeddings = inputs
         else:
             sequences, indices = inputs
             embeddings = None
 
+        # Broadcast in the number of heads if necessary
+        n = self.context.config.training.num_model
+        if sequences.shape[1] == 1 and n > 1:
+            sequences = tf.tile(sequences, [1, n, 1])
+            indices = tf.tile(indices, [1, n])
+            if embeddings is not None:
+                embeddings = tf.tile(embeddings, [1, n, 1, 1])
+
         # Transpose: (batch, num_models, L) -> (num_models, batch, L)
         # In the input pipeline, we need the batch dimension to come first to
-        # make multi GPU work we transpose here, because all learnMSA layers
+        # make multi GPU work. We transpose here, because all learnMSA layers
         # require the model dimension to come first
         # TODO: clean this up; hidten does not use heads first order anymore;
         # needs merging of tree branch first
@@ -117,32 +168,29 @@ class LearnMSAModel(tf.keras.Model):
         transposed_indices = tf.transpose(indices, [1, 0])
 
         # Pass through encoder layers
-        forward_seq = transposed_sequences
-        for layer in self.encoder_layers:
-            forward_seq = layer(forward_seq, transposed_indices, training=training)
-
-        # transpose back
-        # TODO: clean up later
-        forward_seq = tf.transpose(forward_seq, [1, 0, 2, 3])
-
-        padding = 1 - forward_seq[:, :, :, -1:]
-        forward_seq = forward_seq[:, :, :, :-1]
-
-        if embeddings is not None:
-            hmm_inputs = [forward_seq, embeddings, padding]
+        encoded_seq = transposed_sequences
+        if self.context.config.training.use_anc_probs:
+            encoded_seq = self.anc_probs_layer(
+                encoded_seq, rate_indices=transposed_indices, training=training # type: ignore
+            )
         else:
-            hmm_inputs = [forward_seq, padding]
-
-        return self.phmm_layer(hmm_inputs)
+            encoded_seq = tf.one_hot(
+                encoded_seq,
+                depth=self.context.config.hmm.alphabet_size+1, # including padding
+                dtype=self.phmm_layer.dtype
+            )
+        return encoded_seq
 
     @override
-    def build(self, batch_size: int | None = None):
+    def build(self, input_shapes: tuple[tuple[int | None, ...], ...]):
         """
         Build the model based on the input shape.
 
         Args:
             input_shape: Shape of the input data.
         """
+        batch_size = input_shapes[0][0]
+        s = self.context.config.hmm.alphabet_size
         n = self.context.config.training.num_model
         seq_shape_t = (n, batch_size, None)
         ind_shape_t = (n, batch_size)
@@ -154,7 +202,7 @@ class LearnMSAModel(tf.keras.Model):
             emb_dim = self.context.config.language_model.scoring_model_dim
             self.phmm_layer.build(
                 input_shape=(
-                    (batch_size, None, n, len(SequenceDataset.alphabet)-1),
+                    (batch_size, None, n, s),
                     (batch_size, None, n, emb_dim),
                     (batch_size, None, n, 1),
                 )
@@ -162,7 +210,7 @@ class LearnMSAModel(tf.keras.Model):
         else:
             self.phmm_layer.build(
                 input_shape=(
-                    (batch_size, None, n, len(SequenceDataset.alphabet)-1),
+                    (batch_size, None, n, s),
                     (batch_size, None, n, 1),
                 )
             )
@@ -208,46 +256,80 @@ class LearnMSAModel(tf.keras.Model):
         self.phmm_layer.loglik_mode()
         self.context.batch_gen.configure(data, self.context)
         self._print_train_header(indices, batch_size, data)
-
         dataset = make_dataset(
             indices,
             self.context.batch_gen,
             batch_size,
             shuffle=True
         )
-        terminate_on_nan = tf.keras.callbacks.TerminateOnNaN()
-        early_stopping = tf.keras.callbacks.EarlyStopping("loss", patience=1)
-        callbacks += [terminate_on_nan, early_stopping]
-
-        # Find the number of epochs for this iteration
-        last_iteration = (
-            iteration == self.context.config.training.max_iterations - 1
-        )
-        epochs = self.context.config.training.epochs[
-            0 if iteration==0 else 1 if not last_iteration else 2
-        ]
-        verbose_level: int = 2 if self.context.config.input_output.verbose else 0
-        steps = min(max(10, int(100*np.sqrt(indices.shape[0])/batch_size)), 500)
         history = super().fit(
             dataset,
-            epochs=epochs,
-            steps_per_epoch=steps,
-            callbacks=callbacks,
-            verbose=verbose_level
+            epochs=self.get_num_epochs(iteration),
+            steps_per_epoch=self.get_num_steps(indices.shape[0], batch_size),
+            callbacks=callbacks + self.get_train_callbacks(),
+            verbose=self.get_verbosity(),
         )
-
-        # Check if the last reported loss is NaN and terminate if so
-        if history.history and "loss" in history.history:
-            final_loss = history.history['loss'][-1]
-            if math.isnan(final_loss):
-                error_msg = "Training terminated: Final loss is NaN. Loss history: "\
-                    f"{history.history['loss']}"
-                raise ValueError(error_msg)
-
-        if self.context.config.input_output.verbose:
-            print("Fitted model successfully.")
-
+        self._check_training_complete(history)
         return history
+
+    def compute_loss(
+        self,
+        x: Any,
+        y: Any,
+        y_pred: tf.Tensor,
+        sample_weight: tf.Tensor | None = None,
+    ) -> tf.Tensor:
+        """
+        Compute the total loss which combines likelihood and prior.
+        """
+        # Unstack the inputs
+        if self.context.config.language_model.use_language_model:
+            _sequences, indices, _embeddings = x
+        else:
+            _sequences, indices = x
+
+        # Apply sequence weights if provided
+        if self.context.sequence_weights is not None:
+            weights = tf.gather(
+                tf.convert_to_tensor(
+                    self.context.sequence_weights, dtype=tf.float32
+                ),
+                indices,
+            )
+            weighted_y_pred = y_pred * weights
+            weighted_y_pred /= tf.reduce_sum(weights, axis=0)
+            total_weight_sum = self.context.sequence_weights.sum()
+        else:
+            weighted_y_pred = y_pred
+            total_weight_sum = self.context.num_seq
+
+        # Reduce over the sequence dimension
+        weighted_loglik = tf.reduce_sum(weighted_y_pred, axis=0) # (H,)
+        weighted_loglik_mean = tf.reduce_mean(weighted_loglik)
+
+        # Compute the full loss
+        log_prior = self.phmm_layer.prior_scores()
+        log_prior /= tf.cast(total_weight_sum, tf.float32) # Scale prior
+        log_prior_mean = tf.reduce_mean(log_prior)
+
+        loss = - weighted_loglik_mean - log_prior_mean
+
+        self.loss_tracker.update_state(loss)
+        self.loglik_tracker.update_state(-weighted_loglik_mean)
+        self.prior_tracker.update_state(-log_prior_mean)
+
+        return loss
+
+    def reset_metrics(self) -> None:
+        """Reset all metric trackers."""
+        self.loss_tracker.reset_state()
+        self.loglik_tracker.reset_state()
+        self.prior_tracker.reset_state()
+        self.aux_loss_tracker.reset_state()
+
+    @property
+    def metrics(self):
+        return [self.loss_tracker, self.loglik_tracker, self.prior_tracker]
 
     def decode(
         self,
@@ -300,47 +382,58 @@ class LearnMSAModel(tf.keras.Model):
             shuffle=True
         )
 
-    def loglik(self, y_pred):
-        """Extract log-likelihood from predictions."""
-        return y_pred[1]
-
-    def prior(self, y_pred):
-        """Extract prior from predictions."""
-        return tf.reduce_mean(y_pred[2])
-
-    def compute_loss(self, x, y, y_pred, sample_weight):
+    def get_num_epochs(self, iteration: int) -> int:
         """
-        Compute the total loss including likelihood, prior, and auxiliary losses.
-        """
-        if len(y_pred) == 4:
-            loss = -self.loglik(y_pred) - self.prior(y_pred)
-        else:
-            loss = -self.loglik(y_pred)
-        loss += sum(self.losses)
-        self.loss_tracker.update_state(loss)
-        return loss
+        Determine the number of epochs for the current training iteration.
 
-    def compute_metrics(self, x, y, y_pred, sample_weight):
-        """
-        Compute and return metrics for monitoring training.
-        """
-        metric_results = {"loss": self.loss_tracker.result()}
-        self.loglik_tracker.update_state(self.loglik(y_pred))
-        metric_results["loglik"] = self.loglik_tracker.result()
-        if len(y_pred) == 4:
-            self.use_prior = True
-            self.prior_tracker.update_state(self.prior(y_pred))
-            self.aux_loss_tracker.update_state(self.aux_loss(y_pred))
-            metric_results["prior"] = self.prior_tracker.result()
-            metric_results["aux_loss"] = self.aux_loss_tracker.result()
-        return metric_results
+        Args:
+            iteration: Current iteration number in the training loop.
 
-    def reset_metrics(self):
-        """Reset all metric trackers."""
-        self.loss_tracker.reset_state()
-        self.loglik_tracker.reset_state()
-        self.prior_tracker.reset_state()
-        self.aux_loss_tracker.reset_state()
+        Returns:
+            Number of epochs to train for this iteration.
+        """
+        last_iteration = (
+            iteration == self.context.config.training.max_iterations - 1
+        )
+        epochs = self.context.config.training.epochs[
+            0 if iteration==0 else 1 if not last_iteration else 2
+        ]
+        return epochs
+
+    def get_num_steps(self, num_sequences: int, batch_size: int) -> int:
+        """
+        Determine the number of steps per epoch based on the number of sequences
+        and batch size.
+
+        Args:
+            num_sequences: Total number of sequences to train on.
+            batch_size: Number of sequences per batch.
+
+        Returns:
+            Number of steps per epoch.
+        """
+        return min(max(10, int(100*np.sqrt(num_sequences)/batch_size)), 500)
+
+    def get_train_callbacks(self) -> list[tf.keras.callbacks.Callback]:
+        """
+        Create and return a list of standard training callbacks
+        (early stopping, terminate on NaN).
+
+        Returns:
+            List of Keras callbacks for training.
+        """
+        terminate_on_nan = tf.keras.callbacks.TerminateOnNaN()
+        early_stopping = tf.keras.callbacks.EarlyStopping("loss", patience=1)
+        return [terminate_on_nan, early_stopping]
+
+    def get_verbosity(self) -> Literal[0, 2]:
+        """
+        Determine the verbosity level for training output.
+
+        Returns:
+            Verbosity level (0 for silent, 2 for verbose).
+        """
+        return 2 if self.context.config.input_output.verbose else 0
 
     def get_config(self):
         """
@@ -421,34 +514,21 @@ class LearnMSAModel(tf.keras.Model):
             else:
                 print("Using GPU.")
 
+    def _check_training_complete(
+        self,
+        history: tf.keras.callbacks.History
+    ) -> None:
+        # Check if the last reported loss is NaN and terminate if so
+        if history.history and "loss" in history.history:
+            final_loss = history.history['loss'][-1]
+            if math.isnan(final_loss):
+                error_msg = "Training terminated: Final loss is NaN."\
+                    f" Loss history: {history.history['loss']}"
+                raise ValueError(error_msg)
 
-class PermuteSeqs(tf.keras.layers.Layer):
-    """Layer for transposing tensor dimensions."""
-
-    def __init__(self, perm, **kwargs):
-        super(PermuteSeqs, self).__init__(**kwargs)
-        self.perm = perm
-
-    def call(self, sequences):
-        return tf.transpose(sequences, self.perm)
-
-    def get_config(self):
-        config = super().get_config()
-        config.update({"perm": self.perm})
-        return config
-
-
-class Identity(tf.keras.layers.Layer):
-    """Identity layer that passes input through unchanged."""
-
-    def call(self, x):
-        return x
-
-    def get_config(self):
-        return super().get_config()
+        if self.context.config.input_output.verbose:
+            print("Fitted model successfully.")
 
 
 # Register custom objects for serialization
 tf.keras.utils.get_custom_objects()["LearnMSAModel"] = LearnMSAModel
-tf.keras.utils.get_custom_objects()["PermuteSeqs"] = PermuteSeqs
-tf.keras.utils.get_custom_objects()["Identity"] = Identity

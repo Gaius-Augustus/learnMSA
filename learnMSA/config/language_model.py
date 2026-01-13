@@ -62,7 +62,7 @@ class LanguageModelConfig(BaseModel):
         """
         return (
             f"{self.language_model}_{self.scoring_model_dim}_reduced_"
-            f"_mix{self.embedding_prior_components}_"
+            f"mix{self.embedding_prior_components}_"
             f"{self.scoring_model_activation}"
         )
 

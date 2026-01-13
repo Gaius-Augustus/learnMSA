@@ -25,7 +25,7 @@ def layer() -> PHMMLayer:
 @pytest.fixture
 def seq() -> tf.Tensor:
     """Fixture for a test sequence tensor."""
-    # Test sequence: [0, 1, 0, 2] with alphabet size 3
+    # Test sequence: [0, 1, 0, P] with alphabet size 2 and padding P
     # This is binary (0/1) emissions with an extra padding symbol
     return tf.constant(
         [[[1, 0], [0, 1], [1, 0], [0, 0]]], dtype=tf.float32
