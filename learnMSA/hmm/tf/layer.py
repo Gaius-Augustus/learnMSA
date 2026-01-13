@@ -169,6 +169,21 @@ class PHMMLayer(tf.keras.Layer):
         """
         self._mode = HMMMode.POSTERIOR
 
+    def is_loglik_mode(self) -> bool:
+        """Check if the layer is in log-likelihood mode.
+        """
+        return self._mode == HMMMode.LIKELIHOOD_LOG
+
+    def is_viterbi_mode(self) -> bool:
+        """Check if the layer is in Viterbi mode.
+        """
+        return self._mode == HMMMode.VITERBI
+
+    def is_posterior_mode(self) -> bool:
+        """Check if the layer is in posterior mode.
+        """
+        return self._mode == HMMMode.POSTERIOR
+
     def build(self, input_shape: T_shapelike) -> None:
         self.hmm.build(input_shape)
 

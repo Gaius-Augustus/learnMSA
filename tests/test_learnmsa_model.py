@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 import tensorflow as tf
 
+from learnMSA.hmm.tf import layer
 import tests.hmm.ref as ref
 from learnMSA.config import Configuration, TrainingConfig
 from learnMSA.config.hmm import PHMMPriorConfig
@@ -196,8 +197,65 @@ def test_compute_loss_binary(context_binary: LearnMSAContext) -> None:
     # the same likelihood
     loss_log_lik = -np.log(ref.likelihoods).mean()
     assert context_binary.sequence_weights is not None
-    tws = context_binary.sequence_weights.sum()
     loss_log_prior = -model.phmm_layer.prior_scores().numpy().mean()\
         / context_binary.sequence_weights.sum()
 
     np.testing.assert_allclose(loss.numpy(), loss_log_lik + loss_log_prior)
+
+def test_viterbi_on_batch(context_binary: LearnMSAContext) -> None:
+    # Test that the viterbi_on_batch method runs without errors.
+    model = LearnMSAModel(context_binary)
+    model.viterbi_mode()
+
+    seq = tf.constant(
+        [[0, 1, 0, 2]], dtype=tf.int32
+    ) # (1, T)
+    seq = tf.expand_dims(seq, axis=2)  # add head dimension
+
+    # TODO learnMSA currently expects shape (B, H, T, S) --- FIX LATER ---
+    # so we need to swap axes here
+    seq = tf.keras.ops.swapaxes(seq, 1, 2)
+
+    viterbi_seq = model((seq, tf.constant([[0]])))
+
+    np.testing.assert_equal(viterbi_seq[0, :, 0], ref.viterbi_a)
+    np.testing.assert_equal(viterbi_seq[0, :, 1], ref.viterbi_b)
+
+def test_posterior_on_batch(context_binary: LearnMSAContext) -> None:
+    # Test that the posterior_on_batch method runs without errors.
+    model = LearnMSAModel(context_binary)
+    model.posterior_mode()
+
+    seq = tf.constant(
+        [[0, 1, 0, 2]], dtype=tf.int32
+    ) # (1, T)
+    seq = tf.expand_dims(seq, axis=2)  # add head dimension
+
+    # TODO learnMSA currently expects shape (B, H, T, S) --- FIX LATER ---
+    # so we need to swap axes here
+    seq = tf.keras.ops.swapaxes(seq, 1, 2)
+
+    posterior = model((seq, tf.constant([[0]])))
+
+    np.testing.assert_allclose(
+        posterior[0,:,0,:],
+        ref.posterior_a,
+        rtol=1e-3,
+        atol=1e-4,
+        err_msg="Posterior probabilities do not match reference for model A"
+    )
+    np.testing.assert_allclose(
+        posterior[0,:,1,:model.phmm_layer.hmm.config.states[1]],
+        ref.posterior_b[..., :-1],
+        rtol=1e-3,
+        atol=1e-4,
+        err_msg="Posterior probabilities do not match reference for model B"
+    )
+    np.testing.assert_allclose(
+        posterior[0,:,1,-1],
+        ref.posterior_b[..., -1],
+        rtol=1e-3,
+        atol=1e-4,
+        err_msg="Padding state posterior probabilities do not match reference "\
+            "for model B"
+    )

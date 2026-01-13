@@ -81,6 +81,21 @@ class LearnMSAModel(tf.keras.Model):
         self.loglik_tracker = tf.keras.metrics.Mean(name='loglik')
         self.prior_tracker = tf.keras.metrics.Mean(name='prior')
 
+    def loglik_mode(self) -> None:
+        """Makes the model return log-likelihoods.
+        """
+        self.phmm_layer.loglik_mode()
+
+    def viterbi_mode(self) -> None:
+        """Makes the model return Viterbi paths.
+        """
+        self.phmm_layer.viterbi_mode()
+
+    def posterior_mode(self) -> None:
+        """Makes the model return state posterior probabilities.
+        """
+        self.phmm_layer.posterior_mode()
+
     def call(
         self,
         inputs: tuple[tf.Tensor | np.ndarray, ...],
@@ -119,7 +134,10 @@ class LearnMSAModel(tf.keras.Model):
 
         output = self.phmm_layer(
             forward_seq, embeddings=embeddings, padding=padding
-        )[..., 0]
+        )
+
+        if self.phmm_layer.is_loglik_mode():
+            output = tf.squeeze(output, axis=-1)
 
         return output
 
