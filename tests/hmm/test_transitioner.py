@@ -132,3 +132,38 @@ def test_construct_big_transitioner(hmm_config: HidtenHMMConfig) -> None:
     S = transitioner.start_dist()
     t1 = time.perf_counter()
     print(f"Start dist time: {t1-t0:.4f}s")
+
+def test_head_subset(hmm_config: HidtenHMMConfig) -> None:
+    lengths = [4, 3]
+
+    # Create value sets for different heads
+    values = [
+        PHMMValueSet.from_config(L, h, ref.config)
+        for h, L in enumerate(lengths)
+    ]
+
+    transitioner = PHMMTransitioner(values=values)
+    transitioner.hmm_config = hmm_config
+    transitioner.build()
+
+    assert transitioner.matrix().shape[0] == 2  # two heads
+
+    # Set head subset to only head 1
+    transitioner.head_subset = [1]
+
+    S = transitioner.start_dist()
+    A = transitioner.matrix()
+
+    assert S.shape == (1, hmm_config.states[1] + 1)
+    assert A.shape == (1, hmm_config.states[1] + 1, hmm_config.states[1] + 1)
+
+    np.testing.assert_allclose(
+        S[0, :hmm_config.states[1]], ref.start_b[:-1], atol=1e-6
+    )
+    np.testing.assert_allclose(
+        S[0, -1], ref.start_b[-1], atol=1e-6
+    )
+
+    np.testing.assert_allclose(
+        A[0], ref.transitions_b, atol=1e-6
+    )

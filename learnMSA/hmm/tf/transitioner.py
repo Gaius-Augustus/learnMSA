@@ -103,12 +103,14 @@ class PHMMTransitioner(TFTransitioner):
     """
     @property
     def max_states(self) -> int:
-        """The maximum number of states across all heads."""
+        """The maximum number of states across all heads. May be restricted
+        by head_subset."""
         return self.hmm_config.max_states + 1
 
     @property
     def states(self) -> list[int]:
-        """The number of states for each head."""
+        """The number of states for each head. May be restricted
+        by head_subset."""
         return [Q+1 for Q in self.hmm_config.states]
 
     @property
@@ -118,6 +120,9 @@ class PHMMTransitioner(TFTransitioner):
     @prior.setter
     def prior(self, prior: "Prior[T_TFTensor]") -> None:
         self.explicit_transitioner.prior = prior
+
+    head_subset : Sequence[int] | None = None
+    """If set, only these heads are used in computations."""
 
     def __init__(
         self,
@@ -196,7 +201,7 @@ class PHMMTransitioner(TFTransitioner):
     def matrix(self) -> T_TFTensor:
         # Construct the matrix like usual in the transitioner, but instead of
         # using a parameter kernel, we use the folded transition probabilities
-        return tf.math.exp(shared_tensor(
+        matrix = tf.math.exp(shared_tensor(
             indices=tf.constant(self.allow, dtype=tf.int64),
             values=self._get_folded_transition_probs(),
             shape=tf.constant(
@@ -205,12 +210,26 @@ class PHMMTransitioner(TFTransitioner):
             ),
             share=None,
         ))
+        if self.head_subset is not None:
+            # Select only the specified heads
+            matrix = tf.gather(matrix, self.head_subset, axis=0)
+            max_states_subset = max(
+                [self.hmm_config.states[h] for h in self.head_subset]
+            )
+            terminal_state_in = matrix[:, :max_states_subset, -1:]
+            terminal_state_out = tf.one_hot(
+                [[max_states_subset]], depth=max_states_subset+1
+            )
+            matrix = matrix[:, :max_states_subset, :max_states_subset]
+            matrix = tf.concat([matrix, terminal_state_in], axis=2)
+            matrix = tf.concat([matrix, terminal_state_out], axis=1)
+        return matrix
 
     @override
     def start_dist(self) -> T_TFTensor:
         # Same principle: construct start distribution from explicit transition
         # probabilities
-        return tf.math.exp(shared_tensor(
+        start_dist = tf.math.exp(shared_tensor(
             indices=tf.constant(self.allow_start, dtype=tf.int64),
             values=self._get_folded_start_probs(),
             shape=tf.constant(
@@ -219,6 +238,16 @@ class PHMMTransitioner(TFTransitioner):
             ),
             share=None,
         ))
+        if self.head_subset is not None:
+            # Select only the specified heads
+            start_dist = tf.gather(start_dist, self.head_subset, axis=0)
+            max_states_subset = max(
+                [self.hmm_config.states[h] for h in self.head_subset]
+            )
+            terminal_state = start_dist[:, -1:]
+            start_dist = start_dist[:, :max_states_subset]
+            start_dist = tf.concat([start_dist, terminal_state], axis=1)
+        return start_dist
 
     @override
     def prior_scores(self) -> T_TFTensor:

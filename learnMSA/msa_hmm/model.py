@@ -358,6 +358,8 @@ class LearnMSAModel(tf.keras.Model):
         non_homogeneous_mask_func=None,
     ) -> np.ndarray:
         self.phmm_layer.viterbi_mode()
+        assert non_homogeneous_mask_func is None, \
+            "Non-homogeneous decoding not implemented yet."
         data = make_dataset(
             sorted_indices[:,0],
             batch_generator,
@@ -387,18 +389,6 @@ class LearnMSAModel(tf.keras.Model):
         ).numpy()
         self.encode_only = False
         return expected_states
-
-    def get_data(
-        self,
-        indices: np.ndarray,
-        batch_size: int,
-    ) -> tf.data.Dataset:
-        make_dataset(
-            indices,
-            self.context.batch_gen,
-            batch_size,
-            shuffle=True
-        )
 
     def get_num_epochs(self, iteration: int) -> int:
         """
