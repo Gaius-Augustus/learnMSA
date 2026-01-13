@@ -791,3 +791,20 @@ def test_prior_values() -> None:
         err_msg="Full prior (sum of all components) does not match expected "
         "value"
     )
+
+def test_head_subset(
+    layer: PHMMLayer, seq: tf.Tensor, padding: tf.Tensor
+) -> None:
+    layer.head_subset = [1]  # Only use head 1
+
+    loglik = layer(seq, padding).numpy()
+    layer.posterior_mode()
+    posterior = layer(seq, padding).numpy()
+    layer.viterbi_mode()
+    viterbi_paths = layer(seq, padding).numpy()
+
+    np.testing.assert_allclose(loglik, np.log(ref.likelihoods[1]))
+    np.testing.assert_allclose(
+        posterior[0,:,0,:], ref.posterior_b, rtol=1e-3, atol=1e-4
+    )
+    np.testing.assert_equal(viterbi_paths[0,:,0], ref.viterbi_b)

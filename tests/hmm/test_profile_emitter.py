@@ -174,3 +174,32 @@ def test_construct_big_emitter(hmm_config: HidtenHMMConfig) -> None:
     M = emitter.matrix()
     t1 = time.perf_counter()
     print(f"Matrix time: {t1-t0:.4f}s")
+
+
+def test_head_subset(hmm_config: HidtenHMMConfig) -> None:
+    lengths = [4, 3]
+
+    # Create value sets for different heads
+    values = [
+        PHMMValueSet.from_config(L, h, PHMMConfig())
+        for h, L in enumerate(lengths)
+    ]
+
+    emitter = ProfileEmitter(values)
+    emitter.hmm_config = hmm_config
+    emitter.build()
+
+    assert emitter.matrix().shape[0] == 2  # two heads
+
+    # Set head subset to only head 1
+    emitter.head_subset = [1]
+
+    B = emitter.matrix()
+
+    assert B.shape[0] == 1  # only one head
+    assert B.shape[1] == hmm_config.states[1] + 1  # states + padding
+
+    # Check matrix properties for the subset head
+    np.testing.assert_allclose(
+        np.sum(B[0, :hmm_config.states[1]], axis=-1), 1.0
+    )

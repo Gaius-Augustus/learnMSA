@@ -3,7 +3,6 @@ from collections.abc import Sequence
 import numpy as np
 import tensorflow as tf
 from hidten import HMMMode
-from hidten.tf.emitter import TFPaddingEmitter
 from hidten.tf.hmm import TFHMM, T_shapelike
 from hidten.tf.prior import TFCombinedPrior, TFInverseGammaPrior
 
@@ -12,6 +11,7 @@ from learnMSA.hmm.tf.embedding_emitter import EmbeddingEmitter
 from learnMSA.hmm.tf.prior import TFPHMMTransitionPrior
 from learnMSA.hmm.tf.profile_emitter import ProfileEmitter
 from learnMSA.hmm.tf.transitioner import PHMMTransitioner
+from learnMSA.hmm.tf.padding_emitter import TFSubsetPaddingEmitter
 from learnMSA.hmm.tf.util import load_dirichlet, load_mvn
 from learnMSA.hmm.util.value_set import PHMMValueSet
 from learnMSA.hmm.util.value_set_emb import PHMMEmbeddingValueSet
@@ -40,6 +40,18 @@ class PHMMLayer(tf.keras.Layer):
         such as deletes.
         """
         return [3*L+5 for L in self.lengths]
+
+    @property
+    def head_subset(self) -> Sequence[int] | None:
+        """If set, only these heads are used in computations."""
+        return self.hmm.transitioner.head_subset
+
+    @head_subset.setter
+    def head_subset(self, subset: Sequence[int] | None) -> None:
+        self.hmm.transitioner.head_subset = subset
+        for emitter in self.hmm.emitter:
+            if hasattr(emitter, "head_subset"):
+                emitter.head_subset = subset
 
     _mode: HMMMode = HMMMode.LIKELIHOOD_LOG
     """Determines the return value of the layer."""
@@ -152,7 +164,7 @@ class PHMMLayer(tf.keras.Layer):
                 embedding_emitter.prior = combined_prior
 
         # Add the padding emitter
-        self.hmm.add_emitter(TFPaddingEmitter())
+        self.hmm.add_emitter(TFSubsetPaddingEmitter())
 
     def loglik_mode(self) -> None:
         """Makes the layer return log-likelihoods.

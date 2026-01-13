@@ -14,6 +14,16 @@ class ProfileEmitter(TFCategoricalEmitter):
     """An emitter for a profile of sites in a protein and their amino acid
     distributions. Insertions are modeled by a shared background distribution.
     """
+    head_subset : Sequence[int] | None = None
+    """If set, only these heads are used in computations."""
+
+    @property
+    def lengths(self) -> np.ndarray:
+        """The number of match states in each head of the pHMM."""
+        if self.head_subset is not None:
+            return self._lengths[self.head_subset]
+        return self._lengths
+
     def __init__(
         self,
         values: Sequence[PHMMValueSet],
@@ -26,7 +36,7 @@ class ProfileEmitter(TFCategoricalEmitter):
         """
         super().__init__(**kwargs)
 
-        self.lengths = np.array([value_set.L for value_set in values])
+        self._lengths = np.array([value_set.L for value_set in values])
 
         init_values = []
         # Initialization based on provided value sets
@@ -50,7 +60,7 @@ class ProfileEmitter(TFCategoricalEmitter):
         # to minor).
         i_sum = 0
         indices = []
-        for L in self.lengths:
+        for L in self._lengths: # use unrestricted lengths here
             # Nothing is shared for match states (L per head)
             share_match = np.arange(i_sum, i_sum + L*s)
             i_sum += L*s
@@ -64,6 +74,22 @@ class ProfileEmitter(TFCategoricalEmitter):
         self.share = np.concatenate(indices)
 
         super().build(input_shape)
+
+    @override
+    def matrix(self) -> T_TFTensor:
+        matrix = super().matrix()
+        if self.head_subset is not None:
+            matrix = tf.gather(matrix, self.head_subset, axis=0)
+            max_states_subset = max(
+                [self.hmm_config.states[h] for h in self.head_subset]
+            )
+            # Keep terminal state
+            terminal_state = matrix[:, -1:, :]
+            # Keep only relevant states
+            matrix = matrix[:, :max_states_subset, :]
+            # Re-append terminal state
+            matrix = tf.concat([matrix, terminal_state], axis=1)
+        return matrix
 
     def emission_scores(self, observations: T_TFTensor) -> T_TFTensor:
         # Override to handle insertion state via copying instead of
@@ -103,7 +129,7 @@ class ProfileEmitter(TFCategoricalEmitter):
         B, T, H, Q = tf.unstack(tf.shape(emission_scores))
         emission_scores = tf.reshape(emission_scores, (B, T, H*Q))
         repeats = []
-        ML = max(self.lengths)
+        ML = self.lengths.max()
         for L in self.lengths:
             repeats.extend([1]*L)
             repeats.extend([L+2])  # repeat insertion

@@ -14,6 +14,16 @@ class EmbeddingEmitter(TFMVNormalEmitter):
     """An emitter for continuous embedding vectors using a multivariate normal
     distribution and a multivariate normal prior.
     """
+    head_subset : Sequence[int] | None = None
+    """If set, only these heads are used in computations."""
+
+    @property
+    def lengths(self) -> np.ndarray:
+        """The number of match states in each head of the pHMM."""
+        if self.head_subset is not None:
+            return self._lengths[self.head_subset]
+        return self._lengths
+
     def __init__(
         self,
         values: Sequence[PHMMEmbeddingValueSet],
@@ -21,7 +31,7 @@ class EmbeddingEmitter(TFMVNormalEmitter):
     ) -> None:
         super().__init__(**kwargs)
 
-        self.lengths = [value_set.L for value_set in values]
+        self._lengths = np.array([value_set.L for value_set in values])
 
         init_values = []
         # Initialization based on provided value sets
@@ -52,6 +62,15 @@ class EmbeddingEmitter(TFMVNormalEmitter):
         super().build(input_shape)
 
     @override
+    def matrix(self) -> T_TFTensor:
+        matrix = super().matrix()
+        if self.head_subset is not None:
+            matrix = tf.gather(matrix, self.head_subset, axis=0)
+            max_len_subset = max(self.lengths[h] for h in self.head_subset)
+            matrix = matrix[:, :max_len_subset*2, :]
+        return matrix
+
+    @override
     def call(
         self,
         emissions: T_TFTensor,
@@ -68,8 +87,12 @@ class EmbeddingEmitter(TFMVNormalEmitter):
         B, T, H, Q = tf.unstack(tf.shape(emission_scores))
         emission_scores = tf.reshape(emission_scores, (B, T, H*Q))
         repeats = []
-        ML = max(self.lengths)
-        for L in self.lengths:
+        if self.head_subset is not None:
+            lengths = [self.lengths[h] for h in self.head_subset]
+        else:
+            lengths = self.lengths
+        ML = max(lengths)
+        for L in lengths:
             repeats.extend([1]*L)
             repeats.extend([L+2])  # repeat insertion
             repeats.extend([L-1]*int(L < ML))  # repeat any padding

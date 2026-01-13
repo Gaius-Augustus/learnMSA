@@ -216,11 +216,14 @@ class PHMMTransitioner(TFTransitioner):
             max_states_subset = max(
                 [self.hmm_config.states[h] for h in self.head_subset]
             )
+            # Keep terminal state
             terminal_state_in = matrix[:, :max_states_subset, -1:]
             terminal_state_out = tf.one_hot(
                 [[max_states_subset]], depth=max_states_subset+1
             )
+            # Keep only relevant states
             matrix = matrix[:, :max_states_subset, :max_states_subset]
+            # Re-append terminal state
             matrix = tf.concat([matrix, terminal_state_in], axis=2)
             matrix = tf.concat([matrix, terminal_state_out], axis=1)
         return matrix
