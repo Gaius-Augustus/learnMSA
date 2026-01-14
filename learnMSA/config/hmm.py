@@ -1,11 +1,39 @@
 from collections.abc import Sequence
-from typing import ClassVar
+from typing import Annotated, ClassVar
 
-from pydantic import BaseModel, field_validator
+import numpy as np
+from pydantic import BaseModel, BeforeValidator, ConfigDict, field_validator, PlainSerializer
+
+
+def nd_array_before_validator(x):
+    """Custom before validation logic for numpy arrays."""
+    if isinstance(x, str):
+        import ast
+        x_list = ast.literal_eval(x)
+        x = np.array(x_list)
+    if isinstance(x, list):
+        x = np.array(x)
+    return x
+
+
+def nd_array_serializer(x):
+    """Custom serialization logic for numpy arrays."""
+    if isinstance(x, np.ndarray):
+        return x.tolist()
+    return x
+
+
+NPArray = Annotated[
+    np.ndarray,
+    BeforeValidator(nd_array_before_validator),
+    PlainSerializer(nd_array_serializer, return_type=list),
+]
 
 
 class PHMMPriorConfig(BaseModel):
     """HMM prior parameters for transition priors."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     use_amino_acid_prior: bool = True
     """Whether to use a Dirichlet prior for emissions."""
@@ -49,6 +77,8 @@ class PHMMPriorConfig(BaseModel):
 class PHMMConfig(BaseModel):
     """HMM parameters."""
 
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     alphabet: str = "ARNDCQEGHILKMFPSTWYVXUO"
     """The alphabet used in the HMM emissions."""
 
@@ -57,7 +87,7 @@ class PHMMConfig(BaseModel):
         """The size of the alphabet."""
         return len(self.alphabet)
 
-    background_distribution: Sequence[float] = [
+    background_distribution: Sequence[float] | NPArray = [
         8.34333437e-02, 5.19266823e-02, 4.93510863e-02, 4.65871696e-02,
         2.24936164e-02, 5.06824822e-02, 6.29644485e-02, 4.72142352e-02,
         3.34919201e-02, 5.26777168e-02, 7.33173001e-02, 6.35075307e-02,
@@ -74,7 +104,8 @@ class PHMMConfig(BaseModel):
     """
 
     match_emissions: (Sequence[float] | Sequence[Sequence[float]] |
-                      Sequence[Sequence[Sequence[float]]] | None) = None
+                      Sequence[Sequence[Sequence[float]]] |
+                      NPArray | None) = None
     """Defines the emission distribution ``P(amino acid | Match i; h)``.
     Can be:
     - None: Use background_distribution for all match states (default).
@@ -87,7 +118,8 @@ class PHMMConfig(BaseModel):
       in each head.
     """
 
-    insert_emissions: (Sequence[float] | Sequence[Sequence[float]] | None) = None
+    insert_emissions: (Sequence[float] | Sequence[Sequence[float]] |
+                       NPArray | None) = None
     """Defines the emission distribution ``P(amino acid | Insert; h)``.
     Can be:
     - None: Use background_distribution for all heads (default).
@@ -96,76 +128,76 @@ class PHMMConfig(BaseModel):
       Head-specific insertion distributions.
     """
 
-    p_begin_match: float | Sequence[float] | Sequence[Sequence[float]]\
-        = 0.5
+    p_begin_match: float | Sequence[float] | Sequence[Sequence[float]] | \
+        NPArray = 0.5
     """If provided a scalar value, is interpreted as ``P(Match 1 | Begin)``.
     In that case, ``P(Match i | Begin)`` for i > 1 will be chosen uniformly
     depending on head length.
     ``P(Match i | Begin; h)`` for all i and h can also be provided explicitly.
     """
 
-    p_match_match: float | Sequence[float] | Sequence[Sequence[float]]\
-        = 0.7
+    p_match_match: float | Sequence[float] | Sequence[Sequence[float]] | \
+        NPArray = 0.7
     """Defines ``P(Match i+1 | Match i; h)``.
     Can optionally depend on i and h.
     """
 
-    p_match_insert: float | Sequence[float] | Sequence[Sequence[float]]\
-        = 0.1
+    p_match_insert: float | Sequence[float] | Sequence[Sequence[float]] | \
+        NPArray = 0.1
     """Defines ``P(Insert i | Match i; h)``.
     Can optionally depend on i and h.
     """
 
-    p_match_end: float | Sequence[float] | Sequence[Sequence[float]]\
-        = 0.1
+    p_match_end: float | Sequence[float] | Sequence[Sequence[float]] | \
+        NPArray = 0.1
     """Defines ``P(End | Match i; h)``.
     Can optionally depend on i and h.
     """
 
-    p_insert_insert: float | Sequence[float] | Sequence[Sequence[float]]\
-        = 0.38
+    p_insert_insert: float | Sequence[float] | Sequence[Sequence[float]] | \
+        NPArray = 0.38
     """Defines ``P(Insert i | Insert i; h)``.
     Can optionally depend on i and h.
     """
 
-    p_delete_delete: float | Sequence[float] | Sequence[Sequence[float]]\
-        = 0.38
+    p_delete_delete: float | Sequence[float] | Sequence[Sequence[float]] | \
+        NPArray = 0.38
     """Defines ``P(Delete i+1 | Delete i; h)``.
     Can optionally depend on i and h.
     """
 
-    p_begin_delete: float | Sequence[float] = 0.1
+    p_begin_delete: float | Sequence[float] | NPArray = 0.1
     """Defines ``P(Delete 1 | Begin; h)``.
     Can optionally depend on h. This value is not used, if ``p_begin_match``
     is provided as a nested list.
     """
 
-    p_left_left: float | Sequence[float] = 0.7
+    p_left_left: float | Sequence[float] | NPArray = 0.7
     """Defines ``P(Left Flank | Left Flank; h)``.
     Can optionally depend on h.
     """
 
-    p_right_right: float | Sequence[float] = 0.7
+    p_right_right: float | Sequence[float] | NPArray = 0.7
     """Defines ``P(Right Flank | Right Flank; h)``.
     Can optionally depend on h.
     """
 
-    p_unannot_unannot: float | Sequence[float] = 0.7
+    p_unannot_unannot: float | Sequence[float] | NPArray = 0.7
     """Defines ``P(Unannotated | Unannotated; h)``.
     Can optionally depend on h.
     """
 
-    p_end_unannot: float | Sequence[float] = 1e-5
+    p_end_unannot: float | Sequence[float] | NPArray = 1e-5
     """Defines ``P(Unannotated | End; h)``.
     Can optionally depend on h.
     """
 
-    p_end_right: float | Sequence[float] = 0.5
+    p_end_right: float | Sequence[float] | NPArray = 0.5
     """Defines ``P(Right Flank | End; h)``.
     Can optionally depend on h.
     """
 
-    p_start_left_flank: float | Sequence[float] = 0.5
+    p_start_left_flank: float | Sequence[float] | NPArray = 0.5
     """Defines the starting probability ``P(Left Flank; h)``."""
 
     _length_offsets: ClassVar[dict[str, int]] = {
@@ -384,11 +416,11 @@ def get_value(param, head: int, index: int | None = None) -> float:
 
 def get_emission_dist(
     param: Sequence[float] | Sequence[Sequence[float]] |
-          Sequence[Sequence[Sequence[float]]] | None,
+          Sequence[Sequence[Sequence[float]]] | NPArray | None,
     head: int,
     index: int | None = None,
-    default: Sequence[float] | None = None
-) -> Sequence[float]:
+    default: Sequence[float] | NPArray | None = None
+) -> Sequence[float] | NPArray:
     """Get the emission distribution for a specific head and optional index.
 
     Args:

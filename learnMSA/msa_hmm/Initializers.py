@@ -74,7 +74,7 @@ class ConstantInitializer(tf.keras.initializers.Constant):
 
 
 
-R, p = parse_paml(LG_paml, SequenceDataset.alphabet[:-1])
+R, p = parse_paml(LG_paml, SequenceDataset._default_alphabet[:-1])
 exchangeability_init = inverse_softplus(R + 1e-32).numpy()
 
 

@@ -7,7 +7,7 @@ import tensorflow as tf
 from learnMSA import Configuration
 from learnMSA.msa_hmm import (Emitter, Initializers, MsaHmmCell, MsaHmmLayer,
                               Transitioner, Viterbi, training)
-from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
+from learnMSA.msa_hmm.alignment_model import AlignmentModel
 from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
 from learnMSA.util.sequence_dataset import SequenceDataset
 from tests.hmm import ref
@@ -15,8 +15,8 @@ from tests.hmm import ref
 
 def string_to_one_hot(s : str) -> tf.Tensor:
     """Convert a string to one-hot encoded tensor."""
-    i = [SequenceDataset.alphabet.index(aa) for aa in s]
-    return tf.one_hot(i, len(SequenceDataset.alphabet) - 1)
+    i = [SequenceDataset._default_alphabet.index(aa) for aa in s]
+    return tf.one_hot(i, len(SequenceDataset._default_alphabet) - 1)
 
 
 def get_all_seqs(data: SequenceDataset, num_models: int) -> np.ndarray:
@@ -45,7 +45,7 @@ def test_matrices() -> None:
     """Test that transition and emission matrices sum to 1."""
     length = 32
     hmm_cell = MsaHmmCell.MsaHmmCell(length=length)
-    hmm_cell.build((None, None, len(SequenceDataset.alphabet)))
+    hmm_cell.build((None, None, len(SequenceDataset._default_alphabet)))
     A = hmm_cell.transitioner.make_A()
     A_sum = np.sum(A, -1)
     for a in A_sum:
@@ -73,13 +73,13 @@ def test_cell() -> None:
         flank_init=tf.keras.initializers.Zeros()
     )
     hmm_cell = MsaHmmCell.MsaHmmCell(length, emitter=emitter, transitioner=transitioner)
-    hmm_cell.build((None, None, len(SequenceDataset.alphabet)))
+    hmm_cell.build((None, None, len(SequenceDataset._default_alphabet)))
     hmm_cell.recurrent_init()
     filename = os.path.dirname(__file__) + "/../tests/data/simple.fa"
     with SequenceDataset(filename) as data:
         sequences = get_all_seqs(data, 1)
-    sequences = tf.one_hot(sequences, len(SequenceDataset.alphabet))
-    assert sequences.shape == (2, 1, 5, len(SequenceDataset.alphabet))
+    sequences = tf.one_hot(sequences, len(SequenceDataset._default_alphabet))
+    assert sequences.shape == (2, 1, 5, len(SequenceDataset._default_alphabet))
     forward, loglik = hmm_cell.get_initial_state(batch_size=2)
     assert loglik[0] == 0
     # Next match state should always yield highest probability
@@ -97,8 +97,8 @@ def test_cell() -> None:
     filename = os.path.dirname(__file__) + "/../tests/data/length_diff.fa"
     with SequenceDataset(filename) as data:
         sequences = get_all_seqs(data, 1)
-    sequences = tf.one_hot(sequences, len(SequenceDataset.alphabet))
-    assert sequences.shape == (2, 1, 10, len(SequenceDataset.alphabet))
+    sequences = tf.one_hot(sequences, len(SequenceDataset._default_alphabet))
+    assert sequences.shape == (2, 1, 10, len(SequenceDataset._default_alphabet))
     forward, loglik = hmm_cell.get_initial_state(batch_size=2)
     sequences = tf.transpose(sequences, [1, 0, 2, 3])
     emission_probs = hmm_cell.emission_probs(sequences)
@@ -143,7 +143,7 @@ def test_viterbi() -> None:
         flank_init=[tf.keras.initializers.Zeros()] * 2
     )
     hmm_cell = MsaHmmCell.MsaHmmCell(length, emitter=emitter, transitioner=transitioner)
-    hmm_cell.build((None, None, len(SequenceDataset.alphabet)))
+    hmm_cell.build((None, None, len(SequenceDataset._default_alphabet)))
     hmm_cell.recurrent_init()
     with SequenceDataset(os.path.dirname(__file__) + "/../tests/data/felix.fa") as data:
         ref_seqs = np.array([
@@ -274,23 +274,23 @@ def test_viterbi() -> None:
         ref_right_flank_start = np.array([[5, 8, 5, 13, 4, 8, 11, 8],  # model 1
                                           [5, 3, 8, 14, 5, 5, 10, 11]])  # model 2
 
-        s = len(SequenceDataset.alphabet)
-        A = SequenceDataset.alphabet.index("A")
-        H = SequenceDataset.alphabet.index("H")
-        C = SequenceDataset.alphabet.index("C")
-        a = SequenceDataset.alphabet.index("A") + s
-        h = SequenceDataset.alphabet.index("H") + s
-        c = SequenceDataset.alphabet.index("C") + s
-        F = SequenceDataset.alphabet.index("F")
-        E = SequenceDataset.alphabet.index("E")
-        L = SequenceDataset.alphabet.index("L")
-        I = SequenceDataset.alphabet.index("I")
-        X = SequenceDataset.alphabet.index("K")
-        f = SequenceDataset.alphabet.index("F") + s
-        e = SequenceDataset.alphabet.index("E") + s
-        l = SequenceDataset.alphabet.index("L") + s
-        i = SequenceDataset.alphabet.index("I") + s
-        x = SequenceDataset.alphabet.index("K") + s
+        s = len(SequenceDataset._default_alphabet)
+        A = SequenceDataset._default_alphabet.index("A")
+        H = SequenceDataset._default_alphabet.index("H")
+        C = SequenceDataset._default_alphabet.index("C")
+        a = SequenceDataset._default_alphabet.index("A") + s
+        h = SequenceDataset._default_alphabet.index("H") + s
+        c = SequenceDataset._default_alphabet.index("C") + s
+        F = SequenceDataset._default_alphabet.index("F")
+        E = SequenceDataset._default_alphabet.index("E")
+        L = SequenceDataset._default_alphabet.index("L")
+        I = SequenceDataset._default_alphabet.index("I")
+        X = SequenceDataset._default_alphabet.index("K")
+        f = SequenceDataset._default_alphabet.index("F") + s
+        e = SequenceDataset._default_alphabet.index("E") + s
+        l = SequenceDataset._default_alphabet.index("L") + s
+        i = SequenceDataset._default_alphabet.index("I") + s
+        x = SequenceDataset._default_alphabet.index("K") + s
         GAP = s - 1
         gap = 2 * s - 1
 
@@ -479,7 +479,7 @@ def test_parallel_viterbi():
         flank_init=[tf.keras.initializers.Zeros()] * 2
     )
     hmm_cell = MsaHmmCell.MsaHmmCell(length, emitter=emitter, transitioner=transitioner)
-    hmm_cell.build((None, None, len(SequenceDataset.alphabet)))
+    hmm_cell.build((None, None, len(SequenceDataset._default_alphabet)))
     hmm_cell.recurrent_init()
     with SequenceDataset(os.path.dirname(__file__) + "/../tests/data/felix.fa") as data:
         ref_seqs = np.array([
@@ -529,7 +529,7 @@ def test_aligned_insertions() -> None:
     expected_block = np.array([[1, 2, 3, 4, 5, 23],
                                [7, 8, 23, 23, 9, 10],
                                [23, 23, 13, 14, 15, 23]])
-    assert_vec(block, expected_block + len(SequenceDataset.alphabet))
+    assert_vec(block, expected_block + len(SequenceDataset._default_alphabet))
 
 
 def test_backward() -> None:
@@ -568,7 +568,7 @@ def test_posterior_state_probabilities() -> None:
     with SequenceDataset(train_filename) as data:
         hmm_cell = MsaHmmCell.MsaHmmCell(32)
         hmm_layer = MsaHmmLayer.MsaHmmLayer(hmm_cell, 1)
-        hmm_layer.build((1, None, None, len(SequenceDataset.alphabet)))
+        hmm_layer.build((1, None, None, len(SequenceDataset._default_alphabet)))
         config = Configuration()
         config.training.num_model = 1
         config.training.no_sequence_weights = True
@@ -577,7 +577,7 @@ def test_posterior_state_probabilities() -> None:
         indices = tf.range(data.num_seq, dtype=tf.int64)
         ds = training.make_dataset(indices, batch_gen, batch_size=data.num_seq, shuffle=False)
         for x, _ in ds:
-            seq = tf.one_hot(x[0], len(SequenceDataset.alphabet))
+            seq = tf.one_hot(x[0], len(SequenceDataset._default_alphabet))
             seq = tf.transpose(seq, [1, 0, 2, 3])
             p = hmm_layer.state_posterior_log_probs(seq)
         p = np.exp(p)

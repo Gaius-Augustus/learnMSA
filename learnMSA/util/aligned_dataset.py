@@ -16,6 +16,7 @@ class AlignedDataset(SequenceDataset):
             aligned_sequences: list[tuple[str, str]] | None = None,
             indexed: bool = False,
             single_seq_ok: bool = False,
+            alphabet: str | None = None,
     ) -> None:
         """
         Args:
@@ -28,8 +29,10 @@ class AlignedDataset(SequenceDataset):
                 at once.  Otherwise regular parsing is used.
             single_seq_ok (bool): If True, allow datasets with a single
                 sequence.
+            alphabet (str): The amino acid alphabet to use for encoding sequences.
+                If None, uses the default alphabet "ARNDCQEGHILKMFPSTWYVXUO-".
         """
-        super().__init__(filepath, fmt, aligned_sequences, indexed)
+        super().__init__(filepath, fmt, aligned_sequences, indexed, alphabet)
         self._single_seq_ok = single_seq_ok
         self.validate_dataset()
 
@@ -37,12 +40,12 @@ class AlignedDataset(SequenceDataset):
         self._msa_matrix = np.zeros((self.num_seq, len(self.get_record(0))), dtype=np.int16)
         for i in range(self.num_seq):
             self._msa_matrix[i,:] = self.get_encoded_seq(
-                i, remove_gaps=False, dtype=np.int16
+                i, remove_gaps=False, replace_with_x="", dtype=np.int16
             )
 
         # Compute a mapping from sequence positions to MSA-column index
         # A-B--C -> 112223
-        cumsum = np.cumsum(self._msa_matrix != type(self).alphabet.index('-'), axis=1)
+        cumsum = np.cumsum(self._msa_matrix != self.alphabet.index('-'), axis=1)
         # 112223 -> 0112223 -> [[(i+1) - i]] -> 101001
         diff = np.diff(np.insert(cumsum, 0, 0.0, axis=1), axis=1)
         diff_where = [

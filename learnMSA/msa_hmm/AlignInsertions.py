@@ -1,7 +1,7 @@
 import numpy as np
 from learnMSA.util.sequence_dataset import SequenceDataset
 from learnMSA.util.aligned_dataset import AlignedDataset
-import learnMSA.msa_hmm.AlignmentModel as alignment_model
+import learnMSA.msa_hmm.alignment_model as alignment_model
 import subprocess
 from shutil import which
 import sys

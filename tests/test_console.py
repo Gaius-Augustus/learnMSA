@@ -12,7 +12,7 @@ def test_error_handling() -> None:
     single_seq_expected_err = f"File {single_seq} contains only a single sequence."
     faulty_format_expected_err = f"Could not parse any sequences from {faulty_format}."
     empty_seq_expected_err = f"{empty_seq} contains empty sequences."
-    unknown_symbol_expected_err = f"Found unknown character(s) in sequence ersteSequenz. Allowed alphabet: {SequenceDataset.alphabet}."
+    unknown_symbol_expected_err = f"Found unknown character(s) in sequence ersteSequenz. Allowed alphabet: {SequenceDataset._default_alphabet}."
 
     test = subprocess.Popen(
         [

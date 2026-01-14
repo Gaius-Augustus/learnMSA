@@ -17,7 +17,7 @@ def test_default_batch_gen() -> None:
         config.training.no_sequence_weights = True
         batch_gen.configure(data, LearnMSAContext(config, data))
         test_batches = [[0], [1], [4], [0, 2], [0, 1, 2, 3, 4], [2, 3, 4]]
-        alphabet = np.array(list(SequenceDataset.alphabet))
+        alphabet = np.array(list(SequenceDataset._default_alphabet))
         for ind in test_batches:
             ind = np.array(ind)
             ref = [str(data.get_record(i).seq).upper() for i in ind]

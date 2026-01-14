@@ -8,13 +8,11 @@ from packaging import version
 
 import learnMSA.msa_hmm.AncProbsLayer as anc_probs
 import learnMSA.msa_hmm.Emitter as emit
-import learnMSA.msa_hmm.MsaHmmCell as msa_hmm_cell
-import learnMSA.msa_hmm.MsaHmmLayer as msa_hmm_layer
 import learnMSA.msa_hmm.Priors as priors
 import learnMSA.msa_hmm.training as train
 import learnMSA.msa_hmm.Transitioner as trans
 from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
-from learnMSA.msa_hmm.model import LearnMSAModel
+from learnMSA.model.model import LearnMSAModel
 from learnMSA.util.aligned_dataset import AlignedDataset, SequenceDataset
 
 
@@ -23,10 +21,10 @@ from learnMSA.util.aligned_dataset import AlignedDataset, SequenceDataset
 class AlignmentMetaData():
 
     def __init__(
-        self, 
-        core_blocks, 
-        left_flank, 
-        right_flank, 
+        self,
+        core_blocks,
+        left_flank,
+        right_flank,
         unannotated_segments
     ):
         self.consensus = np.stack([C for C,_,_,_ in core_blocks])
@@ -54,41 +52,41 @@ class AlignmentMetaData():
         self.left_flank_len_total = np.amax(self.left_flank_len)
         self.right_flank_len_total = np.amax(self.right_flank_len)
         self.insertion_lens_total = np.amax(self.insertion_lens, axis=1)
-        # convert at least 1 term to int32 in case of an alignment longer 
+        # convert at least 1 term to int32 in case of an alignment longer
         # than 32,767
         self.alignment_len = (
-            self.left_flank_len_total.astype(np.int32) + 
-            self.consensus_len*self.num_repeats + 
-            np.sum(self.insertion_lens_total) + 
+            self.left_flank_len_total.astype(np.int32) +
+            self.consensus_len*self.num_repeats +
+            np.sum(self.insertion_lens_total) +
             np.sum(self.unannotated_segment_lens_total) +
             self.right_flank_len_total
         )
 
 
 class AlignedInsertions():
-    def __init__(self, 
+    def __init__(self,
                  aligned_insertions = None,
                  aligned_left_flank = None,
                  aligned_right_flank = None,
                  aligned_unannotated_segments = None):
-        """ 
-        Args: 
-            aligned_insertions: List of lists of pairs 
-                (indices, AlignedDataset with aligned slices) or None. 
-                Inner lists have length equal to length of model -1. 
+        """
+        Args:
+            aligned_insertions: List of lists of pairs
+                (indices, AlignedDataset with aligned slices) or None.
+                Inner lists have length equal to length of model -1.
                 Outer list has length num_repeats.
-            aligned_left_flank: A pair (indices, AlignedDataset with aligned 
+            aligned_left_flank: A pair (indices, AlignedDataset with aligned
                 slices) or None.
-            aligned_right_flank: A pair (indices, AlignedDataset with aligned 
+            aligned_right_flank: A pair (indices, AlignedDataset with aligned
                 slices) or None.
-            unannotated_data: List of pairs (indices, AlignedDataset with 
+            unannotated_data: List of pairs (indices, AlignedDataset with
                 aligned slices) or None of length num_repeats-1.
         """
         self.aligned_insertions = aligned_insertions
         self.aligned_left_flank = aligned_left_flank
         self.aligned_right_flank = aligned_right_flank
         self.aligned_unannotated_segments = aligned_unannotated_segments
-        
+
         def _process(msa_data : AlignedDataset):
             custom_columns = np.zeros(
                 (msa_data.num_seq, np.amax(msa_data.alignment_len)),
@@ -98,8 +96,8 @@ class AlignedInsertions():
                 cols = msa_data.get_column_map(i)
                 custom_columns[i, :cols.size] = cols
             return custom_columns
-                
-        
+
+
         if aligned_insertions is None:
             self.ext_insertions = 0
         else:
@@ -114,71 +112,71 @@ class AlignedInsertions():
                             _process(x[1])
                         )
             self.ext_insertions = np.array([
-                [np.amax(x)+1 if x is not None else 0 for x in repeats] 
+                [np.amax(x)+1 if x is not None else 0 for x in repeats]
                 for repeats in self.custom_columns_insertions
             ])
-        
+
         if aligned_left_flank is None:
             self.ext_left_flank = 0
         else:
             self.custom_columns_left_flank = _process(aligned_left_flank[1])
             self.ext_left_flank = np.amax(self.custom_columns_left_flank)+1
-        
+
         if aligned_right_flank is None:
             self.ext_right_flank = 0
         else:
             self.custom_columns_right_flank = _process(aligned_right_flank[1])
             self.ext_right_flank = np.amax(self.custom_columns_right_flank)+1
-            
+
         if aligned_unannotated_segments is None:
             self.ext_unannotated = 0
         else:
             self.custom_columns_unannotated_segments = [
-                _process(x[1]) if x is not None else None 
+                _process(x[1]) if x is not None else None
                 for x in aligned_unannotated_segments
             ]
             self.ext_unannotated = np.array([
-                np.amax(x)+1 if x is not None else 0 
+                np.amax(x)+1 if x is not None else 0
                 for x in self.custom_columns_unannotated_segments
             ])
-    
+
     def insertion(self, batch_indices, r):
         if self.aligned_insertions is None:
             return None
         else:
             return [
                 self._get_custom_columns(
-                    batch_indices, 
-                    self.aligned_insertions[r][i][0], 
-                    self.custom_columns_insertions[r][i], 
+                    batch_indices,
+                    self.aligned_insertions[r][i][0],
+                    self.custom_columns_insertions[r][i],
                     self.ext_insertions[r,i]
                 )
                 if self.aligned_insertions[r][i] is not None else None
                 for i in range(len(self.aligned_insertions[r]))
             ]
-    
+
     def left_flank(self, batch_indices):
         if self.aligned_left_flank is None:
             return None
         else:
             return self._get_custom_columns(
-                batch_indices, 
-                self.aligned_left_flank[0], 
-                self.custom_columns_left_flank, 
+                batch_indices,
+                self.aligned_left_flank[0],
+                self.custom_columns_left_flank,
                 self.ext_left_flank
             )
-    
+
     def right_flank(self, batch_indices):
         if self.aligned_right_flank is None:
             return None
         else:
             return self._get_custom_columns(
-                batch_indices, 
-                self.aligned_right_flank[0], 
-                self.custom_columns_right_flank, 
+                batch_indices,
+                self.aligned_right_flank[0],
+                self.custom_columns_right_flank,
                 self.ext_right_flank
             )
-        
+
     def unannotated_segment(self, batch_indices, r):
         if self.aligned_unannotated_segments is None:
             return None
@@ -187,24 +185,24 @@ class AlignedInsertions():
                 return None
             else:
                 return self._get_custom_columns(
-                    batch_indices, 
-                    self.aligned_unannotated_segments[r][0], 
-                    self.custom_columns_unannotated_segments[r], 
+                    batch_indices,
+                    self.aligned_unannotated_segments[r][0],
+                    self.custom_columns_unannotated_segments[r],
                     self.ext_unannotated[r]
                 )
-            
+
     def _get_custom_columns(
-        self, 
-        batch_indices, 
-        custom_indices, 
-        custom_columns, 
+        self,
+        batch_indices,
+        custom_indices,
+        custom_columns,
         max_len
     ):
         columns = np.stack([np.arange(max_len)]*batch_indices.shape[0])
         for i, c in zip(custom_indices, custom_columns):
-            columns[batch_indices == i, :c.size] = c 
+            columns[batch_indices == i, :c.size] = c
         return columns
-        
+
 
 
 
@@ -217,11 +215,11 @@ class AlignmentModel():
 
     best_model: int
 
-    def __init__(self, 
-                 data : SequenceDataset, 
+    def __init__(self,
+                 data : SequenceDataset,
                  batch_generator,
-                 indices, 
-                 batch_size, 
+                 indices,
+                 batch_size,
                  model,
                  gap_symbol="-",
                  gap_symbol_insertions=".",
@@ -230,13 +228,13 @@ class AlignmentModel():
         Args:
             data: The dataset of sequences.
             batch_generator: An already configured batch generator.
-            indices: (A subset of) The sequence indices from the dataset to align 
+            indices: (A subset of) The sequence indices from the dataset to align
                 (1D).
             batch_size: Controls memory consumption of viterbi.
-            model: A learnMSA model which internally might represent multiple 
+            model: A learnMSA model which internally might represent multiple
                 pHMM models.
             gap_symbol: Character used to denote missing match positions.
-            gap_symbol_insertions: Character used to denote insertions in other 
+            gap_symbol_insertions: Character used to denote insertions in other
                 sequences.
             A2M: DEPRECATED. Use format="a2m" or format="fasta" in to_file() method
         """
@@ -246,14 +244,11 @@ class AlignmentModel():
         self.batch_size = batch_size
         self.model = model
         self.anc_probs_layer = model.anc_probs_layer
-        self.msa_hmm_layer = model.msa_hmm_layer
 
         self.gap_symbol = gap_symbol
         self.gap_symbol_insertions = gap_symbol_insertions
 
         self.metadata = {}
-        self.num_models = self.msa_hmm_layer.cell.num_models
-        self.length = self.msa_hmm_layer.cell.length
         if A2M is not None:
             raise DeprecationWarning(
                 "The A2M argument is deprecated. Use format='a2m' or " \
@@ -388,37 +383,37 @@ class AlignmentModel():
         return alignment_strings_all
 
     def to_file(
-        self, 
-        filepath, 
-        model_index = None, 
-        batch_size=100000, 
-        add_block_sep=False, 
-        aligned_insertions : AlignedInsertions = AlignedInsertions(), 
-        format="fasta", 
+        self,
+        filepath,
+        model_index = None,
+        batch_size=100000,
+        add_block_sep=False,
+        aligned_insertions : AlignedInsertions = AlignedInsertions(),
+        format="fasta",
         fasta_line_limit=80,
         only_matches=False,
     ):
-        """ Uses one model to decode an alignment and stores it in fasta file 
+        """ Uses one model to decode an alignment and stores it in fasta file
             format. Currently no other output format is supported.
-            The file is written batch wise. The memory required for this 
-            operation must be large enough to hold decode and store a single 
+            The file is written batch wise. The memory required for this
+            operation must be large enough to hold decode and store a single
             batch of aligned sequences but not the whole alignment.
         Args:
-            model_index: Specifies the model for decoding. Use a suitable 
+            model_index: Specifies the model for decoding. Use a suitable
                 criterion like loglik to decide for a model.
-            batch_size: Defines how many sequences are decoded at a time with 
-                no effect on the output MSA. It can be useful to lower this if 
-                memory is sufficient to store the table-form alignment but GPU 
+            batch_size: Defines how many sequences are decoded at a time with
+                no effect on the output MSA. It can be useful to lower this if
+                memory is sufficient to store the table-form alignment but GPU
                 memory used for decoding a batch is limited.
-            add_block_sep: If true, columns containing a special character are 
+            add_block_sep: If true, columns containing a special character are
                 added to the alignment indicating domain boundaries.
-            aligned_insertions: Can be used to override insertion metadata if 
+            aligned_insertions: Can be used to override insertion metadata if
                 insertions are aligned after the main procedure.
-            format: Output format. Important for large data: learnMSA is only 
-                able to stream fasta files. 
-                Other formats require a conversion, i.e. the whole alignment is 
+            format: Output format. Important for large data: learnMSA is only
+                able to stream fasta files.
+                Other formats require a conversion, i.e. the whole alignment is
                 stored in memory.
-            fasta_line_limit: Maximum number of characters per line in the 
+            fasta_line_limit: Maximum number of characters per line in the
                 fasta file (only applies to sequences).
             only_matches: If true, omit all insertions and write only those
                 amino acids that are assigned to match states.
@@ -455,31 +450,31 @@ class AlignmentModel():
                 model_index, batch_size, add_block_sep, aligned_insertions
             )
             msa = [
-                (self.data.seq_ids[self.indices[i]], msa[i]) 
+                (self.data.seq_ids[self.indices[i]], msa[i])
                 for i in range(len(msa))
             ]
             data = AlignedDataset(aligned_sequences=msa)
             data.write(filepath, format)
-    
+
     def get_batch_alignment(
-        self, 
-        model_index, 
-        batch_indices, 
-        add_block_sep, 
+        self,
+        model_index,
+        batch_indices,
+        add_block_sep,
         aligned_insertions : AlignedInsertions = AlignedInsertions(),
         only_matches=False,
     ):
         """ Returns a dense matrix representing a subset of sequences
-            as specified by batch_indices with respect to the alignment of all 
-            sequences (i.e. the sub alignment can contain gap-only columns and 
+            as specified by batch_indices with respect to the alignment of all
+            sequences (i.e. the sub alignment can contain gap-only columns and
             stacking all batches yields a complete alignment).
         Args:
-            model_index: Specifies the model for decoding. Use a suitable 
+            model_index: Specifies the model for decoding. Use a suitable
                 criterion like loglik to decide for a model.
             batch_indices: Sequence indices / indices of alignment rows.
-            add_block_sep: If true, columns containing a special character are 
+            add_block_sep: If true, columns containing a special character are
                 added to the alignment indicating domain boundaries.
-            aligned_insertions: Can be used to override insertion metadata if 
+            aligned_insertions: Can be used to override insertion metadata if
                 insertions are aligned after the main procedure.
             only_matches: If true, omit all insertions and write only those
                 amino acids that are assigned to match states.
@@ -488,12 +483,12 @@ class AlignmentModel():
             self._build_alignment([model_index])
         data = self.metadata[model_index]
         b = batch_indices.size
-        sequences = np.zeros((b, self.data.max_len), dtype=np.uint16) 
+        sequences = np.zeros((b, self.data.max_len), dtype=np.uint16)
         sequences += (len(self.data.alphabet)-1)
         for i,j in enumerate(batch_indices):
             l = self.data.seq_lens[self.indices[j]]
             sequences[i, :l] = self.data.get_encoded_seq(self.indices[j])
-        blocks = []  
+        blocks = []
         if add_block_sep:
             sep = np.zeros((b,1), dtype=np.uint16) + 2*len(self.data.alphabet)
         if not only_matches:
@@ -534,10 +529,10 @@ class AlignmentModel():
                 unannotated_segment_l = data.unannotated_segments_len[i]
                 unannotated_segment_s = data.unannotated_segments_start[i]
                 unannotated_block = self.get_insertion_block(
-                    sequences, 
+                    sequences,
                     unannotated_segment_l[batch_indices],
                     np.maximum(
-                        data.unannotated_segment_lens_total, 
+                        data.unannotated_segment_lens_total,
                         aligned_insertions.ext_unannotated
                     )[i],
                     unannotated_segment_s[batch_indices],
@@ -550,7 +545,7 @@ class AlignmentModel():
                     blocks.append(sep)
         if not only_matches:
             right_flank_block = self.get_insertion_block(
-                sequences, 
+                sequences,
                 data.right_flank_len[batch_indices],
                 max(data.right_flank_len_total, aligned_insertions.ext_right_flank),
                 data.right_flank_start[batch_indices],
@@ -713,28 +708,28 @@ class AlignmentModel():
             return 0
 
     def compute_AIC(self, max_seq=200000, loglik=None):
-        """ Computes the Akaike information criterion for each underlying model. 
+        """ Computes the Akaike information criterion for each underlying model.
         Args:
-            max_seq: Threshold for the number of sequences used to compute the 
-                loglik. If the dataset has mroe sequences, a random subset is 
+            max_seq: Threshold for the number of sequences used to compute the
+                loglik. If the dataset has mroe sequences, a random subset is
                 drawn.
-            loglik: This argument can be set if the loglik was computed before 
-                via compute_loglik to avoid overhead. If None, the loglik will 
+            loglik: This argument can be set if the loglik was computed before
+                via compute_loglik to avoid overhead. If None, the loglik will
                 be computed internally.
         """
         if loglik is None:
             loglik = self.compute_loglik(max_seq)
         num_param = 34 * np.array(self.length) + 25
         aic = -2 * loglik * self.data.num_seq + 2*num_param
-        return aic 
+        return aic
 
     def compute_consensus_score(self):
-        """ Computes a consensus score that rates how plausible each model is 
+        """ Computes a consensus score that rates how plausible each model is
             with respect to all other models.
-            (Relevant for users not using the default emitter: Uses the 
+            (Relevant for users not using the default emitter: Uses the
             make_B_amino method of the first emitter.)
         """
-        # compute the match sequence of all models padded with terminal symbols 
+        # compute the match sequence of all models padded with terminal symbols
         match_seqs = np.zeros(
             (self.num_models, max(self.length)+1, self.msa_hmm_layer.cell.dim)
         )
@@ -742,33 +737,33 @@ class AlignmentModel():
         emitter = self.msa_hmm_layer.cell.emitter[0]
         for i,L in enumerate(self.length):
             match_seqs[i, :L] = emitter.make_B_amino()[i,1:L+1]
-        # we need to tile the match sequences over the batch dimension because 
+        # we need to tile the match sequences over the batch dimension because
         # each model should see all other models
         match_seqs = tf.stack([match_seqs]*self.num_models, axis=1)
-        # rate the match seqs with respect to the models and cancel out 
+        # rate the match seqs with respect to the models and cancel out
         # self-rating
-        
-        # TODO this does not work with self.model which expects indices rather 
+
+        # TODO this does not work with self.model which expects indices rather
         # than distributions
         # this is a workaround, but will break with a user defined encoder model
-        # we skip the anc probs for simplicity as this would require fitting 
+        # we skip the anc probs for simplicity as this would require fitting
         # evolutionary times
         consensus_logliks = self.msa_hmm_layer(match_seqs)[1]
-        
+
         consensus_logliks *= 1-tf.eye(self.num_models)
-        # Axis 1 means we reduce over the batch dimension rather than the model 
+        # Axis 1 means we reduce over the batch dimension rather than the model
         # dimension,
-        # so output i will be the mean loglik if we input all other match 
+        # so output i will be the mean loglik if we input all other match
         # sequenes to model i.
         # Using axis 0 here is not the same!
-        # Consider the case that all models have the same match sequence but 
+        # Consider the case that all models have the same match sequence but
         # one model allows many deletions or insertions.
         # This model is the outlier and should clearly have the lowest score.
-        # With axis=0, the likelihood of the outlier model under all other 
+        # With axis=0, the likelihood of the outlier model under all other
         # models is high and the scores of the other models will have a penalty
         # since their match sequences are fed into the outlier model.
-        # With axis=1, the scores of all models will be high except for the 
-        # outlier model, which has a strong penalty as it rates all other 
+        # With axis=1, the scores of all models will be high except for the
+        # outlier model, which has a strong penalty as it rates all other
         # match sequences involving the deletion/insertion probabilities.
         consensus_score = tf.reduce_mean(consensus_logliks, axis=1)
         return consensus_score
@@ -776,7 +771,7 @@ class AlignmentModel():
 
     def write_models_to_file(self, filepath, pack=True):
         """ Writes the underlying models to file.
-        Args: 
+        Args:
             filepath: Path of the written file.
             pack: If true, the output will be a zip file, otherwise a directory.
         """
@@ -844,31 +839,31 @@ class AlignmentModel():
                 ]) + "\n")
 
     @classmethod
-    def load_models_from_file(cls, 
-                              filepath, 
-                              data:SequenceDataset, 
-                              from_packed=True, 
+    def load_models_from_file(cls,
+                              filepath,
+                              data:SequenceDataset,
+                              from_packed=True,
                               custom_batch_gen=None,
                               custom_config=None):
-        """ Recreates an AlignmentModel instance with underlying models from 
+        """ Recreates an AlignmentModel instance with underlying models from
             file.
 
         Args:
             filepath: Path of the file to load.
-            from_packed: Pass true or false depending on the pack argument used 
+            from_packed: Pass true or false depending on the pack argument used
                 with write_models_to_file.
-            custom_batch_gen: A custom batch generator to use instead of the 
+            custom_batch_gen: A custom batch generator to use instead of the
                 default one.
-            custom_config: A custom configuration to use instead of the 
+            custom_config: A custom configuration to use instead of the
                 default one.
 
         Returns:
-            An AlignmentModel instance with equivalent behavior as the 
+            An AlignmentModel instance with equivalent behavior as the
             AlignmentModel instance used while saving the model.
         """
         if from_packed:
             shutil.unpack_archive(filepath+".zip", filepath)
-        #deserialize metadata    
+        #deserialize metadata
         with open(filepath+"/meta.json") as metafile:
             d = json.load(metafile)
         #deserialize indices
@@ -878,10 +873,10 @@ class AlignmentModel():
             filepath+".keras",
             custom_objects={
                 "LearnMSAModel": LearnMSAModel,
-                "AncProbsLayer": anc_probs.AncProbsLayer, 
+                "AncProbsLayer": anc_probs.AncProbsLayer,
                 "MsaHmmLayer": msa_hmm_layer.MsaHmmLayer,
-                "MsaHmmCell": msa_hmm_cell.MsaHmmCell, 
-                "ProfileHMMTransitioner": trans.ProfileHMMTransitioner, 
+                "MsaHmmCell": msa_hmm_cell.MsaHmmCell,
+                "ProfileHMMTransitioner": trans.ProfileHMMTransitioner,
                 "ProfileHMMEmitter": emit.ProfileHMMEmitter,
                 "AminoAcidPrior": priors.AminoAcidPrior,
                 "NullPrior": priors.NullPrior,
@@ -928,39 +923,39 @@ class AlignmentModel():
 
     @classmethod
     def decode_core(cls, model_length, state_seqs_max_lik, indices):
-        """ Decodes consensus columns as a matrix as well as insertion lengths 
+        """ Decodes consensus columns as a matrix as well as insertion lengths
             and starting positions as auxiliary vectors.
 
-        Args: 
-            model_length: Number of match states 
+        Args:
+            model_length: Number of match states
                 (length of the consensus sequence).
-            state_seqs_max_lik: A tensor with the most likeli state sequences. 
+            state_seqs_max_lik: A tensor with the most likeli state sequences.
                 Shape: (num_seq, L)
-            indices: Indices in the sequences where decoding should start. 
+            indices: Indices in the sequences where decoding should start.
                 Shape: (num_seq)
         Returns:
-            consensus_columns: Decoded consensus columns. 
+            consensus_columns: Decoded consensus columns.
                 Shape: (num_seq, model_length)
-            insertion_lens: Number of amino acids emitted per insertion state. 
+            insertion_lens: Number of amino acids emitted per insertion state.
                 Shape: (num_seq, model_length-1)
-            insertion_start: Starting position of each insertion in the 
+            insertion_start: Starting position of each insertion in the
                 sequences. Shape: (num_seq, model_length-1)
             finished: Boolean vector indicating sequences that are fully
-                decoded. Shape: (num_seq) 
+                decoded. Shape: (num_seq)
         """
         n = state_seqs_max_lik.shape[0]
-        c = model_length 
+        c = model_length
         # initialize the consensus with gaps
-        consensus_columns = -np.ones((n, c), dtype=np.int16) 
+        consensus_columns = -np.ones((n, c), dtype=np.int16)
         # insertion lengths and starting positions per sequence
         insertion_lens = np.zeros((n, c-1), dtype=np.int16)
         insertion_start = -np.ones((n, c-1), dtype=np.int16)
-        # is true if and only if the previous hidden state was an insertion 
+        # is true if and only if the previous hidden state was an insertion
         # state (not counting flanks)
         last_insert = np.zeros(n, dtype=bool)
         A = np.arange(n)
         while True:
-            q = state_seqs_max_lik[A, indices] 
+            q = state_seqs_max_lik[A, indices]
             is_match = ((q > 0) & (q < c+1))
             is_insert = ((q >= c+1) & (q < 2*c))
             is_insert_start = is_insert & ~last_insert
@@ -983,18 +978,18 @@ class AlignmentModel():
 
     @classmethod
     def decode_flank(cls, state_seqs_max_lik, flank_state_id, indices):
-        """ Decodes flanking insertion states. The deconding is active as long 
+        """ Decodes flanking insertion states. The deconding is active as long
             as at least one sequence remains in a flank/unannotated state.
-        Args: 
-            state_seqs_max_lik: A tensor with the most likeli state sequences. 
+        Args:
+            state_seqs_max_lik: A tensor with the most likeli state sequences.
                 Shape: (num_seq, L)
             flank_state_id: Index of the flanking state.
-            indices: Indices in the sequences where decoding should start. 
+            indices: Indices in the sequences where decoding should start.
                 Shape: (num_seq)
         Returns:
-            insertion_lens: Number of amino acids emitted per insertion state. 
+            insertion_lens: Number of amino acids emitted per insertion state.
                 Shape: (num_seq, model_length-1)
-            insertion_start: Starting position of each insertion in the 
+            insertion_start: Starting position of each insertion in the
                 sequences. Shape: (num_seq, model_length-1)
         """
         n = state_seqs_max_lik.shape[0]
@@ -1011,15 +1006,15 @@ class AlignmentModel():
 
     @classmethod
     def decode(cls, model_length, state_seqs_max_lik):
-        """ Decodes an implicit alignment (insertion start/length are 
+        """ Decodes an implicit alignment (insertion start/length are
             represented as 2 integers) from most likely state sequences.
-        Args: 
-            model_length: Number of match states (length of the consensus 
+        Args:
+            model_length: Number of match states (length of the consensus
                 sequence).
-            state_seqs_max_lik: A tensor with the most likeli state sequences. 
+            state_seqs_max_lik: A tensor with the most likeli state sequences.
                 Shape: (num_seq, L)
         Returns:
-            core_blocks: Representation of the consensus. 
+            core_blocks: Representation of the consensus.
             left_flank:
             right_flank:
             unannotated_segments:
@@ -1027,10 +1022,10 @@ class AlignmentModel():
         n = state_seqs_max_lik.shape[0]
         c = model_length #alias for code readability
         indices = np.zeros(n, np.int16) # active positions in the sequence
-        left_flank = cls.decode_flank(state_seqs_max_lik, 0, indices) 
+        left_flank = cls.decode_flank(state_seqs_max_lik, 0, indices)
         core_blocks = []
         unannotated_segments = []
-        while True:    
+        while True:
             C, IL, IS, finished = cls.decode_core(
                 model_length, state_seqs_max_lik, indices
             )
@@ -1040,34 +1035,34 @@ class AlignmentModel():
             unannotated_segments.append(
                 cls.decode_flank(state_seqs_max_lik, 2*c, indices)
             )
-        right_flank = cls.decode_flank(state_seqs_max_lik, 2*c+1, indices) 
+        right_flank = cls.decode_flank(state_seqs_max_lik, 2*c+1, indices)
         return core_blocks, left_flank, right_flank, unannotated_segments
 
 
     @classmethod
     def get_insertion_block(
-        cls, 
-        sequences, 
-        lens, 
-        maxlen, 
-        starts, 
-        adjust_to_right=False, 
+        cls,
+        sequences,
+        lens,
+        maxlen,
+        starts,
+        adjust_to_right=False,
         custom_columns=None
     ):
-        """ Constructs one insertion block from an implicitly represented 
+        """ Constructs one insertion block from an implicitly represented
         alignment.
 
-        Args: 
+        Args:
         Returns:
         """
         n = sequences.shape[0]
         A = np.arange(n)
-        s = len(SequenceDataset.alphabet)
+        s = len(SequenceDataset._default_alphabet)
         block = np.zeros((n, maxlen), dtype=np.uint8) + s - 1
         count_down_lens = np.copy(lens)
         active = count_down_lens > 0
         i = 0
-        columns = np.stack([np.arange(maxlen)]*n) 
+        columns = np.stack([np.arange(maxlen)]*n)
         if custom_columns is not None:
             columns[:, :custom_columns.shape[1]] = custom_columns
         while np.any(active):
@@ -1079,7 +1074,7 @@ class AlignmentModel():
         if adjust_to_right and custom_columns is None:
             block_right_aligned = np.zeros_like(block) + s - 1
             for i in range(maxlen):
-                
+
                 block_right_aligned[A, (maxlen-lens+i)%maxlen] = block[:, i]
             block = block_right_aligned
         block += s #lower case
@@ -1088,20 +1083,20 @@ class AlignmentModel():
 
     @classmethod
     def get_alignment_block(
-        cls, 
-        sequences, 
-        consensus, 
-        ins_len, 
-        ins_len_total, 
-        ins_start, 
-        is_non_empty=None, 
+        cls,
+        sequences,
+        consensus,
+        ins_len,
+        ins_len_total,
+        ins_start,
+        is_non_empty=None,
         custom_columns=None,
         only_matches=False
     ):
-        """ Constructs one core model hit block from an implicitly represented 
+        """ Constructs one core model hit block from an implicitly represented
             alignment.
 
-        Args: 
+        Args:
 
         Returns:
         """
@@ -1110,8 +1105,8 @@ class AlignmentModel():
             length = consensus.shape[1]
         else:
             length = consensus.shape[1] + np.sum(ins_len_total)
-        block = np.zeros((sequences.shape[0], length), dtype=np.uint8) 
-        block += len(SequenceDataset.alphabet) - 1
+        block = np.zeros((sequences.shape[0], length), dtype=np.uint8)
+        block += len(SequenceDataset._default_alphabet) - 1
         i = 0
         columns_to_remove = [] #track empty columns to be removed later
         for c in range(consensus.shape[1]-1):
@@ -1135,8 +1130,8 @@ class AlignmentModel():
                 block[:,i:i+ins_l_total] = cls.get_insertion_block(
                     sequences,
                     ins_l,
-                    ins_l_total, 
-                    ins_s, 
+                    ins_l_total,
+                    ins_s,
                     custom_columns=custom_column
                 )
                 i += ins_l_total
@@ -1149,16 +1144,16 @@ class AlignmentModel():
         block = np.delete(block, columns_to_remove, axis=1)
         return block
 
-    
+
 @tf.function
-def non_homogeneous_mask_func(i, seq_lens, hmm_cell): 
+def non_homogeneous_mask_func(i, seq_lens, hmm_cell):
     """ Let S = S_1 … S_L be the sequence and M_1 … M_Z the match states.
-    In a Viterbi path pi = pi_1 … pi_L prevent transitions such that either 
+    In a Viterbi path pi = pi_1 … pi_L prevent transitions such that either
     a) (pi_{i-1}, pi_i) = (M_j, E) and L-i <= Z-j or
     b) (pi_{i-1}, pi_i) = (S, M_j) and i <= j.
 
     Returns:
-        A mask of shape (num_models, batch_size, num_states, num_states) 
+        A mask of shape (num_models, batch_size, num_states, num_states)
         indicating allowed transitions.
     """
     k = hmm_cell.num_models
@@ -1174,20 +1169,20 @@ def non_homogeneous_mask_func(i, seq_lens, hmm_cell):
         number_of_forbidden_match_states = tf.maximum(0, length - seq_lens[k] + i)
         #always allow transitions out of the last match state
         number_of_forbidden_match_states = tf.minimum(length-1, number_of_forbidden_match_states)
-        length_mask = 1-tf.cast(tf.sequence_mask(number_of_forbidden_match_states, maxlen=q-1), hmm_cell.dtype)  
+        length_mask = 1-tf.cast(tf.sequence_mask(number_of_forbidden_match_states, maxlen=q-1), hmm_cell.dtype)
         allowed_CR_transitions = tf.concat([tf.ones_like(length_mask[:,:1]), length_mask], axis=1)
         mask_left = states_left[...,tf.newaxis] * allowed_CL_transitions[tf.newaxis]
         mask_left += template * (1 - states_left[:,tf.newaxis])
         mask_right = states_right[tf.newaxis] * allowed_CR_transitions[...,tf.newaxis]
         mask_right += template * (1 - states_right[tf.newaxis])
-        mask = mask_left * mask_right 
+        mask = mask_left * mask_right
         model_masks.append(mask)
     return tf.stack(model_masks, axis=0)
 
 
 @tf.function
 def one_hot_set(indices, d, dtype):
-    # Returns a vector in {0,1}}^d with a 1 at positions i in indices and 0 
+    # Returns a vector in {0,1}}^d with a 1 at positions i in indices and 0
     # elsewhere
     return tf.reduce_sum(tf.one_hot(indices, d, dtype=dtype), axis=0)
 
@@ -1198,7 +1193,7 @@ def find_faulty_sequences(
     if state_seqs_max_lik.shape[1] > limit:
         return np.array([], dtype=np.int32)
     else:
-        # Returns an array of sequences indices for that Viterbi should be 
+        # Returns an array of sequences indices for that Viterbi should be
         # rerun with restrictions
         C = 2 * model_length
         C_state = state_seqs_max_lik == C

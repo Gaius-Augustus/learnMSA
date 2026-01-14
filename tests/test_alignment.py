@@ -7,17 +7,17 @@ import tensorflow as tf
 from learnMSA import Configuration
 from learnMSA.msa_hmm import Emitter, Initializers, Transitioner
 from learnMSA.msa_hmm.align import align
-from learnMSA.msa_hmm.AlignmentModel import (AlignmentModel,
+from learnMSA.msa_hmm.alignment_model import (AlignmentModel,
                                              find_faulty_sequences,
                                              non_homogeneous_mask_func)
 from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
-from learnMSA.msa_hmm.model import LearnMSAModel
+from learnMSA.model.model import LearnMSAModel
 from learnMSA.util.aligned_dataset import AlignedDataset, SequenceDataset
 
 
 def string_to_one_hot(s : str) -> tf.Tensor:
-    i = [SequenceDataset.alphabet.index(aa) for aa in s]
-    return tf.one_hot(i, len(SequenceDataset.alphabet)-1)
+    i = [SequenceDataset._default_alphabet.index(aa) for aa in s]
+    return tf.one_hot(i, len(SequenceDataset._default_alphabet)-1)
 
 @pytest.fixture
 def simple_data() -> SequenceDataset:

@@ -26,7 +26,7 @@ class SequenceDataset:
         record_dict (dict|_IndexedSeqFileDict): A dictionary(-like) object that
             maps sequence IDs to SeqRecord objects.
     """
-    alphabet: str = "ARNDCQEGHILKMFPSTWYVXUO-"
+    _default_alphabet: str = "ARNDCQEGHILKMFPSTWYVXUO-"
 
     def __init__(
         self,
@@ -34,6 +34,7 @@ class SequenceDataset:
         fmt: str = "fasta",
         sequences: list[tuple[str, str]] | None = None,
         indexed: bool = False,
+        alphabet: str | None = None,
     ) -> None:
         """
         Args:
@@ -44,7 +45,11 @@ class SequenceDataset:
                 filepath and fmt arguments are ignored.
             indexed (bool): If True, avoid loading the whole file into memory
                 at once.  Otherwise regular parsing is used.
+            alphabet (str): The amino acid alphabet to use for encoding sequences.
+                If None, uses the default alphabet "ARNDCQEGHILKMFPSTWYVXUO-".
         """
+        self.alphabet = alphabet if alphabet is not None else type(self)._default_alphabet
+
         if sequences is None:
             # Attempt to parse the file when no sequences are given
             assert filepath is not None, \
@@ -171,7 +176,7 @@ class SequenceDataset:
 
     def get_alphabet_no_gap(self) -> str:
         """ Get the alphabet without gap characters. """
-        return type(self).alphabet[:-1]
+        return self.alphabet[:-1]
 
     def get_standardized_seq(
         self,
@@ -249,13 +254,13 @@ class SequenceDataset:
         )
         # Make sure the sequences do not contain any other symbols
         if validate_alphabet:
-            if bool(re.compile(rf"[^{type(self).alphabet}]").search(seq_str)):
+            if bool(re.compile(rf"[^{self.alphabet}]").search(seq_str)):
                 raise ValueError(
                     "Found unknown character(s) in sequence "\
-                    f"{self.seq_ids[i]}. Allowed alphabet: {type(self).alphabet}."
+                    f"{self.seq_ids[i]}. Allowed alphabet: {self.alphabet}."
                 )
         seq = np.array(
-            [type(self).alphabet.index(aa) for aa in seq_str], dtype=dtype
+            [self.alphabet.index(aa) for aa in seq_str], dtype=dtype
         )
         if seq.shape[0] > crop_to_length:
             # Crop randomly

@@ -10,9 +10,9 @@ import learnMSA.msa_hmm.Initializers as initializers
 import learnMSA.msa_hmm.training_util as training_util
 from learnMSA import Configuration
 from learnMSA.msa_hmm.AlignInsertions import make_aligned_insertions
-from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
+from learnMSA.msa_hmm.alignment_model import AlignmentModel
 from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
-from learnMSA.msa_hmm.model import LearnMSAModel
+from learnMSA.model.model import LearnMSAModel
 from learnMSA.msa_hmm.model_surgery import do_model_surgery
 from learnMSA.msa_hmm.posterior import get_state_expectations
 from learnMSA.util.sequence_dataset import SequenceDataset

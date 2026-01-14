@@ -7,9 +7,9 @@ import tensorflow as tf
 import learnMSA.msa_hmm.model_surgery as surgery
 from learnMSA import Configuration
 from learnMSA.msa_hmm import Emitter, Initializers, Transitioner, training
-from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
+from learnMSA.msa_hmm.alignment_model import AlignmentModel
 from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
-from learnMSA.msa_hmm.model import LearnMSAModel
+from learnMSA.model.model import LearnMSAModel
 from learnMSA.util.sequence_dataset import SequenceDataset
 
 
@@ -25,8 +25,8 @@ def assert_vec(x : np.ndarray, y: np.ndarray) -> None:
 
 def string_to_one_hot(s : str) -> tf.Tensor:
     """Convert a string to one-hot encoded tensor."""
-    i = [SequenceDataset.alphabet.index(aa) for aa in s]
-    return tf.one_hot(i, len(SequenceDataset.alphabet) - 1)
+    i = [SequenceDataset._default_alphabet.index(aa) for aa in s]
+    return tf.one_hot(i, len(SequenceDataset._default_alphabet) - 1)
 
 
 def make_test_alignment(data: SequenceDataset) -> AlignmentModel:

@@ -297,7 +297,7 @@ def get_state_seqs_max_lik(
     batch_generator,
     indices,
     batch_size,
-    hmm_cell, 
+    hmm_cell,
     model_ids,
     encoder=None,
     non_homogeneous_mask_func=None,

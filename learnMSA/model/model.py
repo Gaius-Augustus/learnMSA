@@ -1,21 +1,19 @@
 import math
-from typing import Any, Literal, override
+import warnings
+from typing import Any, Literal, Sequence, override
 
 import numpy as np
 import tensorflow as tf
 
-import learnMSA.msa_hmm.Viterbi as viterbi
 from learnMSA.hmm.tf.layer import PHMMLayer
+from learnMSA.model.hmm_stats import HMMStatsMixin
 from learnMSA.msa_hmm.AncProbsLayer import AncProbsLayer
 from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
-from learnMSA.msa_hmm.MsaHmmCell import MsaHmmCell
-from learnMSA.msa_hmm.MsaHmmLayer import MsaHmmLayer
-from learnMSA.msa_hmm.posterior import get_state_expectations
 from learnMSA.msa_hmm.training import make_dataset
 from learnMSA.util.sequence_dataset import SequenceDataset
 
 
-class LearnMSAModel(tf.keras.Model):
+class LearnMSAModel(tf.keras.Model, HMMStatsMixin):
     """
     Main LearnMSA model for training and decoding.
     """
@@ -200,7 +198,9 @@ class LearnMSAModel(tf.keras.Model):
         return encoded_seq
 
     @override
-    def build(self, input_shapes: tuple[tuple[int | None, ...], ...]):
+    def build(
+        self, input_shapes: tuple[tuple[int | None, ...], ...] = ((None,),)
+    ) -> None:
         """
         Build the model based on the input shape.
 
@@ -253,9 +253,11 @@ class LearnMSAModel(tf.keras.Model):
     def fit(
         self,
         data: SequenceDataset,
-        indices: np.ndarray,
-        iteration: int,
-        batch_size: int,
+        indices: np.ndarray | None = None,
+        iteration: int = 0,
+        batch_size: int | None = None,
+        epochs: int | None = None,
+        steps_per_epoch: int | None = None,
         callbacks: list[tf.keras.callbacks.Callback]=[],
     ) -> tf.keras.callbacks.History:
         """
@@ -266,6 +268,9 @@ class LearnMSAModel(tf.keras.Model):
             indices: Array of sequence indices to train on
             iteration: Current iteration number in the training loop
             batch_size: Number of sequences per batch
+            epochs: Number of epochs to train for (overrides automatic setting)
+            steps_per_epoch: Number of steps per epoch
+                (overrides automatic setting)
             callbacks: List of Keras callbacks to use during training
 
         Returns:
@@ -273,6 +278,22 @@ class LearnMSAModel(tf.keras.Model):
         """
         self.phmm_layer.loglik_mode()
         self.context.batch_gen.configure(data, self.context)
+
+        if batch_size is None:
+            if callable(self.context.batch_size):
+                batch_size = self.context.batch_size(data)
+            else:
+                batch_size = self.context.batch_size
+
+        if indices is None:
+            indices = np.arange(data.num_seq)
+
+        if epochs is None:
+            epochs = self.get_num_epochs(iteration)
+
+        if steps_per_epoch is None:
+            steps_per_epoch = self.get_num_steps(indices.shape[0], batch_size)
+
         self._print_train_header(indices, batch_size, data)
         dataset = make_dataset(
             indices,
@@ -282,8 +303,8 @@ class LearnMSAModel(tf.keras.Model):
         )
         history = super().fit(
             dataset,
-            epochs=self.get_num_epochs(iteration),
-            steps_per_epoch=self.get_num_steps(indices.shape[0], batch_size),
+            epochs=epochs,
+            steps_per_epoch=steps_per_epoch,
             callbacks=callbacks + self.get_train_callbacks(),
             verbose=self.get_verbosity(),
         )
@@ -343,52 +364,164 @@ class LearnMSAModel(tf.keras.Model):
         self.loss_tracker.reset_state()
         self.loglik_tracker.reset_state()
         self.prior_tracker.reset_state()
-        self.aux_loss_tracker.reset_state()
 
     @property
     def metrics(self):
         return [self.loss_tracker, self.loglik_tracker, self.prior_tracker]
 
-    def decode(
+    def predict(
         self,
         data: SequenceDataset,
-        indices: np.ndarray,
-        batch_size: int,
-        models: list[int],
-        non_homogeneous_mask_func=None,
+        indices: np.ndarray | None = None,
+        models: list[int] | None = None,
+        bucket_boundaries: Sequence[int | float] | None = None,
+        bucket_batch_sizes: Sequence[int] | None = None,
     ) -> np.ndarray:
-        self.phmm_layer.viterbi_mode()
-        assert non_homogeneous_mask_func is None, \
-            "Non-homogeneous decoding not implemented yet."
-        data = make_dataset(
-            sorted_indices[:,0],
-            batch_generator,
-            batch_size,
+        """
+        Computes predictions for all sequences specified by indices in data.
+        Buckets sequences by length for efficiency and determines appropriate
+        batch sizes from the `TrainingConfiguration` of the model.
+        Specify a call mode before running this method, e.g. `viterbi_mode()`.
+
+        Args:
+            data: SequenceDataset containing the sequences to predict on
+            indices: Array of sequence indices to predict on
+            models: List of model indices to use for prediction
+            bucket_boundaries: Sequence length boundaries for bucketing. If None,
+                uses default boundaries [200, 520, 700, 850, 1200, 2000, 4000, inf].
+            bucket_batch_sizes: Batch sizes for each bucket. If None, uses the
+                adaptive batch size function from the batch generator.
+        """
+        if indices is None:
+            indices = np.arange(data.num_seq)
+
+        # TODO: revert head_subset later?
+        self.phmm_layer.head_subset = models # restrict to specified models
+
+        if models is None:
+            _models = list(range(len(self.phmm_layer.lengths)))
+        else:
+            _models = models
+
+        # Additional setup required before running Viterbi
+        # TODO: clean up later
+        self.context.batch_gen.configure(data, self.context)
+        old_crop_long_seqs = self.context.batch_gen.crop_long_seqs
+        self.context.batch_gen.crop_long_seqs = math.inf #do not crop sequences
+
+        # Create dataset and evaluate
+        ds = make_dataset(
+            indices,
+            self.context.batch_gen,
             shuffle=False,
             bucket_by_seq_length=True,
-            model_lengths=cell.length
+            model_lengths=[self.phmm_layer.lengths[m] for m in _models],
+            bucket_boundaries=bucket_boundaries,
+            bucket_batch_sizes=bucket_batch_sizes,
         )
-        return self.evaluate(data)
 
-    def posterior(
+        # Suppress the "ran out of data" warning for finite datasets with bucketing
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message="Your input ran out of data",
+                category=UserWarning
+            )
+            result = super().predict(ds, verbose=self.get_verbosity())
+
+        # When bucketing is used, predict_step returns (predictions, indices)
+        if isinstance(result, tuple) and len(result) == 2:
+            predictions, bucket_indices = result
+            # Sort predictions back to original order using bucket_indices
+            sorted_order = np.argsort(bucket_indices)
+            decoded_array = predictions[sorted_order]
+        else:
+            # No bucketing, result is just predictions
+            decoded_array = np.asarray(result)
+
+        # Reset
+        self.context.batch_gen.crop_long_seqs = old_crop_long_seqs
+
+        return decoded_array
+
+    @override
+    def predict_step(self, data : Any) -> Any:
+        """
+        Custom prediction step that handles the optional index for bucketed
+        datasets.
+
+        Args:
+            data: Either ((batch, indices), y) for regular datasets
+                or ((batch, indices, j), y) for bucketed datasets where j is the
+                original sequence index.
+
+        Returns:
+            If bucketed: (predictions, j) to allow reordering
+            Otherwise: predictions
+        """
+        x, _ = data
+
+        # Check if we have the bucketing index
+        if isinstance(x, tuple) and len(x) == 3:
+            # Bucketed dataset: (batch, indices, j)
+            batch, indices, j = x
+            predictions = self((batch, indices), training=False)
+            # Return predictions along with the index for reordering
+            return predictions, j
+        else:
+            # Regular dataset: (batch, indices)
+            predictions = self(x, training=False)
+            return predictions
+
+    def evaluate(
         self,
         data: SequenceDataset,
-        indices: np.ndarray,
-        batch_size: int,
+        indices: np.ndarray | None = None,
+        models: list[int] | None = None,
     ) -> np.ndarray:
-        self.encode_only = True
-        expected_states = get_state_expectations(
-            data,
-            self.context.batch_gen,
+        """
+        Computes loss and loglik for all sequences specified by
+        indices in data.
+        """
+        if indices is None:
+            indices = np.arange(data.num_seq)
+
+        self.loglik_mode()
+
+        # TODO: revert head_subset later?
+        self.phmm_layer.head_subset = models # restrict to specified models
+
+        if models is None:
+            _models = list(range(len(self.phmm_layer.lengths)))
+        else:
+            _models = models
+
+        # Additional setup required before running Viterbi
+        # TODO: clean up later
+        self.context.batch_gen.configure(data, self.context)
+        old_crop_long_seqs = self.context.batch_gen.crop_long_seqs
+        self.context.batch_gen.crop_long_seqs = math.inf #do not crop sequences
+
+        # Create dataset and evaluate
+        ds = make_dataset(
             indices,
-            batch_size,
-            self.msa_hmm_layer,
-            self,
-            with_plm=self.context.config.language_model.use_language_model,
-            plm_dim=self.context.scoring_model_config.dim
-        ).numpy()
-        self.encode_only = False
-        return expected_states
+            self.context.batch_gen,
+            shuffle=False,
+            bucket_by_seq_length=True,
+            model_lengths=[self.phmm_layer.lengths[m] for m in _models],
+        )
+
+        result = super().evaluate(ds)
+
+        # When bucketing is used, test_step would need similar handling
+        # For now, evaluate returns scalar metrics, not per-sequence results
+        # So we just return as-is
+        decoded_array = np.asarray(result)
+
+        # Reset
+        self.context.batch_gen.crop_long_seqs = old_crop_long_seqs
+
+        return decoded_array
 
     def get_num_epochs(self, iteration: int) -> int:
         """

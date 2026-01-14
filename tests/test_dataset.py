@@ -73,11 +73,11 @@ def test_remove_gaps() -> None:
             )
             np.testing.assert_equal(
                 data.get_encoded_seq(5),
-                [SequenceDataset.alphabet.index(a) for a in ref.replace('-', '')]
+                [SequenceDataset._default_alphabet.index(a) for a in ref.replace('-', '')]
             )
             np.testing.assert_equal(
                 data.get_encoded_seq(5, remove_gaps=False),
-                [SequenceDataset.alphabet.index(a) for a in ref]
+                [SequenceDataset._default_alphabet.index(a) for a in ref]
             )
 
 
@@ -219,7 +219,7 @@ def test_get_alphabet_no_gap() -> None:
         alphabet_no_gap = data.get_alphabet_no_gap()
         assert alphabet_no_gap == "ARNDCQEGHILKMFPSTWYVXUO"
         assert "-" not in alphabet_no_gap
-        assert SequenceDataset.alphabet.endswith("-")
+        assert SequenceDataset._default_alphabet.endswith("-")
 
 
 def test_get_standardized_seq() -> None:
@@ -440,3 +440,29 @@ def test_file_conversion_aligned(tmp_path: Path) -> None:
                 np.testing.assert_equal(
                     rd.get_column_map(0), data.get_column_map(0)
                 )
+
+
+def test_custom_alphabet() -> None:
+    """Test that custom alphabets work correctly."""
+    # Create a simple dataset with custom alphabet "AB-"
+    sequences = [("seq1", "AABBA"), ("seq2", "A-BBA")]
+
+    with SequenceDataset(sequences=sequences, alphabet="AB-") as data:
+        assert data.alphabet == "AB-"
+        # Test encoding with custom alphabet
+        encoded = data.get_encoded_seq(0, replace_with_x="")
+        # A=0, B=1, -=2
+        np.testing.assert_equal(encoded, [0, 0, 1, 1, 0])
+
+        # Test alphabet_no_gap
+        assert data.get_alphabet_no_gap() == "AB"
+
+    # Test with aligned dataset
+    with AlignedDataset(aligned_sequences=sequences, alphabet="AB-") as data:
+        assert data.alphabet == "AB-"
+        assert data.alignment_len == 5
+        # seq2 has a gap at position 1
+        np.testing.assert_equal(
+            data.get_encoded_seq(1, replace_with_x=""), [0, 1, 1, 0]
+        )
+        np.testing.assert_equal(data.get_column_map(1), [0, 2, 3, 4])

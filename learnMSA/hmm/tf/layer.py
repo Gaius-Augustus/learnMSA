@@ -91,11 +91,11 @@ class PHMMLayer(tf.keras.Layer):
             # Set up the Dirichlet prior for emissions
             emission_prior = load_dirichlet(
                 "amino_acid_dirichlet.weights",
-                dim = len(SequenceDataset.alphabet)-1
+                dim = len(SequenceDataset._default_alphabet)-1
             )
             # Share concentrations across all states
             emission_prior.share = np.tile(
-                np.arange(len(SequenceDataset.alphabet)-1),
+                np.arange(len(SequenceDataset._default_alphabet)-1),
                 reps=2 * sum(lengths) + 2 * len(lengths)
             )
 

@@ -5,7 +5,7 @@ import tensorflow as tf
 from dataclasses import dataclass
 
 import learnMSA.msa_hmm.Initializers as initializers
-from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
+from learnMSA.msa_hmm.alignment_model import AlignmentModel
 
 
 def get_discard_or_expand_positions(am, del_t=0.5, ins_t=0.5):

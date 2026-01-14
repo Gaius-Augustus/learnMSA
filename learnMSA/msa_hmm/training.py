@@ -11,15 +11,15 @@ if TYPE_CHECKING:
 
 
 class BatchGenerator():
+    crop_long_seqs: float
+
     def __init__(
         self,
         return_only_sequences=False,
         shuffle=True,
-        alphabet_size=len(SequenceDataset.alphabet)-1
     ) -> None:
         #generate a unique permutation of the sequence indices for each model to train
         self.return_only_sequences = return_only_sequences
-        self.alphabet_size = alphabet_size
         self.shuffle = shuffle
         self.configured = False
 
@@ -29,6 +29,8 @@ class BatchGenerator():
         context: "LearnMSAContext",
     ):
         self.data = data
+        self.alphabet_size = len(data.alphabet)-1
+        self.context = context
         self.config = context.config
         self.num_models = self.config.training.num_model
         self.crop_long_seqs = self.config.training.crop
@@ -43,7 +45,7 @@ class BatchGenerator():
                 "A batch generator must be configured with the "\
                 "configure(data, config) method."
             )
-        #use a different permutation of the sequences per trained model
+        # Use a different permutation of the sequences per trained model
         if self.shuffle:
             permutated_indices = np.stack([perm[indices] for perm in self.permutations], axis=1)
         else:
@@ -54,13 +56,29 @@ class BatchGenerator():
         if return_crop_boundaries:
             start = np.zeros((indices.shape[0], self.num_models), dtype=np.int32)
             end = np.zeros((indices.shape[0], self.num_models), dtype=np.int32)
-        batch += self.alphabet_size #initialize with terminal symbols
+        batch += self.alphabet_size # Initialize with terminal symbols
         for i,perm_ind in enumerate(permutated_indices):
             for k,j in enumerate(perm_ind):
-                if return_crop_boundaries:
-                    seq, start[i, k], end[i, k] = self.data.get_encoded_seq(j, crop_to_length=self.crop_long_seqs, return_crop_boundaries=True)
+                if self.data.alphabet == SequenceDataset._default_alphabet:
+                    # Replace rare amino acids with X if the amino acid
+                    # alphabet if used
+                    replace_with_x = "BZJ"
                 else:
-                    seq = self.data.get_encoded_seq(j, crop_to_length=self.crop_long_seqs, return_crop_boundaries=False)
+                    replace_with_x = ""
+                if return_crop_boundaries:
+                    seq, start[i, k], end[i, k] = self.data.get_encoded_seq(
+                        j,
+                        crop_to_length=self.crop_long_seqs,
+                        return_crop_boundaries=True,
+                        replace_with_x=replace_with_x,
+                    )
+                else:
+                    seq = self.data.get_encoded_seq(
+                        j,
+                        crop_to_length=self.crop_long_seqs,
+                        return_crop_boundaries=False,
+                        replace_with_x=replace_with_x,
+                    )
                 batch[i, k, :min(self.data.seq_lens[j], self.crop_long_seqs)] = seq
         if self.return_only_sequences:
             if return_crop_boundaries:
@@ -86,6 +104,8 @@ def make_dataset(
     shuffle:bool = True,
     bucket_by_seq_length:bool = False,
     model_lengths:Sequence[int] = [0],
+    bucket_boundaries: Sequence[int | float] | None = None,
+    bucket_batch_sizes: Sequence[int] | None = None,
 ) -> tf.data.Dataset:
     """
     Creates a dataset for training and inference.
@@ -98,28 +118,50 @@ def make_dataset(
         shuffle: Whether to shuffle the dataset.
         bucket_by_seq_length: Whether to use bucketing by sequence length.
         model_lengths: List of model lengths for adaptive batching.
+        bucket_boundaries: Sequence length boundaries for bucketing. If None,
+            uses default boundaries [200, 520, 700, 850, 1200, 2000, 4000, inf].
+        bucket_batch_sizes: Batch sizes for each bucket. If None, uses the
+            adaptive batch size function from the batch generator.
     """
     shuffle = shuffle and not bucket_by_seq_length
     batch_generator.shuffle = shuffle
     ds = tf.data.Dataset.from_tensor_slices(indices)
-    adaptive_batch = batch_generator.config.training.batch_size
-    if bucket_by_seq_length and callable(adaptive_batch): #bucketing only usable if user has not set a fixed batch size
-        ds_len = tf.data.Dataset.from_tensor_slices(batch_generator.data.seq_lens[indices].astype(np.int32))
-        ds_ind =  tf.data.Dataset.from_tensor_slices(np.arange(indices.size))
+    adaptive_batch = batch_generator.context.batch_size
+    if bucket_by_seq_length and callable(adaptive_batch):
+        # Bucketing only usable if user has not set a fixed batch size
+        ds_len = tf.data.Dataset.from_tensor_slices(
+            batch_generator.data.seq_lens[indices].astype(np.int32)
+        )
+        ds_ind =  tf.data.Dataset.from_tensor_slices(
+            np.arange(indices.size)
+        )
         ds = tf.data.Dataset.zip((ds, ds_len, ds_ind))
-        bucket_boundaries = [200, 520, 700, 850, 1200, 2000, 4000, math.inf]
-        bucket_batch_sizes = [adaptive_batch(model_lengths, b) for b in bucket_boundaries]
+
+        # Use provided bucket boundaries or defaults
+        if bucket_boundaries is None:
+            bucket_boundaries = [200, 520, 700, 850, 1200, 2000, 4000]
+        if bucket_batch_sizes is None:
+            bucket_batch_sizes = [
+                adaptive_batch(model_lengths, b) for b in bucket_boundaries+[math.inf]
+            ]
         ds = ds.bucket_by_sequence_length(
-                                element_length_func=lambda i,L,j: L,
-                                bucket_boundaries=bucket_boundaries[:-1],
-                                bucket_batch_sizes=bucket_batch_sizes)
+            element_length_func=lambda i,L,j: L,
+            bucket_boundaries=bucket_boundaries,
+            bucket_batch_sizes=bucket_batch_sizes
+        )
 
         batch_func_out_types = batch_generator.get_out_types() + (tf.int64,)
-        func = (lambda i,j: (batch_generator(i), j)) if len(batch_func_out_types) == 2 else lambda i,j: (*batch_generator(i), j)
-        batch_func = lambda i,_,j: tf.numpy_function(func=func, inp=[i,j], Tout=batch_func_out_types)
+        if len(batch_func_out_types) == 2:
+            func = (lambda i,j: (batch_generator(i), j))
+        else:
+            func = lambda i,j: (*batch_generator(i), j)
+        batch_func = lambda i,_,j:\
+            tf.numpy_function(func=func, inp=[i,j], Tout=batch_func_out_types)
     else:
         if bucket_by_seq_length:
-            ds_arange = tf.data.Dataset.from_tensor_slices(np.arange(indices.size))
+            ds_arange = tf.data.Dataset.from_tensor_slices(
+                np.arange(indices.size)
+            )
             ds = tf.data.Dataset.zip((ds, ds_arange))
         if shuffle:
             ds = ds.shuffle(indices.size, reshuffle_each_iteration=True)
@@ -127,17 +169,36 @@ def make_dataset(
         ds = ds.batch(batch_size)
         def _batch_func(i):
             if len(batch_generator.get_out_types()) == 2:
-                batch, ind = tf.numpy_function(batch_generator, [i], batch_generator.get_out_types())
-                #explicitly set output shapes or tf 2.17 will complain about unknown shapes
-                batch.set_shape(tf.TensorShape([None, batch_generator.num_models, None]))
-                ind.set_shape(tf.TensorShape([None, batch_generator.num_models]))
+                batch, ind = tf.numpy_function(
+                    batch_generator, [i], batch_generator.get_out_types()
+                )
+                # explicitly set output shapes or tf 2.17 will complain about
+                # unknown shapes
+                batch.set_shape(
+                    tf.TensorShape([None, batch_generator.num_models, None])
+                )
+                ind.set_shape(
+                    tf.TensorShape([None, batch_generator.num_models])
+                )
                 return batch, ind
             else:
-                batch, ind, emb = tf.numpy_function(batch_generator, [i], batch_generator.get_out_types())
-                #explicitly set output shapes or tf 2.17 will complain about unknown shapes
-                batch.set_shape(tf.TensorShape([None, batch_generator.num_models, None]))
-                ind.set_shape(tf.TensorShape([None, batch_generator.num_models]))
-                emb.set_shape(tf.TensorShape([None, batch_generator.num_models, None, batch_generator.scoring_model_config.dim+1]))
+                batch, ind, emb = tf.numpy_function(
+                    batch_generator, [i], batch_generator.get_out_types()
+                )
+                # explicitly set output shapes or tf 2.17 will complain about
+                # unknown shapes
+                batch.set_shape(
+                    tf.TensorShape([None, batch_generator.num_models, None])
+                )
+                ind.set_shape(
+                    tf.TensorShape([None, batch_generator.num_models])
+                )
+                emb.set_shape(tf.TensorShape([
+                    None,
+                    batch_generator.num_models,
+                    None,
+                    batch_generator.scoring_model_config.dim+1
+                ]))
                 return batch, ind, emb
         if bucket_by_seq_length:
             def batch_func(i,j):

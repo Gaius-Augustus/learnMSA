@@ -2,12 +2,13 @@ import numpy as np
 import pytest
 import tensorflow as tf
 
-from learnMSA.hmm.tf import layer
+import learnMSA.msa_hmm.training_util as training_util
 import tests.hmm.ref as ref
 from learnMSA.config import Configuration, TrainingConfig
 from learnMSA.config.hmm import PHMMPriorConfig
+from learnMSA.model.model import LearnMSAModel
 from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
-from learnMSA.msa_hmm.model import LearnMSAModel
+from learnMSA.util.sequence_dataset import SequenceDataset
 
 
 @pytest.fixture
@@ -64,7 +65,9 @@ def context_amino_acid(config_amino_acid: Configuration) -> LearnMSAContext:
     )
 
 @pytest.fixture
-def context_amino_acid_no_prior(config_amino_acid_no_prior: Configuration) -> LearnMSAContext:
+def context_amino_acid_no_prior(
+    config_amino_acid_no_prior: Configuration
+) -> LearnMSAContext:
     """The context for setting up the model."""
     return LearnMSAContext(
         config=config_amino_acid_no_prior,
@@ -132,7 +135,8 @@ def test_compute_loss_amino_acid(context_amino_acid: LearnMSAContext) -> None:
 def test_compute_loss_amino_acid_no_prior(
     context_amino_acid_no_prior: LearnMSAContext
 ) -> None:
-    # Test that the compute_loss method runs without errors when no prior is used.
+    # Test that the compute_loss method runs without errors
+    # when no prior is used.
     model = LearnMSAModel(context_amino_acid_no_prior)
 
     batch_size = 4
@@ -258,4 +262,92 @@ def test_posterior_on_batch(context_binary: LearnMSAContext) -> None:
         atol=1e-4,
         err_msg="Padding state posterior probabilities do not match reference "\
             "for model B"
+    )
+
+def test_fit(context_amino_acid: LearnMSAContext) -> None:
+    # Test that the fit method runs without errors and that parameters are
+    # updated depending on the data.
+    model = LearnMSAModel(context_amino_acid)
+    model.build()
+    model.compile()
+
+    # Feed artifical data that contains only a few sequences with a single
+    # amino acid type 'A' (index 0)
+    data = SequenceDataset(sequences=[
+            ("1", "AAAAAAAAAAAAAAAAAAAA"),
+            ("2", "AAAAAAAAAAAAAAAAAA"),
+            ("3", "AAAAAAAAAAAAA"),
+            ("4", "AAAAAAAAAAAAAAAAAA"),
+            ("5", "AAAAAAAAAA"),
+            ("6", "AAAAAAAAAAAAAAAAAA"),
+            ("7", "AAAAAAAAAAAAAAAAAAA"),
+            ("8", "AAAAAAAAAAAAAAA"),
+    ])
+
+    # Get average emission probability of A before training
+    matrix_before_training = model.phmm_layer.hmm.emitter[0].matrix().numpy()
+    prob_A_before_training = matrix_before_training[:, :10, 0].mean()
+
+    # Fit for a few epochs
+    model.fit(data, batch_size=4, epochs=1, steps_per_epoch=10)
+
+    # Get average emission probability of A after training
+    matrix_after_training = model.phmm_layer.hmm.emitter[0].matrix().numpy()
+    prob_A_after_training = matrix_after_training[:, :10, 0].mean()
+
+    assert prob_A_after_training > prob_A_before_training, \
+        "Emission probability for amino acid A did not increase after training"
+
+def test_predict_binary(context_binary: LearnMSAContext) -> None:
+    # Test that the predict method correctly computes log-likelihoods
+    # for sequences in a binary alphabet
+    model = LearnMSAModel(context_binary)
+    model.loglik_mode()
+
+    # Create a dataset with the test sequence "ABA"
+    # and longer "BBBBB" sequences to test if the output ordering is correct
+    # after bucketing internally
+    data = SequenceDataset(
+        sequences=[
+            ("1", "ABA"),
+            ("2", "ABA"),
+            ("3", "BBBBBBBBBBBBBBBBBB"),
+            ("4", "ABA"),
+            ("5", "BBBBBBBBBB"),
+            ("6", "ABA"),
+            ("7", "BBBBBBBBBBBBBBBB"),
+            ("8", "ABA"),
+            ("9", "ABA"),
+            ("10", "ABA"),
+        ],
+        alphabet="AB-",
+    )
+
+    # Manually set an adaptive batch size function for testing
+    batch_cb = training_util.get_adaptive_batch_size(
+        context_binary.model_lengths.tolist(), 20, False
+    )
+    context_binary.config.training.batch_size = batch_cb
+
+    # Predict log-likelihoods for the sequence
+    bucket_boundaries = [4]
+    bucket_batch_sizes = [2, 3]
+    predictions = model.predict(
+        data,
+        bucket_boundaries=bucket_boundaries,
+        bucket_batch_sizes=bucket_batch_sizes,
+    )
+
+    # The predictions should match the reference log-likelihoods
+    # ref.likelihoods contains the likelihoods for both model heads
+    expected_loglik = np.log(ref.likelihoods).reshape((1,2)).repeat(7, axis=0)
+
+        # predictions shape should be (1, 2) for 1 sequence and 2 model heads
+    assert predictions.shape == (10, 2)
+    np.testing.assert_allclose(
+        predictions[[0,1,3,5,7,8,9]],
+        expected_loglik,
+        rtol=1e-3,
+        atol=1e-4,
+        err_msg="Predicted log-likelihoods do not match reference values"
     )

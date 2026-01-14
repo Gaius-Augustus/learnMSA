@@ -49,7 +49,7 @@ class ProfileEmitter(TFCategoricalEmitter):
         if input_shape is None:
             # Number of amino acids (including non-standard + X,
             # but excluding gap)
-            s = len(SequenceDataset.alphabet)-1
+            s = len(SequenceDataset._default_alphabet)-1
             input_shape = (None, None, s)
         else:
             s = input_shape[-1]

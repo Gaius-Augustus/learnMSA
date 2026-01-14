@@ -57,7 +57,7 @@ class EmbeddingEmitter(TFMVNormalEmitter):
         if input_shape is None:
             # Number of amino acids
             # (including non-standard + X, but excluding gap)
-            s = len(SequenceDataset.alphabet)
+            s = len(SequenceDataset._default_alphabet)
             input_shape = (None, None, s-1)
         super().build(input_shape)
 

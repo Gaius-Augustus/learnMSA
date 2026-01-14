@@ -8,10 +8,10 @@ import tensorflow as tf
 
 from learnMSA import Configuration
 from learnMSA.msa_hmm import Emitter, Initializers, Utility, training
-from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
+from learnMSA.msa_hmm.alignment_model import AlignmentModel
 from learnMSA.msa_hmm.AncProbsLayer import AncProbsLayer, make_rate_matrix
 from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
-from learnMSA.msa_hmm.model import LearnMSAModel
+from learnMSA.model.model import LearnMSAModel
 from learnMSA.util.sequence_dataset import SequenceDataset
 from learnMSA.msa_hmm.MsaHmmCell import MsaHmmCell
 from learnMSA.msa_hmm.MsaHmmLayer import MsaHmmLayer
@@ -22,7 +22,7 @@ class AncProbsData:
 
     def __init__(self):
         self.paml_all = [Utility.LG_paml] + Utility.LG4X_paml
-        self.A = SequenceDataset.alphabet[:20]
+        self.A = SequenceDataset._default_alphabet[:20]
 
 
 @pytest.fixture
@@ -142,11 +142,11 @@ def get_test_configs(sequences : np.ndarray) -> list[dict]:
                 case["encoder_initializer"] = encoder_initializer
 
                 if rate_init == -100.:
-                    case["expected_anc_probs"] = tf.one_hot(sequences, len(SequenceDataset.alphabet)).numpy()
+                    case["expected_anc_probs"] = tf.one_hot(sequences, len(SequenceDataset._default_alphabet)).numpy()
                 elif rate_init == 100.:
-                    anc = np.concatenate([p, np.zeros((1, 1, len(SequenceDataset.alphabet) - 20), dtype=np.float32)], axis=-1)
+                    anc = np.concatenate([p, np.zeros((1, 1, len(SequenceDataset._default_alphabet) - 20), dtype=np.float32)], axis=-1)
                     anc = np.concatenate([anc] * sequences.shape[0] * sequences.shape[1] * sequences.shape[2], axis=1)
-                    anc = np.reshape(anc, (sequences.shape[0], sequences.shape[1], sequences.shape[2], len(SequenceDataset.alphabet)))
+                    anc = np.reshape(anc, (sequences.shape[0], sequences.shape[1], sequences.shape[2], len(SequenceDataset._default_alphabet)))
                     case["expected_anc_probs"] = anc
                 if equilibrium_sample:
                     expected_freq = tf.linalg.matvec(p, oh_sequences).numpy()
@@ -245,7 +245,7 @@ def test_anc_probs_layer() -> None:
             n,
             sequences.shape[2],
             case["config"].training.num_rate_matrices,
-            len(SequenceDataset.alphabet)
+            len(SequenceDataset._default_alphabet)
         )
         anc_prob_seqs = np.reshape(anc_prob_seqs, shape)
         if "expected_anc_probs" in case:
@@ -294,7 +294,7 @@ def test_encoder_model() -> None:
                     n,
                     sequences.shape[2],
                     config.training.num_rate_matrices,
-                    len(SequenceDataset.alphabet)
+                    len(SequenceDataset._default_alphabet)
                 )
                 anc_prob_seqs = np.reshape(anc_prob_seqs, shape)
             if "expected_anc_probs" in case:
@@ -339,7 +339,7 @@ def test_transposed() -> None:
         transitioner=context.transitioner
     )
     msa_hmm_layer = MsaHmmLayer(msa_hmm_cell, num_seqs=n)
-    msa_hmm_layer.build((1, None, None, len(SequenceDataset.alphabet)))
+    msa_hmm_layer.build((1, None, None, len(SequenceDataset._default_alphabet)))
 
     # Compute emission matrix
     B = msa_hmm_layer.cell.emitter[0].make_B()[0]
@@ -353,7 +353,7 @@ def test_transposed() -> None:
         n,
         sequences.shape[2],
         config.training.num_rate_matrices,
-        len(SequenceDataset.alphabet)
+        len(SequenceDataset._default_alphabet)
     )
     anc_prob_seqs = np.reshape(anc_prob_seqs, shape)
     anc_prob_seqs = tf.cast(anc_prob_seqs, B.dtype)
