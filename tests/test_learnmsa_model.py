@@ -298,7 +298,7 @@ def test_fit(context_amino_acid: LearnMSAContext) -> None:
     assert prob_A_after_training > prob_A_before_training, \
         "Emission probability for amino acid A did not increase after training"
 
-def test_predict_binary(context_binary: LearnMSAContext) -> None:
+def test_predict(context_binary: LearnMSAContext) -> None:
     # Test that the predict method correctly computes log-likelihoods
     # for sequences in a binary alphabet
     model = LearnMSAModel(context_binary)
@@ -351,3 +351,59 @@ def test_predict_binary(context_binary: LearnMSAContext) -> None:
         atol=1e-4,
         err_msg="Predicted log-likelihoods do not match reference values"
     )
+    assert np.all(predictions[[2,4,6]] != expected_loglik[0])
+
+    # Viterbi predictions
+    model.viterbi_mode()
+    model.compile()
+    viterbi_seqs = model.predict(
+        data,
+        bucket_boundaries=bucket_boundaries,
+        bucket_batch_sizes=bucket_batch_sizes,
+    )
+    assert viterbi_seqs.shape == (10, 19, 2)
+    np.testing.assert_equal(
+        viterbi_seqs[[0,1,3,5,7,8,9], :4, 0],
+        ref.viterbi_a[np.newaxis, :].repeat(7, axis=0),
+        err_msg="Predicted Viterbi sequences do not match reference for model A"
+    )
+    np.testing.assert_equal(
+        viterbi_seqs[[0,1,3,5,7,8,9], :4, 1],
+        ref.viterbi_b[np.newaxis, :].repeat(7, axis=0),
+        err_msg="Predicted Viterbi sequences do not match reference for model B"
+    )
+
+    # Posterior predictions
+    model.posterior_mode()
+    model.compile()
+    posterior = model.predict(
+        data,
+        bucket_boundaries=bucket_boundaries,
+        bucket_batch_sizes=bucket_batch_sizes,
+    )
+    assert posterior.shape == (10, 19, 2, model.phmm_layer.hmm.config.max_states+1)
+    np.testing.assert_allclose(
+        posterior[[0,1,3,5,7,8,9], :4, 0, :],
+        ref.posterior_a[np.newaxis, :, :].repeat(7, axis=0),
+        rtol=1e-3,
+        atol=1e-4,
+        err_msg="Predicted posterior probabilities do not match reference for "\
+            "model A"
+    )
+    np.testing.assert_allclose(
+        posterior[[0,1,3,5,7,8,9], :4, 1, :model.phmm_layer.hmm.config.states[1]],
+        ref.posterior_b[np.newaxis, :, :-1].repeat(7, axis=0),
+        rtol=1e-3,
+        atol=1e-4,
+        err_msg="Predicted posterior probabilities do not match reference for "\
+            "model B"
+    )
+    np.testing.assert_allclose(
+        posterior[[0,1,3,5,7,8,9], :4, 1, -1],
+        ref.posterior_b[np.newaxis, :, -1].repeat(7, axis=0),
+        rtol=1e-3,
+        atol=1e-4,
+        err_msg="Predicted padding state posterior probabilities do not match "\
+            "reference for model B"
+    )
+

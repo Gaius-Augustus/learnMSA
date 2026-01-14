@@ -432,6 +432,8 @@ class LearnMSAModel(tf.keras.Model, HMMStatsMixin):
         # When bucketing is used, predict_step returns (predictions, indices)
         if isinstance(result, tuple) and len(result) == 2:
             predictions, bucket_indices = result
+            if isinstance(predictions, tf.RaggedTensor):
+                predictions = predictions.to_tensor(-1).numpy()
             # Sort predictions back to original order using bucket_indices
             sorted_order = np.argsort(bucket_indices)
             decoded_array = predictions[sorted_order]
