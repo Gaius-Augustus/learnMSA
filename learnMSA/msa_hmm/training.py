@@ -1,9 +1,11 @@
 import math
-from typing import TYPE_CHECKING, Sequence 
+from typing import TYPE_CHECKING, Sequence
 
 import numpy as np
 import tensorflow as tf
+from functools import partial
 
+import learnMSA.msa_hmm.training_util as training_util
 from learnMSA.util.sequence_dataset import SequenceDataset
 
 if TYPE_CHECKING:
@@ -126,7 +128,20 @@ def make_dataset(
     shuffle = shuffle and not bucket_by_seq_length
     batch_generator.shuffle = shuffle
     ds = tf.data.Dataset.from_tensor_slices(indices)
-    adaptive_batch = batch_generator.context.batch_size
+    # TODO: clean up
+    # we can not use the context's adaptive batch, because it takes in a
+    # dataset, here we only have the sequence lengths as a numpy array
+    if batch_generator.context.config.language_model.use_language_model:
+        adaptive_batch = partial(
+            training_util.get_adaptive_batch_size_with_language_model,
+            embedding_dim=batch_generator.context.config.language_model.scoring_model_dim,
+            small_gpu=batch_generator.context.small_gpu
+        )
+    else:
+        adaptive_batch = partial(
+            training_util.get_adaptive_batch_size,
+            small_gpu=batch_generator.context.small_gpu
+        )
     if bucket_by_seq_length and callable(adaptive_batch):
         # Bucketing only usable if user has not set a fixed batch size
         ds_len = tf.data.Dataset.from_tensor_slices(
@@ -152,11 +167,34 @@ def make_dataset(
 
         batch_func_out_types = batch_generator.get_out_types() + (tf.int64,)
         if len(batch_func_out_types) == 2:
+            # return_only_sequences=True case: (batch, j)
             func = (lambda i,j: (batch_generator(i), j))
         else:
+            # return_only_sequences=False case: (batch, indices, j)
             func = lambda i,j: (*batch_generator(i), j)
-        batch_func = lambda i,_,j:\
-            tf.numpy_function(func=func, inp=[i,j], Tout=batch_func_out_types)
+
+        def batch_func(i,_,j):
+            results = tf.numpy_function(
+                func=func, inp=[i,j], Tout=batch_func_out_types
+            )
+            # Set shapes explicitly for TensorFlow 2.17+
+            if len(batch_func_out_types) == 2:
+                batch, j_out = results
+                batch.set_shape(
+                    tf.TensorShape([None, batch_generator.num_models, None])
+                )
+                j_out.set_shape(tf.TensorShape([None]))
+                return batch, j_out
+            else:
+                batch, ind, j_out = results
+                batch.set_shape(
+                    tf.TensorShape([None, batch_generator.num_models, None])
+                )
+                ind.set_shape(
+                    tf.TensorShape([None, batch_generator.num_models])
+                )
+                j_out.set_shape(tf.TensorShape([None]))
+                return batch, ind, j_out
     else:
         if bucket_by_seq_length:
             ds_arange = tf.data.Dataset.from_tensor_slices(

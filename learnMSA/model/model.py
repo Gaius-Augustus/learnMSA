@@ -354,8 +354,8 @@ class LearnMSAModel(tf.keras.Model, HMMStatsMixin):
         loss = - weighted_loglik_mean - log_prior_mean
 
         self.loss_tracker.update_state(loss)
-        self.loglik_tracker.update_state(-weighted_loglik_mean)
-        self.prior_tracker.update_state(-log_prior_mean)
+        self.loglik_tracker.update_state(weighted_loglik_mean)
+        self.prior_tracker.update_state(log_prior_mean)
 
         return loss
 
@@ -513,17 +513,52 @@ class LearnMSAModel(tf.keras.Model, HMMStatsMixin):
             model_lengths=[self.phmm_layer.lengths[m] for m in _models],
         )
 
-        result = super().evaluate(ds)
+        # Suppress the "ran out of data" warning for finite datasets with bucketing
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message="Your input ran out of data",
+                category=UserWarning
+            )
+            result = super().evaluate(ds, verbose=self.get_verbosity())
 
-        # When bucketing is used, test_step would need similar handling
-        # For now, evaluate returns scalar metrics, not per-sequence results
-        # So we just return as-is
+        # Evaluate returns scalar metrics
         decoded_array = np.asarray(result)
 
         # Reset
         self.context.batch_gen.crop_long_seqs = old_crop_long_seqs
 
         return decoded_array
+
+    @override
+    def test_step(self, data: Any) -> dict[str, tf.Tensor]:
+        """
+        Custom test step that handles the optional index for bucketed datasets.
+
+        Args:
+            data: Either ((batch, indices), y) for regular datasets
+                or ((batch, indices, j), y) for bucketed datasets where j is the
+                original sequence index.
+
+        Returns:
+            Dictionary of metric results
+        """
+        x, y = data
+
+        # Check if we have the bucketing index and strip it
+        if isinstance(x, tuple) and len(x) == 3:
+            # Bucketed dataset: (batch, indices, j) - extract (batch, indices)
+            batch, indices, _j = x
+            x = (batch, indices)
+
+        # Compute predictions
+        y_pred = self(x, training=False)
+
+        # Compute loss (updates metrics internally)
+        self.compute_loss(x, y, y_pred)
+
+        # Return metrics
+        return {m.name: m.result() for m in self.metrics}
 
     def get_num_epochs(self, iteration: int) -> int:
         """
