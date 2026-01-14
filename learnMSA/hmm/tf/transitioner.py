@@ -403,8 +403,8 @@ class PHMMTransitioner(TFTransitioner):
             A 1D tensor containing start probabilities for allowed starting
             states.
         """
-        # Get the explicit start distribution
-        explicit_start = tf.math.log(self.explicit_transitioner.start_dist())
+        # Get the explicit start distribution - use safe_log to avoid -inf
+        explicit_start = safe_log(self.explicit_transitioner.start_dist())
 
         start_probs = []
         max_states = PHMMTransitionIndexSet.num_states_unfolded(max(self.lengths))
@@ -445,9 +445,6 @@ class PHMMTransitioner(TFTransitioner):
             start_probs.append(tf.expand_dims(start_left, 0))
 
             # Unannotated - can be reached via Begin -> deletes -> End -> Unannot
-            # But this is typically not a valid start state, so we use log_zero
-            # However, looking at the folded index set, C is listed as a valid start state
-            # Let's compute it properly
             p_delete_to_end = get(idx.delete_to_end)
             p_end = get(idx.end)
 

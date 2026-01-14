@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+import tensorflow as tf
 from hidten.hmm import HMMConfig as HidtenHMMConfig
 
 import tests.hmm.ref as ref
@@ -167,3 +168,34 @@ def test_head_subset(hmm_config: HidtenHMMConfig) -> None:
     np.testing.assert_allclose(
         A[0], ref.transitions_b, atol=1e-6
     )
+
+def test_gradient(hmm_config: HidtenHMMConfig) -> None:
+    """Test that gradients flow correctly through the PHMMTransitioner."""
+    lengths = [4, 3]
+
+    # Create value sets for different heads
+    values = [
+        PHMMValueSet.from_config(L, h, ref.config)
+        for h, L in enumerate(lengths)
+    ]
+
+    transitioner = PHMMTransitioner(values=values)
+    transitioner.hmm_config = hmm_config
+    transitioner.build()
+
+    # Perform forward pass and compute gradients
+    with tf.GradientTape() as tape:
+        transitioner._launch()
+        x = transitioner.start_dist()
+        x = tf.expand_dims(x, axis=0) # Add batch dimension
+        y = transitioner(x)
+        # Create a scalar loss for gradient computation
+        loss = tf.reduce_sum(y)
+
+    grads = tape.gradient(loss, transitioner.trainable_variables)
+
+    for i, grad in enumerate(grads):
+        assert grad is not None, f"Gradient {i} is None!"
+
+    assert not tf.reduce_any(tf.math.is_nan(grad.values)).numpy(), \
+        f"Gradient {i} contains NaN!"
