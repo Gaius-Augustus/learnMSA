@@ -423,28 +423,66 @@ def test_evaluate(context_binary: LearnMSAContext) -> None:
     # Evaluate on the dataset
     metrics = model.evaluate(data)
 
-    # metrics should be an array with [loss, loglik, prior]
-    assert isinstance(metrics, np.ndarray)
-    assert len(metrics) == 3
+    loss = metrics["loss"]
+    loglik = metrics["loglik"]
+    prior = metrics["prior"]
 
-    expected_loglik = np.log(ref.likelihoods).mean()
+    # metrics should be an array with [loss, loglik, prior]
+    assert isinstance(loss, np.ndarray)
+    assert isinstance(loglik, np.ndarray)
+    assert isinstance(prior, np.ndarray)
+    assert loss.shape == ()
+    assert loglik.shape == (2,)
+    assert prior.shape == (2,)
+
+    expected_loglik = np.log(ref.likelihoods)
 
     assert context_binary.sequence_weights is not None
-    expected_prior = model.phmm_layer.prior_scores().numpy().mean() \
+    expected_prior = model.phmm_layer.prior_scores().numpy() \
         / context_binary.sequence_weights.sum()
 
     expected_loss = -expected_loglik - expected_prior
 
     # Check that metrics match expected values
     np.testing.assert_allclose(
-        metrics[0], expected_loss, rtol=1e-4,
+        loss, expected_loss, rtol=1e-4,
         err_msg="Loss does not match expected value"
     )
     np.testing.assert_allclose(
-        metrics[1], expected_loglik, rtol=1e-4,
+        loglik, expected_loglik, rtol=1e-4,
         err_msg="Loglik does not match expected value"
     )
     np.testing.assert_allclose(
-        metrics[2], expected_prior, rtol=1e-4,
+        prior, expected_prior, rtol=1e-4,
         err_msg="Prior does not match expected value"
     )
+
+def test_estimate_loglik(context_amino_acid: LearnMSAContext) -> None:
+    # Test that the estimate_loglik method correctly computes
+    # log-likelihoods for sequences in an amino acid alphabet
+    model = LearnMSAModel(context_amino_acid)
+    model.compile()
+
+    # Create a dataset with random sequences
+    np.random.seed(42)
+    sequences = []
+    for i in range(100):
+        seq_length = np.random.randint(10, 50)
+        seq = ''.join(
+            np.random.choice(
+                list('ACDEFGHIKLMNPQRSTVWY'),
+                size=seq_length
+            )
+        )
+        sequences.append((str(i), seq))
+    data = SequenceDataset(sequences=sequences)
+
+    # Estimate log-likelihoods
+    loglik_reduced = model.estimate_loglik(data, reduce=True)
+    loglik_full = model.estimate_loglik(data, reduce=False)
+
+    # Check shapes of the outputs
+    assert loglik_reduced.shape == (2,), \
+        "Reduced loglik shape is incorrect"
+    assert loglik_full.shape == (100, 2), \
+        "Full loglik shape is incorrect"

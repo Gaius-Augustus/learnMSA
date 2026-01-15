@@ -79,20 +79,19 @@ class LearnMSAModel(tf.keras.Model, HMMStatsMixin):
         self.loglik_tracker = tf.keras.metrics.Mean(name='loglik')
         self.prior_tracker = tf.keras.metrics.Mean(name='prior')
 
-    def loglik_mode(self) -> None:
-        """Makes the model return log-likelihoods.
-        """
-        self.phmm_layer.loglik_mode()
+        # Per-model metrics for evaluation mode
+        num_models = context.config.training.num_model
+        self.loglik_per_model_trackers = [
+            tf.keras.metrics.Mean(name=f'loglik_model_{i}')
+            for i in range(num_models)
+        ]
+        self.prior_per_model_trackers = [
+            tf.keras.metrics.Mean(name=f'prior_model_{i}')
+            for i in range(num_models)
+        ]
+        self._eval_mode = False
 
-    def viterbi_mode(self) -> None:
-        """Makes the model return Viterbi paths.
-        """
-        self.phmm_layer.viterbi_mode()
-
-    def posterior_mode(self) -> None:
-        """Makes the model return state posterior probabilities.
-        """
-        self.phmm_layer.posterior_mode()
+        self.encode_hmm_inputs = train_cfg.use_anc_probs
 
     def call(
         self,
@@ -185,7 +184,8 @@ class LearnMSAModel(tf.keras.Model, HMMStatsMixin):
 
         # Pass through encoder layers
         encoded_seq = transposed_sequences
-        if self.context.config.training.use_anc_probs:
+        if self.context.config.training.use_anc_probs\
+                and self.encode_hmm_inputs:
             encoded_seq = self.anc_probs_layer(
                 encoded_seq, rate_indices=transposed_indices, training=training # type: ignore
             )
@@ -320,6 +320,40 @@ class LearnMSAModel(tf.keras.Model, HMMStatsMixin):
     ) -> tf.Tensor:
         """
         Compute the total loss which combines likelihood and prior.
+
+        In training mode, returns scalar loss with averaged metrics.
+        In evaluation mode, returns scalar loss but accumulates per-model metrics.
+        """
+        weighted_loglik = self.weighted_loglik(x, y_pred)  # (num_models,)
+        log_prior = self.log_prior()  # (num_models,)
+
+        weighted_loglik_mean = tf.reduce_mean(weighted_loglik)
+        log_prior_mean = tf.reduce_mean(log_prior)
+        loss = -weighted_loglik_mean - log_prior_mean
+
+        # Always update scalar metrics
+        self.loss_tracker.update_state(loss)
+        self.loglik_tracker.update_state(weighted_loglik_mean)
+        self.prior_tracker.update_state(log_prior_mean)
+
+        # In eval mode, also update per-model trackers
+        if self._eval_mode:
+            for i in range(len(self.loglik_per_model_trackers)):
+                self.loglik_per_model_trackers[i].update_state(weighted_loglik[i])
+                self.prior_per_model_trackers[i].update_state(log_prior[i])
+
+        return loss
+
+    def weighted_loglik(self, x: Any, y_pred: tf.Tensor) -> tf.Tensor:
+        """ Computes the weighted loglik for the given batch.
+
+        Args:
+            x: Input data tuple containing sequences and indices.
+            y_pred: Predicted loglikelihoods from the model.
+
+        Returns:
+            weighted_loglik: Tensor of shape (num_models,) with the weighted
+                loglik values.
         """
         # Unstack the inputs
         if self.context.config.language_model.use_language_model:
@@ -337,33 +371,38 @@ class LearnMSAModel(tf.keras.Model, HMMStatsMixin):
             )
             weighted_y_pred = y_pred * weights
             weighted_y_pred /= tf.reduce_sum(weights, axis=0)
-            total_weight_sum = self.context.sequence_weights.sum()
         else:
             weighted_y_pred = y_pred
-            total_weight_sum = self.context.num_seq
 
         # Reduce over the sequence dimension
         weighted_loglik = tf.reduce_sum(weighted_y_pred, axis=0) # (H,)
-        weighted_loglik_mean = tf.reduce_mean(weighted_loglik)
 
-        # Compute the full loss
+        return weighted_loglik
+
+    def log_prior(self) -> tf.Tensor:
+        """ Computes the logarithmic prior value of each underlying model.
+
+        Returns:
+            log_prior: Tensor of shape (num_models,) with the log prior values.
+        """
+        if self.context.sequence_weights is not None:
+            S = self.context.sequence_weights.sum()
+        else:
+            S = self.context.num_seq
         log_prior = self.phmm_layer.prior_scores()
-        log_prior /= tf.cast(total_weight_sum, tf.float32) # Scale prior
-        log_prior_mean = tf.reduce_mean(log_prior)
-
-        loss = - weighted_loglik_mean - log_prior_mean
-
-        self.loss_tracker.update_state(loss)
-        self.loglik_tracker.update_state(weighted_loglik_mean)
-        self.prior_tracker.update_state(log_prior_mean)
-
-        return loss
+        if S > 0:
+            log_prior /= tf.cast(S, tf.float32)
+        return log_prior
 
     def reset_metrics(self) -> None:
         """Reset all metric trackers."""
         self.loss_tracker.reset_state()
         self.loglik_tracker.reset_state()
         self.prior_tracker.reset_state()
+        for tracker in self.loglik_per_model_trackers:
+            tracker.reset_state()
+        for tracker in self.prior_per_model_trackers:
+            tracker.reset_state()
 
     @property
     def metrics(self):
@@ -475,15 +514,20 @@ class LearnMSAModel(tf.keras.Model, HMMStatsMixin):
         data: SequenceDataset,
         indices: np.ndarray | None = None,
         models: list[int] | None = None,
-    ) -> np.ndarray:
+    ) -> dict[str, np.ndarray]:
         """
         Computes loss and loglik for all sequences specified by
         indices in data.
+
+        Returns:
+            Dictionary with keys 'loss' (scalar), 'loglik' (per-model),
+            and 'prior' (per-model) when in evaluation mode.
         """
         if indices is None:
             indices = np.arange(data.num_seq)
 
         self.loglik_mode()
+        self.compile()
 
         # TODO: revert head_subset later?
         self.phmm_layer.head_subset = models # restrict to specified models
@@ -508,17 +552,44 @@ class LearnMSAModel(tf.keras.Model, HMMStatsMixin):
             model_lengths=[self.phmm_layer.lengths[m] for m in _models],
         )
 
+        # Enable eval mode and reset per-model trackers
+        self._eval_mode = True
+        for tracker in self.loglik_per_model_trackers:
+            tracker.reset_state()
+        for tracker in self.prior_per_model_trackers:
+            tracker.reset_state()
+
         # Use None for infinite steps (-1), otherwise use the computed steps
         steps_param = None if steps == -1 else steps
-        result = super().evaluate(ds, steps=steps_param, verbose=self.get_verbosity())
+        result = super().evaluate(
+            ds, steps=steps_param, verbose=self.get_verbosity()
+        )
 
-        # Evaluate returns scalar metrics
-        decoded_array = np.asarray(result)
+        # Disable eval mode
+        self._eval_mode = False
+
+        # Get per-model results from trackers
+        loglik_per_model = np.array([
+            tracker.result().numpy() for tracker in self.loglik_per_model_trackers
+        ])
+        prior_per_model = np.array([
+            tracker.result().numpy() for tracker in self.prior_per_model_trackers
+        ])
+
+        # Get scalar loss from result
+        if isinstance(result, list):
+            total_loss = result[0]
+        else:
+            total_loss = result
 
         # Reset
         self.context.batch_gen.crop_long_seqs = old_crop_long_seqs
 
-        return decoded_array
+        return {
+            'loss': np.asarray(total_loss),
+            'loglik': loglik_per_model,
+            'prior': prior_per_model,
+        }
 
     @override
     def test_step(self, data: Any) -> dict[str, tf.Tensor]:
@@ -549,6 +620,156 @@ class LearnMSAModel(tf.keras.Model, HMMStatsMixin):
 
         # Return metrics
         return {m.name: m.result() for m in self.metrics}
+
+    def estimate_loglik(
+        self,
+        data: SequenceDataset,
+        max_seq: int = 200000,
+        reduce: bool = True,
+        models: list[int] | None = None
+    ) -> np.ndarray:
+        """ Computes the logarithmic likelihood for each underlying model.
+
+        Args:
+            max_seq: Threshold for the number of sequences used to compute the
+                loglik. If the dataset has more sequences, a random subset is
+                drawn.
+            reduce: If true, the loglik will be averaged over the number of
+                sequences.
+            models: List of model indices for which the loglik should be
+                computed.
+
+        Returns:
+            loglik: Logarithmic likelihoods. If reduce is true, the shape is
+                (num_models,), otherwise (num_sequences, num_models).
+        """
+        n = data.num_seq
+        if n > max_seq:
+            # estimate the ll only on a subset for efficiency
+            indices = np.arange(n)
+            np.random.shuffle(indices)
+            indices = indices[:max_seq]
+            indices = np.sort(indices)
+        else:
+            indices = np.arange(n)
+        if reduce:
+            return self.evaluate(data, indices, models)["loglik"]
+        else:
+            self.loglik_mode()
+            self.compile()
+            return self.predict(data, indices, models)
+
+    def compute_null_model_log_probs(self):
+        """ Computes the logarithmic likelihood of each sequence under the
+            null model
+
+             S ---> T
+            |_^    |_^
+             p
+
+            where the emission probabilities of S are amino acid background
+            frequencies and T is the terminal state.
+
+            Args:
+                p: The probability of staying in the emitting state S.
+        """
+        # Prepare the data
+        n = self.data.num_seq
+        ds = make_dataset(
+            np.arange(n),
+            self.batch_generator,
+            self.batch_size,
+            shuffle=False,
+            bucket_by_seq_length=True,
+            model_lengths=self.msa_hmm_layer.cell.length
+        )
+
+        # Prepare the background frequencies
+        aa_dist = self.msa_hmm_layer.cell.emitter[0].prior.emission_dirichlet_mix.make_background().numpy()
+        # Append ad-hoc probability for non-standard amino acids
+        aa_dist = np.append(aa_dist, [1e-4]*3)
+        aa_dist /= np.sum(aa_dist) #normalize
+        # Add the terminal symbol emissions
+        aa_dist = np.append(aa_dist, [1.0])
+        # Log transition probabilities
+        aa_dist = np.log(aa_dist + 1e-10)  # shape (24,)
+
+        # Compute emission log probs
+        log_probs = np.zeros((n,))
+        for (x,_,batch_idx), _ in ds:
+            em = tf.reduce_sum(tf.gather(aa_dist, tf.cast(x[:,0,:], tf.int32)), axis=1)
+            log_probs[batch_idx] = em.numpy()
+
+        # Add transition log probs based on the target sequence lenghts
+        # We'll assume a geometric distribution with the expected length
+        # equal to the length of each target sequence
+        L = self.data.seq_lens
+        M = np.mean(L)
+        trans_scores = L * (np.log(M) - np.log(M+1))
+        log_probs += trans_scores
+
+        return log_probs
+
+    def compute_AIC(self, max_seq=200000, loglik=None):
+        """ Computes the Akaike information criterion for each underlying model.
+        Args:
+            max_seq: Threshold for the number of sequences used to compute the
+                loglik. If the dataset has mroe sequences, a random subset is
+                drawn.
+            loglik: This argument can be set if the loglik was computed before
+                via compute_loglik to avoid overhead. If None, the loglik will
+                be computed internally.
+        """
+        if loglik is None:
+            loglik = self.compute_loglik(max_seq)
+        num_param = 34 * np.array(self.length) + 25
+        aic = -2 * loglik * self.data.num_seq + 2*num_param
+        return aic
+
+    def compute_consensus_score(self):
+        """ Computes a consensus score that rates how plausible each model is
+            with respect to all other models.
+            (Relevant for users not using the default emitter: Uses the
+            make_B_amino method of the first emitter.)
+        """
+        # compute the match sequence of all models padded with terminal symbols
+        match_seqs = np.zeros(
+            (self.num_models, max(self.length)+1, self.msa_hmm_layer.cell.dim)
+        )
+        match_seqs[:,:,-1] = 1 #initialize with terminal symbols
+        emitter = self.msa_hmm_layer.cell.emitter[0]
+        for i,L in enumerate(self.length):
+            match_seqs[i, :L] = emitter.make_B_amino()[i,1:L+1]
+        # we need to tile the match sequences over the batch dimension because
+        # each model should see all other models
+        match_seqs = tf.stack([match_seqs]*self.num_models, axis=1)
+        # rate the match seqs with respect to the models and cancel out
+        # self-rating
+
+        # TODO this does not work with self.model which expects indices rather
+        # than distributions
+        # this is a workaround, but will break with a user defined encoder model
+        # we skip the anc probs for simplicity as this would require fitting
+        # evolutionary times
+        consensus_logliks = self.msa_hmm_layer(match_seqs)[1]
+
+        consensus_logliks *= 1-tf.eye(self.num_models)
+        # Axis 1 means we reduce over the batch dimension rather than the model
+        # dimension,
+        # so output i will be the mean loglik if we input all other match
+        # sequenes to model i.
+        # Using axis 0 here is not the same!
+        # Consider the case that all models have the same match sequence but
+        # one model allows many deletions or insertions.
+        # This model is the outlier and should clearly have the lowest score.
+        # With axis=0, the likelihood of the outlier model under all other
+        # models is high and the scores of the other models will have a penalty
+        # since their match sequences are fed into the outlier model.
+        # With axis=1, the scores of all models will be high except for the
+        # outlier model, which has a strong penalty as it rates all other
+        # match sequences involving the deletion/insertion probabilities.
+        consensus_score = tf.reduce_mean(consensus_logliks, axis=1)
+        return consensus_score
 
     def get_num_epochs(self, iteration: int) -> int:
         """

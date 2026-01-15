@@ -17,3 +17,18 @@ class HMMStatsMixin():
     def heads(self) -> int:
         """The number of pHMM heads."""
         return self.phmm_layer.heads
+
+    def loglik_mode(self) -> None:
+        """Makes the model return log-likelihoods.
+        """
+        self.phmm_layer.loglik_mode()
+
+    def viterbi_mode(self) -> None:
+        """Makes the model return Viterbi paths.
+        """
+        self.phmm_layer.viterbi_mode()
+
+    def posterior_mode(self) -> None:
+        """Makes the model return state posterior probabilities.
+        """
+        self.phmm_layer.posterior_mode()

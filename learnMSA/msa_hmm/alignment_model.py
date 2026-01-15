@@ -9,201 +9,13 @@ from packaging import version
 import learnMSA.msa_hmm.AncProbsLayer as anc_probs
 import learnMSA.msa_hmm.Emitter as emit
 import learnMSA.msa_hmm.Priors as priors
-import learnMSA.msa_hmm.training as train
 import learnMSA.msa_hmm.Transitioner as trans
-from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
 from learnMSA.model.model import LearnMSAModel
+from learnMSA.msa_hmm.alignment_metadata import AlignmentMetaData
+from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
+from learnMSA.msa_hmm.AlignInsertions import AlignedInsertions
+from learnMSA.msa_hmm.training import BatchGenerator, make_dataset
 from learnMSA.util.aligned_dataset import AlignedDataset, SequenceDataset
-
-
-# utility class used in AlignmentModel storing useful information on a
-# specific alignment
-class AlignmentMetaData():
-
-    def __init__(
-        self,
-        core_blocks,
-        left_flank,
-        right_flank,
-        unannotated_segments
-    ):
-        self.consensus = np.stack([C for C,_,_,_ in core_blocks])
-        self.insertion_lens = np.stack([IL for _,IL,_,_ in core_blocks])
-        self.insertion_start = np.stack([IS for _,_,IS,_ in core_blocks])
-        self.finished = np.stack([f for _,_,_,f in core_blocks])
-        self.left_flank_len = np.stack(left_flank[0])
-        self.left_flank_start = np.stack(left_flank[1])
-        self.right_flank_len = np.stack(right_flank[0])
-        self.right_flank_start = np.stack(right_flank[1])
-        if len(unannotated_segments) > 0:
-            self.unannotated_segments_len = np.stack([
-                l for l,_ in unannotated_segments
-            ])
-            self.unannotated_segments_start = np.stack([
-                s for _,s in unannotated_segments
-            ])
-            self.unannotated_segment_lens_total = np.amax(
-                self.unannotated_segments_len, axis=1
-            )
-        else:
-            self.unannotated_segment_lens_total = 0
-        self.num_repeats = self.consensus.shape[0]
-        self.consensus_len = self.consensus.shape[-1]
-        self.left_flank_len_total = np.amax(self.left_flank_len)
-        self.right_flank_len_total = np.amax(self.right_flank_len)
-        self.insertion_lens_total = np.amax(self.insertion_lens, axis=1)
-        # convert at least 1 term to int32 in case of an alignment longer
-        # than 32,767
-        self.alignment_len = (
-            self.left_flank_len_total.astype(np.int32) +
-            self.consensus_len*self.num_repeats +
-            np.sum(self.insertion_lens_total) +
-            np.sum(self.unannotated_segment_lens_total) +
-            self.right_flank_len_total
-        )
-
-
-class AlignedInsertions():
-    def __init__(self,
-                 aligned_insertions = None,
-                 aligned_left_flank = None,
-                 aligned_right_flank = None,
-                 aligned_unannotated_segments = None):
-        """
-        Args:
-            aligned_insertions: List of lists of pairs
-                (indices, AlignedDataset with aligned slices) or None.
-                Inner lists have length equal to length of model -1.
-                Outer list has length num_repeats.
-            aligned_left_flank: A pair (indices, AlignedDataset with aligned
-                slices) or None.
-            aligned_right_flank: A pair (indices, AlignedDataset with aligned
-                slices) or None.
-            unannotated_data: List of pairs (indices, AlignedDataset with
-                aligned slices) or None of length num_repeats-1.
-        """
-        self.aligned_insertions = aligned_insertions
-        self.aligned_left_flank = aligned_left_flank
-        self.aligned_right_flank = aligned_right_flank
-        self.aligned_unannotated_segments = aligned_unannotated_segments
-
-        def _process(msa_data : AlignedDataset):
-            custom_columns = np.zeros(
-                (msa_data.num_seq, np.amax(msa_data.alignment_len)),
-                dtype=np.int32
-            )
-            for i in range(msa_data.num_seq):
-                cols = msa_data.get_column_map(i)
-                custom_columns[i, :cols.size] = cols
-            return custom_columns
-
-
-        if aligned_insertions is None:
-            self.ext_insertions = 0
-        else:
-            self.custom_columns_insertions = []
-            for repeat in aligned_insertions:
-                self.custom_columns_insertions.append([])
-                for x in repeat:
-                    if x is None:
-                        self.custom_columns_insertions[-1].append(None)
-                    else:
-                        self.custom_columns_insertions[-1].append(
-                            _process(x[1])
-                        )
-            self.ext_insertions = np.array([
-                [np.amax(x)+1 if x is not None else 0 for x in repeats]
-                for repeats in self.custom_columns_insertions
-            ])
-
-        if aligned_left_flank is None:
-            self.ext_left_flank = 0
-        else:
-            self.custom_columns_left_flank = _process(aligned_left_flank[1])
-            self.ext_left_flank = np.amax(self.custom_columns_left_flank)+1
-
-        if aligned_right_flank is None:
-            self.ext_right_flank = 0
-        else:
-            self.custom_columns_right_flank = _process(aligned_right_flank[1])
-            self.ext_right_flank = np.amax(self.custom_columns_right_flank)+1
-
-        if aligned_unannotated_segments is None:
-            self.ext_unannotated = 0
-        else:
-            self.custom_columns_unannotated_segments = [
-                _process(x[1]) if x is not None else None
-                for x in aligned_unannotated_segments
-            ]
-            self.ext_unannotated = np.array([
-                np.amax(x)+1 if x is not None else 0
-                for x in self.custom_columns_unannotated_segments
-            ])
-
-    def insertion(self, batch_indices, r):
-        if self.aligned_insertions is None:
-            return None
-        else:
-            return [
-                self._get_custom_columns(
-                    batch_indices,
-                    self.aligned_insertions[r][i][0],
-                    self.custom_columns_insertions[r][i],
-                    self.ext_insertions[r,i]
-                )
-                if self.aligned_insertions[r][i] is not None else None
-                for i in range(len(self.aligned_insertions[r]))
-            ]
-
-    def left_flank(self, batch_indices):
-        if self.aligned_left_flank is None:
-            return None
-        else:
-            return self._get_custom_columns(
-                batch_indices,
-                self.aligned_left_flank[0],
-                self.custom_columns_left_flank,
-                self.ext_left_flank
-            )
-
-    def right_flank(self, batch_indices):
-        if self.aligned_right_flank is None:
-            return None
-        else:
-            return self._get_custom_columns(
-                batch_indices,
-                self.aligned_right_flank[0],
-                self.custom_columns_right_flank,
-                self.ext_right_flank
-            )
-
-    def unannotated_segment(self, batch_indices, r):
-        if self.aligned_unannotated_segments is None:
-            return None
-        else:
-            if self.aligned_unannotated_segments[r] is None:
-                return None
-            else:
-                return self._get_custom_columns(
-                    batch_indices,
-                    self.aligned_unannotated_segments[r][0],
-                    self.custom_columns_unannotated_segments[r],
-                    self.ext_unannotated[r]
-                )
-
-    def _get_custom_columns(
-        self,
-        batch_indices,
-        custom_indices,
-        custom_columns,
-        max_len
-    ):
-        columns = np.stack([np.arange(max_len)]*batch_indices.shape[0])
-        for i, c in zip(custom_indices, custom_columns):
-            columns[batch_indices == i, :c.size] = c
-        return columns
-
-
 
 
 class AlignmentModel():
@@ -213,97 +25,40 @@ class AlignmentModel():
     alignments on demand (batch-wise mode possible).
     """
 
-    best_model: int
-
-    def __init__(self,
-                 data : SequenceDataset,
-                 batch_generator,
-                 indices,
-                 batch_size,
-                 model,
-                 gap_symbol="-",
-                 gap_symbol_insertions=".",
-                 A2M=None):
+    def __init__(
+        self,
+        data: SequenceDataset,
+        batch_generator: BatchGenerator,
+        indices: np.ndarray,
+        batch_size: int,
+        model: LearnMSAModel,
+        gap_symbol: str = '-',
+        gap_symbol_insertions: str = '.',
+    ) -> None:
         """
         Args:
             data: The dataset of sequences.
-            batch_generator: An already configured batch generator.
+            batch_generator: A generator for creating batches from the dataset.
             indices: (A subset of) The sequence indices from the dataset to align
                 (1D).
-            batch_size: Controls memory consumption of viterbi.
+            batch_size: Batch size used for decoding sequences.
             model: A learnMSA model which internally might represent multiple
                 pHMM models.
             gap_symbol: Character used to denote missing match positions.
             gap_symbol_insertions: Character used to denote insertions in other
                 sequences.
-            A2M: DEPRECATED. Use format="a2m" or format="fasta" in to_file() method
         """
         self.data = data
         self.batch_generator = batch_generator
         self.indices = indices
         self.batch_size = batch_size
         self.model = model
-        self.anc_probs_layer = model.anc_probs_layer
-
         self.gap_symbol = gap_symbol
         self.gap_symbol_insertions = gap_symbol_insertions
-
+        self.best_model = -1
         self.metadata = {}
-        if A2M is not None:
-            raise DeprecationWarning(
-                "The A2M argument is deprecated. Use format='a2m' or " \
-                "format='fasta' in to_file() method."
-            )
 
-    #computes an implicit alignment (without storing gaps)
-    #eventually, an alignment with explicit gaps can be written
-    #in a memory friendly manner to file
-    def _build_alignment(self, models):
-
-        assert len(models) == 1, "Not implemented for multiple models."
-
-        state_seqs_max_lik = self.model.decode(
-            self.data, self.indices, self.batch_size, models
-        )
-        state_seqs_max_lik = self._clean_up_viterbi_seqs(
-            state_seqs_max_lik, models
-        )
-        for i,max_lik_seqs in zip(models, state_seqs_max_lik):
-            model_len = self.model.context.model_lengths[i]
-            decoded_data = AlignmentModel.decode(model_len, max_lik_seqs)
-            self.metadata[i] = AlignmentMetaData(*decoded_data)
-
-    def _clean_up_viterbi_seqs(self, state_seqs_max_lik, models):
-
-        assert len(models) == 1, "Not implemented for multiple models."
-
-        # state_seqs_max_lik has shape (num_model, num_seq, L)
-        faulty_sequences = find_faulty_sequences(
-            state_seqs_max_lik,
-            self.model.context.model_lengths[models[0]],
-            self.data.seq_lens[self.indices]
-        )
-        self.fixed_viterbi_seqs = faulty_sequences
-        if faulty_sequences.size > 0:
-            # repeat Viterbi with a masking that prevents certain transitions
-            # that can cause problems
-            fixed_state_seqs = self.model.decode(
-                self.data,
-                faulty_sequences,
-                self.batch_size,
-                models,
-                non_homogeneous_mask_func,
-            )
-            if state_seqs_max_lik.shape[-1] < fixed_state_seqs.shape[-1]:
-                state_seqs_max_like = np.pad(
-                    state_seqs_max_lik,
-                    ((0,0),(0,0),(0,fixed_state_seqs.shape[-1]-state_seqs_max_lik.shape[-1])),
-                    constant_values=2*self.model.context.model_lengths[0]+2
-                )
-            state_seqs_max_lik[0,faulty_sequences,:fixed_state_seqs.shape[-1]] = fixed_state_seqs[0]
-        return state_seqs_max_lik
-
-    def get_output_alphabet(self, a2m : bool = True):
+    def get_output_alphabet(self, a2m: bool = True) -> np.ndarray:
         """ Returns the output alphabet used for string representation of
             alignments.
 
@@ -331,25 +86,20 @@ class AlignmentModel():
 
     def to_string(
         self,
-        model_index=None,
-        batch_size=100000,
-        add_block_sep=True,
-        aligned_insertions : AlignedInsertions = AlignedInsertions(),
-        a2m=True,
-        only_matches=False,
-    ):
-        """ Uses one model to decode an alignment and returns the sequences
-            with gaps in a list.
-            Note that this method is not suitable im memory is limited and
+        model_index: int | None = None,
+        add_block_sep: bool = True,
+        aligned_insertions: AlignedInsertions = AlignedInsertions(),
+        a2m: bool = True,
+        only_matches: bool = False,
+    ) -> list[str]:
+        """ Select one model and decode an alignment that is returned as a
+            list of strings.
+            Note that this method is not suitable if memory is limited and
             alignment depths and width are large.
 
         Args:
             model_index: Specifies the model for decoding. Use a suitable
                 criterion like loglik to decide for a model.
-            batch_size: Defines how many sequences are decoded at a time with
-                no effect on the output MSA. It can be useful to lower this if
-                memory is sufficient to store the table-form alignment but GPU
-                memory used for decoding a batch is limited.
             add_block_sep: If true, columns containing a special character are
                 added to the alignment indicating domain boundaries.
             aligned_insertions: Can be used to override insertion metadata if
@@ -363,48 +113,39 @@ class AlignmentModel():
         if model_index is None:
             model_index = self.best_model
         output_alphabet = self.get_output_alphabet(a2m)
-        alignment_strings_all = []
-        n = self.indices.size
-        i = 0
-        while i < n:
-            batch_indices = np.arange(i, min(n, i+batch_size))
-            batch_alignment = self.get_batch_alignment(
-                model_index=model_index,
-                batch_indices=batch_indices,
-                add_block_sep=add_block_sep,
-                aligned_insertions=aligned_insertions,
-                only_matches=only_matches,
-            )
-            alignment_strings = self.batch_to_string(
-                batch_alignment, output_alphabet=output_alphabet
-            )
-            alignment_strings_all.extend(alignment_strings)
-            i += batch_size
-        return alignment_strings_all
+        batch_alignment = self.get_batch_alignment(
+            model_index=model_index,
+            batch_indices=np.arange(self.indices.size),
+            add_block_sep=add_block_sep,
+            aligned_insertions=aligned_insertions,
+            only_matches=only_matches,
+        )
+        alignment_strings = self.batch_to_string(
+            batch_alignment, output_alphabet=output_alphabet
+        )
+        return alignment_strings
 
     def to_file(
         self,
-        filepath,
-        model_index = None,
-        batch_size=100000,
-        add_block_sep=False,
+        filepath: str,
+        model_index: int | None = None,
+        batch_size: int = 100000,
+        add_block_sep: bool = False,
         aligned_insertions : AlignedInsertions = AlignedInsertions(),
-        format="fasta",
-        fasta_line_limit=80,
-        only_matches=False,
-    ):
-        """ Uses one model to decode an alignment and stores it in fasta file
-            format. Currently no other output format is supported.
+        format: str = "fasta",
+        fasta_line_limit: int = 80,
+        only_matches: bool = False,
+    ) -> None:
+        """ Select one model and decode an alignment that is written in fasta
+            or a2m file format.
             The file is written batch wise. The memory required for this
             operation must be large enough to hold decode and store a single
             batch of aligned sequences but not the whole alignment.
         Args:
             model_index: Specifies the model for decoding. Use a suitable
                 criterion like loglik to decide for a model.
-            batch_size: Defines how many sequences are decoded at a time with
-                no effect on the output MSA. It can be useful to lower this if
-                memory is sufficient to store the table-form alignment but GPU
-                memory used for decoding a batch is limited.
+            batch_size: Defines how many sequences are decoded into table form
+                and written to file at a time.
             add_block_sep: If true, columns containing a special character are
                 added to the alignment indicating domain boundaries.
             aligned_insertions: Can be used to override insertion metadata if
@@ -420,7 +161,8 @@ class AlignmentModel():
         """
         if model_index is None:
             model_index = self.best_model
-        if format == "fasta" or format == "a2m": #streaming batches to file
+        if format == "fasta" or format == "a2m":
+            # Stream batches to file
             output_alphabet = self.get_output_alphabet(format == "a2m")
             with open(filepath, "w") as output_file:
                 n = self.indices.size
@@ -446,8 +188,10 @@ class AlignmentModel():
                             output_file.write(s[j:j+fasta_line_limit]+"\n")
                     i += batch_size
         else:
+            # Decode the whole alignment into memory and write the entire
+            # thing at once
             msa = self.to_string(
-                model_index, batch_size, add_block_sep, aligned_insertions
+                model_index, add_block_sep, aligned_insertions
             )
             msa = [
                 (self.data.seq_ids[self.indices[i]], msa[i])
@@ -458,12 +202,12 @@ class AlignmentModel():
 
     def get_batch_alignment(
         self,
-        model_index,
-        batch_indices,
-        add_block_sep,
-        aligned_insertions : AlignedInsertions = AlignedInsertions(),
-        only_matches=False,
-    ):
+        model_index: int,
+        batch_indices: np.ndarray,
+        add_block_sep: bool = True,
+        aligned_insertions: AlignedInsertions = AlignedInsertions(),
+        only_matches: bool = False,
+    ) -> np.ndarray:
         """ Returns a dense matrix representing a subset of sequences
             as specified by batch_indices with respect to the alignment of all
             sequences (i.e. the sub alignment can contain gap-only columns and
@@ -486,8 +230,9 @@ class AlignmentModel():
         sequences = np.zeros((b, self.data.max_len), dtype=np.uint16)
         sequences += (len(self.data.alphabet)-1)
         for i,j in enumerate(batch_indices):
-            l = self.data.seq_lens[self.indices[j]]
-            sequences[i, :l] = self.data.get_encoded_seq(self.indices[j])
+            idx = int(self.indices[j])
+            l = self.data.seq_lens[idx]
+            sequences[i, :l] = self.data.get_encoded_seq(idx)
         blocks = []
         if add_block_sep:
             sep = np.zeros((b,1), dtype=np.uint16) + 2*len(self.data.alphabet)
@@ -555,219 +300,14 @@ class AlignmentModel():
         batch_alignment = np.concatenate(blocks, axis=1)
         return batch_alignment
 
-    def batch_to_string(self, batch_alignment, output_alphabet):
+    def batch_to_string(
+        self, batch_alignment: np.ndarray, output_alphabet: np.ndarray
+    ) -> list[str]:
         """ Converts a dense matrix into string format.
         """
         alignment_arr = output_alphabet[batch_alignment]
         alignment_strings = [''.join(s) for s in alignment_arr]
         return alignment_strings
-
-    def compute_loglik(
-        self,
-        max_seq: int =200000,
-        reduce: bool = True,
-        use_anc_probs: bool = True,
-    ):
-        """ Computes the logarithmic likelihood for each underlying model.
-        Args:
-            max_seq: Threshold for the number of sequences used to compute the
-                loglik. If the dataset has more sequences, a random subset is
-                drawn.
-            reduce: If true, the loglik will be averaged over the number of
-                sequences.
-            use_anc_probs: If false, the ancestral probabilities will not be
-                computed.
-        """
-        n = self.data.num_seq
-        if n > max_seq and reduce:
-            #estimate the ll only on a subset, otherwise for millions of
-            # sequences this step takes rather long for little benefit
-            ll_subset = np.arange(n)
-            np.random.shuffle(ll_subset)
-            ll_subset = ll_subset[:max_seq]
-            ll_subset = np.sort(ll_subset)
-            bucket_by_seq_length = False
-        else:
-            #use the sorted indices for optimal length distributions in batches
-            ll_subset = np.arange(n)
-            bucket_by_seq_length = True
-        # Create dataset
-        ds = train.make_dataset(
-            ll_subset,
-            self.batch_generator,
-            self.batch_size,
-            shuffle=False,
-            bucket_by_seq_length=bucket_by_seq_length and not reduce,
-            model_lengths=self.msa_hmm_layer.cell.length,
-        )
-        # The simplest case is the reduce (when keeping sequence order does not
-        # matter) and when ancestral probabilities are used (i.e. no changes
-        # to the model are required)
-        if reduce and use_anc_probs:
-            loglik = self.model.predict(ds, verbose=0)[0]
-            loglik = np.mean(loglik, axis=0)
-            return loglik
-
-        if use_anc_probs:
-            # Use anc probs, but do not reduce, i.e. keep sequence order
-            model_fn = self.model # use call
-        else:
-            # TODO: Better strip the anc probs from the learnMSA model as
-            # a method
-            def _fn(x):
-                # split x into sequences and idx (idx are not used here)
-                x, _ = x
-                x = tf.one_hot(x, depth=self.msa_hmm_layer.cell.dim)
-                # learnMSA currently expects model dim first
-                x = tf.keras.ops.swapaxes(x, 0, 1)
-                y = self.msa_hmm_layer(x)[0]
-                y = tf.keras.ops.swapaxes(y, 0, 1)
-                return y
-            model_fn = tf.function(
-                _fn,
-                jit_compile=False, # jit compiling is currently slower here
-                input_signature=[[
-                    tf.TensorSpec((None, None, None), dtype=tf.uint8),
-                    tf.TensorSpec((None, None), dtype=tf.int64),
-                ]]
-            )
-
-        # Use the model_fn to compute loglik batch-wise and assemble the results
-        # correctly. We may reduce when not using anc probs
-        if reduce:
-            # note: no anc probs used, otherwise we would have returned earlier
-            loglik = np.zeros((self.msa_hmm_layer.cell.num_models))
-            for (*x,_), _ in ds:
-                loglik += np.sum(model_fn(x), axis=0)
-            loglik /= ll_subset.size
-        else:
-            loglik = np.zeros((n, self.msa_hmm_layer.cell.num_models))
-            for (*x, batch_indices), _ in ds:
-                batch_loglik = model_fn(x).numpy()
-                loglik[batch_indices,:] = batch_loglik
-        return loglik
-
-    def compute_null_model_log_probs(self):
-        """ Computes the logarithmic likelihood of each sequence under the
-            null model
-
-             S ---> T
-            |_^    |_^
-             p
-
-            where the emission probabilities of S are amino acid background
-            frequencies and T is the terminal state.
-
-            Args:
-                p: The probability of staying in the emitting state S.
-        """
-        # Prepare the data
-        n = self.data.num_seq
-        ds = train.make_dataset(
-            np.arange(n),
-            self.batch_generator,
-            self.batch_size,
-            shuffle=False,
-            bucket_by_seq_length=True,
-            model_lengths=self.msa_hmm_layer.cell.length
-        )
-
-        # Prepare the background frequencies
-        aa_dist = self.msa_hmm_layer.cell.emitter[0].prior.emission_dirichlet_mix.make_background().numpy()
-        # Append ad-hoc probability for non-standard amino acids
-        aa_dist = np.append(aa_dist, [1e-4]*3)
-        aa_dist /= np.sum(aa_dist) #normalize
-        # Add the terminal symbol emissions
-        aa_dist = np.append(aa_dist, [1.0])
-        # Log transition probabilities
-        aa_dist = np.log(aa_dist + 1e-10)  # shape (24,)
-
-        # Compute emission log probs
-        log_probs = np.zeros((n,))
-        for (x,_,batch_idx), _ in ds:
-            em = tf.reduce_sum(tf.gather(aa_dist, tf.cast(x[:,0,:], tf.int32)), axis=1)
-            log_probs[batch_idx] = em.numpy()
-
-        # Add transition log probs based on the target sequence lenghts
-        # We'll assume a geometric distribution with the expected length
-        # equal to the length of each target sequence
-        L = self.data.seq_lens
-        M = np.mean(L)
-        trans_scores = L * (np.log(M) - np.log(M+1))
-        log_probs += trans_scores
-
-        return log_probs
-
-    def compute_log_prior(self):
-        """ Computes the logarithmic prior value of each underlying model.
-        """
-        n = self.data.num_seq
-        if n > 0:
-            return self.msa_hmm_layer.cell.get_prior_log_density().numpy()/n
-        else:
-            return 0
-
-    def compute_AIC(self, max_seq=200000, loglik=None):
-        """ Computes the Akaike information criterion for each underlying model.
-        Args:
-            max_seq: Threshold for the number of sequences used to compute the
-                loglik. If the dataset has mroe sequences, a random subset is
-                drawn.
-            loglik: This argument can be set if the loglik was computed before
-                via compute_loglik to avoid overhead. If None, the loglik will
-                be computed internally.
-        """
-        if loglik is None:
-            loglik = self.compute_loglik(max_seq)
-        num_param = 34 * np.array(self.length) + 25
-        aic = -2 * loglik * self.data.num_seq + 2*num_param
-        return aic
-
-    def compute_consensus_score(self):
-        """ Computes a consensus score that rates how plausible each model is
-            with respect to all other models.
-            (Relevant for users not using the default emitter: Uses the
-            make_B_amino method of the first emitter.)
-        """
-        # compute the match sequence of all models padded with terminal symbols
-        match_seqs = np.zeros(
-            (self.num_models, max(self.length)+1, self.msa_hmm_layer.cell.dim)
-        )
-        match_seqs[:,:,-1] = 1 #initialize with terminal symbols
-        emitter = self.msa_hmm_layer.cell.emitter[0]
-        for i,L in enumerate(self.length):
-            match_seqs[i, :L] = emitter.make_B_amino()[i,1:L+1]
-        # we need to tile the match sequences over the batch dimension because
-        # each model should see all other models
-        match_seqs = tf.stack([match_seqs]*self.num_models, axis=1)
-        # rate the match seqs with respect to the models and cancel out
-        # self-rating
-
-        # TODO this does not work with self.model which expects indices rather
-        # than distributions
-        # this is a workaround, but will break with a user defined encoder model
-        # we skip the anc probs for simplicity as this would require fitting
-        # evolutionary times
-        consensus_logliks = self.msa_hmm_layer(match_seqs)[1]
-
-        consensus_logliks *= 1-tf.eye(self.num_models)
-        # Axis 1 means we reduce over the batch dimension rather than the model
-        # dimension,
-        # so output i will be the mean loglik if we input all other match
-        # sequenes to model i.
-        # Using axis 0 here is not the same!
-        # Consider the case that all models have the same match sequence but
-        # one model allows many deletions or insertions.
-        # This model is the outlier and should clearly have the lowest score.
-        # With axis=0, the likelihood of the outlier model under all other
-        # models is high and the scores of the other models will have a penalty
-        # since their match sequences are fed into the outlier model.
-        # With axis=1, the scores of all models will be high except for the
-        # outlier model, which has a strong penalty as it rates all other
-        # match sequences involving the deletion/insertion probabilities.
-        consensus_score = tf.reduce_mean(consensus_logliks, axis=1)
-        return consensus_score
-
 
     def write_models_to_file(self, filepath, pack=True):
         """ Writes the underlying models to file.
@@ -838,6 +378,54 @@ class AlignmentModel():
                     f"{bitscore[idx]}"
                 ]) + "\n")
 
+    #computes an implicit alignment (without storing gaps)
+    #eventually, an alignment with explicit gaps can be written
+    #in a memory friendly manner to file
+    def _build_alignment(self, models):
+
+        assert len(models) == 1, "Not implemented for multiple models."
+
+        state_seqs_max_lik = self.model.decode(
+            self.data, self.indices, self.batch_size, models
+        )
+        state_seqs_max_lik = self._clean_up_viterbi_seqs(
+            state_seqs_max_lik, models
+        )
+        for i,max_lik_seqs in zip(models, state_seqs_max_lik):
+            model_len = self.model.context.model_lengths[i]
+            decoded_data = AlignmentModel.decode(model_len, max_lik_seqs)
+            self.metadata[i] = AlignmentMetaData(*decoded_data)
+
+    def _clean_up_viterbi_seqs(self, state_seqs_max_lik, models):
+
+        assert len(models) == 1, "Not implemented for multiple models."
+
+        # state_seqs_max_lik has shape (num_model, num_seq, L)
+        faulty_sequences = find_faulty_sequences(
+            state_seqs_max_lik,
+            self.model.context.model_lengths[models[0]],
+            self.data.seq_lens[self.indices]
+        )
+        self.fixed_viterbi_seqs = faulty_sequences
+        if faulty_sequences.size > 0:
+            # repeat Viterbi with a masking that prevents certain transitions
+            # that can cause problems
+            fixed_state_seqs = self.model.decode(
+                self.data,
+                faulty_sequences,
+                self.batch_size,
+                models,
+                non_homogeneous_mask_func,
+            )
+            if state_seqs_max_lik.shape[-1] < fixed_state_seqs.shape[-1]:
+                state_seqs_max_like = np.pad(
+                    state_seqs_max_lik,
+                    ((0,0),(0,0),(0,fixed_state_seqs.shape[-1]-state_seqs_max_lik.shape[-1])),
+                    constant_values=2*self.model.context.model_lengths[0]+2
+                )
+            state_seqs_max_lik[0,faulty_sequences,:fixed_state_seqs.shape[-1]] = fixed_state_seqs[0]
+        return state_seqs_max_lik
+
     @classmethod
     def load_models_from_file(cls,
                               filepath,
@@ -892,7 +480,7 @@ class AlignmentModel():
         # todo: this is currently a bit limited because it creates a default
         # batch gen from a default config
         if custom_batch_gen is None:
-            batch_gen = train.BatchGenerator()
+            batch_gen = BatchGenerator()
         else:
             batch_gen = custom_batch_gen
         # ensure that the model uses the same batch generator
