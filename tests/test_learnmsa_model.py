@@ -410,17 +410,13 @@ def test_predict(context_binary: LearnMSAContext) -> None:
 def test_evaluate(context_binary: LearnMSAContext) -> None:
     # Test that the evaluate method correctly computes metrics
     # for sequences in a binary alphabet
+    context_binary.sequence_weights = np.arange(1, 401, dtype=float) / 200.0
     model = LearnMSAModel(context_binary)
     model.compile()
 
     # Create a dataset with the test sequence "ABA"
     data = SequenceDataset(
-        sequences=[
-            ("1", "ABA"),
-            ("2", "ABA"),
-            ("3", "ABA"),
-            ("4", "ABA"),
-        ],
+        sequences=[(str(i), "ABA") for i in range(400)],
         alphabet="AB-",
     )
 
@@ -431,11 +427,24 @@ def test_evaluate(context_binary: LearnMSAContext) -> None:
     assert isinstance(metrics, np.ndarray)
     assert len(metrics) == 3
 
-    # Loss should be positive (negative log-likelihood + prior)
-    assert metrics[0] > 0, "Loss should be positive"
+    expected_loglik = np.log(ref.likelihoods).mean()
 
-    # Loglik should be negative (since it's the negative log-likelihood metric)
-    assert metrics[1] < 0, "Loglik metric should be negative"
+    assert context_binary.sequence_weights is not None
+    expected_prior = model.phmm_layer.prior_scores().numpy().mean() \
+        / context_binary.sequence_weights.sum()
 
-    # Prior should be negative (since it's the negative log-prior metric)
-    assert metrics[2] < 0, "Prior metric should be negative"
+    expected_loss = -expected_loglik - expected_prior
+
+    # Check that metrics match expected values
+    np.testing.assert_allclose(
+        metrics[0], expected_loss, rtol=1e-4,
+        err_msg="Loss does not match expected value"
+    )
+    np.testing.assert_allclose(
+        metrics[1], expected_loglik, rtol=1e-4,
+        err_msg="Loglik does not match expected value"
+    )
+    np.testing.assert_allclose(
+        metrics[2], expected_prior, rtol=1e-4,
+        err_msg="Prior does not match expected value"
+    )

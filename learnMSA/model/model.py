@@ -295,7 +295,7 @@ class LearnMSAModel(tf.keras.Model, HMMStatsMixin):
             steps_per_epoch = self.get_num_steps(indices.shape[0], batch_size)
 
         self._print_train_header(indices, batch_size, data)
-        dataset = make_dataset(
+        dataset, _ = make_dataset(
             indices,
             self.context.batch_gen,
             batch_size,
@@ -409,8 +409,8 @@ class LearnMSAModel(tf.keras.Model, HMMStatsMixin):
         old_crop_long_seqs = self.context.batch_gen.crop_long_seqs
         self.context.batch_gen.crop_long_seqs = math.inf #do not crop sequences
 
-        # Create dataset and evaluate
-        ds = make_dataset(
+        # Create dataset and get number of steps
+        ds, steps = make_dataset(
             indices,
             self.context.batch_gen,
             shuffle=False,
@@ -420,14 +420,9 @@ class LearnMSAModel(tf.keras.Model, HMMStatsMixin):
             bucket_batch_sizes=bucket_batch_sizes,
         )
 
-        # Suppress the "ran out of data" warning for finite datasets with bucketing
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore",
-                message="Your input ran out of data",
-                category=UserWarning
-            )
-            result = super().predict(ds, verbose=self.get_verbosity())
+        # Use None for infinite steps (-1), otherwise use the computed steps
+        steps_param = None if steps == -1 else steps
+        result = super().predict(ds, steps=steps_param, verbose=self.get_verbosity())
 
         # When bucketing is used, predict_step returns (predictions, indices)
         if isinstance(result, tuple) and len(result) == 2:
@@ -504,8 +499,8 @@ class LearnMSAModel(tf.keras.Model, HMMStatsMixin):
         old_crop_long_seqs = self.context.batch_gen.crop_long_seqs
         self.context.batch_gen.crop_long_seqs = math.inf #do not crop sequences
 
-        # Create dataset and evaluate
-        ds = make_dataset(
+        # Create dataset and get number of steps
+        ds, steps = make_dataset(
             indices,
             self.context.batch_gen,
             shuffle=False,
@@ -513,14 +508,9 @@ class LearnMSAModel(tf.keras.Model, HMMStatsMixin):
             model_lengths=[self.phmm_layer.lengths[m] for m in _models],
         )
 
-        # Suppress the "ran out of data" warning for finite datasets with bucketing
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore",
-                message="Your input ran out of data",
-                category=UserWarning
-            )
-            result = super().evaluate(ds, verbose=self.get_verbosity())
+        # Use None for infinite steps (-1), otherwise use the computed steps
+        steps_param = None if steps == -1 else steps
+        result = super().evaluate(ds, steps=steps_param, verbose=self.get_verbosity())
 
         # Evaluate returns scalar metrics
         decoded_array = np.asarray(result)

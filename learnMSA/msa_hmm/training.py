@@ -108,7 +108,7 @@ def make_dataset(
     model_lengths:Sequence[int] = [0],
     bucket_boundaries: Sequence[int | float] | None = None,
     bucket_batch_sizes: Sequence[int] | None = None,
-) -> tf.data.Dataset:
+) -> tuple[tf.data.Dataset, int]:
     """
     Creates a dataset for training and inference.
 
@@ -124,6 +124,10 @@ def make_dataset(
             uses default boundaries [200, 520, 700, 850, 1200, 2000, 4000, inf].
         bucket_batch_sizes: Batch sizes for each bucket. If None, uses the
             adaptive batch size function from the batch generator.
+
+    Returns:
+        A tuple of (dataset, steps) where steps is the number of steps needed
+        to iterate through the entire dataset, or -1 for repeated (infinite) datasets.
     """
     shuffle = shuffle and not bucket_by_seq_length
     batch_generator.shuffle = shuffle
@@ -159,6 +163,15 @@ def make_dataset(
             bucket_batch_sizes = [
                 adaptive_batch(model_lengths, b) for b in bucket_boundaries+[math.inf]
             ]
+
+        # Compute steps for bucketed dataset
+        total_steps = compute_dataset_steps(
+            indices=indices,
+            batch_generator=batch_generator,
+            bucket_boundaries=bucket_boundaries,
+            bucket_batch_sizes=bucket_batch_sizes,
+        )
+
         ds = ds.bucket_by_sequence_length(
             element_length_func=lambda i,L,j: L,
             bucket_boundaries=bucket_boundaries,
@@ -196,6 +209,12 @@ def make_dataset(
                 j_out.set_shape(tf.TensorShape([None]))
                 return batch, ind, j_out
     else:
+        # Compute steps for non-bucketed dataset
+        if shuffle:
+            total_steps = -1  # Repeated dataset - infinite steps
+        else:
+            total_steps = int(np.ceil(indices.size / batch_size))
+
         if bucket_by_seq_length:
             ds_arange = tf.data.Dataset.from_tensor_slices(
                 np.arange(indices.size)
@@ -258,4 +277,42 @@ def make_dataset(
     ds = ds.with_options(options)
     ds_y = tf.data.Dataset.from_tensor_slices(tf.zeros(1)).batch(batch_size).repeat()
     ds = tf.data.Dataset.zip((ds, ds_y))
-    return ds
+    return ds, total_steps
+
+def compute_dataset_steps(
+    indices: np.ndarray,
+    batch_generator: BatchGenerator,
+    bucket_boundaries: Sequence[int | float],
+    bucket_batch_sizes: Sequence[int],
+) -> int:
+    """
+    Compute the number of steps needed to iterate through a bucketed dataset.
+
+    Args:
+        indices: The indices of the sequences to include in the dataset.
+        batch_generator: The batch generator (must be configured).
+        bucket_boundaries: Sequence length boundaries for bucketing.
+        bucket_batch_sizes: Batch sizes for each bucket.
+
+    Returns:
+        Number of steps to iterate through the bucketed dataset.
+    """
+    # Compute number of steps for bucketed dataset
+    seq_lengths = batch_generator.data.seq_lens[indices]
+    total_steps = 0
+    boundaries = list(bucket_boundaries) + [math.inf]
+
+    for i, (lower, upper, bsize) in enumerate(
+        zip([0] + boundaries[:-1], boundaries, bucket_batch_sizes)
+    ):
+        # Count sequences in this bucket
+        if i == 0:
+            count = np.sum(seq_lengths <= upper)
+        else:
+            count = np.sum((seq_lengths > lower) & (seq_lengths <= upper))
+
+        # Compute number of batches for this bucket
+        if count > 0:
+            total_steps += int(np.ceil(count / bsize))
+
+    return total_steps
