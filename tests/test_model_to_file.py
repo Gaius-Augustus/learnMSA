@@ -61,67 +61,52 @@ def test_model_to_file() -> None:
     context = LearnMSAContext(config, data)
 
     model = LearnMSAModel(context)
-    model.compile() #prevents warnings
+    model.compile()
     model.build()
 
     # Make a snapshot of parameters and likelihood before saving
     weights = [w.numpy() for w in model.trainable_weights]
     seq = np.random.randint(20, size=(1,1,17))
     seq[:,:,-1] = len(SequenceDataset._default_alphabet)-1
-    ind = np.array([[0]])
-    loglik = model([seq, ind]).numpy()
+    loglik = model([seq, np.array([[0]])]).numpy()
 
     #make alignment and save
     context.batch_gen.configure(data, context)
     ind = np.array([0,1])
-    batch_size = 2
-    am = AlignmentModel(data, context.batch_gen, ind, batch_size, model)
-    am.write_models_to_file(test_filepath)
+    am = AlignmentModel(data, model, ind)
+    am.save(test_filepath)
 
-    # # Remember how the decoded MSA looks and delete the alignment object
-    # # Todo: the MSA is currently nonsense, but it should be enough to test
-    # # if Viterbi runs are consistent
-    # tf.get_logger().setLevel('ERROR')
-    # # Prints expected warnings about retracing
-    # msa_str = am.to_string(model_index = 0)
-    # tf.get_logger().setLevel('WARNING')
-    # del am
+    # Decode MSA to string and delete model from memory
+    # TODO: the MSA is currently nonsense, but it should be enough to test
+    # if Viterbi runs are consistent
+    msa_str = am.to_string(model_index = 0)
+    del am
 
-    # #load again
-    # deserialized_am = AlignmentModel.load_models_from_file(
-    #     test_filepath, data, custom_batch_gen=context.batch_gen
-    # )
+    #load again
+    am2 = AlignmentModel.load(test_filepath, data)
 
-    # #test if parameters are the same
-    # deserialized_emission_kernel = deserialized_am.model.msa_hmm_cell.emitter[0].emission_kernel[0].numpy()
-    # np.testing.assert_equal(emission_kernel, deserialized_emission_kernel)
+    # Assert that truly a new model was loaded
+    assert am2.model is not model
 
-    # deserialized_insertion_kernel = deserialized_am.model.msa_hmm_cell.emitter[0].insertion_kernel[0].numpy()
-    # np.testing.assert_equal(insertion_kernel, deserialized_insertion_kernel)
+    # Test if parameters are the same
+    deserialized_weights = [w.numpy() for w in am2.model.trainable_weights]
+    assert len(weights) == len(deserialized_weights)
+    for w, dw in zip(weights, deserialized_weights):
+        np.testing.assert_allclose(w, dw, rtol=1e-6, atol=1e-6)
 
-    # for key, k in transition_kernel.items():
-    #     deserialized_k = deserialized_am.model.msa_hmm_cell.transitioner.transition_kernel[0][key].numpy()
-    #     np.testing.assert_equal(k, deserialized_k)
+    # Test if likelihood is the same as before
+    loglik_in_deserialized_model = am2.model([seq, np.array([[0]])]).numpy()
+    np.testing.assert_allclose(
+        loglik, loglik_in_deserialized_model, rtol=1e-6, atol=1e-6
+    )
 
-    # deserialized_flank_init_kernel = deserialized_am.model.msa_hmm_cell.transitioner.flank_init_kernel[0].numpy()
-    # np.testing.assert_equal(flank_init_kernel, deserialized_flank_init_kernel)
+    # Test if the decoded MSA is the same
+    msa_str_from_deserialized_model = am2.to_string(model_index=0)
+    assert msa_str == msa_str_from_deserialized_model
 
-    # deserialized_tau_kernel = deserialized_am.model.anc_probs_layer.tau_kernel.numpy()
-    # np.testing.assert_equal(tau_kernel, deserialized_tau_kernel)
-
-    # #test if likelihood is the same as before
-    # loglik_in_deserialized_model = deserialized_am.model([seq, np.array([[0]])])[1].numpy()
-    # np.testing.assert_equal(loglik, loglik_in_deserialized_model)
-
-    # #test MSA as string
-    # tf.get_logger().setLevel('ERROR') #prints expected warnings about retracing
-    # msa_str_from_deserialized_model = deserialized_am.to_string(model_index = 0)
-    # tf.get_logger().setLevel('WARNING')
-    # assert msa_str == msa_str_from_deserialized_model
-
-    # #remove saved models from this test
-    # shutil.rmtree(test_filepath, ignore_errors=True)
-    # if os.path.exists(test_filepath+".keras"):
-    #     os.remove(test_filepath+".keras")
-    # if os.path.exists(test_filepath+".zip"):
-    #     os.remove(test_filepath+".zip")
+    # Clean up: remove saved models from this test
+    shutil.rmtree(test_filepath, ignore_errors=True)
+    if os.path.exists(test_filepath+".keras"):
+        os.remove(test_filepath+".keras")
+    if os.path.exists(test_filepath+".zip"):
+        os.remove(test_filepath+".zip")

@@ -1,11 +1,13 @@
 import json
 import shutil
+import warnings
 from pathlib import Path
 
 import numpy as np
 import tensorflow as tf
 from packaging import version
 
+from learnMSA.config.config import Configuration
 import learnMSA.msa_hmm.AncProbsLayer as anc_probs
 import learnMSA.msa_hmm.Emitter as emit
 import learnMSA.msa_hmm.Priors as priors
@@ -14,7 +16,7 @@ from learnMSA.model.model import LearnMSAModel
 from learnMSA.msa_hmm.alignment_metadata import AlignmentMetaData
 from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
 from learnMSA.msa_hmm.AlignInsertions import AlignedInsertions
-from learnMSA.msa_hmm.training import BatchGenerator, make_dataset
+from learnMSA.msa_hmm.training import BatchGenerator
 from learnMSA.util.aligned_dataset import AlignedDataset, SequenceDataset
 
 
@@ -25,34 +27,55 @@ class AlignmentModel():
     alignments on demand (batch-wise mode possible).
     """
 
+    data: SequenceDataset
+    """The dataset of sequences."""
+
+    model: LearnMSAModel
+    """A learnMSA model instance for decoding and scoring."""
+
+    indices: np.ndarray
+    """Array of sequence indices specifying which sequences from data are
+    included."""
+
+    gap_symbol: str
+    """Character used to denote missing match positions."""
+
+    gap_symbol_insertions: str
+    """Character used to denote insertions in other sequences."""
+
+    best_model: int
+    """Index of the best model based on model selection criterion.
+    TODO: Set externally, remove this attribute from here or set internally.
+    """
+
+    metadata: dict
+    """Alignment metadata for each model."""
+
     def __init__(
         self,
         data: SequenceDataset,
-        batch_generator: BatchGenerator,
-        indices: np.ndarray,
-        batch_size: int,
         model: LearnMSAModel,
+        indices: np.ndarray|None = None,
         gap_symbol: str = '-',
         gap_symbol_insertions: str = '.',
     ) -> None:
         """
         Args:
             data: The dataset of sequences.
-            batch_generator: A generator for creating batches from the dataset.
-            indices: (A subset of) The sequence indices from the dataset to align
-                (1D).
-            batch_size: Batch size used for decoding sequences.
-            model: A learnMSA model which internally might represent multiple
-                pHMM models.
+            model: A learnMSA model instance for decoding and scoring.
+            indices: An optional array of sequence indices specifying which
+                sequences from data are included in the alignment. If None,
+                all sequences are included.
             gap_symbol: Character used to denote missing match positions.
             gap_symbol_insertions: Character used to denote insertions in other
                 sequences.
         """
         self.data = data
-        self.batch_generator = batch_generator
-        self.indices = indices
-        self.batch_size = batch_size
         self.model = model
+        if indices is None:
+            self.indices = np.arange(data.num_seq)
+        else:
+            self.indices = indices
         self.gap_symbol = gap_symbol
         self.gap_symbol_insertions = gap_symbol_insertions
         self.best_model = -1
@@ -309,43 +332,9 @@ class AlignmentModel():
         alignment_strings = [''.join(s) for s in alignment_arr]
         return alignment_strings
 
-    def write_models_to_file(self, filepath, pack=True):
-        """ Writes the underlying models to file.
-        Args:
-            filepath: Path of the written file.
-            pack: If true, the output will be a zip file, otherwise a directory.
-        """
-        Path(filepath).mkdir(parents=True, exist_ok=True)
-        #serialize metadata
-        d = {
-            "num_models" : self.num_models,
-            "batch_size" : self.batch_size,
-            "gap_symbol" : self.gap_symbol,
-            "gap_symbol_insertions" : self.gap_symbol_insertions,
-        }
-        if hasattr(self, "best_model"):
-            d["best_model"] = int(self.best_model)
-        with open(filepath+"/meta.json", "w") as metafile:
-            metafile.write(json.dumps(d, indent=4))
-        #serialize indices
-        np.savetxt(filepath+"/indices", self.indices, fmt='%i')
-        #save the model
-        if version.parse(tf.__version__) < version.parse("2.12.0"):
-            self.model.save(filepath+".keras", save_traces=False)
-        else:
-            self.model.save(filepath+".keras")
-        if pack:
-            shutil.make_archive(filepath, "zip", filepath)
-            try:
-                shutil.rmtree(filepath)
-            except OSError as e:
-                print("Error: %s - %s." % (e.filename, e.strerror))
-
-
     def write_scores(self, filepath: Path, model: int|None = None) -> None:
         """ Writes per-sequence scores (loglik, bitscore) to a
-            tsv file sorted by bitscore. The bitscore is computed as+
-            ``loglik(S) - log P(S; nullmodel)``.
+            tsv file sorted by the bitscore ``loglik(S) - log P(S; nullmodel)``.
         Args:
             filepath: Path of the output file.
             model: The model for which scores are written. By default, the best
@@ -353,14 +342,14 @@ class AlignmentModel():
         """
         # Find the model index to use
         if model is None:
-            model = self.best_model if hasattr(self, "best_model") else 0 # type: ignore
+            model = self.best_model if self.best_model >= 0 else 0  # type: ignore
 
         # Compute the likelihood and bitscores for all sequences
-        loglik = self.compute_loglik(
-            self.data.num_seq, reduce=False, use_anc_probs=False
-        )[:,model]
+        loglik = self.model.estimate_loglik(
+            self.data, self.data.num_seq, reduce=False, models=[model]
+        )
         # Compute the bitscore
-        log_null = self.compute_null_model_log_probs()
+        log_null = self.model.compute_null_model_log_probs(self.data)
         bitscore = loglik - log_null
 
         # Sort by bitscore in descending order
@@ -378,72 +367,47 @@ class AlignmentModel():
                     f"{bitscore[idx]}"
                 ]) + "\n")
 
-    #computes an implicit alignment (without storing gaps)
-    #eventually, an alignment with explicit gaps can be written
-    #in a memory friendly manner to file
-    def _build_alignment(self, models):
+    def save(self, filepath: str, pack: bool = True) -> None:
+        """ Writes the underlying models to file.
 
-        assert len(models) == 1, "Not implemented for multiple models."
-
-        state_seqs_max_lik = self.model.decode(
-            self.data, self.indices, self.batch_size, models
-        )
-        state_seqs_max_lik = self._clean_up_viterbi_seqs(
-            state_seqs_max_lik, models
-        )
-        for i,max_lik_seqs in zip(models, state_seqs_max_lik):
-            model_len = self.model.context.model_lengths[i]
-            decoded_data = AlignmentModel.decode(model_len, max_lik_seqs)
-            self.metadata[i] = AlignmentMetaData(*decoded_data)
-
-    def _clean_up_viterbi_seqs(self, state_seqs_max_lik, models):
-
-        assert len(models) == 1, "Not implemented for multiple models."
-
-        # state_seqs_max_lik has shape (num_model, num_seq, L)
-        faulty_sequences = find_faulty_sequences(
-            state_seqs_max_lik,
-            self.model.context.model_lengths[models[0]],
-            self.data.seq_lens[self.indices]
-        )
-        self.fixed_viterbi_seqs = faulty_sequences
-        if faulty_sequences.size > 0:
-            # repeat Viterbi with a masking that prevents certain transitions
-            # that can cause problems
-            fixed_state_seqs = self.model.decode(
-                self.data,
-                faulty_sequences,
-                self.batch_size,
-                models,
-                non_homogeneous_mask_func,
-            )
-            if state_seqs_max_lik.shape[-1] < fixed_state_seqs.shape[-1]:
-                state_seqs_max_like = np.pad(
-                    state_seqs_max_lik,
-                    ((0,0),(0,0),(0,fixed_state_seqs.shape[-1]-state_seqs_max_lik.shape[-1])),
-                    constant_values=2*self.model.context.model_lengths[0]+2
-                )
-            state_seqs_max_lik[0,faulty_sequences,:fixed_state_seqs.shape[-1]] = fixed_state_seqs[0]
-        return state_seqs_max_lik
+        Args:
+            filepath: Path of the written file.
+            pack: If true, the output will be a zip file, otherwise a directory.
+        """
+        Path(filepath).mkdir(parents=True, exist_ok=True)
+        # Serialize metadata
+        d: dict = {
+            "gap_symbol" : self.gap_symbol,
+            "gap_symbol_insertions" : self.gap_symbol_insertions,
+        }
+        if self.best_model >= 0:
+            d["best_model"] = int(self.best_model)
+        with open(filepath+"/meta.json", "w") as metafile:
+            metafile.write(json.dumps(d, indent=4))
+        # Serialize indices
+        np.savetxt(filepath+"/indices", self.indices, fmt='%i')
+        # Save the model
+        self.model.save(filepath+".keras")
+        if pack:
+            shutil.make_archive(filepath, "zip", filepath)
+            try:
+                shutil.rmtree(filepath)
+            except OSError as e:
+                print("Error: %s - %s." % (e.filename, e.strerror))
 
     @classmethod
-    def load_models_from_file(cls,
-                              filepath,
-                              data:SequenceDataset,
-                              from_packed=True,
-                              custom_batch_gen=None,
-                              custom_config=None):
-        """ Recreates an AlignmentModel instance with underlying models from
-            file.
+    def load(
+        cls,
+        filepath: str,
+        data: SequenceDataset,
+        from_packed: bool = True,
+    ):
+        """ Loads an AlignmentModel instance from a file.
 
         Args:
             filepath: Path of the file to load.
             from_packed: Pass true or false depending on the pack argument used
                 with write_models_to_file.
-            custom_batch_gen: A custom batch generator to use instead of the
-                default one.
-            custom_config: A custom configuration to use instead of the
-                default one.
 
         Returns:
             An AlignmentModel instance with equivalent behavior as the
@@ -451,58 +415,53 @@ class AlignmentModel():
         """
         if from_packed:
             shutil.unpack_archive(filepath+".zip", filepath)
-        #deserialize metadata
+
+        # Deserialize metadata
         with open(filepath+"/meta.json") as metafile:
             d = json.load(metafile)
-        #deserialize indices
+
+        # Deserialize indices
         indices = np.loadtxt(filepath+"/indices", dtype=int)
-        #load the model
-        model = tf.keras.models.load_model(
-            filepath+".keras",
-            custom_objects={
-                "LearnMSAModel": LearnMSAModel,
-                "AncProbsLayer": anc_probs.AncProbsLayer,
-                "MsaHmmLayer": msa_hmm_layer.MsaHmmLayer,
-                "MsaHmmCell": msa_hmm_cell.MsaHmmCell,
-                "ProfileHMMTransitioner": trans.ProfileHMMTransitioner,
-                "ProfileHMMEmitter": emit.ProfileHMMEmitter,
-                "AminoAcidPrior": priors.AminoAcidPrior,
-                "NullPrior": priors.NullPrior,
-                "ProfileHMMTransitionPrior": priors.ProfileHMMTransitionPrior
-            }
-        )
+
+        # Load the model
+        with warnings.catch_warnings():
+            # Suppress the compile warning since we manually compile right after
+            warnings.filterwarnings(
+                'ignore',
+                message=".*compile.*was not called as part of model loading.*",
+                category=UserWarning
+            )
+            model = tf.keras.models.load_model(
+                filepath+".keras",
+                # custom_objects={
+                #     "LearnMSAModel": LearnMSAModel,
+                #     "AncProbsLayer": anc_probs.AncProbsLayer,
+                #     "MsaHmmLayer": msa_hmm_layer.MsaHmmLayer,
+                #     "MsaHmmCell": msa_hmm_cell.MsaHmmCell,
+                #     "ProfileHMMTransitioner": trans.ProfileHMMTransitioner,
+                #     "ProfileHMMEmitter": emit.ProfileHMMEmitter,
+                #     "AminoAcidPrior": priors.AminoAcidPrior,
+                #     "NullPrior": priors.NullPrior,
+                #     "ProfileHMMTransitionPrior": priors.ProfileHMMTransitionPrior
+                # }
+            )
+
+        # Manually compile the model after loading
+        model.compile()
+
         if from_packed:
             #after loading remove unpacked files and keep only the archive
             try:
                 shutil.rmtree(filepath)
             except OSError as e:
-                print("Error: %s - %s." % (e.filepath, e.strerror))
-        # todo: this is currently a bit limited because it creates a default
-        # batch gen from a default config
-        if custom_batch_gen is None:
-            batch_gen = BatchGenerator()
-        else:
-            batch_gen = custom_batch_gen
-        # ensure that the model uses the same batch generator
-        model.context.batch_gen = batch_gen
-        if custom_config is None:
-            # temporary solution to get a legacy config on the fly
-            from learnMSA import Configuration
+                print("Error: %s - %s." % (e.filename, e.strerror))
 
-            config = Configuration()
-            config.training.num_model = d["num_models"]
-            config.training.no_sequence_weights = True
-        else:
-            config = custom_config
-        batch_gen.configure(data, LearnMSAContext(config, data))
         am = cls(
             data,
-            batch_gen,
-            indices,
-            d["batch_size"],
             model,
+            indices,
             d["gap_symbol"],
-            d["gap_symbol_insertions"]
+            d["gap_symbol_insertions"],
         )
         if "best_model" in d:
             am.best_model = d["best_model"]
@@ -732,6 +691,91 @@ class AlignmentModel():
         block = np.delete(block, columns_to_remove, axis=1)
         return block
 
+    #computes an implicit alignment (without storing gaps)
+    #eventually, an alignment with explicit gaps can be written
+    #in a memory friendly manner to file
+    def _build_alignment(self, models):
+
+        assert len(models) == 1, "Not implemented for multiple models."
+
+        self.model.viterbi_mode()
+        self.model.compile()
+        state_seqs_max_lik = self.model.predict(
+            self.data, self.indices, models
+        )
+
+        # TODO: transpose needed to make legacy code work, fix later
+        state_seqs_max_lik = np.transpose(state_seqs_max_lik, (2, 0, 1)) # (num_model, num_seq, L)
+        state_seqs_max_lik[state_seqs_max_lik == -1] = 2*self.model.context.model_lengths[0]+2 # terminal state
+
+        # TODO: the legacy code assumes a different indexing of the pHMM states
+        # legacy: 0: left flank, 1..C: match states, C+1..2C-1: insert states,
+        # 2C: right flank, 2C+1: unannotated, -1: terminal state
+        # current: 0..C-1: match states, C..2C-2: insert states,
+        # 2C-1: left flank, 2C: right flank, 2C+1: unannotated, 2C+2: terminal state
+
+        # Translate from current indexing to legacy indexing
+        for model_idx in models:
+            C = self.model.context.model_lengths[model_idx]
+            states = state_seqs_max_lik[models.index(model_idx)]
+
+            # Create a copy to avoid in-place modification issues
+            translated_states = np.copy(states)
+
+            # Left flank: 2C-1 → 0
+            translated_states[states == 2*C-1] = 0
+
+            # Match and insert states: [0, 2C-1) → [1, 2C)
+            mask = states < 2*C-1
+            translated_states[mask] = states[mask] + 1
+
+            # Right flank, unannotated, terminal: >= 2C stay the same
+            # (already copied, no change needed)
+
+            state_seqs_max_lik[models.index(model_idx)] = translated_states
+
+        state_seqs_max_lik = self._clean_up_viterbi_seqs(
+            state_seqs_max_lik, models
+        )
+        for i,max_lik_seqs in zip(models, state_seqs_max_lik):
+            model_len = self.model.context.model_lengths[i]
+            decoded_data = AlignmentModel.decode(model_len, max_lik_seqs)
+            self.metadata[i] = AlignmentMetaData(*decoded_data)
+
+    def _clean_up_viterbi_seqs(self, state_seqs_max_lik, models):
+
+        assert len(models) == 1, "Not implemented for multiple models."
+
+        # TODO
+        print("WARNING: Fixing faulty Viterbi sequences is currently not supported. SKIPPING.")
+        return state_seqs_max_lik
+
+        # state_seqs_max_lik has shape (num_model, num_seq, L)
+        faulty_sequences = find_faulty_sequences(
+            state_seqs_max_lik,
+            self.model.context.model_lengths[models[0]],
+            self.data.seq_lens[self.indices]
+        )
+        self.fixed_viterbi_seqs = faulty_sequences
+        if faulty_sequences.size > 0:
+            # repeat Viterbi with a masking that prevents certain transitions
+            # that can cause problems
+            fixed_state_seqs = self.model.decode(
+                self.data,
+                faulty_sequences,
+                self.batch_size,
+                models,
+                non_homogeneous_mask_func,
+            )
+            if state_seqs_max_lik.shape[-1] < fixed_state_seqs.shape[-1]:
+                state_seqs_max_like = np.pad(
+                    state_seqs_max_lik,
+                    ((0,0),(0,0),(0,fixed_state_seqs.shape[-1]-state_seqs_max_lik.shape[-1])),
+                    constant_values=2*self.model.context.model_lengths[0]+2
+                )
+            state_seqs_max_lik[0,faulty_sequences,:fixed_state_seqs.shape[-1]] = fixed_state_seqs[0]
+        return state_seqs_max_lik
+
 
 @tf.function
 def non_homogeneous_mask_func(i, seq_lens, hmm_cell):
@@ -759,9 +803,9 @@ def non_homogeneous_mask_func(i, seq_lens, hmm_cell):
         number_of_forbidden_match_states = tf.minimum(length-1, number_of_forbidden_match_states)
         length_mask = 1-tf.cast(tf.sequence_mask(number_of_forbidden_match_states, maxlen=q-1), hmm_cell.dtype)
         allowed_CR_transitions = tf.concat([tf.ones_like(length_mask[:,:1]), length_mask], axis=1)
-        mask_left = states_left[...,tf.newaxis] * allowed_CL_transitions[tf.newaxis]
+        mask_left = states_left[...,tf.newaxis] * allowed_CL_transitions[tf.newaxis] # type: ignore
         mask_left += template * (1 - states_left[:,tf.newaxis])
-        mask_right = states_right[tf.newaxis] * allowed_CR_transitions[...,tf.newaxis]
+        mask_right = states_right[tf.newaxis] * allowed_CR_transitions[...,tf.newaxis] # type: ignore
         mask_right += template * (1 - states_right[tf.newaxis])
         mask = mask_left * mask_right
         model_masks.append(mask)

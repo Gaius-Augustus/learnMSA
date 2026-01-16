@@ -1,21 +1,22 @@
 import math
-import warnings
 from typing import Any, Literal, Sequence, override
 
 import numpy as np
 import tensorflow as tf
 
 from learnMSA.hmm.tf.layer import PHMMLayer
-from learnMSA.model.hmm_stats import HMMStatsMixin
+from learnMSA.model.phmm_mixin import PHMMMixin
 from learnMSA.msa_hmm.AncProbsLayer import AncProbsLayer
 from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
 from learnMSA.msa_hmm.training import make_dataset
 from learnMSA.util.sequence_dataset import SequenceDataset
 
 
-class LearnMSAModel(tf.keras.Model, HMMStatsMixin):
+class LearnMSAModel(tf.keras.Model, PHMMMixin):
     """
-    Main LearnMSA model for training and decoding.
+    The main model class for LearnMSA, combining a pHMM layer with
+    ancestoral probability encoding.
+    Provides methods for training, evaluation, and prediction.
     """
 
     # enable proper type checking for __new__
@@ -430,6 +431,13 @@ class LearnMSAModel(tf.keras.Model, HMMStatsMixin):
                 uses default boundaries [200, 520, 700, 850, 1200, 2000, 4000, inf].
             bucket_batch_sizes: Batch sizes for each bucket. If None, uses the
                 adaptive batch size function from the batch generator.
+
+        Returns: An array whose shape depends on the call mode:
+            - Viterbi mode: (num_sequences, length, num_models) with the
+                most likely state sequences for each sequence and model.
+            - Loglik mode: (num_sequences, num_models) with the loglikelihoods
+              for each sequence and model.
+            - Posterior mode: (num_sequences, length, num_models, num_states)
         """
         if indices is None:
             indices = np.arange(data.num_seq)
@@ -659,7 +667,12 @@ class LearnMSAModel(tf.keras.Model, HMMStatsMixin):
             self.compile()
             return self.predict(data, indices, models)
 
-    def compute_null_model_log_probs(self):
+    def compute_null_model_log_probs(
+        self,
+        data: SequenceDataset,
+        background_dist: np.ndarray | None = None,
+        transition_prob: float | None = None
+    ) -> np.ndarray:
         """ Computes the logarithmic likelihood of each sequence under the
             null model
 
@@ -671,78 +684,136 @@ class LearnMSAModel(tf.keras.Model, HMMStatsMixin):
             frequencies and T is the terminal state.
 
             Args:
-                p: The probability of staying in the emitting state S.
+                data: SequenceDataset containing the sequences to evaluate.
+                background_dist: Optional background distribution over the
+                    alphabet. If None, uses the prior background distribution
+                    from the emitter. Must be a flat array of size alphabet_size.
+                transition_prob: Optional self-loop transition probability.
+                    If None, uses M/(M+1) where M is the mean sequence length.
+                    Must be a probability value in [0, 1].
+
+            Returns:
+                log_probs: Array of log probabilities for each sequence.
         """
         # Prepare the data
-        n = self.data.num_seq
-        ds = make_dataset(
+        n = data.num_seq
+
+        # Configure batch generator
+        self.context.batch_gen.configure(data, self.context)
+
+        # Determine batch size
+        if callable(self.context.batch_size):
+            batch_size = self.context.batch_size(data)
+        else:
+            batch_size = self.context.batch_size
+
+        ds, _ = make_dataset(
             np.arange(n),
-            self.batch_generator,
-            self.batch_size,
+            self.context.batch_gen,
+            batch_size,
             shuffle=False,
             bucket_by_seq_length=True,
-            model_lengths=self.msa_hmm_layer.cell.length
+            model_lengths=self.phmm_layer.lengths
         )
 
         # Prepare the background frequencies
-        aa_dist = self.msa_hmm_layer.cell.emitter[0].prior.emission_dirichlet_mix.make_background().numpy()
-        # Append ad-hoc probability for non-standard amino acids
-        aa_dist = np.append(aa_dist, [1e-4]*3)
-        aa_dist /= np.sum(aa_dist) #normalize
+        if background_dist is None:
+            # Use prior background distribution
+            assert self.phmm_layer.hmm.emitter[0].prior,\
+                    "Emitter needs a Dirichlet prior for null model computation."
+            dirichlet_alpha = self.phmm_layer.hmm.emitter[0].prior.matrix().numpy()
+            dirichlet_alpha = dirichlet_alpha[0,0] # Shared, pick any head and state
+            _background_dist = dirichlet_alpha / np.sum(dirichlet_alpha)
+
+            # Append ad-hoc probability for non-standard amino acids
+            _background_dist = np.append(_background_dist, [1e-4]*3)
+            _background_dist /= np.sum(_background_dist) #normalize  # shape (24,)
+        else:
+            _background_dist = background_dist
+
         # Add the terminal symbol emissions
-        aa_dist = np.append(aa_dist, [1.0])
+        _background_dist = np.append(_background_dist, [1.0])
         # Log transition probabilities
-        aa_dist = np.log(aa_dist + 1e-10)  # shape (24,)
+        _background_dist = np.log(_background_dist + 1e-10)
 
         # Compute emission log probs
         log_probs = np.zeros((n,))
-        for (x,_,batch_idx), _ in ds:
-            em = tf.reduce_sum(tf.gather(aa_dist, tf.cast(x[:,0,:], tf.int32)), axis=1)
-            log_probs[batch_idx] = em.numpy()
+        for batch_data, _ in ds:
+            # Handle bucketed datasets
+            if isinstance(batch_data, tuple) and len(batch_data) == 3:
+                x, _, batch_idx = batch_data
+            else:
+                x, _ = batch_data
+                # No bucket indices available, skip this batch
+                continue
 
-        # Add transition log probs based on the target sequence lenghts
+            x_np = x.numpy()[:, 0, :]  # (batch, seq_length)
+            em = np.sum(_background_dist[x_np], axis=1)
+            log_probs[batch_idx.numpy()] = em
+
+        # Add transition log probs based on the target sequence lengths
         # We'll assume a geometric distribution with the expected length
         # equal to the length of each target sequence
-        L = self.data.seq_lens
-        M = np.mean(L)
-        trans_scores = L * (np.log(M) - np.log(M+1))
+        L = data.seq_lens
+        if transition_prob is None:
+            M = np.mean(L)
+            trans_scores = (L - 1) * (np.log(M) - np.log(M+1))
+        else:
+            trans_scores = (L - 1) * np.log(transition_prob)
         log_probs += trans_scores
 
         return log_probs
 
-    def compute_AIC(self, max_seq=200000, loglik=None):
+    def estimate_AIC(
+        self,
+        data: SequenceDataset,
+        max_seq: int = 200000,
+        loglik: np.ndarray | None = None
+    ) -> np.ndarray:
         """ Computes the Akaike information criterion for each underlying model.
+
         Args:
+            data: SequenceDataset containing the sequences to evaluate.
             max_seq: Threshold for the number of sequences used to compute the
-                loglik. If the dataset has mroe sequences, a random subset is
+                loglik. If the dataset has more sequences, a random subset is
                 drawn.
             loglik: This argument can be set if the loglik was computed before
-                via compute_loglik to avoid overhead. If None, the loglik will
+                via estimate_loglik to avoid overhead. If None, the loglik will
                 be computed internally.
+
+        Returns:
+            aic: Array of AIC values for each model.
         """
         if loglik is None:
-            loglik = self.compute_loglik(max_seq)
-        num_param = 34 * np.array(self.length) + 25
-        aic = -2 * loglik * self.data.num_seq + 2*num_param
+            loglik = self.estimate_loglik(data, max_seq, reduce=True)
+        num_param = 34 * np.array(self.phmm_layer.lengths) + 25
+        aic = -2 * loglik * data.num_seq + 2 * num_param
         return aic
 
-    def compute_consensus_score(self):
+    def compute_consensus_score(self) -> tf.Tensor:
         """ Computes a consensus score that rates how plausible each model is
             with respect to all other models.
             (Relevant for users not using the default emitter: Uses the
             make_B_amino method of the first emitter.)
+
+        Returns:
+            consensus_score: Tensor of shape (num_models,) with consensus scores.
         """
+        num_models = self.context.config.training.num_model
+        model_lengths = self.phmm_layer.lengths
+        alphabet_size = self.context.config.hmm.alphabet_size
+
         # compute the match sequence of all models padded with terminal symbols
         match_seqs = np.zeros(
-            (self.num_models, max(self.length)+1, self.msa_hmm_layer.cell.dim)
+            (num_models, max(model_lengths)+1, alphabet_size + 1)
         )
-        match_seqs[:,:,-1] = 1 #initialize with terminal symbols
-        emitter = self.msa_hmm_layer.cell.emitter[0]
-        for i,L in enumerate(self.length):
-            match_seqs[i, :L] = emitter.make_B_amino()[i,1:L+1]
+        match_seqs[:,:,-1] = 1  # initialize with terminal symbols
+        emitter = self.phmm_layer.hmm.emitter[0]
+        for i, L in enumerate(model_lengths):
+            match_seqs[i, :L] = emitter.matrix()[i, 1:L+1]
         # we need to tile the match sequences over the batch dimension because
         # each model should see all other models
-        match_seqs = tf.stack([match_seqs]*self.num_models, axis=1)
+        match_seqs = tf.stack([match_seqs] * num_models, axis=1)
         # rate the match seqs with respect to the models and cancel out
         # self-rating
 
@@ -751,9 +822,12 @@ class LearnMSAModel(tf.keras.Model, HMMStatsMixin):
         # this is a workaround, but will break with a user defined encoder model
         # we skip the anc probs for simplicity as this would require fitting
         # evolutionary times
-        consensus_logliks = self.msa_hmm_layer(match_seqs)[1]
+        consensus_logliks = self.phmm_layer.hmm.likelihood_log(
+            match_seqs[:, :, :, :-1],  # Remove terminal symbol for emissions
+            1 - match_seqs[:, :, :, -1:]  # Padding mask
+        )
 
-        consensus_logliks *= 1-tf.eye(self.num_models)
+        consensus_logliks *= 1 - tf.eye(num_models)
         # Axis 1 means we reduce over the batch dimension rather than the model
         # dimension,
         # so output i will be the mean loglik if we input all other match

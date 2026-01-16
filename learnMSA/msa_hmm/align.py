@@ -58,7 +58,7 @@ def align(data : SequenceDataset, config : Configuration) -> AlignmentModel:
     if config.input_output.load_model == Path() and \
             config.training.skip_training:
         # Load a model without any training
-        am = AlignmentModel.load_models_from_file(
+        am = AlignmentModel.load(
             config.input_output.load_model,
             data,
             custom_batch_gen=context.batch_gen
@@ -173,7 +173,7 @@ def _fit_and_align(
 
     if config.input_output.load_model:
         # Load the alignment model from file and use it as initialization
-        am = AlignmentModel.load_models_from_file(
+        am = AlignmentModel.load(
             config.input_output.load_model,
             data,
             custom_batch_gen=context.batch_gen,

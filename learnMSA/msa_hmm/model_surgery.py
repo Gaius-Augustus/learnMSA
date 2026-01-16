@@ -142,7 +142,7 @@ def extend_mods(pos_expand, expansion_lens, pos_discard, L, k=0):
 
 #applies expansions and discards to emission and transition kernels
 def update_kernels(
-    am,
+    am: AlignmentModel,
     model_index,
     pos_expand,
     expansion_lens,
@@ -151,7 +151,7 @@ def update_kernels(
     transition_dummy,
     init_flank_dummy,
 ):
-    L = am.msa_hmm_layer.cell.length[model_index]
+    L = am.model.lengths[model_index]
     emissions = [em.emission_kernel[model_index].numpy() for em in am.msa_hmm_layer.cell.emitter]
     transitions = { key : kernel.numpy()
                          for key, kernel in am.msa_hmm_layer.cell.transitioner.transition_kernel[model_index].items()}

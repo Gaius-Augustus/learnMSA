@@ -486,3 +486,47 @@ def test_estimate_loglik(context_amino_acid: LearnMSAContext) -> None:
         "Reduced loglik shape is incorrect"
     assert loglik_full.shape == (100, 2), \
         "Full loglik shape is incorrect"
+
+def test_null_model_log_probs(context_amino_acid: LearnMSAContext) -> None:
+    # Test that compute_null_model_log_probs correctly computes
+    # log probabilities under a null model
+    model = LearnMSAModel(context_amino_acid)
+    model.compile()
+
+    # Create a dataset with sequences of varying lengths
+    sequences = [
+        ("1", "ACDEFGHIKLMNPQRSTVWY"),
+        ("2", "AAAAAAAAA"),
+        ("3", "ACDEFG"),
+        ("4", "MGKLPQRSTVWY"),
+    ]
+    data = SequenceDataset(sequences=sequences)
+
+    # Use a uniform distribution for easy reference value computation
+    uniform_dist = np.ones(23) / 23.0
+
+    # Compute null model log probabilities with uniform background
+    log_probs = model.compute_null_model_log_probs(
+        data, background_dist=uniform_dist, transition_prob=0.5
+    )
+
+    # Log probabilities
+    p = np.log(uniform_dist[0])
+
+    # Compute expected log probs for each sequence
+    expected_log_probs = np.zeros(4)
+    for i, (_, seq) in enumerate(sequences):
+        # Emissions
+        expected_log_probs[i] = p * len(seq)
+        # Transitions
+        expected_log_probs[i] += np.log(0.5) * (len(seq) - 1)
+
+    # Check that output has correct shape
+    assert log_probs.shape == (4,), \
+        f"Expected shape (4,), got {log_probs.shape}"
+
+    # Check that computed values match expected values
+    np.testing.assert_allclose(
+        log_probs, expected_log_probs, rtol=1e-5,
+        err_msg="Computed log probabilities do not match expected values"
+    )

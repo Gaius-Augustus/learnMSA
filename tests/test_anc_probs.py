@@ -1,6 +1,5 @@
 """Tests for ancestral probability calculations and rate matrices."""
 import os
-from multiprocessing import context
 
 import numpy as np
 import pytest

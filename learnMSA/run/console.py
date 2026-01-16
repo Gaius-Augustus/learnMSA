@@ -52,7 +52,7 @@ def run_main():
         alignment_model = align(data, config)
 
         if config.input_output.save_model:
-            alignment_model.write_models_to_file(config.input_output.save_model)
+            alignment_model.save(config.input_output.save_model)
         if config.input_output.scores != Path():
             alignment_model.write_scores(config.input_output.scores)
             if config.input_output.verbose:

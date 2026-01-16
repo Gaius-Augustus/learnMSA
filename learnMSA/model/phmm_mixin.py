@@ -3,7 +3,7 @@ import numpy as np
 from learnMSA.hmm.tf.layer import PHMMLayer
 
 
-class HMMStatsMixin():
+class PHMMMixin():
     phmm_layer: PHMMLayer
     """The PHMM layer used in the model."""
 
