@@ -520,8 +520,8 @@ def test_prior_values() -> None:
     """
     Test that the priors are correctly set in the layer.
     """
-
-    # Set up the new layer
+    config = ref.config.model_copy(deep=True)
+    config.use_prior_for_emission_init = True
 
     # Test model A
     lengths = [4]
@@ -533,7 +533,7 @@ def test_prior_values() -> None:
     prior_config.alpha_single_compl = 1
     prior_config.alpha_global_compl = 1
     layer = PHMMLayer(
-        lengths=lengths, config=ref.config, prior_config=prior_config
+        lengths=lengths, config=config, prior_config=prior_config
     )
 
     # Build the layer by providing shapes for observations and padding
