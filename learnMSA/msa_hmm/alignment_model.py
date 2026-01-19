@@ -433,17 +433,6 @@ class AlignmentModel():
             )
             model = tf.keras.models.load_model(
                 filepath+".keras",
-                # custom_objects={
-                #     "LearnMSAModel": LearnMSAModel,
-                #     "AncProbsLayer": anc_probs.AncProbsLayer,
-                #     "MsaHmmLayer": msa_hmm_layer.MsaHmmLayer,
-                #     "MsaHmmCell": msa_hmm_cell.MsaHmmCell,
-                #     "ProfileHMMTransitioner": trans.ProfileHMMTransitioner,
-                #     "ProfileHMMEmitter": emit.ProfileHMMEmitter,
-                #     "AminoAcidPrior": priors.AminoAcidPrior,
-                #     "NullPrior": priors.NullPrior,
-                #     "ProfileHMMTransitionPrior": priors.ProfileHMMTransitionPrior
-                # }
             )
 
         # Manually compile the model after loading

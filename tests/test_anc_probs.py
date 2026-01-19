@@ -71,7 +71,7 @@ def assert_rate_matrix(Q: np.ndarray, p: np.ndarray) -> None:
 def assert_anc_probs(
         anc_prob_seqs: np.ndarray,
         expected_sum: np.ndarray,
-        expected_anc_probs: np.ndarray = None
+        expected_anc_probs: np.ndarray|None = None
 ) -> None:
     """Assert properties of ancestral probability sequences."""
     assert_vec(np.sum(anc_prob_seqs, -1, keepdims=True), expected_sum, almost=True)
@@ -84,9 +84,9 @@ def assert_anc_probs_layer(
 ) -> None:
     """Assert properties of an ancestral probabilities layer."""
     anc_probs_layer.build()
-    p = anc_probs_layer.make_p()
-    R = anc_probs_layer.make_R()
-    Q = anc_probs_layer.make_Q()
+    p = anc_probs_layer.make_p().numpy()
+    R = anc_probs_layer.make_R().numpy()
+    Q = anc_probs_layer.make_Q().numpy()
     assert p.shape[0] == config.training.num_model
     assert R.shape[0] == config.training.num_model
     assert Q.shape[0] == config.training.num_model
@@ -188,13 +188,16 @@ def get_simple_seq(data: SequenceDataset) -> np.ndarray:
     config.training.num_model = 1
     config.training.no_sequence_weights = True
     batch_generator.configure(data, LearnMSAContext(config, data))
-    ds = training.make_dataset(indices,
-                               batch_generator,
-                               batch_size=data.num_seq,
-                               shuffle=False)
-    for (seq, _), _ in ds:
+    ds, steps = training.make_dataset(
+        indices,
+        batch_generator,
+        batch_size=data.num_seq,
+        shuffle=False,
+    )
+    for (seq, _), _ in ds.take(1):
         sequences = seq.numpy()[:, :, :-1]
         sequences = np.transpose(sequences, [1, 0, 2])
+        break
     return sequences
 
 
@@ -269,7 +272,6 @@ def test_encoder_model() -> None:
         config.training.no_sequence_weights = True
         batch_gen = training.BatchGenerator()
         batch_gen.configure(data, LearnMSAContext(config, data))
-        ds = training.make_dataset(ind, batch_gen, batch_size=n, shuffle=False)
         for case in get_test_configs(sequences):
             # The default emitter initializers expect 25 as last dimension
             # which is not compatible with num_matrix=3
@@ -285,9 +287,9 @@ def test_encoder_model() -> None:
             context.effective_num_seq = n
             model = LearnMSAModel(context)
             assert_anc_probs_layer(model.anc_probs_layer, config)
-            model.encode_only = True
-            for x, _ in ds:
-                anc_prob_seqs = model(x).numpy()[:, :, :-1]
+            ds, steps = training.make_dataset(ind, batch_gen, batch_size=n, shuffle=False)
+            for x, _ in ds.take(1):
+                anc_prob_seqs = model.encode_batch(x).numpy()[:, :, :-1]
                 shape = (
                     config.training.num_model,
                     n,
@@ -296,6 +298,7 @@ def test_encoder_model() -> None:
                     len(SequenceDataset._default_alphabet)
                 )
                 anc_prob_seqs = np.reshape(anc_prob_seqs, shape)
+                break
             if "expected_anc_probs" in case:
                 assert_anc_probs(
                     anc_prob_seqs,
