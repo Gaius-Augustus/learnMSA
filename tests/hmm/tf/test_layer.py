@@ -1,12 +1,14 @@
+import os
+
 import numpy as np
 import pytest
 import tensorflow as tf
 
-from learnMSA.util.sequence_dataset import SequenceDataset
 import tests.hmm.ref as ref
 from learnMSA.config.hmm import PHMMConfig, PHMMPriorConfig
 from learnMSA.hmm.tf import prior
 from learnMSA.hmm.tf.layer import PHMMLayer
+from learnMSA.util.sequence_dataset import SequenceDataset
 
 
 @pytest.fixture
@@ -36,6 +38,154 @@ def seq() -> tf.Tensor:
 def padding() -> tf.Tensor:
     """Fixture for a test padding tensor."""
     return tf.constant([[[1], [1], [1], [0]]], dtype=tf.float32) # (B, T, 1)
+
+@pytest.fixture
+def two_motifs_layer() -> PHMMLayer:
+    """Fixture for a PHMMLayer with two motifs: FELIK (length 5) and AHC (length 3)."""
+    alphabet = SequenceDataset._default_alphabet
+
+    # Create two models: one for "FELIK" (5 states), one for "AHC" (3 states)
+    felik_indices = [alphabet.index(aa) for aa in "FELIK"]
+    ahc_indices = [alphabet.index(aa) for aa in "AHC"]
+
+    # Model 1: FELIK (length 5)
+    match_emissions_1 = np.zeros((5, len(alphabet)-1))
+    for i, aa_idx in enumerate(felik_indices):
+        match_emissions_1[i, aa_idx] = 1.0
+
+    # Model 2: AHC (length 3) - pad to length 5 to match model 1
+    match_emissions_2 = np.zeros((5, len(alphabet)-1))
+    for i, aa_idx in enumerate(ahc_indices):
+        match_emissions_2[i, aa_idx] = 1.0
+
+    # Combine into multi-head configuration
+    match_emissions = np.array([match_emissions_1, match_emissions_2])
+
+    config = PHMMConfig(
+        match_emissions=match_emissions,
+        insert_emissions=[1/23]*23,
+        use_prior_for_emission_init=False,
+        # First head (length 5) and second head (length 3) values
+        p_begin_match=[
+            [0.43636364, 0.10909091, 0.10909091, 0.10909091, 0.10909091],
+            [0.44444445, 0.22222222, 0.22222222]
+        ],
+        p_match_end=[
+            [0.12857144, 0.12857144, 0.12857144, 0.12857144, 1.0],
+            [0.3, 0.3, 1.0]
+        ],
+        p_match_match=[
+            [0.2857143, 0.2857143, 0.2857143, 0.2857143],
+            [0.19999999, 0.19999999]
+        ],
+        p_match_insert=[
+            [0.2857143, 0.2857143, 0.2857143, 0.2857143],
+            [0.19999999, 0.19999999]
+        ],
+        p_insert_insert=[
+            [0.5, 0.5, 0.5, 0.5],
+            [0.5, 0.5]
+        ],
+        p_delete_delete=[
+            [0.5, 0.5, 0.5, 0.5],
+            [0.5, 0.5]
+        ],
+        p_begin_delete=[0.12727274, 0.11111111],
+        p_left_left=0.5,
+        p_right_right=0.5,
+        p_unannot_unannot=0.5,
+        p_end_unannot=0.42231882,
+        p_end_right=0.15536243,
+        p_start_left_flank=0.5,
+    )
+
+    layer = PHMMLayer(lengths=[5, 3], config=config)
+
+    # Build layer
+    alphabet_size = len(SequenceDataset._default_alphabet) - 1
+    layer.build(((None, None, alphabet_size), (None, None, 1)))
+
+    return layer
+
+@pytest.fixture
+def felix_data() -> tuple[tf.Tensor, tf.Tensor]:
+    """Fixture for felix.fa sequences and padding."""
+    alphabet = SequenceDataset._default_alphabet
+    test_data_path = os.path.join(
+        os.path.dirname(__file__), "..", "..", "data", "felix.fa"
+    )
+
+    with SequenceDataset(test_data_path) as data:
+        # Get sequences and convert to one-hot
+        max_len = np.max(data.seq_lens)
+        num_seqs = data.num_seq
+
+        # Create one-hot encoded sequences
+        seq = np.zeros((num_seqs, max_len+1)) + alphabet.index("-")
+        for i in range(num_seqs):
+            seq[i, :data.seq_lens[i]] = data.get_encoded_seq(i)
+        seq = np.eye(len(alphabet))[seq.astype(int)]
+
+    padding = 1 - tf.constant(seq[..., -1:], dtype=tf.float32)  # (N, L, 1)
+    seq = tf.constant(seq[..., :-1], dtype=tf.float32)  # (N, L, 23)
+
+    return seq, padding
+
+@pytest.fixture
+def felix_reference_states() -> np.ndarray:
+    """Fixture for reference Viterbi states on felix.fa (remapped to new ordering)."""
+    def remap_states(old_seq, length):
+        """Remap state numbers from legacy to new PHMMLayer ordering."""
+        new_seq = np.zeros_like(old_seq)
+        for i, old_state in enumerate(old_seq):
+            if old_state == 0:
+                # LEFT_FLANK
+                new_seq[i] = 2 * length - 1
+            elif 1 <= old_state <= length:
+                # MATCH states
+                new_seq[i] = old_state - 1
+            elif length + 1 <= old_state <= 2 * length - 1:
+                # INSERT states
+                new_seq[i] = old_state - 1
+            elif old_state in [2 * length, 2 * length + 1]:
+                # UNANNOTATED, RIGHT_FLANK (unchanged)
+                new_seq[i] = old_state
+            elif old_state == 2 * length + 2:
+                # END state
+                new_seq[i] = -1
+        return new_seq
+
+    # Legacy reference sequences (using old state numbering)
+    ref_seqs_legacy = np.array([
+        # model 1 (FELIK, length 5)
+        [[1, 2, 3, 4, 5, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12],
+         [0, 0, 0, 1, 2, 3, 4, 5, 12, 12, 12, 12, 12, 12, 12],
+         [1, 2, 3, 4, 5, 11, 11, 11, 12, 12, 12, 12, 12, 12, 12],
+         [1, 2, 3, 4, 5, 10, 10, 10, 1, 2, 3, 4, 5, 11, 12],
+         [0, 2, 3, 4, 11, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12],
+         [1, 2, 7, 7, 7, 3, 4, 5, 12, 12, 12, 12, 12, 12, 12],
+         [1, 6, 6, 2, 3, 8, 4, 9, 9, 9, 5, 12, 12, 12, 12],
+         [1, 2, 3, 8, 8, 8, 4, 5, 11, 11, 11, 12, 12, 12, 12]],
+        # model 2 (AHC, length 3)
+        [[0, 0, 0, 0, 0, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8],
+         [1, 2, 3, 7, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 8],
+         [0, 0, 0, 0, 0, 0, 1, 3, 8, 8, 8, 8, 8, 8, 8],
+         [0, 0, 0, 0, 0, 1, 2, 3, 6, 6, 6, 6, 6, 1, 8],
+         [1, 4, 4, 4, 2, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8],
+         [0, 0, 1, 2, 3, 7, 7, 7, 8, 8, 8, 8, 8, 8, 8],
+         [0, 1, 2, 6, 6, 1, 6, 1, 2, 3, 7, 8, 8, 8, 8],
+         [0, 0, 0, 1, 2, 3, 6, 6, 1, 2, 3, 8, 8, 8, 8]]
+    ])
+
+    # Remap to new state numbering
+    ref_seqs = np.array([
+        # model 1, length 5
+        np.array([remap_states(seq, 5) for seq in ref_seqs_legacy[0]]),
+        # model 2, length 3
+        np.array([remap_states(seq, 3) for seq in ref_seqs_legacy[1]])
+    ])
+
+    return ref_seqs
 
 def test_matrices(
     layer: PHMMLayer, seq: tf.Tensor, padding: tf.Tensor
@@ -358,7 +508,7 @@ def test_parallel_factor(
     viterbi_paths = layer.hmm.viterbi(seq, padding, parallel=2)
     posterior = layer.hmm.posterior(seq, padding, parallel=2)
     loglik = loglik.numpy()
-    viterbi_paths = viterbi_paths.numpy()
+    viterbi_paths = viterbi_paths.numpy() # type: ignore
     assert isinstance(posterior, tf.Tensor)
     posterior = posterior.numpy()
 
@@ -945,158 +1095,26 @@ def test_variable_length_sequences() -> None:
     )
 
 
-def test_viterbi_two_heads() -> None:
+def test_viterbi_two_motifs(
+    two_motifs_layer: PHMMLayer,
+    felix_data: tuple[tf.Tensor, tf.Tensor],
+    felix_reference_states: np.ndarray
+) -> None:
     """Test Viterbi algorithm with two heads on real sequence data.
 
     This is analogous to the legacy test_viterbi but uses PHMMLayer.
     Tests Viterbi decoding with two models of different lengths.
     """
-    alphabet = SequenceDataset._default_alphabet
-
-    # Create two models: one for "FELIK" (5 states), one for "AHC" (3 states)
-    felik_indices = [alphabet.index(aa) for aa in "FELIK"]
-    ahc_indices = [alphabet.index(aa) for aa in "AHC"]
-
-    # Model 1: FELIK (length 5)
-    match_emissions_1 = np.zeros((5, len(alphabet)-1))
-    for i, aa_idx in enumerate(felik_indices):
-        match_emissions_1[i, aa_idx] = 1.0
-
-    # Model 2: AHC (length 3) - pad to length 5 to match model 1
-    match_emissions_2 = np.zeros((5, len(alphabet)-1))
-    for i, aa_idx in enumerate(ahc_indices):
-        match_emissions_2[i, aa_idx] = 1.0
-    # Positions 3 and 4 remain zero (padding for unused match states)
-
-    # Combine into multi-head configuration
-    match_emissions = np.array([match_emissions_1, match_emissions_2])
-
-    config = PHMMConfig(
-        match_emissions=match_emissions,
-        insert_emissions=[1/23]*23,
-        use_prior_for_emission_init=False,
-        # First head (length 5) and second head (length 3) values
-        p_begin_match=[
-            [0.43636364, 0.10909091, 0.10909091, 0.10909091, 0.10909091],
-            [0.44444445, 0.22222222, 0.22222222]
-        ],
-        p_match_end=[
-            [0.12857144, 0.12857144, 0.12857144, 0.12857144, 1.0],
-            [0.3, 0.3, 1.0]
-        ],
-        p_match_match=[
-            [0.2857143, 0.2857143, 0.2857143, 0.2857143],
-            [0.19999999, 0.19999999]
-        ],
-        p_match_insert=[
-            [0.2857143, 0.2857143, 0.2857143, 0.2857143],
-            [0.19999999, 0.19999999]
-        ],
-        p_insert_insert=[
-            [0.5, 0.5, 0.5, 0.5],
-            [0.5, 0.5]
-        ],
-        p_delete_delete=[
-            [0.5, 0.5, 0.5, 0.5],
-            [0.5, 0.5]
-        ],
-        p_begin_delete=[0.12727274, 0.11111111],
-        p_left_left=0.5,
-        p_right_right=0.5,
-        p_unannot_unannot=0.5,
-        p_end_unannot=0.42231882,
-        p_end_right=0.15536243,
-        p_start_left_flank=0.5,
-    )
-
-    layer = PHMMLayer(lengths=[5, 3], config=config)
-
-    # Load test data from felix.fa
-    import os
-    test_data_path = os.path.join(
-        os.path.dirname(__file__), "..", "..", "data", "felix.fa"
-    )
-
-    with SequenceDataset(test_data_path) as data:
-        # Get sequences and convert to one-hot
-        max_len = np.max(data.seq_lens)
-        num_seqs = data.num_seq
-
-        # Create one-hot encoded sequences
-        seq = np.zeros((num_seqs, max_len+1))+alphabet.index("-")
-        for i in range(num_seqs):
-           seq[i, :data.seq_lens[i]] = data.get_encoded_seq(i)
-        seq = np.eye(len(alphabet))[seq.astype(int)]
-
-    padding = 1-tf.constant(seq[..., -1:], dtype=tf.float32)  # (N, L, 1)
-    seq = tf.constant(seq[..., :-1], dtype=tf.float32) # (N, L, 23)
-
-    # Build layer
-    layer.build(((None, None, len(alphabet)-1), (None, None, 1)))
+    seq, padding = felix_data
+    ref_seqs = felix_reference_states
 
     # Run Viterbi
-    layer.viterbi_mode()
-    viterbi_paths = layer(seq, padding).numpy()
+    two_motifs_layer.viterbi_mode()
+    viterbi_paths = two_motifs_layer(seq, padding).numpy()
 
     # Check basic properties of Viterbi paths
-    assert viterbi_paths.shape == (num_seqs, max_len+1, 2), \
-        f"Expected shape ({num_seqs}, {max_len+1}, 2), got {viterbi_paths.shape}"
-
-    def remap_states(old_seq, length):
-        """Remap state numbers from legacy to new PHMMLayer ordering."""
-        # For length L:
-        # Old: [LEFT_FLANK=0, M1=1...ML=L, I1=L+1...IL-1=2L-1,
-        # UNANNOT=2L, RIGHT=2L+1, END=2L+2]
-        # New: [M1=0...ML=L-1, I1=L...IL-1=2L-2, LEFT_FLANK=2L-1,
-        # UNANNOT=2L, RIGHT=2L+1, END=-1]
-        new_seq = np.zeros_like(old_seq)
-        for i, old_state in enumerate(old_seq):
-            if old_state == 0:
-                # LEFT_FLANK
-                new_seq[i] = 2 * length - 1
-            elif 1 <= old_state <= length:
-                # MATCH states
-                new_seq[i] = old_state - 1
-            elif length + 1 <= old_state <= 2 * length - 1:
-                # INSERT states
-                new_seq[i] = old_state - 1
-            elif old_state in [2 * length, 2 * length + 1]:
-                # UNANNOTATED, RIGHT_FLANK (unchanged)
-                new_seq[i] = old_state
-            elif old_state == 2 * length + 2:
-                # END state
-                new_seq[i] = -1
-        return new_seq
-
-    # Legacy reference sequences (using old state numbering)
-    ref_seqs_legacy = np.array([
-        # model 1 (FELIK, length 5)
-        [[1, 2, 3, 4, 5, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12],
-         [0, 0, 0, 1, 2, 3, 4, 5, 12, 12, 12, 12, 12, 12, 12],
-         [1, 2, 3, 4, 5, 11, 11, 11, 12, 12, 12, 12, 12, 12, 12],
-         [1, 2, 3, 4, 5, 10, 10, 10, 1, 2, 3, 4, 5, 11, 12],
-         [0, 2, 3, 4, 11, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12],
-         [1, 2, 7, 7, 7, 3, 4, 5, 12, 12, 12, 12, 12, 12, 12],
-         [1, 6, 6, 2, 3, 8, 4, 9, 9, 9, 5, 12, 12, 12, 12],
-         [1, 2, 3, 8, 8, 8, 4, 5, 11, 11, 11, 12, 12, 12, 12]],
-        # model 2 (AHC, length 3)
-        [[0, 0, 0, 0, 0, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8],
-         [1, 2, 3, 7, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 8],
-         [0, 0, 0, 0, 0, 0, 1, 3, 8, 8, 8, 8, 8, 8, 8],
-         [0, 0, 0, 0, 0, 1, 2, 3, 6, 6, 6, 6, 6, 1, 8],
-         [1, 4, 4, 4, 2, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8],
-         [0, 0, 1, 2, 3, 7, 7, 7, 8, 8, 8, 8, 8, 8, 8],
-         [0, 1, 2, 6, 6, 1, 6, 1, 2, 3, 7, 8, 8, 8, 8],
-         [0, 0, 0, 1, 2, 3, 6, 6, 1, 2, 3, 8, 8, 8, 8]]
-    ])
-
-    # Remap to new state numbering
-    ref_seqs = np.array([
-        # model 1, length 5
-        np.array([remap_states(seq, 5) for seq in ref_seqs_legacy[0]]),
-        # model 2, length 3
-        np.array([remap_states(seq, 3) for seq in ref_seqs_legacy[1]])
-    ])
+    num_seqs, max_len_plus_one, num_heads = viterbi_paths.shape
+    assert num_heads == 2, f"Expected 2 heads, got {num_heads}"
 
     # Check that Viterbi paths match reference for both models
     np.testing.assert_equal(
@@ -1111,10 +1129,61 @@ def test_viterbi_two_heads() -> None:
     )
 
     # Test with parallel Viterbi
-    viterbi_paths_parallel = layer.hmm.viterbi(seq, padding, parallel=3)
+    viterbi_paths_parallel = two_motifs_layer.hmm.viterbi(
+        seq, padding, parallel=3
+    )
     np.testing.assert_array_equal(
         viterbi_paths,
         viterbi_paths_parallel.numpy(), # type: ignore
         err_msg="Parallel Viterbi gives different results"
     )
 
+def test_parallel_viterbi_two_motifs(
+    two_motifs_layer: PHMMLayer,
+    felix_data: tuple[tf.Tensor, tf.Tensor],
+    felix_reference_states: np.ndarray
+) -> None:
+    """Test parallel Viterbi algorithm with different parallel factors.
+
+    This test verifies that the Viterbi algorithm produces consistent results
+    with different parallel factors (1, 3, 5) on the felix.fa dataset.
+    """
+    seq, padding = felix_data
+    ref_seqs = felix_reference_states
+
+    # Test Viterbi with different parallel factors
+    viterbi_paths_1 = two_motifs_layer.hmm.viterbi(
+        seq, padding, parallel=1
+    ).numpy() # type: ignore
+    viterbi_paths_3 = two_motifs_layer.hmm.viterbi(
+        seq, padding, parallel=3
+    ).numpy() # type: ignore
+    viterbi_paths_5 = two_motifs_layer.hmm.viterbi(
+        seq, padding, parallel=5
+    ).numpy() # type: ignore
+
+    # Verify all parallel factors produce identical results
+    np.testing.assert_array_equal(
+        viterbi_paths_1,
+        viterbi_paths_3,
+        err_msg="Viterbi paths differ between parallel=1 and parallel=3"
+    )
+    np.testing.assert_array_equal(
+        viterbi_paths_1,
+        viterbi_paths_5,
+        err_msg="Viterbi paths differ between parallel=1 and parallel=5"
+    )
+
+    # Verify results match reference for both models
+    np.testing.assert_equal(
+        viterbi_paths_3[:, :15, 0],
+        ref_seqs[0],
+        err_msg="Viterbi paths do not match reference for model 1 (FELIK)"\
+            "with parallel=3"
+    )
+    np.testing.assert_equal(
+        viterbi_paths_3[:, :15, 1],
+        ref_seqs[1],
+        err_msg="Viterbi paths do not match reference for model 2 (AHC)"\
+            "with parallel=3"
+    )
