@@ -27,12 +27,15 @@ def get_all_seqs(data: SequenceDataset, num_models: int) -> np.ndarray:
     config.training.num_model = num_models
     config.training.no_sequence_weights = True
     batch_generator.configure(data, LearnMSAContext(config, data))
-    ds = training.make_dataset(indices,
-                               batch_generator,
-                               batch_size=data.num_seq,
-                               shuffle=False)
-    for (seq, _), _ in ds:
-        return seq.numpy()
+    ds, steps = training.make_dataset(
+        indices,
+        batch_generator,
+        batch_size=data.num_seq,
+        shuffle=False,
+    )
+    for (seq, _), _ in ds.take(steps):
+        break
+    return seq.numpy()
 
 
 def assert_vec(x: np.ndarray, y: np.ndarray) -> None:
@@ -515,23 +518,6 @@ def test_parallel_viterbi():
         assert_vec(state_seqs_max_lik_5.numpy(), ref_seqs)
 
 
-def test_aligned_insertions() -> None:
-    """Test aligned insertion blocks."""
-    sequences = np.array([[1, 2, 3, 4, 5],
-                          [6, 7, 8, 9, 10],
-                          [11, 12, 13, 14, 15]])
-    lens = np.array([5, 4, 3])
-    starts = np.array([0, 1, 2])
-    custom_columns = np.array([[0, 1, 2, 3, 4, -1],
-                               [0, 1, 4, 5, -1, -1],
-                               [2, 3, 4, -1, -1, -1]])
-    block = AlignmentModel.get_insertion_block(sequences, lens, 6, starts, custom_columns=custom_columns)
-    expected_block = np.array([[1, 2, 3, 4, 5, 23],
-                               [7, 8, 23, 23, 9, 10],
-                               [23, 23, 13, 14, 15, 23]])
-    assert_vec(block, expected_block + len(SequenceDataset._default_alphabet))
-
-
 def test_backward() -> None:
     """Test backward algorithm."""
     length = [4]
@@ -574,9 +560,9 @@ def test_posterior_state_probabilities() -> None:
         config.training.no_sequence_weights = True
         batch_gen = training.BatchGenerator()
         batch_gen.configure(data, LearnMSAContext(config, data))
-        indices = tf.range(data.num_seq, dtype=tf.int64)
-        ds = training.make_dataset(indices, batch_gen, batch_size=data.num_seq, shuffle=False)
-        for x, _ in ds:
+        indices = np.arange(data.num_seq)
+        ds, steps = training.make_dataset(indices, batch_gen, batch_size=data.num_seq, shuffle=False)
+        for x, _ in ds.take(steps):
             seq = tf.one_hot(x[0], len(SequenceDataset._default_alphabet))
             seq = tf.transpose(seq, [1, 0, 2, 3])
             p = hmm_layer.state_posterior_log_probs(seq)

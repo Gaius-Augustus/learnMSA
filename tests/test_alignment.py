@@ -176,3 +176,25 @@ def test_find_faulty_sequences() -> None:
                                     [3,C,1,T,T]]])
     faulty_sequences = find_faulty_sequences(state_seqs_max_lik, model_length, seq_lens)
     np.testing.assert_equal(faulty_sequences, [0, 1, 4, 5, 6, 7, 8])
+
+
+
+def test_aligned_insertions() -> None:
+    """Test aligned insertion blocks."""
+    sequences = np.array([[1, 2, 3, 4, 5],
+                          [6, 7, 8, 9, 10],
+                          [11, 12, 13, 14, 15]])
+    lens = np.array([5, 4, 3])
+    starts = np.array([0, 1, 2])
+    custom_columns = np.array([[0, 1, 2, 3, 4, -1],
+                               [0, 1, 4, 5, -1, -1],
+                               [2, 3, 4, -1, -1, -1]])
+    block = AlignmentModel.get_insertion_block(
+        sequences, lens, 6, starts, custom_columns=custom_columns
+    )
+    expected_block = np.array([[1, 2, 3, 4, 5, 23],
+                               [7, 8, 23, 23, 9, 10],
+                               [23, 23, 13, 14, 15, 23]])
+    np.testing.assert_array_equal(
+        block, expected_block + len(SequenceDataset._default_alphabet)
+    )

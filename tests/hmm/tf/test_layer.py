@@ -2,8 +2,9 @@ import numpy as np
 import pytest
 import tensorflow as tf
 
+from learnMSA.util.sequence_dataset import SequenceDataset
 import tests.hmm.ref as ref
-from learnMSA.config.hmm import PHMMPriorConfig
+from learnMSA.config.hmm import PHMMConfig, PHMMPriorConfig
 from learnMSA.hmm.tf import prior
 from learnMSA.hmm.tf.layer import PHMMLayer
 
@@ -808,3 +809,137 @@ def test_head_subset(
         posterior[0,:,0,:], ref.posterior_b, rtol=1e-3, atol=1e-4
     )
     np.testing.assert_equal(viterbi_paths[0,:,0], ref.viterbi_b)
+
+
+def test_basic_forward_simple_seq() -> None:
+    """Test basic forward algorithm functionality with simple sequences.
+    """
+
+    # Create a model with deterministic emissions matching "ACGT"
+    alphabet = SequenceDataset._default_alphabet
+    acgt = [alphabet.index(s) for s in "ACGT"]
+    match_emissions = np.zeros((1, 4, len(alphabet)-1))
+    match_emissions[0, 0, acgt[0]] = 1
+    match_emissions[0, 1, acgt[1]] = 1
+    match_emissions[0, 2, acgt[2]] = 1
+    match_emissions[0, 3, acgt[3]] = 1
+
+    # Convert to list for Pydantic validation
+    config = PHMMConfig(
+        match_emissions=match_emissions,
+        use_prior_for_emission_init=False,
+    )
+
+    layer = PHMMLayer(lengths=[4], config=config)
+
+    # Create one-hot encoded sequences for "ACGT"
+    seqs = np.eye(len(alphabet)-1)[[acgt, acgt]]  # (2, 4, 23)
+
+    # No padding
+    padding = np.ones((2, 4, 1), dtype=np.float32)
+
+    # Build the layer
+    layer.build(input_shape=((None, None, 23), (None, None, 1)))
+
+    # Run forward algorithm
+    seqs = tf.constant(seqs, dtype=tf.float32)
+    padding = tf.constant(padding, dtype=tf.float32)
+    forward_log = layer.hmm.forward_log(seqs, padding)
+    forward_log_argmax = np.argmax(forward_log, axis=-1)
+
+    # Check that forward probabilities progress through match states
+    # The highest probability state at each timestep should be the
+    # corresponding match state
+    # Match states are at indices 0-3 in the state space
+    for t in range(4):
+        for b in range(2):
+            # Get the state with highest forward probability at time t
+            max_state = forward_log_argmax[b, t, 0]
+            # Should be in match state t (accounting for state ordering)
+            # In PHMMLayer, match states M1-M4 are typically at indices 0-3
+            assert max_state == t or max_state == t + 1, \
+                f"At time {t}, expected match state {t}, got {max_state}"
+
+
+def test_variable_length_sequences() -> None:
+    """Test handling of sequences with different lengths using padding.
+
+    This is analogous to the second part of legacy test_cell.
+    Tests that padding is correctly handled and doesn't affect likelihood.
+    """
+    # Create a model with deterministic emissions matching "ACGT"
+    alphabet = SequenceDataset._default_alphabet
+    acgt = [alphabet.index(s) for s in "ACGT"]
+    x = alphabet.index("X")
+
+    match_emissions = np.zeros((1, 4, len(alphabet)-1))
+    match_emissions[0, 0, acgt[0]] = 1  # A
+    match_emissions[0, 1, acgt[1]] = 1  # C
+    match_emissions[0, 2, acgt[2]] = 1  # G
+    match_emissions[0, 3, acgt[3]] = 1  # T
+
+    config = PHMMConfig(
+        match_emissions=match_emissions,
+        p_end_unannot=0.5,
+        use_prior_for_emission_init=False,
+    )
+
+    layer = PHMMLayer(lengths=[4], config=config)
+
+    # Create two sequences: one short (ACGT=4), one long (ACGTXACGT=9)
+    max_len = 10
+    seq = np.zeros((2, max_len, len(alphabet)-1))
+
+    # First sequence: ACGT (4 symbols) + padding
+    seq[0, :4] = np.eye(len(alphabet)-1)[acgt]
+
+    # Second sequence: ACGTXACGT (9 symbols) + padding
+    seq[1, :4] = np.eye(len(alphabet)-1)[acgt]
+    seq[1, 4, x] = 1.0
+    seq[1, 5:9] = np.eye(len(alphabet)-1)[acgt]
+
+    # Create padding mask
+    padding = np.zeros((2, max_len, 1))
+    padding[0, :4] = 1.0   # First 4 positions are valid
+    padding[1, :9] = 1.0   # First 9 positions are valid
+
+    # Build the layer
+    layer.build(input_shape=((None, None, len(alphabet)-1), (None, None, 1)))
+
+    # Convert to tensors
+    seq = tf.constant(seq, dtype=tf.float32)
+    padding = tf.constant(padding, dtype=tf.float32)
+
+    # Compute likelihoods
+    loglik = layer(seq, padding).numpy()
+
+    # Run forward algorithm to check state progression
+    forward_log = layer.hmm.forward_log(seq, padding)
+    forward_log_argmax = np.argmax(forward_log, axis=-1)
+
+    # First sequence should have most probability mass on the path ACGT
+    np.testing.assert_array_equal(
+        forward_log_argmax[0, :4, 0],
+        np.array([0, 1, 2, 3]),
+        err_msg="First sequence did not progress through ACGT correctly"
+    )
+
+    # Second sequence should progress twice through ACGT with X treated as
+    # unannotated region
+    np.testing.assert_array_equal(
+        forward_log_argmax[1, :9, 0],
+        np.array([0, 1, 2, 3, 8, 0, 1, 2, 3]),
+        err_msg="Second sequence did not progress through ACGTXACGT correctly"
+    )
+
+    # Ensure that the likelihood of ACGTP equals that of ACGTP^5,
+    # i.e. the number of padding tokens after the first padding token does
+    # not affect the likelihood
+    loglik_short = layer(seq[:1,:5], padding[:1,:5]).numpy()
+    np.testing.assert_allclose(
+        loglik[0],
+        loglik_short[0],
+        rtol=1e-5,
+        atol=1e-4,
+        err_msg="Likelihoods differ for sequences with different padding"
+    )

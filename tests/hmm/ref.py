@@ -31,7 +31,8 @@ config: PHMMConfig = PHMMConfig(
     p_unannot_unannot=[0.9]*2,
     p_end_unannot=[0.2]*2,
     p_end_right=[0.7]*2,
-    p_start_left_flank=[0.5]*2
+    p_start_left_flank=[0.5]*2,
+    use_prior_for_emission_init=False,
 )
 """Configuration for the reference models"""
 

@@ -2,7 +2,8 @@ from collections.abc import Sequence
 from typing import Annotated, ClassVar
 
 import numpy as np
-from pydantic import BaseModel, BeforeValidator, ConfigDict, field_validator, PlainSerializer
+from pydantic import (BaseModel, BeforeValidator, ConfigDict, PlainSerializer,
+                      field_validator, model_validator)
 
 
 def nd_array_before_validator(x):
@@ -278,6 +279,53 @@ class PHMMConfig(BaseModel):
         alphabet = info.data.get('alphabet', 'ARNDCQEGHILKMFPSTWYVXUO')
         alphabet_size = len(alphabet)
 
+        # Handle numpy arrays
+        if isinstance(v, np.ndarray):
+            if v.ndim == 1:
+                # Case 1: 1D array - single distribution for all
+                if len(v) != alphabet_size:
+                    raise ValueError(
+                        f"match_emissions must have length {alphabet_size} "
+                        f"(alphabet size), got {len(v)}."
+                    )
+                return v
+            elif v.ndim == 2:
+                # Case 2: 2D array - head-specific, position-independent
+                if lengths is not None and v.shape[0] != len(lengths):
+                    raise ValueError(
+                        f"match_emissions outer length must match number of heads "
+                        f"({len(lengths)}), got {v.shape[0]}."
+                    )
+                if v.shape[1] != alphabet_size:
+                    raise ValueError(
+                        f"match_emissions inner length must be {alphabet_size} "
+                        f"(alphabet size), got {v.shape[1]}."
+                    )
+                return v
+            elif v.ndim == 3:
+                # Case 3: 3D array - fully specified
+                if lengths is not None and v.shape[0] != len(lengths):
+                    raise ValueError(
+                        f"match_emissions outer length must match number of heads "
+                        f"({len(lengths)}), got {v.shape[0]}."
+                    )
+                for h in range(v.shape[0]):
+                    if lengths is not None and v.shape[1] != lengths[h]:
+                        raise ValueError(
+                            f"match_emissions[{h}] must have length {lengths[h]} "
+                            f"(number of match states), got {v.shape[1]}."
+                        )
+                    if v.shape[2] != alphabet_size:
+                        raise ValueError(
+                            f"match_emissions[{h}] inner length must be {alphabet_size} "
+                            f"(alphabet size), got {v.shape[2]}."
+                        )
+                return v
+            else:
+                raise ValueError(
+                    f"match_emissions numpy array must be 1D, 2D, or 3D, got {v.ndim}D"
+                )
+
         # Case 1: Sequence[float] - single distribution for all
         if (isinstance(v, Sequence) and not isinstance(v, str)
             and all(isinstance(x, (float, int)) for x in v)):
@@ -348,6 +396,34 @@ class PHMMConfig(BaseModel):
         alphabet = info.data.get('alphabet', 'ARNDCQEGHILKMFPSTWYVXUO')
         alphabet_size = len(alphabet)
 
+        # Handle numpy arrays
+        if isinstance(v, np.ndarray):
+            if v.ndim == 1:
+                # Case 1: 1D array - single distribution for all heads
+                if len(v) != alphabet_size:
+                    raise ValueError(
+                        f"insert_emissions must have length {alphabet_size} "
+                        f"(alphabet size), got {len(v)}."
+                    )
+                return v
+            elif v.ndim == 2:
+                # Case 2: 2D array - head-specific distributions
+                if lengths is not None and v.shape[0] != len(lengths):
+                    raise ValueError(
+                        f"insert_emissions outer length must match number of heads "
+                        f"({len(lengths)}), got {v.shape[0]}."
+                    )
+                if v.shape[1] != alphabet_size:
+                    raise ValueError(
+                        f"insert_emissions inner length must be {alphabet_size} "
+                        f"(alphabet size), got {v.shape[1]}."
+                    )
+                return v
+            else:
+                raise ValueError(
+                    f"insert_emissions numpy array must be 1D or 2D, got {v.ndim}D"
+                )
+
         # Case 1: Sequence[float] - single distribution for all heads
         if (isinstance(v, Sequence) and not isinstance(v, str)
             and all(isinstance(x, (float, int)) for x in v)):
@@ -385,6 +461,17 @@ class PHMMConfig(BaseModel):
             "insert_emissions must be None, a sequence of floats, or a sequence "
             "of sequences of floats."
         )
+
+    @model_validator(mode='after')
+    def validate_emission_init(self):
+        """Validate that match_emissions is None when use_prior_for_emission_init is True."""
+        if self.use_prior_for_emission_init and self.match_emissions is not None:
+            raise ValueError(
+                "match_emissions must be None when use_prior_for_emission_init is True. "
+                "Either set use_prior_for_emission_init=False to use custom match_emissions, "
+                "or set match_emissions=None to use the prior-based initialization."
+            )
+        return self
 
 
 def get_value(param, head: int, index: int | None = None) -> float:
