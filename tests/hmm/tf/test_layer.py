@@ -8,6 +8,7 @@ import tests.hmm.ref as ref
 from learnMSA.config.hmm import PHMMConfig, PHMMPriorConfig
 from learnMSA.hmm.tf import prior
 from learnMSA.hmm.tf.layer import PHMMLayer
+from learnMSA.msa_hmm.alignment_model import AlignmentModel
 from learnMSA.util.sequence_dataset import SequenceDataset
 
 
@@ -1187,3 +1188,41 @@ def test_parallel_viterbi_two_motifs(
         err_msg="Viterbi paths do not match reference for model 2 (AHC)"\
             "with parallel=3"
     )
+
+def test_posterior_state_probabilities() -> None:
+    """Test posterior state probabilities sum to 1.
+
+    This test loads the egf.fasta dataset and verifies that the posterior
+    state probabilities computed by the HMM sum to 1 at each position.
+    """
+    train_filename = os.path.dirname(__file__) + "/../../data/egf.fasta"
+    with SequenceDataset(train_filename) as data:
+        # Create a single-head model with length 32
+        config = PHMMConfig()
+        layer = PHMMLayer(lengths=[32], config=config)
+
+        # Get sequences from dataset
+        sequences = []
+        for i in range(data.num_seq):
+            seq = data.get_encoded_seq(i)
+            sequences.append(seq)
+
+        # Stack and convert to one-hot encoding
+        max_len = max(len(s) for s in sequences)
+        seq_array = np.full((len(sequences), max_len), len(data.alphabet) - 1)
+        for i, seq in enumerate(sequences):
+            seq_array[i, :len(seq)] = seq
+
+        seq_tensor = tf.one_hot(seq_array, len(data.alphabet))
+        padding = 1-seq_tensor[..., -1:]  # Exclude padding channel
+        seq_tensor = seq_tensor[..., :-1]  # Exclude padding channel
+
+        # Build layer with correct input shape
+        layer.build(((None, None, len(data.alphabet)-1), (None, None, 1)))
+
+        # Compute posterior probabilities
+        layer.posterior_mode()
+        p = layer(seq_tensor, padding).numpy()
+
+        # Verify probabilities sum to 1
+        np.testing.assert_almost_equal(np.sum(p, -1), 1., decimal=4)
