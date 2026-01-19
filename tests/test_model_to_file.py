@@ -55,6 +55,7 @@ def test_model_to_file() -> None:
     config.hmm.p_unannot_unannot = 0.68
     config.hmm.p_end_unannot = 1e-4
     config.hmm.p_end_right = 0.48
+    config.hmm.use_prior_for_emission_init = False
 
     # Load data and set up context
     data = SequenceDataset("tests/data/simple.fa")
