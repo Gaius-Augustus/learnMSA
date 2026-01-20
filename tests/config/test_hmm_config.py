@@ -292,7 +292,10 @@ def test_hmm_config_match_emissions_single_distribution():
     """Test HMMConfig with single emission distribution for all match states."""
     # Single distribution applied to all match states in all heads
     dist = [0.05] * 23
-    config = PHMMConfig(match_emissions=dist)
+    config = PHMMConfig(
+        match_emissions=dist,
+        use_prior_for_emission_init=False,
+    )
 
     assert config.match_emissions is not None
     assert len(config.match_emissions) == 23
@@ -303,7 +306,10 @@ def test_hmm_config_match_emissions_head_specific():
     # Different distribution per head, same for all positions within head
     dist1 = [0.05] * 23
     dist2 = [0.04] * 23
-    config = PHMMConfig(match_emissions=[dist1, dist2])
+    config = PHMMConfig(
+        match_emissions=[dist1, dist2],
+        use_prior_for_emission_init=False,
+    )
 
     assert config.match_emissions is not None
     assert isinstance(config.match_emissions, Sequence)
@@ -329,7 +335,8 @@ def test_hmm_config_match_emissions_fully_specified():
         match_emissions=[
             [dist_h0_m1, dist_h0_m2, dist_h0_m3],
             [dist_h1_m1, dist_h1_m2]
-        ]
+        ],
+        use_prior_for_emission_init=False,
     )
 
     assert config.match_emissions is not None
@@ -385,7 +392,8 @@ def test_hmm_config_emissions_with_custom_alphabet():
     config = PHMMConfig(
         alphabet=custom_alphabet,
         match_emissions=dist,
-        insert_emissions=dist
+        insert_emissions=dist,
+        use_prior_for_emission_init=False,
     )
 
     assert config.alphabet == custom_alphabet

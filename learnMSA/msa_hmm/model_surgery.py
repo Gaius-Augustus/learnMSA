@@ -1,41 +1,56 @@
+from dataclasses import dataclass
 from typing import Sequence
 
-import numpy as np
 import tensorflow as tf
-from dataclasses import dataclass
+import numpy as np
 
+from learnMSA.config.hmm import PHMMConfig
 import learnMSA.msa_hmm.Initializers as initializers
+from learnMSA.model.model import LearnMSAModel
 from learnMSA.msa_hmm.alignment_model import AlignmentModel
 
 
-def get_discard_or_expand_positions(am, del_t=0.5, ins_t=0.5):
-    """ Given an AlignmentModel, computes positions for match expansions and discards based on the posterior state probabilities.
+def get_discard_or_expand_positions(
+    am: AlignmentModel, del_t: float = 0.5, ins_t: float = 0.5
+) -> tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray]]:
+    """ Given an AlignmentModel, computes positions for match expansions and
+    discards based on the posterior state probabilities.
+
     Args:
         am: An AlignmentModel object.
-        del_t: Discards match positions that are expected less often than this number.
-        ins_t: Expands insertions that are expected more often than this number.
-                Adds new match states according to the expected insertion length.
+        del_t: Discards match positions that are expected less often than
+            this number.
+        ins_t: Expands insertions that are expected more often thanthis number.
+            Adds new match states according to the expected nsertion length.
+
     Returns:
-        pos_expand: A list of arrays with match positions to expand per model.
-        expansion_lens: A list of arrays with the expansion lengths.
-        pos_discard: A list of arrays with match positions to discard.
+        tuple[np.ndarray, np.ndarray, np.ndarray]: A tuple containing:
+            pos_expand: A list of arrays with match positions to expand per model.
+            expansion_lens: A list of arrays with the expansion lengths.
+            pos_discard: A list of arrays with match positions to discard.
     """
     # num_models x max_num_states
-    expected_state = am.model.posterior(am.data, am.indices, am.batch_size)
+    am.model.posterior_mode()
+    am.model.compile()
+    expected_state = am.model.predict(am.data, am.indices) # (B, T, H, Q)
+    expected_state = np.sum(expected_state, axis=1)
+    expected_state = np.mean(expected_state, axis=0)  # (H, Q)
     pos_expand = []
     expansion_lens = []
     pos_discard = []
-    for i in range(am.num_models):
-        model_length = am.msa_hmm_layer.cell.length[i]
+    for i in range(am.model.heads):
+        model_length = am.model.lengths[i]
         #discards
-        match_states = expected_state[i, 1:model_length+1]
+        match_states = expected_state[i, :model_length]
         discard = np.arange(model_length, dtype=np.int32)[match_states < del_t]
         pos_discard.append(discard)
         #expansions
-        insert_states = expected_state[i, model_length+1:2*model_length]
-        left_flank_state = expected_state[i, 0]
+        insert_states = expected_state[i, model_length:2*model_length-1]
+        left_flank_state = expected_state[i, 2*model_length-1]
         right_flank_state = expected_state[i, 2*model_length+1]
-        all_inserts = np.concatenate([[left_flank_state], insert_states, [right_flank_state]], axis=0)
+        all_inserts = np.concatenate(
+            [[left_flank_state], insert_states, [right_flank_state]], axis=0
+        )
         which_to_expand = all_inserts > ins_t
         expand = np.arange(model_length+1, dtype=np.int32)[which_to_expand]
         pos_expand.append(expand)
@@ -45,12 +60,33 @@ def get_discard_or_expand_positions(am, del_t=0.5, ins_t=0.5):
     return pos_expand, expansion_lens, pos_discard
 
 
-#applies discards and expansions simultaneously to a vector x
-#all positions are with respect to the original vector without any modification
-#replicates insert_value for the expansions
-#assumes that del_marker is a value that does no occur in x
-#returns a new vector with all modifications applied
-def apply_mods(x, pos_expand, expansion_lens, pos_discard, insert_value, del_marker=-9999):
+def apply_mods(
+    x: np.ndarray,
+    pos_expand: np.ndarray,
+    expansion_lens: np.ndarray,
+    pos_discard: np.ndarray,
+    insert_value: np.ndarray|float|int,
+    del_marker: float = -9999.0,
+):
+    """
+    Applies modifications (discards and expansions) to axis 0 of x.
+
+    Args:
+        x (np.ndarray): The input array to modify of shape `(N, ...)`.
+        pos_expand (np.ndarray): Positions to expand of shape ``(K,)``, where
+            `K <= N` is the number of positions to expand.
+        expansion_lens (np.ndarray): Lengths of expansions of shape ``(K,)``
+            corresponding to `pos_expand`.
+        pos_discard (np.ndarray): Positions to discard of shape ``(M,)``, where
+            `M <= N` is the number of positions to discard.
+        insert_value (np.ndarray): Value to insert for expansions
+            of shape ``(...,)``.
+        del_marker (float, optional): Marker value for discards.
+            Defaults to -9999.0. Should not occur in x otherwise.
+
+    Returns:
+        (np.ndarray): A copy of x with modifications applied.
+    """
     #mark discard positions with del_marker, expand thereafter
     #and eventually remove the marked positions
     x = np.copy(x)
@@ -64,25 +100,49 @@ def apply_mods(x, pos_expand, expansion_lens, pos_discard, insert_value, del_mar
     return x
 
 
-# makes updated pos_expand, expansion_lens, pos_discard vectors that fulfill:
-#
-# - each consecutive segment of discards from i to j is replaced with discards
-#   from i+k-1 to j+k and an expansion of length 1 at i+k-1
-#   edge cases that do not require an expansion:
-#        replaced with discards from i+k to j+k if i+k == 0 and j+k < L-1
-#        replaced with discards from i+k-1 to j+k-1 if i+k > 0 and j+k == L-1
-#        replaced with discards from i+k to j+k-1 i+k == 0 and j+k == L-1
-#
-# - an expansion at position i by l is replaced by a discard at i+k-1 and an expansion by l+1 at i+k-1
-#   edge cases that do not require a discard:
-#        replaced by an expansion by l at i+k if i+k == 0
-#        replaced by an expansion by l at i+k-1 if i+k==L or i+k-1 is already in the discarded positions
-#        if all positions are discarded (and the first expansion would add l match states to a model of length 0)
-#        the length of the expansion is reduced by 1
-#
-# k can be any integer
-# L is the length of the array to which the indices of pos_expand and pos_discard belong
-def extend_mods(pos_expand, expansion_lens, pos_discard, L, k=0):
+def extend_mods(
+    pos_expand: np.ndarray,
+    expansion_lens: np.ndarray,
+    pos_discard: np.ndarray,
+    L: int,
+    k: int = 0
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    This function transforms modification (discards and expansions) vectors to
+    fulfill specific alignment rules:
+
+    - Each consecutive segment of discards from i to j is replaced with discards
+      from i+k-1 to j+k and an expansion of length 1 at i+k-1.
+      Edge cases that do not require an expansion:
+        * Replaced with discards from i+k to j+k if i+k == 0 and j+k < L-1
+        * Replaced with discards from i+k-1 to j+k-1 if i+k > 0 and j+k == L-1
+        * Replaced with discards from i+k to j+k-1 if i+k == 0 and j+k == L-1
+
+    - An expansion at position i by l is replaced by a discard at i+k-1 and an
+      expansion by l+1 at i+k-1.
+      Edge cases that do not require a discard:
+        * Replaced by an expansion by l at i+k if i+k == 0
+        * Replaced by an expansion by l at i+k-1 if i+k==L or i+k-1 is already
+          in the discarded positions
+        * If all positions are discarded (and the first expansion would add l
+          match states to a model of length 0), the length of the expansion is
+          reduced by 1
+
+    Args:
+        pos_expand (np.ndarray): Positions to expand of shape ``(K,)``.
+        expansion_lens (np.ndarray): Lengths of expansions of shape ``(K,)``
+            corresponding to `pos_expand`.
+        pos_discard (np.ndarray): Positions to discard of shape ``(M,)``.
+        L (int): The length of the array to which the indices of pos_expand
+            and pos_discard belong.
+        k (int, optional): Offset to shift positions. Defaults to 0.
+
+    Returns:
+        tuple[np.ndarray, np.ndarray, np.ndarray]: A tuple containing:
+            - new_pos_expand: Updated positions to expand
+            - new_expansion_lens: Updated expansion lengths
+            - new_pos_discard: Updated positions to discard
+    """
     if pos_discard.size == L and pos_expand.size > 0:
         expansion_lens = np.copy(expansion_lens)
         expansion_lens[0] -= 1
@@ -140,22 +200,57 @@ def extend_mods(pos_expand, expansion_lens, pos_discard, L, k=0):
     return new_pos_expand, new_expansion_lens, new_pos_discard
 
 
-#applies expansions and discards to emission and transition kernels
 def update_kernels(
-    am: AlignmentModel,
-    model_index,
-    pos_expand,
-    expansion_lens,
-    pos_discard,
-    emission_dummy,
-    transition_dummy,
-    init_flank_dummy,
-):
-    L = am.model.lengths[model_index]
-    emissions = [em.emission_kernel[model_index].numpy() for em in am.msa_hmm_layer.cell.emitter]
+    model: LearnMSAModel,
+    head_index: int,
+    pos_expand: np.ndarray,
+    expansion_lens: np.ndarray,
+    pos_discard: np.ndarray,
+) -> PHMMConfig:
+    """
+    Apply expansions and discards to emission and transition kernels.
+
+    This function modifies the model kernels according to specified position
+    expansions and discards, using values from the model configuration for
+    newly created positions (i.e. newly added states are initialized in the
+    same way they would have been initialized in the original model).
+
+    Note:
+        The function handles different transition types with appropriate
+        position shifts using `extend_mods`. Transitions from the flanks and
+        unannotated segment states are always reset to initial values.
+
+    Args:
+        model (LearnMSAModel): The model containing the kernels to update.
+        head_index (int): Index of the head to update within the model.
+        pos_expand (np.ndarray): Positions to expand of shape ``(K,)``.
+        expansion_lens (np.ndarray): Lengths of expansions of shape ``(K,)``
+            corresponding to `pos_expand`.
+        pos_discard (np.ndarray): Positions to discard of shape ``(M,)``.
+        aa_emission_dummy (np.ndarray): Array of shape ``(23,)``.
+        emb_emission_dummy (np.ndarray|None): Array of shape ``(D,)`` or None.
+            Must be given if the model uses pLM embeddings.
+        transition_dummy (dict[str, initializers.Initializer]): Dictionary of
+            initializers for creating transition values at newly expanded
+            positions. Keys should match the transition kernel keys.
+        init_flank_dummy (initializers.Initializer): Initializer for flank
+            initialization values.
+
+    Returns:
+        tuple[dict[str, np.ndarray], list[np.ndarray], np.ndarray]:
+            - transitions_new: Dictionary of updated transition kernels
+            - emissions_new: List of updated emission kernels
+            - init_flank_new: Updated flank initialization values
+    """
+    L = model.lengths[head_index]
+
+    # Gather the current kernels
+    emissions = model.phmm_layer.emitter[0].matrix()
+    emissions = [em.emission_kernel[head_index].numpy() for em in model.msa_hmm_layer.cell.emitter]
     transitions = { key : kernel.numpy()
                          for key, kernel in am.msa_hmm_layer.cell.transitioner.transition_kernel[model_index].items()}
     dtype = am.msa_hmm_layer.cell.dtype
+
     emission_dummy = [d((1, em.shape[-1]), dtype).numpy() for d,em in zip(emission_dummy, emissions)]
     transition_dummy = { key : transition_dummy[key](t.shape, dtype).numpy() for key, t in transitions.items()}
     init_flank_dummy = init_flank_dummy((1), dtype).numpy()
