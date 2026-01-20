@@ -75,11 +75,8 @@ class PHMMLayer(tf.keras.Layer):
         """
         super().__init__(**kwargs)
         self.lengths = np.asarray(lengths, dtype=np.int32)
-        self.config = config
         if prior_config is None:
             prior_config = PHMMPriorConfig()
-        self.prior_config = prior_config
-        self.plm_config = plm_config
         self.use_prior = use_prior
 
         values = [
@@ -87,7 +84,7 @@ class PHMMLayer(tf.keras.Layer):
             for h, L in enumerate(lengths)
         ]
 
-        if self.prior_config.use_amino_acid_prior:
+        if prior_config.use_amino_acid_prior:
             # Set up the Dirichlet prior for emissions
             emission_prior = load_dirichlet(
                 "amino_acid_dirichlet.weights",
@@ -101,7 +98,7 @@ class PHMMLayer(tf.keras.Layer):
 
         # Override emission values with prior distribution if requested
         if config.use_prior_for_emission_init:
-            assert self.prior_config.use_amino_acid_prior, (
+            assert prior_config.use_amino_acid_prior, (
                 "Cannot use prior for emission initialization if no "
                 "emission prior is set."
             )
@@ -122,13 +119,15 @@ class PHMMLayer(tf.keras.Layer):
         # Add the profile emitter
         profile_emitter = ProfileEmitter(values=values)
         self.hmm.add_emitter(profile_emitter)
-        if self.use_prior and self.prior_config.use_amino_acid_prior:
+        if self.use_prior and prior_config.use_amino_acid_prior:
             profile_emitter.prior = emission_prior
 
-        if self.plm_config != None and self.plm_config.use_language_model:
+        self.use_language_model = plm_config != None\
+            and plm_config.use_language_model
+        if self.use_language_model:
             # Create embedding value sets
             embedding_values = [
-                PHMMEmbeddingValueSet.from_config(L, h, self.plm_config)
+                PHMMEmbeddingValueSet.from_config(L, h, plm_config) # type: ignore
                 for h, L in enumerate(lengths)
             ]
 
