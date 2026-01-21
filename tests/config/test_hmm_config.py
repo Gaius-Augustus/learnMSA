@@ -2,9 +2,11 @@
 
 from collections.abc import Sequence
 from typing import cast
+
 import pytest
 
-from learnMSA.config.hmm import PHMMConfig, PHMMPriorConfig, get_value, get_emission_dist
+from learnMSA.config import (PHMMConfig, PHMMPriorConfig, get_emission_dist,
+                             get_value)
 
 
 def test_hmm_config_scalar_initialization():

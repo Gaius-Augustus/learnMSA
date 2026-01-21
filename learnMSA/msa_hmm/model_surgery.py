@@ -352,8 +352,10 @@ def update_kernels(
         begin_to_match[0] = get_value(config.p_begin_match, h, 0)
         begin_to_delete = get_value(config.p_begin_delete, h)
     # Re-normalize the internal begin_to_match probabilities
-    begin_to_match[1:] /= begin_to_match[1:].sum()\
-        / (1 - begin_to_match[0] - begin_to_delete)
+    p1 = begin_to_match[1:].sum()
+    p2 = 1 - begin_to_match[0] - begin_to_delete
+    if p1 > 0 and p2 > 0:
+        begin_to_match[1:] /= p1 / p2
 
     if L in pos_expand:
         match_to_end[-1] = get_value(config.p_match_end, h, 0)
@@ -484,9 +486,24 @@ def model_surgery(
 
     # Merge configurations that contain parameters per head to a single config
     def concat_param(param_name: str):
-        return np.concatenate(
-            [getattr(c, param_name) for c in configs], axis=0
-        )
+        values = [getattr(c, param_name) for c in configs]
+        arrays = [np.atleast_1d(v) for v in values]
+
+        # Simple 1D case (like p_begin_delete): just concatenate
+        if arrays[0].ndim == 1:
+            return np.concatenate(arrays, axis=0)
+
+        # 2D or higher: create zeros array and fill
+        num_heads = len(arrays)
+        max_len = max(arr.shape[1] for arr in arrays)
+        full_shape = (num_heads, max_len) + arrays[0].shape[2:]
+        result = np.zeros(full_shape, dtype=arrays[0].dtype)
+
+        for i, arr in enumerate(arrays):
+            result[i, :arr.shape[1]] = arr[0]
+
+        return result
+
     merged_config = configs[0].model_copy(deep=True)
     merged_config.match_emissions = concat_param("match_emissions")
     merged_config.insert_emissions = concat_param("insert_emissions")

@@ -13,7 +13,7 @@ from learnMSA.msa_hmm.AlignInsertions import make_aligned_insertions
 from learnMSA.msa_hmm.alignment_model import AlignmentModel
 from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
 from learnMSA.model.model import LearnMSAModel
-from learnMSA.msa_hmm.model_surgery import do_model_surgery
+from learnMSA.msa_hmm.model_surgery import model_surgery
 from learnMSA.msa_hmm.posterior import get_state_expectations
 from learnMSA.util.sequence_dataset import SequenceDataset
 from learnMSA.protein_language_models.MvnEmitter import \
@@ -183,7 +183,7 @@ def _fit_and_align(
 
         # Prevent model surgery from adding or discarding any states,
         # we'll use it to get initial transition and emission parameters
-        surgery_result = do_model_surgery(
+        surgery_result = model_surgery(
             am, 0.0, 1e6,
             emission_dummy,
             transition_dummy,
@@ -241,7 +241,7 @@ def _fit_and_align(
             print("Successfully created alignment model.")
         if last_iteration:
             break
-        surgery_result = do_model_surgery(
+        surgery_result = model_surgery(
             am,
             config.training.surgery_del,
             config.training.surgery_ins,

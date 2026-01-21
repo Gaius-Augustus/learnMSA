@@ -14,7 +14,7 @@ from learnMSA.msa_hmm.alignment_model import AlignmentModel
 from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
 from learnMSA.msa_hmm.model_surgery import (apply_mods, extend_mods,
                                             get_discard_or_expand_positions,
-                                            update_kernels)
+                                            update_kernels, model_surgery)
 from learnMSA.util.sequence_dataset import SequenceDataset
 
 
@@ -26,7 +26,66 @@ def string_to_one_hot(s : str) -> tf.Tensor:
 @pytest.fixture
 def data() -> SequenceDataset:
     """Create a test sequence dataset."""
-    """Create a test alignment model with specific parameters."""
+    data = SequenceDataset(sequences=[(str(i), "FELIK") for i in range(10)])
+    return data
+
+@pytest.fixture
+def model(data: SequenceDataset) -> LearnMSAModel:
+    """Create a test alignment model with two heads: FEIK and FDELIK."""
+    alphabet = SequenceDataset._default_alphabet
+
+    # First head: "FEIK" (4 states)
+    match_emissions_h1 = np.zeros((4, len(alphabet) - 1))
+    for i, aa in enumerate("FEIK"):
+        match_emissions_h1[i, alphabet.index(aa)] = 1.0
+
+    # Second head: "FDELIK" (6 states)
+    match_emissions_h2 = np.zeros((6, len(alphabet) - 1))
+    for i, aa in enumerate("FDELIK"):
+        match_emissions_h2[i, alphabet.index(aa)] = 1.0
+
+    # Pad the shorter model to match the longer one
+    max_len = max(4, 6)
+    match_emissions_h1_padded = np.zeros((max_len, len(alphabet) - 1))
+    match_emissions_h1_padded[:4] = match_emissions_h1
+
+    # Create 3D array for match emissions
+    match_emissions = np.array([match_emissions_h1_padded, match_emissions_h2])
+
+    insert_emissions = np.ones((2, len(alphabet) - 1)) / (len(alphabet) - 1)
+
+    # Create LearnMSAModel
+    learnmsa_config = Configuration()
+    learnmsa_config.training.num_model = 2
+    learnmsa_config.training.no_sequence_weights = True
+    learnmsa_config.training.length_init = [4, 6]
+    learnmsa_config.hmm.match_emissions = match_emissions
+    learnmsa_config.hmm.insert_emissions = insert_emissions
+    learnmsa_config.hmm.use_prior_for_emission_init = False
+    learnmsa_config.hmm.p_begin_match = 0.9
+    learnmsa_config.hmm.p_match_end = 0.3
+    learnmsa_config.hmm.p_match_match = 0.7
+    learnmsa_config.hmm.p_match_insert = 0.2
+    learnmsa_config.hmm.p_insert_insert = 0.01
+    learnmsa_config.hmm.p_delete_delete = 0.7
+    learnmsa_config.hmm.p_begin_delete = 0.05
+    learnmsa_config.hmm.p_left_left = 0.5
+    learnmsa_config.hmm.p_right_right = 0.5
+    learnmsa_config.hmm.p_unannot_unannot = 0.5
+    learnmsa_config.hmm.p_end_unannot = 0.3
+    learnmsa_config.hmm.p_end_right = 0.3
+    learnmsa_config.hmm.p_start_left_flank = 0.1
+
+    context = LearnMSAContext(learnmsa_config, data)
+
+    model = LearnMSAModel(context)
+    model.build()
+
+    return model
+
+@pytest.fixture
+def data_insert_delete() -> SequenceDataset:
+    """Create a test sequence dataset."""
     test_data_path = os.path.join(
         os.path.dirname(__file__), "data", "felix_insert_delete.fa"
     )
@@ -34,9 +93,8 @@ def data() -> SequenceDataset:
     return data
 
 @pytest.fixture
-def model(data: SequenceDataset) -> LearnMSAModel:
-    """Create a test alignment model with specific parameters."""
-    # Create match emissions for "FELIC" motif
+def model_single_head(data: SequenceDataset) -> LearnMSAModel:
+    """Create a single-head test model with FELIC motif for legacy tests."""
     alphabet = SequenceDataset._default_alphabet
     match_emissions = np.zeros((1, 5, len(alphabet) - 1))
     for i, aa in enumerate("FELIC"):
@@ -46,7 +104,6 @@ def model(data: SequenceDataset) -> LearnMSAModel:
         insert_emissions[0, alphabet.index(aa)] = 0.5
 
     # Create LearnMSAModel
-    # Initial probabilities are transferred from a legacy test
     learnmsa_config = Configuration()
     learnmsa_config.training.num_model = 1
     learnmsa_config.training.no_sequence_weights = True
@@ -79,7 +136,7 @@ def model(data: SequenceDataset) -> LearnMSAModel:
 
 
 def test_discard_or_expand_positions(
-    model: LearnMSAModel, data: SequenceDataset
+    model_single_head: LearnMSAModel, data_insert_delete: SequenceDataset
 ) -> None:
     """Test detection of positions to discard or expand."""
     # A simple alignment to test detection of
@@ -93,7 +150,7 @@ def test_discard_or_expand_positions(
         "..........FnE-...ICaaaF-LnI-nnn"
     ]
 
-    am = AlignmentModel(data, model)
+    am = AlignmentModel(data_insert_delete, model_single_head)
 
     # Decode the alignment depending on the sequences and model parameters
     aligned_sequences = am.to_string(model_index=0, add_block_sep=False)
@@ -131,7 +188,7 @@ def test_discard_or_expand_positions(
             [0, 0, 1, 0]]]
     )
     pos_expand, expansion_lens, pos_discard = get_discard_or_expand_positions(
-        model, data, del_t=0.5, ins_t=0.5
+        model_single_head, data_insert_delete, del_t=0.5, ins_t=0.5
     )
     pos_expand = pos_expand[0]
     expansion_lens = expansion_lens[0]
@@ -140,7 +197,7 @@ def test_discard_or_expand_positions(
     np.testing.assert_equal(expansion_lens, [2, 2, 3])
     np.testing.assert_equal(pos_discard, [1])
 
-def test_update_kernels(model: LearnMSAModel, data: SequenceDataset) -> None:
+def test_update_kernels(model_single_head: LearnMSAModel) -> None:
     """Test updating model kernels during surgery."""
     pos_expand = np.array([2, 3, 5])
     expansion_lens = np.array([2, 1, 3])
@@ -151,7 +208,7 @@ def test_update_kernels(model: LearnMSAModel, data: SequenceDataset) -> None:
     dummy_emission = np.zeros((len(alphabet) - 1,))
     dummy_emission[alphabet.index("A")] = 1.0
 
-    config = model.context.config.hmm.model_copy(deep=True)
+    config = model_single_head.context.config.hmm.model_copy(deep=True)
     # Override some parameters to check if they are correctly used as updates
     config.background_distribution = dummy_emission
     config.p_begin_match = 0.5
@@ -164,7 +221,7 @@ def test_update_kernels(model: LearnMSAModel, data: SequenceDataset) -> None:
     # Update the pHMM with the specified modifications and obtains a
     # new config
     result = update_kernels(
-        model.phmm_layer,
+        model_single_head.phmm_layer,
         0,
         pos_expand,
         expansion_lens,
@@ -411,6 +468,29 @@ def test_checked_concat() -> None:
     np.testing.assert_equal(d, np.arange(9))
 
 
-def test_whole_surgery() -> None:
-    """Test whole surgery process."""
-    pass
+def test_model_surgery(data: SequenceDataset, model: LearnMSAModel) -> None:
+    """Test model surgery with two heads: FEIK should expand at position 2,
+    FDELIK should discard position 1."""
+    # Run model surgery
+    result = model_surgery(
+        model=model,
+        data=data,
+        surgery_del=0.5,
+        surgery_ins=0.5,
+    )
+
+    # Verify we got results for both heads
+    assert len(result.model_lengths) == 2
+
+    # Original: F E I K (4 states)
+    # Expected after expansion: F E L I K (5 states)
+    assert result.model_lengths[0] == 5,\
+        f"Expected first head to have 6 states, got {result.model_lengths[0]}"
+
+    # Original: F D E L I K (6 states)
+    # Expected after discard: F E L I K (5 states)
+    assert result.model_lengths[1] == 5,\
+        f"Expected second head to have 5 states, got {result.model_lengths[1]}"
+
+    # Surgery should not have converged (modifications were applied)
+    assert not result.surgery_converged

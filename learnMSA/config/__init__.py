@@ -7,7 +7,7 @@ from .visualization import VisualizationConfig
 from .advanced import AdvancedConfig
 from .input_output import InputOutputConfig
 from .hmm import PHMMConfig, PHMMPriorConfig
-from .util import get_value
+from .util import get_value, get_emission_dist
 from .config import Configuration
 
 __all__ = [
