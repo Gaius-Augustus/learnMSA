@@ -29,18 +29,18 @@ class PHMMValueSet:
 
     @classmethod
     def from_config(cls, L: int, h: int, config: PHMMConfig) -> "PHMMValueSet":
-        """Creates a PHMMValueSet from a HMMConfig object.
+        """Creates a PHMMValueSet from a PHMMConfig object.
 
         Args:
             length: The number of match states (L).
             h: The head index.
-            config: An HMMConfig object containing the transition and
+            config: An PHMMConfig object containing the transition and
                 emission probabilities.
 
         Returns:
             A PHMMValueSet object with parameters initialized from the config.
         """
-        from learnMSA.config.hmm import get_value
+        from learnMSA.config.util import get_value
         from collections.abc import Sequence
 
         q = 3*L + 5
@@ -61,10 +61,10 @@ class PHMMValueSet:
             get_value(config.p_begin_match, h, 0)
 
         # Check if transition probs to other match states are provided
-        if isinstance(config.p_begin_match, Sequence) and \
-                isinstance(config.p_begin_match[h], Sequence):
+        if isinstance(config.p_begin_match, (Sequence, np.ndarray)) and \
+                isinstance(config.p_begin_match[h], (Sequence, np.ndarray)):
             p_begin_match_head = config.p_begin_match[h]
-            assert isinstance(p_begin_match_head, Sequence)  # Type guard
+            assert isinstance(p_begin_match_head, (Sequence, np.ndarray))  # Type guard
             p_begin_match_inner = p_begin_match_head[1:]
             p_sum_prob_begin_match = sum(p_begin_match_head)
             assert p_sum_prob_begin_match <= 1, (
@@ -83,7 +83,7 @@ class PHMMValueSet:
         for i in range(L - 1):
             # Begin to match i+1
             p_val = (p_begin_match_inner[i]
-                    if isinstance(p_begin_match_inner, Sequence)
+                    if isinstance(p_begin_match_inner, (Sequence, np.ndarray))
                     else p_begin_match_inner)
             transitions[ind.begin_to_match[i + 1, 0], ind.begin_to_match[i + 1, 1]] = \
                 p_val
@@ -175,7 +175,7 @@ class PHMMValueSet:
                 [config.background_distribution]*L, axis=0
             ).astype(np.float32)
         else:
-            from learnMSA.config.hmm import get_emission_dist
+            from learnMSA.config.util import get_emission_dist
             # Get emissions for each match state
             match_emissions_list = []
             for i in range(L):
@@ -196,7 +196,7 @@ class PHMMValueSet:
                 dtype=np.float32
             )
         else:
-            from learnMSA.config.hmm import get_emission_dist
+            from learnMSA.config.util import get_emission_dist
             dist = get_emission_dist(
                 config.insert_emissions,
                 head=h,

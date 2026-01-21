@@ -184,7 +184,7 @@ def _fit_and_align(
         # Prevent model surgery from adding or discarding any states,
         # we'll use it to get initial transition and emission parameters
         surgery_result = do_model_surgery(
-            am, 0.0, 1.0,
+            am, 0.0, 1e6,
             emission_dummy,
             transition_dummy,
             flank_init_dummy,

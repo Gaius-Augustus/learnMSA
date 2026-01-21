@@ -9,6 +9,8 @@ from hidten.tf.transitioner import (T_TFTensor, TFTransitioner, TransitionMode,
                                     shared_tensor)
 from hidten.tf.util import log_zero, safe_log
 
+from learnMSA.hmm.util import value_set
+from learnMSA.hmm.util import value_set
 from learnMSA.hmm.util.transition_index_set import PHMMTransitionIndexSet
 from learnMSA.hmm.util.value_set import PHMMValueSet
 

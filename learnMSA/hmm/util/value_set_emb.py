@@ -5,6 +5,7 @@ import numpy as np
 from learnMSA.util.aligned_dataset import AlignedDataset
 from learnMSA.hmm.util.transition_index_set import PHMMTransitionIndexSet
 from learnMSA.config import LanguageModelConfig
+from learnMSA.config.util import get_emission_dist
 
 
 @dataclass
@@ -43,15 +44,70 @@ class PHMMEmbeddingValueSet:
         # Get embedding dimension and number of mixture components
         embedding_dim = config.scoring_model_dim
 
-        # Initialize with zeros - will be overridden by prior if needed
-        match_expectations = np.zeros((L, embedding_dim), dtype=np.float32)
-        match_stddev = np.random.normal(
-            0.0, config.variance_init_stdev, (L, embedding_dim)
-        ).astype(np.float32)
-        insert_expectation = np.zeros((embedding_dim,), dtype=np.float32)
-        insert_stddev = np.random.normal(
-            0.0, config.variance_init_stdev, (embedding_dim,)
-        ).astype(np.float32)
+        # Initialize match_expectations
+        if config.match_expectations is None:
+            match_expectations = np.zeros((L, embedding_dim), dtype=np.float32)
+        else:
+            # Get expectations for each match state in this head
+            match_expectations_list = []
+            default_zeros = np.zeros((embedding_dim,), dtype=np.float32)
+            for i in range(L):
+                dist = get_emission_dist(
+                    config.match_expectations,
+                    head=h,
+                    index=i,
+                    default=default_zeros
+                )
+                match_expectations_list.append(np.array(dist, dtype=np.float32))
+            match_expectations = np.stack(match_expectations_list, axis=0)
+
+        # Initialize match_stddev
+        if config.match_stddev is None:
+            match_stddev = np.random.normal(
+                0.0, config.variance_init_stdev, (L, embedding_dim)
+            ).astype(np.float32)
+        else:
+            # Get standard deviations for each match state in this head
+            default_stddev = np.random.normal(
+                0.0, config.variance_init_stdev, (embedding_dim,)
+            ).astype(np.float32)
+            match_stddev_list = []
+            for i in range(L):
+                dist = get_emission_dist(
+                    config.match_stddev,
+                    head=h,
+                    index=i,
+                    default=default_stddev
+                )
+                match_stddev_list.append(np.array(dist, dtype=np.float32))
+            match_stddev = np.stack(match_stddev_list, axis=0)
+
+        # Initialize insert_expectation
+        if config.insert_expectation is None:
+            insert_expectation = np.zeros((embedding_dim,), dtype=np.float32)
+        else:
+            dist = get_emission_dist(
+                config.insert_expectation,
+                head=h,
+                default=default_zeros
+            )
+            insert_expectation = np.array(dist, dtype=np.float32)
+
+        # Initialize insert_stddev
+        if config.insert_stddev is None:
+            insert_stddev = np.random.normal(
+                0.0, config.variance_init_stdev, (embedding_dim,)
+            ).astype(np.float32)
+        else:
+            default_stddev_insert = np.random.normal(
+                0.0, config.variance_init_stdev, (embedding_dim,)
+            ).astype(np.float32)
+            dist = get_emission_dist(
+                config.insert_stddev,
+                head=h,
+                default=default_stddev_insert
+            )
+            insert_stddev = np.array(dist, dtype=np.float32)
 
         return cls(
             L=L,

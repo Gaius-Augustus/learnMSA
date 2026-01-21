@@ -1,8 +1,15 @@
-from pydantic import BaseModel, field_validator
+from collections.abc import Sequence
+
+import numpy as np
+from pydantic import BaseModel, ConfigDict, field_validator
+
+from .util import NPArray
 
 
 class LanguageModelConfig(BaseModel):
     """Protein language model integration parameters."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     use_language_model: bool = False
     """Uses a large protein lanague model to generate per-token
@@ -52,6 +59,56 @@ class LanguageModelConfig(BaseModel):
 
     inverse_gamma_beta: float = 0.5
     """Beta parameter for the inverse gamma prior on variances."""
+
+    match_expectations: (Sequence[float] | Sequence[Sequence[float]] |
+                        Sequence[Sequence[Sequence[float]]] |
+                        NPArray | None) = None
+    """Optional initialization for match state expectations.
+    Can be:
+    - None: Initialize with zeros (default).
+    - Sequence[float] of length scoring_model_dim: Same for all match states
+        in all heads.
+    - Sequence[Sequence[float]] of shape (num_heads, scoring_model_dim):
+      Head-specific expectations, same for all match states within a head.
+    - Sequence[Sequence[Sequence[float]]] of shape
+        `(num_heads, length[h], scoring_model_dim)`:
+        Fully specified match state expectations for each position in each head.
+    """
+
+    match_stddev: (Sequence[float] | Sequence[Sequence[float]] |
+                   Sequence[Sequence[Sequence[float]]] |
+                   NPArray | None) = None
+    """Optional initialization for match state standard deviations.
+    Can be:
+    - None: Initialize with random normal values (default).
+    - Sequence[float] of length scoring_model_dim: Same for all match states
+        in all heads.
+    - Sequence[Sequence[float]] of shape `(num_heads, scoring_model_dim)`:
+      Head-specific standard deviations, same for all match states within a head.
+    - Sequence[Sequence[Sequence[float]]] of shape
+        `(num_heads, length[h], scoring_model_dim)`: Fully specified match
+        state standard deviations for each position in each head.
+    """
+
+    insert_expectation: (Sequence[float] | Sequence[Sequence[float]] |
+                         NPArray | None) = None
+    """Optional initialization for insert state expectations.
+    Can be:
+    - None: Initialize with zeros (default).
+    - Sequence[float] of length scoring_model_dim: Same for all heads.
+    - Sequence[Sequence[float]] of shape `(num_heads, scoring_model_dim)`:
+        Head-specific insert expectations.
+    """
+
+    insert_stddev: (Sequence[float] | Sequence[Sequence[float]] |
+                    NPArray | None) = None
+    """Optional initialization for insert state standard deviations.
+    Can be:
+    - None: Initialize with random normal values (default).
+    - Sequence[float] of length scoring_model_dim: Same for all heads.
+    - Sequence[Sequence[float]] of shape `(num_heads, scoring_model_dim)`:
+        Head-specific insert standard deviations.
+    """
 
 
     def id_string(self) -> str:

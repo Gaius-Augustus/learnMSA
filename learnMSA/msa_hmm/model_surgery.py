@@ -1,27 +1,38 @@
 from dataclasses import dataclass
-from typing import Sequence
 
-import tensorflow as tf
 import numpy as np
 
-from learnMSA.config.hmm import PHMMConfig
 import learnMSA.msa_hmm.Initializers as initializers
+from learnMSA.config.hmm import PHMMConfig
+from learnMSA.config.language_model import LanguageModelConfig
+from learnMSA.config.util import get_value
+from learnMSA.hmm.tf.layer import PHMMLayer
+from learnMSA.hmm.util.transition_index_set import PHMMTransitionIndexSet
 from learnMSA.model.model import LearnMSAModel
-from learnMSA.msa_hmm.alignment_model import AlignmentModel
+from learnMSA.util.sequence_dataset import SequenceDataset
 
 
 def get_discard_or_expand_positions(
-    am: AlignmentModel, del_t: float = 0.5, ins_t: float = 0.5
+    model: LearnMSAModel,
+    data: SequenceDataset,
+    indices: np.ndarray|None = None,
+    del_t: float = 0.5,
+    ins_t: float = 0.5,
 ) -> tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray]]:
     """ Given an AlignmentModel, computes positions for match expansions and
     discards based on the posterior state probabilities.
 
     Args:
-        am: An AlignmentModel object.
-        del_t: Discards match positions that are expected less often than
-            this number.
-        ins_t: Expands insertions that are expected more often thanthis number.
-            Adds new match states according to the expected nsertion length.
+        model: A LearnMSAModel object with a PHMMLayer.
+        data: A SequenceDataset used for computing the posterior state.
+        indices: Optional indices to select a subset of the data. If None, all
+            sequences in `data` are used.
+        del_t: This number is compared to the expected number of times a match
+            state is used when aligning a protein from the underlying dataset
+            to the pHMM.
+        ins_t: This number is compared to the expected number of times an insert
+            state is used when aligning a protein from the underlying dataset
+            to the pHMM.
 
     Returns:
         tuple[np.ndarray, np.ndarray, np.ndarray]: A tuple containing:
@@ -30,16 +41,16 @@ def get_discard_or_expand_positions(
             pos_discard: A list of arrays with match positions to discard.
     """
     # num_models x max_num_states
-    am.model.posterior_mode()
-    am.model.compile()
-    expected_state = am.model.predict(am.data, am.indices) # (B, T, H, Q)
+    model.posterior_mode()
+    model.compile()
+    expected_state = model.predict(data, indices) # (B, T, H, Q)
     expected_state = np.sum(expected_state, axis=1)
     expected_state = np.mean(expected_state, axis=0)  # (H, Q)
     pos_expand = []
     expansion_lens = []
     pos_discard = []
-    for i in range(am.model.heads):
-        model_length = am.model.lengths[i]
+    for i in range(model.heads):
+        model_length = model.lengths[i]
         #discards
         match_states = expected_state[i, :model_length]
         discard = np.arange(model_length, dtype=np.int32)[match_states < del_t]
@@ -199,14 +210,25 @@ def extend_mods(
             new_pos_discard = pos_expand_shift[extend]
     return new_pos_expand, new_expansion_lens, new_pos_discard
 
+@dataclass
+class UpdateKernelResult:
+    length: int
+    """The lengths of the updated models."""
+    config: PHMMConfig
+    """The updated PHMMConfig with modified parameters."""
+    plm_config: LanguageModelConfig | None = None
+    """The updated LanguageModelConfig with modified parameters, if
+    the PHMMLayer was using embeddings."""
 
 def update_kernels(
-    model: LearnMSAModel,
-    head_index: int,
+    phmm_layer: PHMMLayer,
+    model_index: int,
     pos_expand: np.ndarray,
     expansion_lens: np.ndarray,
     pos_discard: np.ndarray,
-) -> PHMMConfig:
+    config: PHMMConfig,
+    plm_config: LanguageModelConfig | None = None,
+) -> UpdateKernelResult:
     """
     Apply expansions and discards to emission and transition kernels.
 
@@ -221,138 +243,214 @@ def update_kernels(
         unannotated segment states are always reset to initial values.
 
     Args:
-        model (LearnMSAModel): The model containing the kernels to update.
-        head_index (int): Index of the head to update within the model.
-        pos_expand (np.ndarray): Positions to expand of shape ``(K,)``.
+        phmm_layer (PHMMLayer): The layer containing the kernels to update.
+        model_index (int): The index of the model to update.
+        pos_expand (np.ndarray): Positions to expand of shape ``(K,)``, where
+            `K`must be less than or equal to the number of match states.
         expansion_lens (np.ndarray): Lengths of expansions of shape ``(K,)``
             corresponding to `pos_expand`.
-        pos_discard (np.ndarray): Positions to discard of shape ``(M,)``.
-        aa_emission_dummy (np.ndarray): Array of shape ``(23,)``.
-        emb_emission_dummy (np.ndarray|None): Array of shape ``(D,)`` or None.
-            Must be given if the model uses pLM embeddings.
-        transition_dummy (dict[str, initializers.Initializer]): Dictionary of
-            initializers for creating transition values at newly expanded
-            positions. Keys should match the transition kernel keys.
-        init_flank_dummy (initializers.Initializer): Initializer for flank
-            initialization values.
+        pos_discard (np.ndarray): Positions to discard of shape ``(M,)``,
+            where `M` must be less than the number of match states..
+        config (PHMMConfig): The configuration containing the initialization
+            values.
+        plm_config (LanguageModelConfig | None): The protein language model
+            configuration.
 
     Returns:
-        tuple[dict[str, np.ndarray], list[np.ndarray], np.ndarray]:
-            - transitions_new: Dictionary of updated transition kernels
-            - emissions_new: List of updated emission kernels
-            - init_flank_new: Updated flank initialization values
+        PHMMConfig: A new configuration with modified parameters that can be
+            used to create a new PHMMLayer with updated kernels.
     """
-    L = model.lengths[head_index]
+    head_subset_backup = phmm_layer.head_subset
+    phmm_layer.head_subset = [model_index]
+    L = phmm_layer.lengths[model_index]
 
-    # Gather the current kernels
-    emissions = model.phmm_layer.emitter[0].matrix()
-    emissions = [em.emission_kernel[head_index].numpy() for em in model.msa_hmm_layer.cell.emitter]
-    transitions = { key : kernel.numpy()
-                         for key, kernel in am.msa_hmm_layer.cell.transitioner.transition_kernel[model_index].items()}
-    dtype = am.msa_hmm_layer.cell.dtype
+    # Gather the current emission parameters
+    aa_emissions = phmm_layer.hmm.emitter[0].matrix().numpy() # (1, Q, S)
+    if phmm_layer.use_language_model:
+        emb_emissions = phmm_layer.hmm.emitter[1].matrix().numpy()  # (1, Q, 2D)
 
-    emission_dummy = [d((1, em.shape[-1]), dtype).numpy() for d,em in zip(emission_dummy, emissions)]
-    transition_dummy = { key : transition_dummy[key](t.shape, dtype).numpy() for key, t in transitions.items()}
-    init_flank_dummy = init_flank_dummy((1), dtype).numpy()
-    emissions_new = [apply_mods(k,
-                                  pos_expand,
-                                  expansion_lens,
-                                  pos_discard,
-                                  d) for k,d in zip(emissions, emission_dummy)]
-    transitions_new = {}
-    args1 = extend_mods(pos_expand,expansion_lens,pos_discard,L)
-    transitions_new["match_to_match"] = apply_mods(transitions["match_to_match"],
-                                                      *args1,
-                                                      transition_dummy["match_to_match"][0])
-    transitions_new["match_to_insert"] = apply_mods(transitions["match_to_insert"],
-                                                      *args1,
-                                                      transition_dummy["match_to_insert"][0])
-    transitions_new["insert_to_match"] = apply_mods(transitions["insert_to_match"],
-                                                      *args1,
-                                                      transition_dummy["insert_to_match"][0])
-    transitions_new["insert_to_insert"] = apply_mods(transitions["insert_to_insert"],
-                                                      *args1,
-                                                      transition_dummy["insert_to_insert"][0])
-    args2 = extend_mods(pos_expand,expansion_lens,pos_discard,L+1,k=1)
-    transitions_new["match_to_delete"] = apply_mods(transitions["match_to_delete"],
-                                                     *args2,
-                                                      transition_dummy["match_to_delete"][0])
-    args3 = extend_mods(pos_expand,expansion_lens,pos_discard,L+1)
-    transitions_new["delete_to_match"] = apply_mods(transitions["delete_to_match"],
-                                                     *args3,
-                                                      transition_dummy["delete_to_match"][0])
-    transitions_new["delete_to_delete"] = apply_mods(transitions["delete_to_delete"],
-                                                     *args1,
-                                                      transition_dummy["delete_to_delete"][0])
+    # Slice to the model of interest and to only match states
+    aa_emissions = aa_emissions[0, :L, :]  # (L, S)
+    if phmm_layer.use_language_model:
+        emb_emissions = emb_emissions[0, :L, :]  # (L, 2D)
 
-    #always reset the multi-hit transitions:
-    transitions_new["left_flank_loop"] = transition_dummy["left_flank_loop"]
-    transitions_new["left_flank_exit"] = transition_dummy["left_flank_exit"]
-    init_flank_new = init_flank_dummy
-    transitions_new["right_flank_loop"] = transition_dummy["right_flank_loop"]
-    transitions_new["right_flank_exit"] = transition_dummy["right_flank_exit"]
-    transitions_new["end_to_unannotated_segment"] = transition_dummy["end_to_unannotated_segment"]
-    transitions_new["end_to_right_flank"] = transition_dummy["end_to_right_flank"]
-    transitions_new["end_to_terminal"] = transition_dummy["end_to_terminal"]
-    transitions_new["unannotated_segment_loop"] = transition_dummy["unannotated_segment_loop"]
-    transitions_new["unannotated_segment_exit"] = transition_dummy["unannotated_segment_exit"]
+    # Apply modifications to the amino acid emission parameters
+    aa_insert_value = np.array(config.background_distribution)
+    aa_emissions_new = apply_mods(
+        aa_emissions,
+        pos_expand=pos_expand,
+        expansion_lens=expansion_lens,
+        pos_discard=pos_discard,
+        insert_value=aa_insert_value,
+    )
 
-    # Maybe TODO?: Discarding or extending positions has the side effect of changing all probabilities
-    # in begin-state transition distribution. E.g.
-    # Depending on discarded positions, adjust weights such that the residual distribution after
-    # discarding some match states is unaffected.
-    # If an insert position is expanded, the transitions from begin to the new match states should have
-    # probabilities according to the initial dummy distribution and the weights of the old transitions
-    # should also be corrected accordingly.
+    # Apply modifications to the embedding emission parameters
+    if phmm_layer.use_language_model:
+        assert plm_config is not None,\
+            "plm_config must be provided to update_kernels if"\
+            "the PHMMLayer uses a language model."
+        embedding_dim = plm_config.scoring_model_dim
+        emb_expectations = np.zeros((embedding_dim,), dtype=np.float32)
+        # TODO: This should ideally use different random variances per
+        # new position
+        emb_stddev = np.random.normal(
+            0.0, plm_config.variance_init_stdev, (embedding_dim,)
+        ).astype(np.float32)
+        emb_insert_value = np.concatenate(
+            [emb_expectations, emb_stddev], axis=0
+        )
+        emb_emissions_new = apply_mods(
+            emb_emissions,
+            pos_expand=pos_expand,
+            expansion_lens=expansion_lens,
+            pos_discard=pos_discard,
+            insert_value=emb_insert_value,
+        )
 
-    transitions_new["begin_to_match"] = apply_mods(transitions["begin_to_match"],
-                                                      pos_expand,
-                                                      expansion_lens,
-                                                      pos_discard,
-                                                      transition_dummy["begin_to_match"][1])
+    # Gather the current transition parameters
+    # Note: The transitions not occuring here (like left_flank_loop) are
+    # always reset to initial values later on.
+    A = phmm_layer.hmm.transitioner.explicit_transitioner.matrix().numpy()
+    A = A[0] # (Q, Q)
+    ind = PHMMTransitionIndexSet(L)
+    match_to_match = A[ind.match_to_match[:, 0], ind.match_to_match[:, 1]]
+    match_to_insert = A[ind.match_to_insert[:, 0], ind.match_to_insert[:, 1]]
+    insert_to_insert = A[ind.insert_to_insert[:, 0], ind.insert_to_insert[:, 1]]
+    delete_to_delete = A[ind.delete_to_delete[:, 0], ind.delete_to_delete[:, 1]]
+    begin_to_match = A[ind.begin_to_match[:, 0], ind.begin_to_match[:, 1]]
+    match_to_end = A[ind.match_to_end[:, 0], ind.match_to_end[:, 1]]
+    begin_to_delete = A[ind.begin_to_delete[:, 0], ind.begin_to_delete[:, 1]]
+
+    h = model_index
+    args = extend_mods(pos_expand, expansion_lens, pos_discard, L)
+
+    match_to_match = apply_mods(
+        match_to_match, *args,
+        insert_value = get_value(config.p_match_match, h, 0),
+    )
+    match_to_insert = apply_mods(
+        match_to_insert, *args,
+        insert_value = get_value(config.p_match_insert, h, 0),
+    )
+    insert_to_insert = apply_mods(
+        insert_to_insert, *args,
+        insert_value = get_value(config.p_insert_insert, h, 0),
+    )
+    delete_to_delete = apply_mods(
+        delete_to_delete, *args,
+        insert_value = get_value(config.p_delete_delete, h, 0),
+    )
+
+    begin_to_match = apply_mods(
+        begin_to_match,
+        pos_expand,
+        expansion_lens,
+        pos_discard,
+        get_value(config.p_begin_match, h, 1),
+    )
     if 0 in pos_expand:
-        transitions_new["begin_to_match"][0] = transition_dummy["begin_to_match"][0]
+        begin_to_match[0] = get_value(config.p_begin_match, h, 0)
+        begin_to_delete = get_value(config.p_begin_delete, h)
+    # Re-normalize the internal begin_to_match probabilities
+    begin_to_match[1:] /= begin_to_match[1:].sum()\
+        / (1 - begin_to_match[0] - begin_to_delete)
 
     if L in pos_expand:
-        transitions["match_to_end"][-1] = transition_dummy["match_to_end"][0]
-    transitions_new["match_to_end"] = apply_mods(transitions["match_to_end"],
-                                                  pos_expand,
-                                                  expansion_lens,
-                                                  pos_discard,
-                                                  transition_dummy["match_to_end"][0])
-    return transitions_new, emissions_new, init_flank_new
+        match_to_end[-1] = get_value(config.p_match_end, h, 0)
+    match_to_end = apply_mods(
+        match_to_end,
+        pos_expand,
+        expansion_lens,
+        pos_discard,
+        get_value(config.p_match_end, h, 0),
+    )
 
+    new_config = config.model_copy(deep=True)
+    new_config.match_emissions=aa_emissions_new[np.newaxis]
+    new_config.p_match_match=match_to_match[np.newaxis]
+    new_config.p_match_insert=match_to_insert[np.newaxis]
+    new_config.p_insert_insert=insert_to_insert[np.newaxis]
+    new_config.p_delete_delete=delete_to_delete[np.newaxis]
+    new_config.p_begin_match=begin_to_match[np.newaxis]
+    new_config.p_match_end=match_to_end[np.newaxis]
+    new_config.p_begin_delete=begin_to_delete
+
+    if phmm_layer.use_language_model and plm_config is not None:
+        new_plm_config = plm_config.model_copy(deep=True)
+        new_plm_config.match_expectations = emb_emissions_new[:, :embedding_dim]
+        new_plm_config.match_stddev = emb_emissions_new[:, embedding_dim:]
+    else:
+        new_plm_config = None
+
+    # Reset
+    phmm_layer.head_subset = head_subset_backup
+
+    return UpdateKernelResult(
+        length=aa_emissions_new.shape[0],
+        config=new_config,
+        plm_config=new_plm_config
+    )
 
 @dataclass
 class ModelSurgeryResult:
-    emitter: list[tf.keras.layers.Layer]
-    transitioner: tf.keras.layers.Layer
     model_lengths: np.ndarray
+    """The lengths of the updated models."""
     surgery_converged: bool
+    """Whether no modifications were applied during surgery."""
+    config: PHMMConfig
+    """The updated PHMMConfig with modified parameters."""
+    plm_config: LanguageModelConfig | None = None
+    """The updated LanguageModelConfig with modified parameters, if
+    the PHMMLayer was using embeddings."""
 
-
-def do_model_surgery(
-    am: AlignmentModel,
-    surgery_del: float,
-    surgery_ins: float,
-    emission_dummy: Sequence[initializers.Initializer],
-    transition_dummy: dict[str, initializers.Initializer],
-    flank_init_dummy: initializers.Initializer,
-    verbose: bool=False
+def model_surgery(
+    model: LearnMSAModel,
+    data: SequenceDataset,
+    indices: np.ndarray|None = None,
+    surgery_del: float = 0.5,
+    surgery_ins: float = 0.5,
+    verbose: bool = False,
 ) -> ModelSurgeryResult:
-    surgery_converged = True
-    # Duplicate the previous emitters and transitioner and replace their
-    # initializers later
-    emitter = [em.duplicate() for em in am.msa_hmm_layer.cell.emitter]
-    transitioner = am.msa_hmm_layer.cell.transitioner.duplicate()
+    """
+    A heuristic that optimizes the length of the pHMMs in the given PHMMLayer
+    based on the posterior probabilities of states.
+
+    Args:
+        model: A LearnMSAModel object with a PHMMLayer.
+        data: A SequenceDataset used for computing the posterior state.
+        indices: Optional indices to select a subset of the data. If None, all
+            sequences in `data` are used.
+        surgery_del: Discards match states for which `surgery_del` is larger
+            than the expected number of times this match state is used in an
+            alignment of a sequence from the underlying dataset to the model.
+        surgery_ins: Discards match states for which `surgery_ins` is smaller
+            than the expected number of times insert states between two match
+            states are used in an alignment of a sequence from the underlying
+            dataset to the model. New match states are added according to the
+            expected insertion length.
+        verbose: Whether to print information about the surgery process.
+
+    Returns:
+        A ModelSurgeryResult object.
+    """
+
+    # Find positions to discard or expand
     pos_expand, expansion_lens, pos_discard = get_discard_or_expand_positions(
-        am,
+        model=model,
+        data=data,
+        indices=indices,
         del_t=surgery_del,
         ins_t=surgery_ins
     )
+
+    # Loop over models and apply modifications
+    surgery_converged = True #becomes False if any modification is applied
     model_lengths = []
-    for i,k in enumerate(range(am.num_models)):
+    configs = []
+    plm_configs = []
+    for i,k in enumerate(range(model.heads)):
         surgery_converged &= pos_expand[k].size == 0 and pos_discard[k].size == 0
+
         if verbose:
             if pos_expand[k].size > 0:
                 print(
@@ -363,37 +461,69 @@ def do_model_surgery(
                 print(
                     f"discards model {i}:", pos_discard[k]
                 )
-        transition_init, emission_init, flank_init = update_kernels(
-            am,
+
+        result = update_kernels(
+            model.phmm_layer,
             k,
             pos_expand[k],
             expansion_lens[k],
             pos_discard[k],
-            emission_dummy,
-            transition_dummy,
-            flank_init_dummy,
+            model.context.config.hmm,
+            model.context.config.language_model,
         )
-        for em, old_em, e_init in zip(
-            emitter, am.msa_hmm_layer.cell.emitter, emission_init
-        ):
-            em.emission_init[i] = initializers.ConstantInitializer(e_init)
-            em.insertion_init[i] = initializers.ConstantInitializer(
-                old_em.insertion_kernel[k].numpy()
-            )
-        transitioner.transition_init[i] = {
-            key : initializers.ConstantInitializer(t)
-            for key,t in transition_init.items()
-        }
-        transitioner.flank_init[i] = initializers.ConstantInitializer(flank_init)
-        model_lengths.append(emission_init[0].shape[0])
+
+        model_lengths.append(result.length)
         if model_lengths[-1] < 3:
             raise SystemExit(
                 "A problem occured during model surgery: "\
                 "A pHMM is too short (length <= 2)."
             )
+
+        configs.append(result.config)
+        plm_configs.append(result.plm_config)
+
+    # Merge configurations that contain parameters per head to a single config
+    def concat_param(param_name: str):
+        return np.concatenate(
+            [getattr(c, param_name) for c in configs], axis=0
+        )
+    merged_config = configs[0].model_copy(deep=True)
+    merged_config.match_emissions = concat_param("match_emissions")
+    merged_config.insert_emissions = concat_param("insert_emissions")
+    merged_config.p_begin_match = concat_param("p_begin_match")
+    merged_config.p_match_match = concat_param("p_match_match")
+    merged_config.p_match_insert = concat_param("p_match_insert")
+    merged_config.p_match_end = concat_param("p_match_end")
+    merged_config.p_insert_insert = concat_param("p_insert_insert")
+    merged_config.p_delete_delete = concat_param("p_delete_delete")
+    merged_config.p_begin_delete = concat_param("p_begin_delete")
+    merged_config.p_left_left = concat_param("p_left_left")
+    merged_config.p_right_right = concat_param("p_right_right")
+    merged_config.p_unannot_unannot = concat_param("p_unannot_unannot")
+    merged_config.p_end_unannot = concat_param("p_end_unannot")
+    merged_config.p_end_right = concat_param("p_end_right")
+    merged_config.p_start_left_flank = concat_param("p_start_left_flank")
+
+    if plm_configs[0] is not None:
+        merged_plm_config = plm_configs[0].model_copy(deep=True)
+        merged_plm_config.match_expectations = np.concatenate(
+            [c.match_expectations for c in plm_configs], axis=0
+        )
+        merged_plm_config.match_stddev = np.concatenate(
+            [c.match_stddev for c in plm_configs], axis=0
+        )
+        merged_plm_config.insert_expectations = np.concatenate(
+            [c.insert_expectations for c in plm_configs], axis=0
+        )
+        merged_plm_config.insert_stddev = np.concatenate(
+            [c.insert_stddev for c in plm_configs], axis=0
+        )
+    else:
+        merged_plm_config = None
+
     return ModelSurgeryResult(
-        emitter=emitter,
-        transitioner=transitioner,
         model_lengths=np.array(model_lengths, dtype=np.int32),
-        surgery_converged=surgery_converged
+        surgery_converged=surgery_converged,
+        config=merged_config,
+        plm_config=merged_plm_config,
     )

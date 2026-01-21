@@ -7,6 +7,8 @@ import tensorflow as tf
 
 from learnMSA import Configuration
 from learnMSA.config.hmm import PHMMConfig
+from learnMSA.hmm.tf.layer import PHMMLayer
+from learnMSA.hmm.util.transition_index_set import PHMMTransitionIndexSet
 from learnMSA.model.model import LearnMSAModel
 from learnMSA.msa_hmm.alignment_model import AlignmentModel
 from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
@@ -22,13 +24,18 @@ def string_to_one_hot(s : str) -> tf.Tensor:
     return tf.one_hot(i, len(SequenceDataset._default_alphabet) - 1)
 
 @pytest.fixture
-def am() -> AlignmentModel:
+def data() -> SequenceDataset:
+    """Create a test sequence dataset."""
     """Create a test alignment model with specific parameters."""
     test_data_path = os.path.join(
         os.path.dirname(__file__), "data", "felix_insert_delete.fa"
     )
     data = SequenceDataset(test_data_path)
+    return data
 
+@pytest.fixture
+def model(data: SequenceDataset) -> LearnMSAModel:
+    """Create a test alignment model with specific parameters."""
     # Create match emissions for "FELIC" motif
     alphabet = SequenceDataset._default_alphabet
     match_emissions = np.zeros((1, 5, len(alphabet) - 1))
@@ -48,19 +55,19 @@ def am() -> AlignmentModel:
     learnmsa_config.hmm.insert_emissions=insert_emissions
     learnmsa_config.hmm.use_prior_for_emission_init = False
     learnmsa_config.hmm.p_begin_match = [
-        [0.38360426, 0.14112014, 0.14112014, 0.14112014, 0.14112014]
+        [0.35, 0.15, 0.15, 0.15, 0.15]
     ]
-    learnmsa_config.hmm.p_match_end = 0.29692274
-    learnmsa_config.hmm.p_match_match = 0.29692274
-    learnmsa_config.hmm.p_match_insert = 0.29692274
-    learnmsa_config.hmm.p_insert_insert = 0.73105854
-    learnmsa_config.hmm.p_delete_delete = 0.26894143
-    learnmsa_config.hmm.p_begin_delete = 0.05191519
+    learnmsa_config.hmm.p_match_end = 0.3
+    learnmsa_config.hmm.p_match_match = 0.3
+    learnmsa_config.hmm.p_match_insert = 0.3
+    learnmsa_config.hmm.p_insert_insert = 0.7
+    learnmsa_config.hmm.p_delete_delete = 0.3
+    learnmsa_config.hmm.p_begin_delete = 0.05
     learnmsa_config.hmm.p_left_left = 0.5
     learnmsa_config.hmm.p_right_right = 0.5
     learnmsa_config.hmm.p_unannot_unannot = 0.5
-    learnmsa_config.hmm.p_end_unannot = 0.33333334
-    learnmsa_config.hmm.p_end_right = 0.33333334
+    learnmsa_config.hmm.p_end_unannot = 0.3
+    learnmsa_config.hmm.p_end_right = 0.3
     learnmsa_config.hmm.p_start_left_flank = 0.5
 
     context = LearnMSAContext(learnmsa_config, data)
@@ -68,11 +75,12 @@ def am() -> AlignmentModel:
     model = LearnMSAModel(context)
     model.build()
 
-    am = AlignmentModel(data, model)
-    return am
+    return model
 
 
-def test_discard_or_expand_positions(am: AlignmentModel) -> None:
+def test_discard_or_expand_positions(
+    model: LearnMSAModel, data: SequenceDataset
+) -> None:
     """Test detection of positions to discard or expand."""
     # A simple alignment to test detection of
     # too sparse columns and too frequent insertions
@@ -84,6 +92,8 @@ def test_discard_or_expand_positions(am: AlignmentModel) -> None:
         "..........-.--...ICaaaF--.I-nnn",
         "..........FnE-...ICaaaF-LnI-nnn"
     ]
+
+    am = AlignmentModel(data, model)
 
     # Decode the alignment depending on the sequences and model parameters
     aligned_sequences = am.to_string(model_index=0, add_block_sep=False)
@@ -120,7 +130,9 @@ def test_discard_or_expand_positions(am: AlignmentModel) -> None:
             [0, 0, 0, 0],
             [0, 0, 1, 0]]]
     )
-    pos_expand, expansion_lens, pos_discard = get_discard_or_expand_positions(am)
+    pos_expand, expansion_lens, pos_discard = get_discard_or_expand_positions(
+        model, data, del_t=0.5, ins_t=0.5
+    )
     pos_expand = pos_expand[0]
     expansion_lens = expansion_lens[0]
     pos_discard = pos_discard[0]
@@ -128,62 +140,95 @@ def test_discard_or_expand_positions(am: AlignmentModel) -> None:
     np.testing.assert_equal(expansion_lens, [2, 2, 3])
     np.testing.assert_equal(pos_discard, [1])
 
-def test_update_kernels(am: AlignmentModel) -> None:
+def test_update_kernels(model: LearnMSAModel, data: SequenceDataset) -> None:
     """Test updating model kernels during surgery."""
     pos_expand = np.array([2, 3, 5])
-    expansion_lens = np.array([9, 1, 3])
+    expansion_lens = np.array([2, 1, 3])
     pos_discard = np.array([4])
 
-    # Create dummy initializers for new positions
+    # Expanded positions will emit "A"
     alphabet = SequenceDataset._default_alphabet
-    dummy_emission = np.zeros((1, len(alphabet) - 1))
-    dummy_emission[0, alphabet.index("A")] = 10.0
+    dummy_emission = np.zeros((len(alphabet) - 1,))
+    dummy_emission[alphabet.index("A")] = 1.0
 
-    from learnMSA.msa_hmm import Initializers
+    config = model.context.config.hmm.model_copy(deep=True)
+    # Override some parameters to check if they are correctly used as updates
+    config.background_distribution = dummy_emission
+    config.p_begin_match = 0.5
+    config.p_match_end = 0.2
+    config.p_match_match = 0.1
+    config.p_match_insert = 0.5
+    config.p_insert_insert = 0.4
+    config.p_delete_delete = 0.2
 
-    emission_init2 = [Initializers.ConstantInitializer(dummy_emission)]
-    transition_init2 = {
-        "begin_to_match": Initializers.ConstantInitializer(77),
-        "match_to_end": Initializers.ConstantInitializer(77),
-        "match_to_match": Initializers.ConstantInitializer(77),
-        "match_to_insert": Initializers.ConstantInitializer(77),
-        "insert_to_match": Initializers.ConstantInitializer(77),
-        "insert_to_insert": Initializers.ConstantInitializer(77),
-        "match_to_delete": Initializers.ConstantInitializer(77),
-        "delete_to_match": Initializers.ConstantInitializer(77),
-        "delete_to_delete": Initializers.ConstantInitializer(77),
-        "left_flank_loop": Initializers.ConstantInitializer(77),
-        "left_flank_exit": Initializers.ConstantInitializer(77),
-        "right_flank_loop": Initializers.ConstantInitializer(77),
-        "right_flank_exit": Initializers.ConstantInitializer(77),
-        "unannotated_segment_loop": Initializers.ConstantInitializer(77),
-        "unannotated_segment_exit": Initializers.ConstantInitializer(77),
-        "end_to_unannotated_segment": Initializers.ConstantInitializer(77),
-        "end_to_right_flank": Initializers.ConstantInitializer(77),
-        "end_to_terminal": Initializers.ConstantInitializer(77)
-    }
-    transitions_new, emissions_new, _ = update_kernels(
-        am, 0,
-        pos_expand, expansion_lens, pos_discard,
-        emission_init2, transition_init2, Initializers.ConstantInitializer(0.0)
+    # Update the pHMM with the specified modifications and obtains a
+    # new config
+    result = update_kernels(
+        model.phmm_layer,
+        0,
+        pos_expand,
+        expansion_lens,
+        pos_discard,
+        config,
     )
-    ref_consensus = "FE" + "A" * 9 + "LAI" + "A" * 3
-    assert emissions_new[0].shape[0] == len(ref_consensus)
+
+    # Create a new HMM layer from the config
+    updated_phmm_layer = PHMMLayer([result.length], result.config)
+    updated_phmm_layer.build(((None, None, None, 23), (None, None, None, 1)))
+
+    emissions_new = updated_phmm_layer.hmm.emitter[0].matrix().numpy()[0]
+    transitions_new = updated_phmm_layer.hmm.transitioner\
+        .explicit_transitioner.matrix().numpy()[0]
+
+    ref_consensus = "FE" + "A" * 2 + "LAI" + "A" * 3
+    assert result.length == len(ref_consensus)
 
     # Create expected emissions for the reference consensus
     expected_emissions = np.zeros((len(ref_consensus), len(alphabet) - 1))
     for i, aa in enumerate(ref_consensus):
-        expected_emissions[i, alphabet.index(aa)] = 10.0
+        expected_emissions[i, alphabet.index(aa)] = 1.0
 
-    np.testing.assert_equal(emissions_new[0], expected_emissions)
-    np.testing.assert_equal(transitions_new["begin_to_match"], [1, 0] + [77] * 9 + [0, 77, 0, 77, 77, 77])
-    np.testing.assert_equal(transitions_new["match_to_end"], [0, 0] + [77] * 9 + [0, 77, 0, 77, 77, 77])
-    np.testing.assert_equal(transitions_new["match_to_match"], [0] + [77] * 15)
-    np.testing.assert_equal(transitions_new["match_to_insert"], [0] + [77] * 15)
-    np.testing.assert_equal(transitions_new["insert_to_match"], [0] + [77] * 15)
-    np.testing.assert_equal(transitions_new["insert_to_insert"], [1] + [77] * 15)
-    np.testing.assert_equal(transitions_new["match_to_delete"], [-1, -1] + [77] * 15)
-    np.testing.assert_equal(transitions_new["delete_to_match"], [1] + [77] * 16)
+    np.testing.assert_equal(emissions_new[:result.length], expected_emissions)
+
+    # The expected initial distribution after expanding and discarding
+    # must have inserted the default value 0.5/(L-1) (as per above config) for
+    # internal begin_to_match transitions and then renormalized
+    expected_begin_to_match = np.array([
+        0.35, 0.15, 0.5, 0.5, 0.15, 0.5, 0.15, 0.5, 0.5, 0.5
+    ])
+    expected_begin_to_match[1:] /= expected_begin_to_match[1:].sum()\
+        / (1 - 0.35 - 0.05) # must also account for begin -> D1
+
+    ind = PHMMTransitionIndexSet(result.length)
+    np.testing.assert_almost_equal(
+        transitions_new[ind.begin_to_match[:,0], ind.begin_to_match[:,1]],
+        expected_begin_to_match
+    )
+
+    np.testing.assert_almost_equal(
+        transitions_new[ind.match_to_end[:,0], ind.match_to_end[:,1]],
+        [.3, .3, .2, .2, .3, .2, .3, .2, .2, 1]
+    )
+    np.testing.assert_almost_equal(
+        transitions_new[ind.match_to_match[:,0], ind.match_to_match[:,1]],
+        [.3] + [.1] * 8
+    )
+    np.testing.assert_almost_equal(
+        transitions_new[ind.match_to_insert[:,0], ind.match_to_insert[:,1]],
+        [.3] + [.5] * 8
+    )
+    np.testing.assert_almost_equal(
+        transitions_new[ind.insert_to_insert[:,0], ind.insert_to_insert[:,1]],
+        [.7] + [.4] * 8
+    )
+    np.testing.assert_almost_equal(
+        transitions_new[ind.insert_to_match[:,0], ind.insert_to_match[:,1]],
+        [.3] + [.6] * 8
+    )
+    np.testing.assert_almost_equal(
+        transitions_new[ind.delete_to_delete[:,0], ind.delete_to_delete[:,1]],
+        [.3] + [.2] * 8
+    )
 
 def test_apply_mods() -> None:
     """Test applying modifications to arrays."""
