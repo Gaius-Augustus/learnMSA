@@ -6,8 +6,8 @@ import tensorflow as tf
 
 from learnMSA import Configuration
 from learnMSA.config.hmm import PHMMConfig
-from learnMSA.msa_hmm.align import align
-from learnMSA.msa_hmm.alignment_model import (AlignmentModel,
+from learnMSA.align.align import align
+from learnMSA.align.alignment_model import (AlignmentModel,
                                              find_faulty_sequences,
                                              non_homogeneous_mask_func)
 from learnMSA.util.context import LearnMSAContext

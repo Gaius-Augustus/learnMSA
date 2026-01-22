@@ -8,7 +8,7 @@ import tensorflow as tf
 from learnMSA import Configuration
 from learnMSA.model.tf import training
 from learnMSA.msa_hmm import Initializers
-from learnMSA.msa_hmm.alignment_model import AlignmentModel
+from learnMSA.align.alignment_model import AlignmentModel
 from learnMSA.msa_hmm.Emitter import ProfileHMMEmitter
 from learnMSA.msa_hmm.Initializers import ConstantInitializer
 from learnMSA.util.context import LearnMSAContext

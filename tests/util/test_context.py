@@ -3,11 +3,9 @@ from typing import Generator
 
 import numpy as np
 import pytest
-import tensorflow as tf
 
 from learnMSA import Configuration
-from learnMSA.config import (InitMSAConfig, InputOutputConfig,
-                             LanguageModelConfig, TrainingConfig)
+from learnMSA.config import InputOutputConfig, TrainingConfig
 from learnMSA.util.context import LearnMSAContext
 from learnMSA.util.sequence_dataset import SequenceDataset
 from learnMSA.run.util import get_batch_multiplicator, is_small_gpu
@@ -109,17 +107,6 @@ def test_auto_crop_setup(
 
     expected_crop = int(np.ceil(1.5 * np.mean(simple_data.seq_lens)))
     assert context.config.training.crop == expected_crop
-
-def test_emitter_and_transitioner_setup(
-    simple_data: SequenceDataset, config: Configuration
-) -> None:
-    """Test that emitter and transitioner are properly initialized."""
-    context = LearnMSAContext(config=config, data=simple_data)
-
-    assert isinstance(context.emitter, list)
-    assert len(context.emitter) > 0
-    assert all(isinstance(e, tf.keras.layers.Layer) for e in context.emitter)
-    assert isinstance(context.transitioner, tf.keras.layers.Layer)
 
 def test_encoder_initializer_setup(
     simple_data: SequenceDataset, config: Configuration
@@ -338,28 +325,6 @@ def test_batch_generator_without_data(config: Configuration) -> None:
 
     from learnMSA.model.tf import training
     assert isinstance(context.batch_gen, training.BatchGenerator)
-
-
-# Transitioner Tests
-def test_transitioner_prior_parameters(
-    simple_data: SequenceDataset, config: Configuration
-) -> None:
-    """Test that transitioner prior parameters are set correctly."""
-    config.hmm_prior.alpha_flank = 2.0
-    config.hmm_prior.alpha_single = 3.0
-    config.hmm_prior.alpha_global = 4.0
-    config.hmm_prior.alpha_flank_compl = 5.0
-    config.hmm_prior.alpha_single_compl = 6.0
-    config.hmm_prior.alpha_global_compl = 7.0
-    context = LearnMSAContext(config=config, data=simple_data)
-
-    # Check transitioner prior parameters
-    assert context.transitioner.prior.alpha_flank == 2.0
-    assert context.transitioner.prior.alpha_single == 3.0
-    assert context.transitioner.prior.alpha_global == 4.0
-    assert context.transitioner.prior.alpha_flank_compl == 5.0
-    assert context.transitioner.prior.alpha_single_compl == 6.0
-    assert context.transitioner.prior.alpha_global_compl == 7.0
 
 
 # Serialization Tests

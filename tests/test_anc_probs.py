@@ -8,7 +8,7 @@ import tensorflow as tf
 from learnMSA import Configuration
 from learnMSA.model.tf import training
 from learnMSA.msa_hmm import Emitter, Initializers, Utility
-from learnMSA.msa_hmm.alignment_model import AlignmentModel
+from learnMSA.align.alignment_model import AlignmentModel
 from learnMSA.msa_hmm.AncProbsLayer import AncProbsLayer, make_rate_matrix
 from learnMSA.util.context import LearnMSAContext
 from learnMSA.model.tf.model import LearnMSAModel

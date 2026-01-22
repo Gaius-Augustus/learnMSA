@@ -9,8 +9,8 @@ import tensorflow as tf
 import learnMSA.msa_hmm.Initializers as initializers
 import learnMSA.msa_hmm.training_util as training_util
 from learnMSA import Configuration
-from learnMSA.msa_hmm.AlignInsertions import make_aligned_insertions
-from learnMSA.msa_hmm.alignment_model import AlignmentModel
+from learnMSA.align.align_inserts import make_aligned_insertions
+from learnMSA.align.alignment_model import AlignmentModel
 from learnMSA.util.context import LearnMSAContext
 from learnMSA.model.tf.model import LearnMSAModel
 from learnMSA.model.surgery import model_surgery
@@ -24,9 +24,11 @@ np.set_printoptions(legacy='1.21')
 
 def align(data : SequenceDataset, config : Configuration) -> AlignmentModel:
     """ Aligns the sequences in data according to the specified config.
+
     Args:
         data: Dataset of sequences.
         config: Configuration that can be used to control training and decoding
+
     Returns:
         An AlignmentModel object.
     """
@@ -129,19 +131,26 @@ def align(data : SequenceDataset, config : Configuration) -> AlignmentModel:
     return am
 
 
-""" Trains k independent models on the sequences in a dataset and returns k "lazy" alignments, where "lazy" means
-    that decoding will only be carried out when the user wants to print the alignment or write it to a file.
-    Decoding is usually expensive and typically it should only be done after a model selection step.
+""" Trains k independent models on the sequences in a dataset and returns k
+    "lazy" alignments, where "lazy" means that decoding will only be carried
+    out when the user wants to print the alignment or write it to a file.
+    Decoding is usually expensive and typically it should only be done after
+    a model selection step.
 Args:
     data: The sequence dataset to align.
-    config: Configuration that can be used to control training and decoding (see msa_hmm.config.make_default).
-    model_generator: Optional callback that generates a user defined model (if None, the default model generator will be used).
-    batch_generator: Optional callback that generates sequence batches defined by user (if None, the default batch generator will be used).
-    subset: Optional subset of the sequence ids. Only the specified sequences will be aligned but the models will be trained on all sequences
-            (if None, all sequences in the dataset will be aligned).
+    config: Configuration that can be used to control training and decoding
+        (see msa_hmm.config.make_default).
+    model_generator: Optional callback that generates a user defined model
+        (if None, the default model generator will be used).
+    batch_generator: Optional callback that generates sequence batches defined
+        by user (if None, the default batch generator will be used).
+    subset: Optional subset of the sequence ids. Only the specified sequences
+        will be aligned but the models will be trained on all sequences
+        (if None, all sequences in the dataset will be aligned).
     verbose: If False, all output messages will be disabled.
-    A2M_output: If True, insertions will be indicated by lower case letters in the output and "." will indicate insertions in other sequences.
-                Otherwise all upper case letters and only "-" will be used.
+    A2M_output: If True, insertions will be indicated by lower case letters in
+        the output and "." will indicate insertions in other sequences.
+        Otherwise all upper case letters and only "-" will be used.
     load_model: Path to a pre-trained model to load (if any).
 Returns:
     An AlignmentModel object.

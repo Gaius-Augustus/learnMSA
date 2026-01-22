@@ -3,20 +3,17 @@ from pathlib import Path
 from typing import Any, Callable
 
 import numpy as np
-import tensorflow as tf
 
-import learnMSA.msa_hmm.Emitter as emit
 import learnMSA.msa_hmm.Initializers as initializers
 import learnMSA.model.tf.training as train
 import learnMSA.msa_hmm.training_util as training_util
-import learnMSA.msa_hmm.Transitioner as trans
 import learnMSA.protein_language_models.Common as Common
 import learnMSA.protein_language_models.EmbeddingBatchGenerator as EmbeddingBatchGenerator
 from learnMSA import Configuration
 from learnMSA.hmm.util import value_set
 from learnMSA.msa_hmm import clustering
 from learnMSA.protein_language_models.MvnEmitter import (
-    AminoAcidPlusMvnEmissionInitializer, MvnEmitter)
+    AminoAcidPlusMvnEmissionInitializer)
 from learnMSA.run.util import is_small_gpu, validate_filepath
 
 from ..msa_hmm.AncProbsLayer import inverse_softplus
@@ -55,8 +52,6 @@ class LearnMSAContext:
     model_lengths: np.ndarray
     scoring_model_config: Common.ScoringModelConfig #legacy, will be removed in future
     initializers: PHMMInitializerSet
-    emitter: list[tf.keras.Layer]
-    transitioner: tf.keras.Layer
     batch_size: int | Callable[[SequenceDataset], int]
     batch_gen: train.BatchGenerator
     sequence_weights: np.ndarray | None
@@ -162,8 +157,6 @@ class LearnMSAContext:
         if self.config.language_model.use_language_model:
             self._setup_language_model_specific_settings()
 
-        self.emitter, self.transitioner = self._setup_hmm_components()
-
         # Set up encoder initialization
         self.encoder_initializer = initializers.make_default_anc_probs_init(
             self.config.training.num_model
@@ -174,17 +167,6 @@ class LearnMSAContext:
                 np.array(self.config.advanced.initial_distance) + 1e-8
             ).numpy()
         )
-
-        # Set custom transitioner parameters if specified
-        transitioners = self.transitioner if hasattr(
-            self.transitioner, '__iter__') else [self.transitioner]
-        for trans in transitioners:
-            trans.prior.alpha_flank = self.config.hmm_prior.alpha_flank
-            trans.prior.alpha_single = self.config.hmm_prior.alpha_single
-            trans.prior.alpha_global = self.config.hmm_prior.alpha_global
-            trans.prior.alpha_flank_compl = self.config.hmm_prior.alpha_flank_compl
-            trans.prior.alpha_single_compl = self.config.hmm_prior.alpha_single_compl
-            trans.prior.alpha_global_compl = self.config.hmm_prior.alpha_global_compl
 
         # Adjust training settings automatically if skip_training is set
         if self.config.training.skip_training:
@@ -432,31 +414,6 @@ class LearnMSAContext:
         return None
 
 
-    def _setup_hmm_components(self) -> tuple[list[tf.keras.Layer], tf.keras.Layer]:
-        if self.config.language_model.use_language_model:
-            emitter = MvnEmitter(
-                self.scoring_model_config,
-                emission_init=self.initializers.match_emissions,
-                insertion_init=self.initializers.insert_emissions,
-                num_prior_components=self.config.language_model.embedding_prior_components,
-                full_covariance=False,
-                temperature=self.config.language_model.temperature,
-                frozen_insertions=self.config.training.frozen_insertions,
-                inv_gamma_alpha=self.config.advanced.inverse_gamma_alpha,
-                inv_gamma_beta=self.config.advanced.inverse_gamma_beta,
-            )
-        else:
-            emitter = emit.ProfileHMMEmitter(
-                emission_init=self.initializers.match_emissions, # type: ignore
-                insertion_init=self.initializers.insert_emissions, # type: ignore
-            )
-        transitioner = trans.ProfileHMMTransitioner(
-            transition_init = self.initializers.transitions,
-            flank_init = self.initializers.start # type: ignore
-        )
-        return [emitter], transitioner
-
-
     def _setup_batch_size_cb(self) -> BatchSizeCallback | int:
         """ Check if a custom batch size or tokens per batch is set.
         If not, setup a callback to automatically scale the batch size based
@@ -597,7 +554,3 @@ class LearnMSAContext:
         else:
             sequence_weights, clusters = None, None
         return sequence_weights, clusters
-
-
-# Register LearnMSAContext as a serializable Keras object
-tf.keras.utils.get_custom_objects()["LearnMSAContext"] = LearnMSAContext
