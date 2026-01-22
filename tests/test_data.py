@@ -3,8 +3,8 @@ import os
 import numpy as np
 
 from learnMSA import Configuration
-from learnMSA.msa_hmm import training
-from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
+from learnMSA.model.tf import training
+from learnMSA.util.context import LearnMSAContext
 from learnMSA.util.sequence_dataset import SequenceDataset
 
 

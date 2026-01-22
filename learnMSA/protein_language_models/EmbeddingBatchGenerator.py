@@ -8,14 +8,14 @@ import tensorflow as tf
 
 import learnMSA.protein_language_models.Common as Common
 from learnMSA.util.sequence_dataset import SequenceDataset
-from learnMSA.msa_hmm.training import BatchGenerator
+from learnMSA.model.tf.training import BatchGenerator
 from learnMSA.msa_hmm.training_util import get_adaptive_batch_size_with_language_model
 from learnMSA.protein_language_models.BilinearSymmetric import \
     make_scoring_model
 from learnMSA.protein_language_models.embedding_cache import EmbeddingCache
 
 if TYPE_CHECKING:
-    from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
+    from learnMSA.util.context import LearnMSAContext
 
 
 class EmbeddingBatchGenerator(BatchGenerator):

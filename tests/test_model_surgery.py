@@ -9,10 +9,10 @@ from learnMSA import Configuration
 from learnMSA.config.hmm import PHMMConfig
 from learnMSA.hmm.tf.layer import PHMMLayer
 from learnMSA.hmm.util.transition_index_set import PHMMTransitionIndexSet
-from learnMSA.model.model import LearnMSAModel
+from learnMSA.model.tf.model import LearnMSAModel
 from learnMSA.msa_hmm.alignment_model import AlignmentModel
-from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
-from learnMSA.msa_hmm.model_surgery import (apply_mods, extend_mods,
+from learnMSA.util.context import LearnMSAContext
+from learnMSA.model.surgery import (apply_mods, extend_mods,
                                             get_discard_or_expand_positions,
                                             update_kernels, model_surgery)
 from learnMSA.util.sequence_dataset import SequenceDataset

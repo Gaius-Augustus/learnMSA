@@ -6,11 +6,12 @@ import pytest
 import tensorflow as tf
 
 from learnMSA import Configuration
-from learnMSA.msa_hmm import Emitter, Initializers, Utility, training
+from learnMSA.model.tf import training
+from learnMSA.msa_hmm import Emitter, Initializers, Utility
 from learnMSA.msa_hmm.alignment_model import AlignmentModel
 from learnMSA.msa_hmm.AncProbsLayer import AncProbsLayer, make_rate_matrix
-from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
-from learnMSA.model.model import LearnMSAModel
+from learnMSA.util.context import LearnMSAContext
+from learnMSA.model.tf.model import LearnMSAModel
 from learnMSA.util.sequence_dataset import SequenceDataset
 from learnMSA.msa_hmm.MsaHmmCell import MsaHmmCell
 from learnMSA.msa_hmm.MsaHmmLayer import MsaHmmLayer
@@ -181,7 +182,7 @@ def make_anc_probs_layer(config : Configuration, enc_init, num_seq) -> AncProbsL
 
 def get_simple_seq(data: SequenceDataset) -> np.ndarray:
     """Get simple sequence data for testing."""
-    from learnMSA.msa_hmm import training
+    from learnMSA.model.tf import training
     indices = np.arange(data.num_seq)
     batch_generator = training.BatchGenerator()
     config = Configuration()

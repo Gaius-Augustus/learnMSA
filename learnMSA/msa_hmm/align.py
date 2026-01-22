@@ -11,9 +11,9 @@ import learnMSA.msa_hmm.training_util as training_util
 from learnMSA import Configuration
 from learnMSA.msa_hmm.AlignInsertions import make_aligned_insertions
 from learnMSA.msa_hmm.alignment_model import AlignmentModel
-from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
-from learnMSA.model.model import LearnMSAModel
-from learnMSA.msa_hmm.model_surgery import model_surgery
+from learnMSA.util.context import LearnMSAContext
+from learnMSA.model.tf.model import LearnMSAModel
+from learnMSA.model.surgery import model_surgery
 from learnMSA.msa_hmm.posterior import get_state_expectations
 from learnMSA.util.sequence_dataset import SequenceDataset
 from learnMSA.protein_language_models.MvnEmitter import \

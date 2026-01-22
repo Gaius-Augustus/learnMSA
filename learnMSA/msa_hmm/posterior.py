@@ -3,7 +3,7 @@ import math
 import numpy as np
 import tensorflow as tf
 
-import learnMSA.msa_hmm.training as train
+import learnMSA.model.tf.training as train
 from learnMSA.util.sequence_dataset import SequenceDataset
 
 

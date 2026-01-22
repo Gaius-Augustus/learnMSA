@@ -6,12 +6,13 @@ import numpy as np
 import tensorflow as tf
 
 from learnMSA import Configuration
-from learnMSA.msa_hmm import Initializers, training
+from learnMSA.model.tf import training
+from learnMSA.msa_hmm import Initializers
 from learnMSA.msa_hmm.alignment_model import AlignmentModel
 from learnMSA.msa_hmm.Emitter import ProfileHMMEmitter
 from learnMSA.msa_hmm.Initializers import ConstantInitializer
-from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
-from learnMSA.model.model import LearnMSAModel
+from learnMSA.util.context import LearnMSAContext
+from learnMSA.model.tf.model import LearnMSAModel
 from learnMSA.util.sequence_dataset import SequenceDataset
 from learnMSA.msa_hmm.Transitioner import ProfileHMMTransitioner
 

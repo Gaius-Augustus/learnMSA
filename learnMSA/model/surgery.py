@@ -2,13 +2,12 @@ from dataclasses import dataclass
 
 import numpy as np
 
-import learnMSA.msa_hmm.Initializers as initializers
 from learnMSA.config.hmm import PHMMConfig
 from learnMSA.config.language_model import LanguageModelConfig
 from learnMSA.config.util import get_value
 from learnMSA.hmm.tf.layer import PHMMLayer
 from learnMSA.hmm.util.transition_index_set import PHMMTransitionIndexSet
-from learnMSA.model.model import LearnMSAModel
+from learnMSA.model.tf.model import LearnMSAModel
 from learnMSA.util.sequence_dataset import SequenceDataset
 
 

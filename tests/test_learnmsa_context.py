@@ -8,7 +8,7 @@ import tensorflow as tf
 from learnMSA import Configuration
 from learnMSA.config import (InitMSAConfig, InputOutputConfig,
                              LanguageModelConfig, TrainingConfig)
-from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
+from learnMSA.util.context import LearnMSAContext
 from learnMSA.util.sequence_dataset import SequenceDataset
 from learnMSA.run.util import get_batch_multiplicator, is_small_gpu
 
@@ -324,7 +324,7 @@ def test_default_batch_generator(
     """Test default batch generator setup."""
     context = LearnMSAContext(config=config, data=simple_data)
 
-    from learnMSA.msa_hmm import training
+    from learnMSA.model.tf import training
     assert isinstance(context.batch_gen, training.BatchGenerator)
 
 
@@ -336,7 +336,7 @@ def test_batch_generator_without_data(config: Configuration) -> None:
         num_seq=50
     )
 
-    from learnMSA.msa_hmm import training
+    from learnMSA.model.tf import training
     assert isinstance(context.batch_gen, training.BatchGenerator)
 
 

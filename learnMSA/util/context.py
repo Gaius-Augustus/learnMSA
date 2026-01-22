@@ -7,7 +7,7 @@ import tensorflow as tf
 
 import learnMSA.msa_hmm.Emitter as emit
 import learnMSA.msa_hmm.Initializers as initializers
-import learnMSA.msa_hmm.training as train
+import learnMSA.model.tf.training as train
 import learnMSA.msa_hmm.training_util as training_util
 import learnMSA.msa_hmm.Transitioner as trans
 import learnMSA.protein_language_models.Common as Common
@@ -20,10 +20,10 @@ from learnMSA.protein_language_models.MvnEmitter import (
 from learnMSA.run.util import is_small_gpu, validate_filepath
 
 from ..msa_hmm.AncProbsLayer import inverse_softplus
-from ..util.aligned_dataset import AlignedDataset
-from ..util.sequence_dataset import SequenceDataset
-from . import Priors
-from .Initializers import (ConstantInitializer, PHMMInitializerSet,
+from .aligned_dataset import AlignedDataset
+from .sequence_dataset import SequenceDataset
+from ..msa_hmm import Priors
+from ..msa_hmm.Initializers import (ConstantInitializer, PHMMInitializerSet,
                            make_initializers_from)
 
 # Type alias for model length callback
