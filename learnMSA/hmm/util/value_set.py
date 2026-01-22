@@ -5,6 +5,7 @@ import numpy as np
 from learnMSA.util.aligned_dataset import AlignedDataset
 from learnMSA.hmm.util.transition_index_set import PHMMTransitionIndexSet
 from learnMSA.config.hmm import PHMMConfig
+from learnMSA.config.util import get_emission_dist
 
 
 @dataclass
@@ -175,7 +176,6 @@ class PHMMValueSet:
                 [config.background_distribution]*L, axis=0
             ).astype(np.float32)
         else:
-            from learnMSA.config.util import get_emission_dist
             # Get emissions for each match state
             match_emissions_list = []
             for i in range(L):
@@ -196,7 +196,6 @@ class PHMMValueSet:
                 dtype=np.float32
             )
         else:
-            from learnMSA.config.util import get_emission_dist
             dist = get_emission_dist(
                 config.insert_emissions,
                 head=h,

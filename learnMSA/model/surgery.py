@@ -486,6 +486,11 @@ def model_surgery(
     # Merge configurations that contain parameters per head to a single config
     def concat_param(param_name: str):
         values = [getattr(c, param_name) for c in configs]
+
+        # Check if all values are None
+        if all(v is None for v in values):
+            return None
+
         arrays = [np.atleast_1d(v) for v in values]
 
         # Simple 1D case (like p_begin_delete): just concatenate

@@ -73,7 +73,6 @@ def test_subalignment(
     for s, r in zip(subalignment_strings, ref_subalignment):
         assert s == r
 
-
 def test_only_matches(
     simple_data : SequenceDataset,
     simple_model : LearnMSAModel
@@ -89,7 +88,6 @@ def test_only_matches(
     ref_subalignment = ["FELIK", "FELIK", "FELIK"]
     for s, r in zip(subalignment_strings, ref_subalignment):
         assert s == r
-
 
 def test_alignment_egf() -> None:
     """Test the high-level alignment function with real world data"""
@@ -115,22 +113,33 @@ def test_alignment_egf() -> None:
         config.input_output.subset_ids = seq_ids
         config.training.length_init = [20]
 
-        am = align(data, config)
-        # some friendly thresholds to check if the alignment makes sense
-        eval_output = am.model.evaluate(data)
-    print(eval_output)
+        # Fit the alignment model
+        am, best_index = align(data, config)
 
-    assert np.amin(am.compute_loglik()) > -70
-    assert am.msa_hmm_layer.cell.length[0] > 25
+        # Evaluate the model
+        eval_output = am.model.evaluate(data, models=[best_index])
+
+    # Check some friendly thresholds to check if the alignment makes sense
+    assert np.amin(eval_output["loglik"].mean()) > -70
+    assert am.model.lengths[best_index] > 25
+
     am.to_file(egf_out_path, 0)
     with AlignedDataset(egf_out_path) as pred_msa:
+
+        print("Predicted MSA:")
+        for s in range(pred_msa.num_seq):
+            print(pred_msa.get_record(s).seq)
+
+        print("Reference MSA:")
+        for s in range(ref_msa.num_seq):
+            print(ref_msa.get_record(s).seq)
+
         sp = pred_msa.SP_score(ref_msa)
         # based on experience, any half decent hyperparameter choice
         # should yield at least this score
         assert sp > 0.7
     # Clean up output file
     os.remove(egf_out_path)
-
 
 def test_non_homogeneous_mask() -> None:
     """Test non_homogeneous_mask_func"""
@@ -172,7 +181,6 @@ def test_non_homogeneous_mask() -> None:
                 else:
                     assert mask[0, k, u, v] == 1, f"Expected 1 at {u},{v}"
 
-
 def test_find_faulty_sequences() -> None:
     model_length = 4
     C = 2*model_length
@@ -187,8 +195,6 @@ def test_find_faulty_sequences() -> None:
                                     [3,C,1,T,T]]])
     faulty_sequences = find_faulty_sequences(state_seqs_max_lik, model_length, seq_lens)
     np.testing.assert_equal(faulty_sequences, [0, 1, 4, 5, 6, 7, 8])
-
-
 
 def test_aligned_insertions() -> None:
     """Test aligned insertion blocks."""

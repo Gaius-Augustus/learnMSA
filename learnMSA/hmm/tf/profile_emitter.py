@@ -83,12 +83,8 @@ class ProfileEmitter(TFCategoricalEmitter):
             max_states_subset = max(
                 [self.hmm_config.states[h] for h in self.head_subset]
             )
-            # Keep terminal state
-            terminal_state = matrix[:, -1:, :]
             # Keep only relevant states
             matrix = matrix[:, :max_states_subset, :]
-            # Re-append terminal state
-            matrix = tf.concat([matrix, terminal_state], axis=1)
         return matrix
 
     def emission_scores(self, observations: T_TFTensor) -> T_TFTensor:

@@ -150,17 +150,17 @@ class PHMMConfig(BaseModel):
     is provided as a nested list.
     """
 
-    p_left_left: float | Sequence[float] | NPArray = 0.7
+    p_left_left: float | Sequence[float] | NPArray = 0.5
     """Defines ``P(Left Flank | Left Flank; h)``.
     Can optionally depend on h.
     """
 
-    p_right_right: float | Sequence[float] | NPArray = 0.7
+    p_right_right: float | Sequence[float] | NPArray = 0.5
     """Defines ``P(Right Flank | Right Flank; h)``.
     Can optionally depend on h.
     """
 
-    p_unannot_unannot: float | Sequence[float] | NPArray = 0.7
+    p_unannot_unannot: float | Sequence[float] | NPArray = 0.5
     """Defines ``P(Unannotated | Unannotated; h)``.
     Can optionally depend on h.
     """

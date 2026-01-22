@@ -197,7 +197,7 @@ def test_head_subset(hmm_config: HidtenHMMConfig) -> None:
     B = emitter.matrix()
 
     assert B.shape[0] == 1  # only one head
-    assert B.shape[1] == hmm_config.states[1] + 1  # states + padding
+    assert B.shape[1] == hmm_config.states[1]
 
     # Check matrix properties for the subset head
     np.testing.assert_allclose(

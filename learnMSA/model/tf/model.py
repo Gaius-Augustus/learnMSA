@@ -374,6 +374,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             weighted_y_pred /= tf.reduce_sum(weights, axis=0)
         else:
             weighted_y_pred = y_pred
+            weighted_y_pred /= tf.cast(tf.shape(y_pred)[0], tf.float32)
 
         # Reduce over the sequence dimension
         weighted_loglik = tf.reduce_sum(weighted_y_pred, axis=0) # (H,)
@@ -438,6 +439,8 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             - Loglik mode: (num_sequences, num_models) with the loglikelihoods
               for each sequence and model.
             - Posterior mode: (num_sequences, length, num_models, num_states)
+                with the posterior state distribution per sequence position
+                and head. Outputs zeros for padding positions.
         """
         if indices is None:
             indices = np.arange(data.num_seq)
@@ -485,6 +488,10 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
 
         # Reset
         self.context.batch_gen.crop_long_seqs = old_crop_long_seqs
+
+        # Replace -1 padding with zeros
+        if self.phmm_layer.is_posterior_mode():
+            decoded_array[decoded_array == -1] = 0
 
         return decoded_array
 

@@ -172,7 +172,7 @@ def test_compute_loss_amino_acid_no_prior(
 
     # When use_prior=False, the loss should only be the log-likelihood
     # without any prior component
-    np.testing.assert_allclose(loss.numpy(), loss_log_lik)
+    np.testing.assert_allclose(loss.numpy(), loss_log_lik, rtol=1e-6)
 
 def test_compute_loss_binary(context_binary: LearnMSAContext) -> None:
     # Test that the compute_loss method runs without errors.

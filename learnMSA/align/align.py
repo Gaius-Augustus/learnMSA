@@ -6,7 +6,6 @@ from pathlib import Path
 import numpy as np
 import tensorflow as tf
 
-import learnMSA.msa_hmm.Initializers as initializers
 import learnMSA.msa_hmm.training_util as training_util
 from learnMSA import Configuration
 from learnMSA.align.align_inserts import make_aligned_insertions
@@ -14,8 +13,6 @@ from learnMSA.align.alignment_model import AlignmentModel
 from learnMSA.model.select import SelectionCriterion, select_model
 from learnMSA.model.surgery import model_surgery
 from learnMSA.model.tf.model import LearnMSAModel
-from learnMSA.protein_language_models.MvnEmitter import \
-    AminoAcidPlusMvnEmissionInitializer
 from learnMSA.util.context import LearnMSAContext
 from learnMSA.util.sequence_dataset import SequenceDataset
 
