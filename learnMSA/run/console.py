@@ -49,18 +49,18 @@ def run_main():
         data.validate_dataset()
 
         # Run a training to align the sequences
-        alignment_model = align(data, config)
+        alignment_model, best_model = align(data, config)
 
         if config.input_output.save_model:
             alignment_model.save(config.input_output.save_model)
         if config.input_output.scores != Path():
-            alignment_model.write_scores(config.input_output.scores)
+            alignment_model.write_scores(config.input_output.scores, best_model)
             if config.input_output.verbose:
                 print(f"Wrote scores to {config.input_output.scores}")
         if args.logo:
             plot_and_save_logo(
                 alignment_model,
-                alignment_model.best_model, # type: ignore
+                best_model,
                 args.logo,
             )
         if args.dist_out:

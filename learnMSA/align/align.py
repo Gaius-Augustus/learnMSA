@@ -11,26 +11,31 @@ import learnMSA.msa_hmm.training_util as training_util
 from learnMSA import Configuration
 from learnMSA.align.align_inserts import make_aligned_insertions
 from learnMSA.align.alignment_model import AlignmentModel
-from learnMSA.util.context import LearnMSAContext
-from learnMSA.model.tf.model import LearnMSAModel
+from learnMSA.model.select import SelectionCriterion, select_model
 from learnMSA.model.surgery import model_surgery
-from learnMSA.msa_hmm.posterior import get_state_expectations
-from learnMSA.util.sequence_dataset import SequenceDataset
+from learnMSA.model.tf.model import LearnMSAModel
 from learnMSA.protein_language_models.MvnEmitter import \
     AminoAcidPlusMvnEmissionInitializer
+from learnMSA.util.context import LearnMSAContext
+from learnMSA.util.sequence_dataset import SequenceDataset
 
 np.set_printoptions(legacy='1.21')
 
 
-def align(data : SequenceDataset, config : Configuration) -> AlignmentModel:
+def align(
+    data : SequenceDataset, config : Configuration
+) -> tuple[AlignmentModel, int]:
     """ Aligns the sequences in data according to the specified config.
 
     Args:
         data: Dataset of sequences.
-        config: Configuration that can be used to control training and decoding
+        config: Configuration that can be used to cgit ontrol training and
+            decoding.
 
     Returns:
-        An AlignmentModel object.
+        A tuple containing:
+        - An AlignmentModel object
+        - The index of the best model selected based on the model criterion
     """
     # If the input/output config is not set, we use the dataset path
     if config.input_output.input_file == Path():
@@ -56,15 +61,11 @@ def align(data : SequenceDataset, config : Configuration) -> AlignmentModel:
             f"{Path(config.input_output.input_file).name}"
         )
 
-
+    # Either load a model from file or train a new model
     if config.input_output.load_model == Path() and \
             config.training.skip_training:
         # Load a model without any training
-        am = AlignmentModel.load(
-            config.input_output.load_model,
-            data,
-            custom_batch_gen=context.batch_gen
-        )
+        am = AlignmentModel.load(config.input_output.load_model, data)
     else:
         try:
             t_a = time.time()
@@ -81,15 +82,32 @@ def align(data : SequenceDataset, config : Configuration) -> AlignmentModel:
                 "was: "+str(config.training.batch_size)+"."
             )
             sys.exit(e.error_code)
-    tf.keras.backend.clear_session() #not sure if necessary
-    am.best_model = select_model(
-        am, config.training.model_criterion, config.input_output.verbose
+
+    tf.keras.backend.clear_session() # TODO: not sure if necessary
+
+    if data.num_seq > config.training.max_seq_model_select:
+        # Sample a random subset of sequences for model selection
+        ind = np.random.choice(
+            data.num_seq,
+            config.training.max_seq_model_select,
+            replace=False
+        )
+    else:
+        ind = None
+    best_model = select_model(
+        am.model,
+        data,
+        SelectionCriterion(config.training.model_criterion),
+        sequence_indices=ind,
+        verbose=config.input_output.verbose,
     )
 
     if config.input_output.output_file == Path():
-        return am
+        return am, best_model
 
-    Path(config.input_output.output_file).parent.mkdir(parents=True, exist_ok=True)
+    Path(config.input_output.output_file).parent.mkdir(
+        parents=True, exist_ok=True
+    )
     t = time.time()
 
     if config.training.unaligned_insertions or config.training.only_matches:
@@ -97,7 +115,7 @@ def align(data : SequenceDataset, config : Configuration) -> AlignmentModel:
         # be written to the output file
         am.to_file(
             config.input_output.output_file,
-            am.best_model,
+            best_model,
             format=config.input_output.format,
             only_matches=config.training.only_matches
         )
@@ -110,7 +128,7 @@ def align(data : SequenceDataset, config : Configuration) -> AlignmentModel:
         )
         am.to_file(
             config.input_output.output_file,
-            am.best_model,
+            best_model,
             aligned_insertions=aligned_insertions,
             format=config.input_output.format
         )
@@ -128,37 +146,35 @@ def align(data : SequenceDataset, config : Configuration) -> AlignmentModel:
         print("time for generating output:", "%.4f" % (time.time()-t))
         print("Wrote file", config.input_output.output_file)
 
-    return am
+    return am, best_model
 
-
-""" Trains k independent models on the sequences in a dataset and returns k
-    "lazy" alignments, where "lazy" means that decoding will only be carried
-    out when the user wants to print the alignment or write it to a file.
-    Decoding is usually expensive and typically it should only be done after
-    a model selection step.
-Args:
-    data: The sequence dataset to align.
-    config: Configuration that can be used to control training and decoding
-        (see msa_hmm.config.make_default).
-    model_generator: Optional callback that generates a user defined model
-        (if None, the default model generator will be used).
-    batch_generator: Optional callback that generates sequence batches defined
-        by user (if None, the default batch generator will be used).
-    subset: Optional subset of the sequence ids. Only the specified sequences
-        will be aligned but the models will be trained on all sequences
-        (if None, all sequences in the dataset will be aligned).
-    verbose: If False, all output messages will be disabled.
-    A2M_output: If True, insertions will be indicated by lower case letters in
-        the output and "." will indicate insertions in other sequences.
-        Otherwise all upper case letters and only "-" will be used.
-    load_model: Path to a pre-trained model to load (if any).
-Returns:
-    An AlignmentModel object.
-"""
 def _fit_and_align(
     data: SequenceDataset,
     context : LearnMSAContext
 ) -> AlignmentModel:
+    """ Utility method that trains a LearnMSAModel and creates an
+    AlignmentModel from it.
+
+    Args:
+        data: The sequence dataset to align.
+        config: Configuration that can be used to control training and decoding
+            (see msa_hmm.config.make_default).
+        model_generator: Optional callback that generates a user defined model
+            (if None, the default model generator will be used).
+        batch_generator: Optional callback that generates sequence batches
+            defined by user (if None, the default batch generator will be used).
+        subset: Optional subset of the sequence ids. Only the specified
+            sequences will be aligned but the models will be trained on all
+            sequences (if None, all sequences in the dataset will be aligned).
+        verbose: If False, all output messages will be disabled.
+        A2M_output: If True, insertions will be indicated by lower case letters
+            in the output and "." will indicate insertions in other sequences.
+            Otherwise all upper case letters and only "-" will be used.
+        load_model: Path to a pre-trained model to load (if any).
+
+    Returns:
+        An AlignmentModel object.
+    """
     config = context.config
     if config.input_output.verbose:
         _dataset_messages(data)
@@ -170,54 +186,26 @@ def _fit_and_align(
         config.training.min_surgery_seqs
     )
 
-    # Make dummy initializers for surgery
-    if config.language_model.use_language_model:
-        emission_dummy = [
-            AminoAcidPlusMvnEmissionInitializer(context.scoring_model_config)
-        ]
-    else:
-        emission_dummy = [initializers.make_default_emission_init()]
-    transition_dummy = initializers.make_default_transition_init()
-    flank_init_dummy = initializers.make_default_flank_init()
-
     if config.input_output.load_model:
         # Load the alignment model from file and use it as initialization
-        am = AlignmentModel.load(
-            config.input_output.load_model,
-            data,
-            custom_batch_gen=context.batch_gen,
-        )
+        am = AlignmentModel.load(config.input_output.load_model, data)
         if config.input_output.verbose:
             print("Loaded model from file", config.input_output.load_model)
 
-        # Prevent model surgery from adding or discarding any states,
-        # we'll use it to get initial transition and emission parameters
-        surgery_result = model_surgery(
-            am, 0.0, 1e6,
-            emission_dummy,
-            transition_dummy,
-            flank_init_dummy,
-            config.input_output.verbose
-        )
-
-        # Override the initializers in the legacy config
-        context.emitter = surgery_result.emitter
-        context.transitioner = surgery_result.transitioner
-        context.model_lengths = surgery_result.model_lengths
-
-    # Check the maximum number of iterations that the user allows
-    # if it's 1, we only do a single training iteration without surgery
-    last_iteration=config.training.max_iterations==1
+        # TODO: legacy code did override context.lengths here
+        # still needed?
 
     # 2 staged main loop: Fits model parameters with GD and optimized model
     # architecture with surgery
+    last_iteration = config.training.max_iterations == 1
     for i in range(config.training.max_iterations):
         if callable(context.batch_size):
             batch_size = context.batch_size(data)
         else:
             batch_size = context.batch_size
-        #set the batch size to something smaller than the dataset size even though
-        #for low sequence numbers it would be feasible to train on all data at once
+        # Set the batch size to something smaller than the dataset size even
+        # though or low sequence numbers it would be feasible to train on all
+        # data at once
         batch_size = min(
             batch_size, training_util.get_low_seq_num_batch_size(data.num_seq)
         )
@@ -232,54 +220,40 @@ def _fit_and_align(
         context.effective_num_seq = train_indices.shape[0] #todo: workaround
         model = LearnMSAModel(context)
         model.compile()
-        model.build(batch_size)
 
         # Run training
         model.fit(data, train_indices, i, batch_size)
 
+        am = AlignmentModel(data, model, decode_indices)
+
         if config.input_output.verbose:
-            print("Creating alignment model...")
-        am = AlignmentModel(
-            data,
-            context.batch_gen,
-            decode_indices,
-            batch_size=batch_size,
-            model=model
-        )
-        if config.input_output.verbose:
-            print("Successfully created alignment model.")
+            print("Created alignment model successfully.")
+
         if last_iteration:
             break
+
         surgery_result = model_surgery(
-            am,
-            config.training.surgery_del,
-            config.training.surgery_ins,
-            emission_dummy,
-            transition_dummy,
-            flank_init_dummy,
-            config.input_output.verbose
+            am.model,
+            data,
+            surgery_del = config.training.surgery_del,
+            surgery_ins = config.training.surgery_ins,
+            verbose = config.input_output.verbose,
         )
-        context.emitter = surgery_result.emitter
-        context.transitioner = surgery_result.transitioner
+
         context.model_lengths = surgery_result.model_lengths
+        context.config.hmm = surgery_result.config
+        if surgery_result.plm_config is not None:
+            context.config.language_model = surgery_result.plm_config
         surgery_converged = surgery_result.surgery_converged
 
-        if context.encoder_weight_extractor is not None:
-            if config.input_output.verbose:
-                print(
-                    "Used the encoder_weight_extractor callback to pass "\
-                    "the encoder parameters to the next iteration."
-                )
-            raise NotImplementedError(
-                "Encoder re-initialization after surgery is currently not "\
-                "supported."
-            )
-            #context.encoder_initializer = context.encoder_weight_extractor(am.encoder_model)
-        elif config.input_output.verbose:
+        if config.input_output.verbose:
             print("Re-initialized the encoder parameters.")
-        if config.input_output.verbose and surgery_converged:
-            print("Surgery converged.")
-        last_iteration = surgery_converged or (i == config.training.max_iterations-2)
+            if surgery_converged:
+                print("Surgery converged.")
+
+        last_iteration = surgery_converged\
+            or (i == config.training.max_iterations-2)
+
     return am
 
 
@@ -290,7 +264,10 @@ def _fit_and_align_with_logo_gif(
     from learnMSA.msa_hmm.Visualize import LogoPlotterCallback, make_logo_gif
     config = context.config
     indices = np.arange(data.num_seq)
-    logo_dir = config.visualization.logo_gif.parent if config.visualization.logo_gif else "", # type: ignore
+    if config.visualization.logo_gif:
+        logo_dir = config.visualization.logo_gif.parent
+    else:
+        logo_dir = ""
     if callable(context.batch_size):
         batch_size = context.batch_size(
             context.model_lengths, # type: ignore
@@ -299,87 +276,27 @@ def _fit_and_align_with_logo_gif(
     else:
         batch_size = context.batch_size
 
-    logo_plotter_callback = LogoPlotterCallback(logo_dir, data, context.batch_gen, indices, batch_size)
-    print("Running in logo gif mode. A sequence logo will be generated for each training step.")
-    print("This mode is much slower and less accurate (no model surgery and just 1 model) than the default mode")
-    print("and should only be used for vizualization and debugging.")
+    logo_plotter_callback = LogoPlotterCallback(
+        logo_dir, data, context.batch_gen, indices, batch_size
+    )
+
+    print(
+        "Running in logo gif mode. A sequence logo will be generated for each "\
+        "training step. This mode is much slower and less accurate (no model "\
+        "surgery and just 1 model) than the default mode and should only be "\
+        "used for visualization and debugging."
+    )
 
     # Create and compile the model
     model = LearnMSAModel(context)
     model.compile()
 
     # Run training
-    model.fit(data, indices, 0, batch_size, [logo_plotter_callback])
+    model.fit(data, indices, 0, batch_size, callbacks=[logo_plotter_callback])
 
     make_logo_gif(logo_plotter_callback.frame_dir, logo_dir / "training.gif") # type: ignore
-    am = AlignmentModel(data, context.batch_gen, indices, batch_size=batch_size, model=model)
+    am = AlignmentModel(data, model, indices)
     return am
-
-
-def get_model_scores(am, model_criterion, verbose):
-    selection_criteria = {
-        "posterior": select_model_posterior,
-        "loglik": select_model_loglik,
-        "AIC": select_model_AIC,
-        "consensus": select_model_consensus
-    }
-    if model_criterion not in selection_criteria:
-        raise SystemExit(f"Invalid model selection criterion. Valid criteria are: {list(selection_criteria.keys())}.")
-    return selection_criteria[model_criterion](am, verbose)
-
-
-def select_model(am, model_criterion, verbose) -> int:
-    scores = get_model_scores(am, model_criterion, verbose)
-    best = np.argmax(scores)
-    if verbose:
-        print("Selection criterion:", model_criterion)
-        print("Best model: ", best, "(0-based)")
-    return int(best)
-
-
-def select_model_posterior(am, verbose=False):
-    expected_state = get_state_expectations(am.data,
-                                            am.batch_generator,
-                                            np.arange(am.data.num_seq),
-                                            am.batch_size,
-                                            am.msa_hmm_layer,
-                                            am.encoder_model)
-    posterior_sums = [np.sum(expected_state[i, 1:am.length[i]+1]) for i in range(am.num_models)]
-    if verbose:
-        print("Total expected match states:", posterior_sums)
-    return posterior_sums
-
-
-#TODO: the default is to use the prior although not using is seems to be very slightly better
-#the default argument should change later to false but keep using prior for now for legacy reasons
-def select_model_loglik(am, verbose=False, use_prior=True):
-    loglik = am.compute_loglik()
-    score = tf.identity(loglik)
-    if use_prior:
-        prior = am.compute_log_prior()
-        score += prior
-    if verbose:
-        if use_prior:
-            likelihoods = ["%.4f" % ll + " (%.4f)" % p for ll,p in zip(loglik, prior)]
-            print("Likelihoods (priors): ", likelihoods)
-        else:
-            likelihoods = ["%.4f" % ll for ll in loglik]
-            print("Likelihoods: ", likelihoods)
-            print("Mean likelihood: ", np.mean(loglik))
-    return score
-
-
-def select_model_AIC(am, verbose=False):
-    loglik = select_model_loglik(am, verbose, use_prior=False)
-    aic = am.compute_AIC(loglik=loglik)
-    return -aic #negate as we want to take the maximum
-
-
-def select_model_consensus(am, verbose=False):
-    consensus = am.compute_consensus_score()
-    if verbose:
-        print("Consensus scores: ", ["%.4f" % c for c in consensus])
-    return consensus
 
 
 def _dataset_messages(data : SequenceDataset, seq_count_heuristic_gap_check=100, seq_count_warning_threshold=100):

@@ -279,7 +279,7 @@ def plot_rate_matrices(am,
     
     
 def print_and_plot(am, 
-                   model_index = None,
+                   model_index: int,
                    max_seq = 20, 
                    seqs_to_plot = [0,1,2], 
                    path_colors=["#CC6600", "#0000cc", "#00cccc"],
@@ -292,8 +292,6 @@ def print_and_plot(am,
                    model_filename="", 
                    anc_probs_filename="",
                    logo_filename=""):
-    if model_index is None:
-        model_index = am.best_model
     # print the alignment
     msa = am.to_string(model_index)
     ds = msa_hmm.Training.make_dataset(am.indices, 

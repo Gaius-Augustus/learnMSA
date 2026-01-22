@@ -58,6 +58,10 @@ class TrainingConfig(BaseModel):
     model_criterion: str = "AIC"
     """Criterion for model selection."""
 
+    max_seq_model_select: int = 200000
+    """Maximum number of sequences to use for model selection. If the dataset
+    contains more sequences, a random subset will be used."""
+
     indexed_data: bool = False
     """Stream training data at the cost of training time."""
 

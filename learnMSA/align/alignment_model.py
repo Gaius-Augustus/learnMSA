@@ -43,11 +43,6 @@ class AlignmentModel():
     gap_symbol_insertions: str
     """Character used to denote insertions in other sequences."""
 
-    best_model: int
-    """Index of the best model based on model selection criterion.
-    TODO: Set externally, remove this attribute from here or set internally.
-    """
-
     metadata: dict
     """Alignment metadata for each model."""
 
@@ -78,7 +73,6 @@ class AlignmentModel():
             self.indices = indices
         self.gap_symbol = gap_symbol
         self.gap_symbol_insertions = gap_symbol_insertions
-        self.best_model = -1
         self.metadata = {}
 
     def get_output_alphabet(self, a2m: bool = True) -> np.ndarray:
@@ -109,7 +103,7 @@ class AlignmentModel():
 
     def to_string(
         self,
-        model_index: int | None = None,
+        model_index: int,
         add_block_sep: bool = True,
         aligned_insertions: AlignedInsertions = AlignedInsertions(),
         a2m: bool = True,
@@ -133,8 +127,6 @@ class AlignmentModel():
             only_matches: If true, omit all insertions and write only those
                 amino acids that are assigned to match states.
         """
-        if model_index is None:
-            model_index = self.best_model
         output_alphabet = self.get_output_alphabet(a2m)
         batch_alignment = self.get_batch_alignment(
             model_index=model_index,
@@ -151,7 +143,7 @@ class AlignmentModel():
     def to_file(
         self,
         filepath: str,
-        model_index: int | None = None,
+        model_index: int,
         batch_size: int = 100000,
         add_block_sep: bool = False,
         aligned_insertions : AlignedInsertions = AlignedInsertions(),
@@ -182,8 +174,6 @@ class AlignmentModel():
             only_matches: If true, omit all insertions and write only those
                 amino acids that are assigned to match states.
         """
-        if model_index is None:
-            model_index = self.best_model
         if format == "fasta" or format == "a2m":
             # Stream batches to file
             output_alphabet = self.get_output_alphabet(format == "a2m")
@@ -332,17 +322,13 @@ class AlignmentModel():
         alignment_strings = [''.join(s) for s in alignment_arr]
         return alignment_strings
 
-    def write_scores(self, filepath: Path, model: int|None = None) -> None:
+    def write_scores(self, filepath: Path, model: int) -> None:
         """ Writes per-sequence scores (loglik, bitscore) to a
             tsv file sorted by the bitscore ``loglik(S) - log P(S; nullmodel)``.
         Args:
             filepath: Path of the output file.
-            model: The model for which scores are written. By default, the best
-                model based on the model selection standard criterion is used.
+            model: The model for which scores are written.
         """
-        # Find the model index to use
-        if model is None:
-            model = self.best_model if self.best_model >= 0 else 0  # type: ignore
 
         # Compute the likelihood and bitscores for all sequences
         loglik = self.model.estimate_loglik(
@@ -380,8 +366,6 @@ class AlignmentModel():
             "gap_symbol" : self.gap_symbol,
             "gap_symbol_insertions" : self.gap_symbol_insertions,
         }
-        if self.best_model >= 0:
-            d["best_model"] = int(self.best_model)
         with open(filepath+"/meta.json", "w") as metafile:
             metafile.write(json.dumps(d, indent=4))
         # Serialize indices
@@ -452,8 +436,6 @@ class AlignmentModel():
             d["gap_symbol"],
             d["gap_symbol_insertions"],
         )
-        if "best_model" in d:
-            am.best_model = d["best_model"]
         return am
 
 

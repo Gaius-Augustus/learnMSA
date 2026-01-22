@@ -106,14 +106,15 @@ def test_alignment_egf() -> None:
     with SequenceDataset(egf_fasta_path) as data:
         with AlignedDataset(egf_ref_path) as ref_msa:
             seq_ids = ref_msa.seq_ids
+
         config = Configuration()
         config.training.num_model = 1
         config.training.no_sequence_weights = True
         config.training.epochs = [5, 1, 5]
         config.training.max_iterations = 2
         config.input_output.subset_ids = seq_ids
-        config.input_output.verbose = False
         config.training.length_init = [20]
+
         am = align(data, config)
         # some friendly thresholds to check if the alignment makes sense
         eval_output = am.model.evaluate(data)
