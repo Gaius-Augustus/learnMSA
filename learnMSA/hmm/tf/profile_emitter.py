@@ -27,16 +27,20 @@ class ProfileEmitter(TFCategoricalEmitter):
     def __init__(
         self,
         values: Sequence[PHMMValueSet],
+        trainable_insertions: bool = True,
         **kwargs
     ) -> None:
         """
         Args:
             values (Sequence[PHMMValueSet]): A sequence of value sets,
                 one per head, with probabilities.
+            trainable_insertions (bool): Whether insertion emissions are
+                trainable. Defaults to True.
         """
         super().__init__(**kwargs)
 
         self._lengths = np.array([value_set.L for value_set in values])
+        self.trainable_insertions = trainable_insertions
 
         init_values = []
         # Initialization based on provided value sets
@@ -85,6 +89,19 @@ class ProfileEmitter(TFCategoricalEmitter):
             )
             # Keep only relevant states
             matrix = matrix[:, :max_states_subset, :]
+
+        if not self.trainable_insertions:
+            # Create mask for match states (True) vs insertion states (False)
+            # self.lengths gives the number of match states per head
+            max_states = tf.shape(matrix)[1]
+            mask = tf.sequence_mask(
+                self.lengths, maxlen=max_states, dtype=matrix.dtype
+            )
+            # Expand mask to cover the emission dimension
+            mask = mask[:, :, tf.newaxis]
+            # Apply mask: keep gradients for match states, stop for insertions
+            matrix = mask * matrix + (1 - mask) * tf.stop_gradient(matrix)
+
         return matrix
 
     def emission_scores(self, observations: T_TFTensor) -> T_TFTensor:

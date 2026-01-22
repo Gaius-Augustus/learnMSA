@@ -63,6 +63,7 @@ class PHMMLayer(tf.keras.Layer):
         prior_config: PHMMPriorConfig | None = None,
         plm_config: LanguageModelConfig | None = None,
         use_prior: bool = True,
+        trainable_insertions: bool = True,
         **kwargs
     ) -> None:
         """
@@ -72,6 +73,7 @@ class PHMMLayer(tf.keras.Layer):
             prior_config: Prior configuration parameters.
             plm_config: Protein language model configuration.
             use_prior: Whether to use priors for regularization.
+            trainable_insertions: Whether insertion emissions are trainable.
         """
         super().__init__(**kwargs)
         self.lengths = np.asarray(lengths, dtype=np.int32)
@@ -117,7 +119,9 @@ class PHMMLayer(tf.keras.Layer):
             )
 
         # Add the profile emitter
-        profile_emitter = ProfileEmitter(values=values)
+        profile_emitter = ProfileEmitter(
+            values=values, trainable_insertions=trainable_insertions
+        )
         self.hmm.add_emitter(profile_emitter)
         if self.use_prior and prior_config.use_amino_acid_prior:
             profile_emitter.prior = emission_prior

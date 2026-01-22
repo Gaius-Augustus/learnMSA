@@ -87,7 +87,7 @@ def model(data: SequenceDataset) -> LearnMSAModel:
 def data_insert_delete() -> SequenceDataset:
     """Create a test sequence dataset."""
     test_data_path = os.path.join(
-        os.path.dirname(__file__), "data", "felix_insert_delete.fa"
+        os.path.dirname(__file__), "..", "data", "felix_insert_delete.fa"
     )
     data = SequenceDataset(test_data_path)
     return data

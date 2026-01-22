@@ -110,8 +110,9 @@ def test_alignment_egf() -> None:
         config.training.no_sequence_weights = True
         config.training.epochs = [5, 1, 5]
         config.training.max_iterations = 2
-        config.input_output.subset_ids = seq_ids
         config.training.length_init = [20]
+        config.training.frozen_insertions = True
+        config.input_output.subset_ids = seq_ids
 
         # Fit the alignment model
         am, best_index = align(data, config)
@@ -135,6 +136,7 @@ def test_alignment_egf() -> None:
             print(ref_msa.get_record(s).seq)
 
         sp = pred_msa.SP_score(ref_msa)
+        print("sp score:", sp)
         # based on experience, any half decent hyperparameter choice
         # should yield at least this score
         assert sp > 0.7

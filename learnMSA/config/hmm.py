@@ -115,7 +115,7 @@ class PHMMConfig(BaseModel):
     """
 
     p_match_match: float | Sequence[float] | Sequence[Sequence[float]] | \
-        NPArray = 0.7
+        NPArray = 0.78
     """Defines ``P(Match i+1 | Match i; h)``.
     Can optionally depend on i and h.
     """
@@ -127,7 +127,7 @@ class PHMMConfig(BaseModel):
     """
 
     p_match_end: float | Sequence[float] | Sequence[Sequence[float]] | \
-        NPArray = 0.1
+        NPArray = 0.02
     """Defines ``P(End | Match i; h)``.
     Can optionally depend on i and h.
     """
@@ -150,17 +150,17 @@ class PHMMConfig(BaseModel):
     is provided as a nested list.
     """
 
-    p_left_left: float | Sequence[float] | NPArray = 0.5
+    p_left_left: float | Sequence[float] | NPArray = 0.26
     """Defines ``P(Left Flank | Left Flank; h)``.
     Can optionally depend on h.
     """
 
-    p_right_right: float | Sequence[float] | NPArray = 0.5
+    p_right_right: float | Sequence[float] | NPArray = 0.26
     """Defines ``P(Right Flank | Right Flank; h)``.
     Can optionally depend on h.
     """
 
-    p_unannot_unannot: float | Sequence[float] | NPArray = 0.5
+    p_unannot_unannot: float | Sequence[float] | NPArray = 0.26
     """Defines ``P(Unannotated | Unannotated; h)``.
     Can optionally depend on h.
     """
