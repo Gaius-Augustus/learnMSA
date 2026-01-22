@@ -5,7 +5,7 @@ import pytest
 import tensorflow as tf
 
 from learnMSA import Configuration
-from learnMSA.msa_hmm import Emitter, Initializers, Transitioner
+from learnMSA.config.hmm import PHMMConfig
 from learnMSA.msa_hmm.align import align
 from learnMSA.msa_hmm.alignment_model import (AlignmentModel,
                                              find_faulty_sequences,
@@ -14,10 +14,6 @@ from learnMSA.msa_hmm.learnmsa_context import LearnMSAContext
 from learnMSA.model.model import LearnMSAModel
 from learnMSA.util.aligned_dataset import AlignedDataset, SequenceDataset
 
-
-def string_to_one_hot(s : str) -> tf.Tensor:
-    i = [SequenceDataset._default_alphabet.index(aa) for aa in s]
-    return tf.one_hot(i, len(SequenceDataset._default_alphabet)-1)
 
 @pytest.fixture
 def simple_data() -> SequenceDataset:
@@ -31,45 +27,47 @@ def simple_config() -> Configuration:
     config.training.num_model = 1
     config.training.no_sequence_weights = True
     config.training.length_init = [5]
+    alphabet = SequenceDataset._default_alphabet
+
+    # Create FELIK model (length 5)
+    felik_indices = [alphabet.index(aa) for aa in "FELIK"]
+    match_emissions = np.zeros((1, 5, len(alphabet)-1))
+    for i, aa_idx in enumerate(felik_indices):
+        match_emissions[0, i, aa_idx] = 1.0
+    config.hmm.match_emissions = match_emissions
+    config.hmm.insert_emissions = [1/23]*23
+    config.hmm.use_prior_for_emission_init = False
+
     return config
 
-def make_simple_context_and_model(
-    data : SequenceDataset,
-    config : Configuration
-) -> tuple[LearnMSAContext, LearnMSAModel]:
-    # Prepare the context based on config and data
-    context = LearnMSAContext(config, data)
-    # Create and initialize the model
-    emission_init = string_to_one_hot("FELIK").numpy()*20
-    insert_init = np.squeeze(string_to_one_hot("A") + string_to_one_hot("H")\
-        + string_to_one_hot("C"))*20
-    context.emitter = [Emitter.ProfileHMMEmitter(
-        emission_init=Initializers.ConstantInitializer(emission_init), # type: ignore
-        insertion_init=Initializers.ConstantInitializer(insert_init)
-    )]
-    context.transitioner = Transitioner.ProfileHMMTransitioner(
-        transition_init=(
-            Initializers.make_default_transition_init(
-                MM=0, MI=0, MD=0, II=0, IM=0, DM=0, DD=0,
-                FC=0, FE=0, R=0, RF=0, T=0, scale=0
-            )
-        )
-    )
-    model = LearnMSAModel(context)
-    model.build(None)
-    return context, model
+@pytest.fixture
+def simple_context(
+    simple_data: SequenceDataset,
+    simple_config: Configuration
+) -> LearnMSAContext:
+    """Fixture for a LearnMSAContext for FELIK model (single head)."""
+    # Create context and set phmm_config
+    context = LearnMSAContext(simple_config, simple_data)
+    return context
+
+@pytest.fixture
+def simple_model(
+    simple_context: LearnMSAContext
+) -> LearnMSAModel:
+    """Fixture for a LearnMSAModel with FELIK model."""
+    model = LearnMSAModel(simple_context)
+    model.build()
+    return model
 
 def test_subalignment(
     simple_data : SequenceDataset,
-    simple_config : Configuration
+    simple_model : LearnMSAModel
 ) -> None:
     """Test extraction of subalignments from AlignmentModel"""
-    context, model = make_simple_context_and_model(simple_data, simple_config)
     # subalignment
     subset = np.array([0, 2, 5])
     # create alignment after building model
-    context.batch_gen.configure(simple_data, context)
-    sub_am = AlignmentModel(simple_data, context.batch_gen, subset, 32, model)
+    sub_am = AlignmentModel(simple_data, simple_model, subset)
     subalignment_strings = sub_am.to_string(0, add_block_sep=False)
     ref_subalignment = ["FE...LIK...", "FE...LIKhac", "FEahcLIK..."]
     for s, r in zip(subalignment_strings, ref_subalignment):
@@ -78,15 +76,13 @@ def test_subalignment(
 
 def test_only_matches(
     simple_data : SequenceDataset,
-    simple_config : Configuration
+    simple_model : LearnMSAModel
 ) -> None:
     """Test writing only match columns to file"""
-    context, model = make_simple_context_and_model(simple_data, simple_config)
     # subalignment
     subset = np.array([0, 2, 5])
     # create alignment after building model
-    context.batch_gen.configure(simple_data, context)
-    sub_am = AlignmentModel(simple_data, context.batch_gen, subset, 32, model)
+    sub_am = AlignmentModel(simple_data, simple_model, subset)
     subalignment_strings = sub_am.to_string(
         0, add_block_sep=False, only_matches=True
     )
@@ -96,11 +92,19 @@ def test_only_matches(
 
 
 def test_alignment_egf() -> None:
-    """Test the high level alignment function with real world data"""
-    train_filename = os.path.dirname(__file__)+"/../tests/data/egf.fasta"
-    ref_filename = os.path.dirname(__file__)+"/../tests/data/egf.ref"
-    with SequenceDataset(train_filename) as data:
-        with AlignedDataset(ref_filename) as ref_msa:
+    """Test the high-level alignment function with real world data"""
+    egf_fasta_path = os.path.join(
+        os.path.dirname(__file__), "data", "egf.fasta"
+    )
+    egf_ref_path = os.path.join(
+        os.path.dirname(__file__), "data", "egf.ref"
+    )
+    egf_out_path = os.path.join(
+        os.path.dirname(__file__), "data", "egf.out.fasta"
+    )
+
+    with SequenceDataset(egf_fasta_path) as data:
+        with AlignedDataset(egf_ref_path) as ref_msa:
             seq_ids = ref_msa.seq_ids
         config = Configuration()
         config.training.num_model = 1
@@ -112,13 +116,19 @@ def test_alignment_egf() -> None:
         config.training.length_init = [20]
         am = align(data, config)
         # some friendly thresholds to check if the alignment makes sense
-        assert np.amin(am.compute_loglik()) > -70
-        assert am.msa_hmm_layer.cell.length[0] > 25
-        am.to_file(os.path.dirname(__file__)+"/../tests/data/egf.out.fasta", 0)
-        with AlignedDataset(os.path.dirname(__file__)+"/../tests/data/egf.out.fasta") as pred_msa:
-            sp = pred_msa.SP_score(ref_msa)
-            # based on experience, any half decent hyperparameter choice should yield at least this score
-            assert sp > 0.7
+        eval_output = am.model.evaluate(data)
+    print(eval_output)
+
+    assert np.amin(am.compute_loglik()) > -70
+    assert am.msa_hmm_layer.cell.length[0] > 25
+    am.to_file(egf_out_path, 0)
+    with AlignedDataset(egf_out_path) as pred_msa:
+        sp = pred_msa.SP_score(ref_msa)
+        # based on experience, any half decent hyperparameter choice
+        # should yield at least this score
+        assert sp > 0.7
+    # Clean up output file
+    os.remove(egf_out_path)
 
 
 def test_non_homogeneous_mask() -> None:
