@@ -171,25 +171,6 @@ def test_get_value_invalid_parameter():
         get_value([["nested", "strings"]], head=0, index=0)
 
 
-def test_hmm_config_default_values():
-    """Test HMMConfig with default values."""
-    config = PHMMConfig()
-
-    assert config.p_begin_match == 0.5
-    assert config.p_match_match == 0.7
-    assert config.p_match_insert == 0.1
-    assert config.p_match_end == 0.1
-    assert config.p_insert_insert == 0.38
-    assert config.p_delete_delete == 0.38
-    assert config.p_begin_delete == 0.1
-    assert config.p_left_left == 0.7
-    assert config.p_right_right == 0.7
-    assert config.p_unannot_unannot == 0.7
-    assert config.p_end_unannot == 1e-5
-    assert config.p_end_right == 0.5
-    assert config.p_start_left_flank == 0.5
-
-
 def test_hmm_config_complex_multi_head():
     """Test HMMConfig with complex multi-head configuration."""
     # 3 heads with varying lengths

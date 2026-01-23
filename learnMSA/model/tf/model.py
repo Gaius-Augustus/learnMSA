@@ -280,6 +280,9 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         """
         self.phmm_layer.loglik_mode()
         self.context.batch_gen.configure(data, self.context)
+        # use static shapes when JIT is enabled
+        self.context.batch_gen.static_shape_mode =\
+            self.context.config.advanced.jit_compile
 
         if batch_size is None:
             if callable(self.context.batch_size):
@@ -457,6 +460,8 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         # Additional setup required before running Viterbi
         # TODO: clean up later
         self.context.batch_gen.configure(data, self.context)
+        # Don't use static shapes for prediction - we'll use bucketing
+        self.context.batch_gen.static_shape_mode = False
         old_crop_long_seqs = self.context.batch_gen.crop_long_seqs
         self.context.batch_gen.crop_long_seqs = math.inf #do not crop sequences
 
@@ -473,7 +478,9 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
 
         # Use None for infinite steps (-1), otherwise use the computed steps
         steps_param = None if steps == -1 else steps
-        result = super().predict(ds, steps=steps_param, verbose=self.get_verbosity())
+        result = super().predict(
+            ds, steps=steps_param, verbose=self.get_verbosity()
+        )
 
         # When bucketing is used, predict_step returns (predictions, indices)
         if isinstance(result, tuple) and len(result) == 2:
@@ -556,6 +563,8 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         # Additional setup required before running Viterbi
         # TODO: clean up later
         self.context.batch_gen.configure(data, self.context)
+        # Don't use static shapes for prediction - we'll use bucketing
+        self.context.batch_gen.static_shape_mode = False
         old_crop_long_seqs = self.context.batch_gen.crop_long_seqs
         self.context.batch_gen.crop_long_seqs = math.inf #do not crop sequences
 
