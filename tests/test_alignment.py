@@ -126,17 +126,7 @@ def test_alignment_egf() -> None:
 
     am.to_file(egf_out_path, 0)
     with AlignedDataset(egf_out_path) as pred_msa:
-
-        print("Predicted MSA:")
-        for s in range(pred_msa.num_seq):
-            print(pred_msa.get_record(s).seq)
-
-        print("Reference MSA:")
-        for s in range(ref_msa.num_seq):
-            print(ref_msa.get_record(s).seq)
-
         sp = pred_msa.SP_score(ref_msa)
-        print("sp score:", sp)
         # based on experience, any half decent hyperparameter choice
         # should yield at least this score
         assert sp > 0.7
