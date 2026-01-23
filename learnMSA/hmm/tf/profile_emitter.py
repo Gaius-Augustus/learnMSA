@@ -141,15 +141,26 @@ class ProfileEmitter(TFCategoricalEmitter):
         # [..., head 2, L2 x match + (L2+3) x insert + (padding)]]
         B, T, H, Q = tf.unstack(tf.shape(emission_scores))
         emission_scores = tf.reshape(emission_scores, (B, T, H*Q))
-        repeats = []
+
+        # Build gather indices for XLA compatibility (instead of tf.repeat)
+        indices = []
         ML = self.lengths.max()
+        offset = 0
         for L in self.lengths:
-            repeats.extend([1]*L)
-            repeats.extend([L+2])  # repeat insertion
+            # Match states: copy once each
+            indices.extend(list(range(offset, offset + L)))
+            # Insertion state: repeat L+2 times
+            indices.extend([offset + L] * (L + 2))
+            offset += L + 1  # Move to next head (L matches + 1 insert)
+            # Padding states
             if L < ML:
-                repeats.extend([ML-L+1])  # repeat any padding
-                repeats.extend([1]*(ML-L-1))  # keep rest of padding
-        emission_scores = tf.repeat(emission_scores, repeats, axis=-1)
+                indices.extend([offset] * (ML - L + 1))  # repeat first padding
+                indices.extend(list(range(offset + 1, offset + ML - L)))  # rest of padding
+                offset += ML - L
+
+        # Use tf.gather instead of tf.repeat for XLA compatibility
+        indices_tensor = tf.constant(indices, dtype=tf.int32)
+        emission_scores = tf.gather(emission_scores, indices_tensor, axis=-1)
         emission_scores = tf.reshape(emission_scores, (B, T, H, 2*Q))
         if use_padding:
             emission_scores = tf.pad(

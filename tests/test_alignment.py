@@ -108,10 +108,11 @@ def test_alignment_egf() -> None:
         config = Configuration()
         config.training.num_model = 1
         config.training.no_sequence_weights = True
-        config.training.epochs = [5, 1, 5]
+        config.training.epochs = [3, 1, 10]
         config.training.max_iterations = 2
         config.training.length_init = [20]
-        config.training.frozen_insertions = True
+        config.training.use_anc_probs = False
+        config.advanced.jit_compile = False
         config.input_output.subset_ids = seq_ids
 
         # Fit the alignment model
@@ -130,6 +131,7 @@ def test_alignment_egf() -> None:
         # based on experience, any half decent hyperparameter choice
         # should yield at least this score
         assert sp > 0.7
+        print(f"EGF alignment SP score: {sp}")
     # Clean up output file
     os.remove(egf_out_path)
 

@@ -123,9 +123,15 @@ class TFPHMMTransitionPrior(TFPrior):
         scores = tf.squeeze(scores) # (sum_L - num_heads)
 
         # Sum over the heads (each with various number of match states)
-        scores = tf.math.segment_sum(
+        # Use unsorted_segment_sum instead of segment_sum for XLA compatibility
+        segment_ids = tf.constant(
+            np.repeat(np.arange(len(self.lengths)), [L-1 for L in self.lengths]),
+            dtype=tf.int32
+        )
+        scores = tf.math.unsorted_segment_sum(
             scores,
-            np.repeat(np.arange(len(self.lengths)), [L-1 for L in self.lengths])
+            segment_ids,
+            num_segments=len(self.lengths)
         )
 
         return scores
