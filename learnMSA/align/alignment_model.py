@@ -670,7 +670,6 @@ class AlignmentModel():
         assert len(models) == 1, "Not implemented for multiple models."
 
         self.model.viterbi_mode()
-        self.model.compile()
         state_seqs_max_lik = self.model.predict(
             self.data, self.indices, models
         )

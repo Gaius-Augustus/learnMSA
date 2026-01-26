@@ -168,7 +168,10 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             embeddings = None
 
         # Broadcast in the number of heads if necessary
-        n = self.context.config.training.num_model
+        if self.phmm_layer.head_subset is not None:
+            n = len(self.phmm_layer.head_subset)
+        else:
+            n = self.phmm_layer.heads
         if sequences.shape[1] == 1 and n > 1:
             sequences = tf.tile(sequences, [1, n, 1])
             indices = tf.tile(indices, [1, n])
@@ -211,7 +214,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         """
         batch_size = input_shapes[0][0]
         s = self.context.config.hmm.alphabet_size
-        n = self.context.config.training.num_model
+        n = self.phmm_layer.heads
         seq_shape_t = (n, batch_size, None)
         ind_shape_t = (n, batch_size)
         if self.context.config.training.use_anc_probs:
@@ -449,8 +452,11 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         if indices is None:
             indices = np.arange(data.num_seq)
 
+        # restrict to specified models
         # TODO: revert head_subset later?
-        self.phmm_layer.head_subset = models # restrict to specified models
+        self.phmm_layer.head_subset = models
+        if self.context.config.training.use_anc_probs:
+            self.anc_probs_layer.head_subset = models
 
         if models is None:
             _models = list(range(len(self.phmm_layer.lengths)))
@@ -465,6 +471,10 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         old_crop_long_seqs = self.context.batch_gen.crop_long_seqs
         self.context.batch_gen.crop_long_seqs = math.inf #do not crop sequences
 
+        # Override the number of models from the config if necessary
+        if self.phmm_layer.head_subset is not None:
+            self.context.batch_gen.num_models = len(self.phmm_layer.head_subset)
+
         # Create dataset and get number of steps
         ds, steps = make_dataset(
             indices,
@@ -475,6 +485,9 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             bucket_boundaries=bucket_boundaries,
             bucket_batch_sizes=bucket_batch_sizes,
         )
+
+        # Compile to acccount for any changes in head_subset or call mode
+        self.compile()
 
         # Use None for infinite steps (-1), otherwise use the computed steps
         steps_param = None if steps == -1 else steps
@@ -497,9 +510,13 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         # Reset
         self.context.batch_gen.crop_long_seqs = old_crop_long_seqs
 
-        # Replace -1 padding with zeros
+        # Replace -1 padding
         if self.phmm_layer.is_posterior_mode():
             decoded_array[decoded_array == -1] = 0
+        elif self.phmm_layer.is_viterbi_mode():
+            for i in _models:
+                L = self.phmm_layer.lengths[i]
+                decoded_array[:,:,i][decoded_array[:,:,i] == -1] = 2*L + 2
 
         return decoded_array
 
@@ -550,10 +567,12 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             indices = np.arange(data.num_seq)
 
         self.loglik_mode()
-        self.compile()
 
+        # restrict to specified models
         # TODO: revert head_subset later?
-        self.phmm_layer.head_subset = models # restrict to specified models
+        self.phmm_layer.head_subset = models
+        if self.context.config.training.use_anc_probs:
+            self.anc_probs_layer.head_subset = models
 
         if models is None:
             _models = list(range(len(self.phmm_layer.lengths)))
@@ -568,6 +587,10 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         old_crop_long_seqs = self.context.batch_gen.crop_long_seqs
         self.context.batch_gen.crop_long_seqs = math.inf #do not crop sequences
 
+        # Override the number of models from the config if necessary
+        if self.phmm_layer.head_subset is not None:
+            self.context.batch_gen.num_models = len(self.phmm_layer.head_subset)
+
         # Create dataset and get number of steps
         ds, steps = make_dataset(
             indices,
@@ -576,6 +599,9 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             bucket_by_seq_length=True,
             model_lengths=[self.phmm_layer.lengths[m] for m in _models],
         )
+
+        # Compile to acccount for any changes in head_subset or call mode
+        self.compile()
 
         # Enable eval mode and reset per-model trackers
         self._eval_mode = True

@@ -220,7 +220,11 @@ def test_viterbi_on_batch(context_binary: LearnMSAContext) -> None:
     # so we need to swap axes here
     seq = tf.keras.ops.swapaxes(seq, 1, 2)
 
-    viterbi_seq = model((seq, tf.constant([[0]])))
+    viterbi_seq = model((seq, tf.constant([[0]]))).numpy()
+
+    # Replace padding -1
+    viterbi_seq[:,:,0][viterbi_seq[:,:,0] == -1] = 10
+    viterbi_seq[:,:,1][viterbi_seq[:,:,1] == -1] = 8
 
     np.testing.assert_equal(viterbi_seq[0, :, 0], ref.viterbi_a)
     np.testing.assert_equal(viterbi_seq[0, :, 1], ref.viterbi_b)
@@ -361,6 +365,9 @@ def test_predict(context_binary: LearnMSAContext) -> None:
         bucket_boundaries=bucket_boundaries,
         bucket_batch_sizes=bucket_batch_sizes,
     )
+    # Replace padding -1
+    viterbi_seqs[:,:,0][viterbi_seqs[:,:,0] == -1] = 10
+    viterbi_seqs[:,:,1][viterbi_seqs[:,:,1] == -1] = 8
     assert viterbi_seqs.shape == (10, 19, 2)
     np.testing.assert_equal(
         viterbi_seqs[[0,1,3,5,7,8,9], :4, 0],

@@ -328,6 +328,11 @@ def test_viterbi(
     viterbi_paths = viterbi_paths.numpy()
     gamma = gamma.numpy()
 
+    # Replace padding -1 with terminal state (normally automatically handled
+    # by learnMSA model)
+    for i,L in enumerate(layer.lengths):
+        viterbi_paths[:,:,i][viterbi_paths[:,:,i] == -1] = 2*L + 2
+
     # Check that Viterbi paths match reference
     np.testing.assert_equal(
         viterbi_paths[0,:,0],
@@ -461,6 +466,11 @@ def test_tf_model(
     hmm_tf_model.compile(jit_compile=True)
     viterbi_paths = hmm_tf_model.predict([seq, padding])
 
+    # Replace padding -1 with terminal state (normally automatically handled
+    # by learnMSA model)
+    for i,L in enumerate(layer.lengths):
+        viterbi_paths[:,:,i][viterbi_paths[:,:,i] == -1] = 2*L + 2
+
     # Check that Viterbi paths match reference
     np.testing.assert_equal(
         viterbi_paths[0,:,0],
@@ -510,6 +520,10 @@ def test_parallel_factor(
     posterior = layer.hmm.posterior(seq, padding, parallel=2)
     loglik = loglik.numpy()
     viterbi_paths = viterbi_paths.numpy() # type: ignore
+    # Replace padding -1 with terminal state (normally automatically handled
+    # by learnMSA model)
+    for i,L in enumerate(layer.lengths):
+        viterbi_paths[:,:,i][viterbi_paths[:,:,i] == -1] = 2*L + 2
     assert isinstance(posterior, tf.Tensor)
     posterior = posterior.numpy()
 
@@ -954,6 +968,9 @@ def test_head_subset(
     posterior = layer(seq, padding).numpy()
     layer.viterbi_mode()
     viterbi_paths = layer(seq, padding).numpy()
+    # Replace padding -1 with terminal state (normally automatically handled
+    # by learnMSA model)
+    viterbi_paths[:,:,1][viterbi_paths[:,:,1] == -1] = 2*layer.lengths[1] + 2
 
     np.testing.assert_allclose(loglik, np.log(ref.likelihoods[1]))
     np.testing.assert_allclose(

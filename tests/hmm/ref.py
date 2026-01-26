@@ -238,7 +238,7 @@ viterbi_variables_a: np.ndarray = np.array([
 ])
 """Viterbi variables of the first reference model"""
 
-viterbi_a: np.ndarray = np.array([ 0,  1,  3, -1])
+viterbi_a: np.ndarray = np.array([ 0,  1,  3, 10])
 """Viterbi path of the first reference model"""
 
 forward_b: np.ndarray = np.array([
@@ -323,7 +323,7 @@ viterbi_variables_b: np.ndarray = np.array([
 ])
 """Viterbi variables of the second reference model"""
 
-viterbi_b : np.ndarray = np.array([0, 1, 7, -1])
+viterbi_b : np.ndarray = np.array([0, 1, 7, 8])
 """Viterbi path of the second reference model"""
 
 def make_transition_init_A():

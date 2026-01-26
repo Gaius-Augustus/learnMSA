@@ -137,6 +137,16 @@ class AncProbsLayer(tf.keras.layers.Layer):
         self.clusters = clusters
         self.num_clusters = np.max(clusters) + 1 if clusters is not None else self.num_rates
         self.use_lstm = use_lstm
+        self._head_subset = None
+    
+    @property
+    def head_subset(self):
+        """If set, only these models are used in computations."""
+        return self._head_subset
+    
+    @head_subset.setter
+    def head_subset(self, subset):
+        self._head_subset = subset
     
     def build(self, input_shape=None):
         if self.built:
@@ -184,20 +194,26 @@ class AncProbsLayer(tf.keras.layers.Layer):
     def make_R(self, kernel=None):
         if kernel is None:
             kernel = self.exchangeability_kernel
+            if self._head_subset is not None:
+                kernel = tf.gather(kernel, self._head_subset, axis=0)
         R = 0.5 * (kernel + tf.transpose(kernel, [0,1,3,2])) #make symmetric
         R = tf.math.softplus(R)
         R -= tf.linalg.diag(tf.linalg.diag_part(R)) #zero diagonal
         return R
     
     def make_p(self):
-        return tf.nn.softmax(self.equilibrium_kernel)
+        kernel = self.equilibrium_kernel
+        if self._head_subset is not None:
+            kernel = tf.gather(kernel, self._head_subset, axis=0)
+        return tf.nn.softmax(kernel)
     
     def make_Q(self):
         R, p = self.make_R(), self.make_p()
         R = tf.reshape(R, (-1, 20, 20))
         p = tf.reshape(p, (-1, 20))
         Q = make_rate_matrix(R, p)
-        Q = tf.reshape(Q, (self.num_models, self.num_matrices, 20, 20))
+        num_models = len(self._head_subset) if self._head_subset is not None else self.num_models
+        Q = tf.reshape(Q, (num_models, self.num_matrices, 20, 20))
         return Q
         
     def make_tau(self, inputs=None, subset=None):
@@ -216,14 +232,19 @@ class AncProbsLayer(tf.keras.layers.Layer):
             return self.dense(lstm_output)[...,0]
         else:
             tau = self.tau_kernel
+            if self._head_subset is not None:
+                tau = tf.gather(tau, self._head_subset, axis=0)
             if self.clusters is not None:
                 tau = tf.gather(tau, self.clusters, axis=-1)
             if subset is not None:
                 tau = tf.gather_nd(tau, subset, batch_dims=1)
             return tf.math.softplus(tau)
-    
+
     def make_per_matrix_rate(self):
-        return tf.math.softplus(self.per_matrix_rates_kernel)
+        kernel = self.per_matrix_rates_kernel
+        if self._head_subset is not None:
+            kernel = tf.gather(kernel, self._head_subset, axis=0)
+        return tf.math.softplus(kernel)
 
     def call(self, inputs, rate_indices, replace_rare_with_equilibrium=True):
         """ Computes anchestral probabilities of the inputs.
@@ -235,9 +256,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
         Returns:
             Ancestral probabilities. Shape: (num_model, b, L, num_matrices*s)
         """
-        rate_indices = tf.identity(rate_indices) #take care of numpy inputs
-        rate_indices.set_shape([self.num_models,None]) #resolves tf 2.12 issues
-        input_indices = len(inputs.shape) == 3 
+        input_indices = len(inputs.shape) == 3
         def _make_mask(bools):
             mask = tf.cast(bools, self.dtype)
             mask = tf.expand_dims(mask, -1)
