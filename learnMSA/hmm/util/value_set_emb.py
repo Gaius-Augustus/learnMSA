@@ -2,8 +2,6 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from learnMSA.util.aligned_dataset import AlignedDataset
-from learnMSA.hmm.util.transition_index_set import PHMMTransitionIndexSet
 from learnMSA.config import LanguageModelConfig
 from learnMSA.config.util import get_emission_dist
 

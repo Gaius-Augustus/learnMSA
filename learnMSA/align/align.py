@@ -13,7 +13,7 @@ from learnMSA.align.alignment_model import AlignmentModel
 from learnMSA.model.select import SelectionCriterion, select_model
 from learnMSA.model.surgery import model_surgery
 from learnMSA.model.tf.model import LearnMSAModel
-from learnMSA.util.context import LearnMSAContext
+from learnMSA.model.context import LearnMSAContext
 from learnMSA.util.sequence_dataset import SequenceDataset
 
 np.set_printoptions(legacy='1.21')

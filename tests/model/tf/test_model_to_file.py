@@ -11,7 +11,7 @@ from learnMSA.msa_hmm import Initializers
 from learnMSA.align.alignment_model import AlignmentModel
 from learnMSA.msa_hmm.Emitter import ProfileHMMEmitter
 from learnMSA.msa_hmm.Initializers import ConstantInitializer
-from learnMSA.util.context import LearnMSAContext
+from learnMSA.model.context import LearnMSAContext
 from learnMSA.model.tf.model import LearnMSAModel
 from learnMSA.util.sequence_dataset import SequenceDataset
 from learnMSA.msa_hmm.Transitioner import ProfileHMMTransitioner

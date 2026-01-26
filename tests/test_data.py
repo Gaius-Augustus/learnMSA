@@ -5,7 +5,7 @@ import pytest
 
 from learnMSA import Configuration
 from learnMSA.model.tf import training
-from learnMSA.util.context import LearnMSAContext
+from learnMSA.model.context import LearnMSAContext
 from learnMSA.util.sequence_dataset import SequenceDataset
 
 

@@ -11,7 +11,7 @@ from learnMSA.hmm.tf.layer import PHMMLayer
 from learnMSA.hmm.util.transition_index_set import PHMMTransitionIndexSet
 from learnMSA.model.tf.model import LearnMSAModel
 from learnMSA.align.alignment_model import AlignmentModel
-from learnMSA.util.context import LearnMSAContext
+from learnMSA.model.context import LearnMSAContext
 from learnMSA.model.surgery import (apply_mods, extend_mods,
                                             get_discard_or_expand_positions,
                                             update_kernels, model_surgery)

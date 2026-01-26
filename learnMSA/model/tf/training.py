@@ -9,7 +9,7 @@ import learnMSA.msa_hmm.training_util as training_util
 from learnMSA.util.sequence_dataset import SequenceDataset
 
 if TYPE_CHECKING:
-    from learnMSA.util.context import LearnMSAContext
+    from learnMSA.model.context import LearnMSAContext
 
 
 class BatchGenerator():

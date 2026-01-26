@@ -6,7 +6,7 @@ import pytest
 
 from learnMSA import Configuration
 from learnMSA.config import InputOutputConfig, TrainingConfig
-from learnMSA.util.context import LearnMSAContext
+from learnMSA.model.context import LearnMSAContext
 from learnMSA.util.sequence_dataset import SequenceDataset
 from learnMSA.run.util import get_batch_multiplicator, is_small_gpu
 

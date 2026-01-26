@@ -17,8 +17,8 @@ from learnMSA.protein_language_models.MvnEmitter import (
 from learnMSA.run.util import is_small_gpu, validate_filepath
 
 from ..msa_hmm.AncProbsLayer import inverse_softplus
-from .aligned_dataset import AlignedDataset
-from .sequence_dataset import SequenceDataset
+from ..util.aligned_dataset import AlignedDataset
+from ..util.sequence_dataset import SequenceDataset
 from ..msa_hmm import Priors
 from ..msa_hmm.Initializers import (ConstantInitializer, PHMMInitializerSet,
                            make_initializers_from)

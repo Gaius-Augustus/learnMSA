@@ -15,7 +15,7 @@ from learnMSA.protein_language_models.BilinearSymmetric import \
 from learnMSA.protein_language_models.embedding_cache import EmbeddingCache
 
 if TYPE_CHECKING:
-    from learnMSA.util.context import LearnMSAContext
+    from learnMSA.model.context import LearnMSAContext
 
 
 class EmbeddingBatchGenerator(BatchGenerator):

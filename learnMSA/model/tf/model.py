@@ -7,7 +7,7 @@ import tensorflow as tf
 from learnMSA.hmm.tf.layer import PHMMLayer
 from learnMSA.model.tf.phmm_mixin import PHMMMixin
 from learnMSA.msa_hmm.AncProbsLayer import AncProbsLayer
-from learnMSA.util.context import LearnMSAContext
+from learnMSA.model.context import LearnMSAContext
 from learnMSA.model.tf.training import make_dataset
 from learnMSA.util.sequence_dataset import SequenceDataset
 

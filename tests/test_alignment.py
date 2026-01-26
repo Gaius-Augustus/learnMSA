@@ -10,7 +10,7 @@ from learnMSA.align.align import align
 from learnMSA.align.alignment_model import (AlignmentModel,
                                              find_faulty_sequences,
                                              non_homogeneous_mask_func)
-from learnMSA.util.context import LearnMSAContext
+from learnMSA.model.context import LearnMSAContext
 from learnMSA.model.tf.model import LearnMSAModel
 from learnMSA.util.aligned_dataset import AlignedDataset, SequenceDataset
 

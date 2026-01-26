@@ -6,15 +6,12 @@ import pytest
 import tensorflow as tf
 
 from learnMSA import Configuration
+from learnMSA.hmm.tf.layer import PHMMLayer
+from learnMSA.model import LearnMSAModel, LearnMSAContext
 from learnMSA.model.tf import training
-from learnMSA.msa_hmm import Emitter, Initializers, Utility
-from learnMSA.align.alignment_model import AlignmentModel
+from learnMSA.msa_hmm import Utility, Initializers
 from learnMSA.msa_hmm.AncProbsLayer import AncProbsLayer, make_rate_matrix
-from learnMSA.util.context import LearnMSAContext
-from learnMSA.model.tf.model import LearnMSAModel
-from learnMSA.util.sequence_dataset import SequenceDataset
-from learnMSA.msa_hmm.MsaHmmCell import MsaHmmCell
-from learnMSA.msa_hmm.MsaHmmLayer import MsaHmmLayer
+from learnMSA.util import SequenceDataset
 
 
 class AncProbsData:
@@ -281,10 +278,6 @@ def test_encoder_model() -> None:
             config.input_output.verbose = False
             context = LearnMSAContext(config, data)
             context.encoder_initializer = case["encoder_initializer"]
-            context.emitter = [Emitter.ProfileHMMEmitter(
-                emission_init=Initializers.ConstantInitializer(0.),
-                insertion_init=Initializers.ConstantInitializer(0.)
-            )]
             context.effective_num_seq = n
             model = LearnMSAModel(context)
             assert_anc_probs_layer(model.anc_probs_layer, config)
@@ -335,17 +328,16 @@ def test_transposed() -> None:
 
     context = LearnMSAContext(config, data)
 
-    # Create MsaHmmLayer
-    msa_hmm_cell = MsaHmmCell(
-        context.model_lengths,
-        emitter=context.emitter,
-        transitioner=context.transitioner
-    )
-    msa_hmm_layer = MsaHmmLayer(msa_hmm_cell, num_seqs=n)
-    msa_hmm_layer.build((1, None, None, len(SequenceDataset._default_alphabet)))
-
-    # Compute emission matrix
-    B = msa_hmm_layer.cell.emitter[0].make_B()[0]
+    # Obtain emission matrix
+    phmm_layer = PHMMLayer(context.model_lengths, config.hmm)
+    phmm_layer.build(input_shape=(
+        (None, None, n, context.config.hmm.alphabet_size),
+        (None, None, n, 1),
+    ))
+    B = phmm_layer.hmm.emitter[0].matrix()[0]
+    # Add terminal state to make this test work
+    # TODO: clean up
+    B = tf.concat([B, tf.zeros((B.shape[0], 1), dtype=B.dtype)], axis=1)
 
     # Verify transposed works
     anc_prob_seqs = anc_probs_layer_transposed(

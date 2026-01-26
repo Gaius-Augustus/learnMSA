@@ -14,7 +14,7 @@ import learnMSA.msa_hmm.Priors as priors
 import learnMSA.msa_hmm.Transitioner as trans
 from learnMSA.model.tf.model import LearnMSAModel
 from learnMSA.align.alignment_metadata import AlignmentMetaData
-from learnMSA.util.context import LearnMSAContext
+from learnMSA.model.context import LearnMSAContext
 from learnMSA.align.align_inserts import AlignedInsertions
 from learnMSA.model.tf.training import BatchGenerator
 from learnMSA.util.aligned_dataset import AlignedDataset, SequenceDataset
