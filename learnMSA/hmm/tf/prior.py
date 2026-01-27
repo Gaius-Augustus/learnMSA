@@ -137,16 +137,13 @@ class TFPHMMTransitionPrior(TFPrior):
         return scores
 
     def compute_flank_prior(
-        self, transition_matrix: T_TFTensor, flank_init_prob: T_TFTensor
+        self, transition_matrix: T_TFTensor
     ) -> T_TFTensor:
         """Compute the prior score for the flanking transitions.
 
         Args:
             transition_matrix (Tensor):
                 The transition matrix of shape (H, Q, Q).
-            flank_init_prob (Tensor):
-                The probability of starting in the left flank state for each head.
-                Shape: (H,)
         Returns:
             Tensor: The output tensor of shape (H), with prior scores per
                 head.
@@ -183,19 +180,17 @@ class TFPHMMTransitionPrior(TFPrior):
             end_to_unannotated = transition_matrix[h, end_idx, unannot_idx] # type: ignore
             end_to_terminal = transition_matrix[h, end_idx, terminal_idx] # type: ignore
 
-            # Compute flank prior
+            # Compute flank prior (without start distribution terms)
             a = self.prior_config.alpha_flank
             a_c = self.prior_config.alpha_flank_compl
             flank = (a - 1) * tf.math.log(unannotated_loop)
             flank += (a - 1) * tf.math.log(right_flank_loop)
             flank += (a - 1) * tf.math.log(left_flank_loop)
             flank += (a - 1) * tf.math.log(end_to_right_flank)
-            flank += (a - 1) * tf.math.log(flank_init_prob[h]) # type: ignore
             flank += (a_c - 1) * tf.math.log(unannotated_exit)
             flank += (a_c - 1) * tf.math.log(right_flank_exit)
             flank += (a_c - 1) * tf.math.log(left_flank_exit)
             flank += (a_c - 1) * tf.math.log(end_to_unannotated + end_to_terminal)
-            flank += (a_c - 1) * tf.math.log(1 - flank_init_prob[h]) # type: ignore
 
             scores.append(flank)
 
@@ -302,17 +297,13 @@ class TFPHMMTransitionPrior(TFPrior):
     @override
     def call(
         self,
-        transition_matrix: T_TFTensor,
-        flank_init_prob: T_TFTensor | None = None
+        transition_matrix: T_TFTensor
     ) -> T_TFTensor:
         """Calls the prior with the given transition_matrix.
 
         Args:
             transition_matrix (Tensor):
                 The transition matrix of shape (H, Q, Q).
-            flank_init_prob (Tensor, optional):
-                The probability of starting in the left flank state for each head.
-                Shape: (H,). If None, defaults to 0.5 for each head.
 
         Returns:
             Tensor: The output tensor of shape (H), with prior scores per
@@ -332,14 +323,76 @@ class TFPHMMTransitionPrior(TFPrior):
             TFPHMMTransitionPrior.TransitionType.DELETE
         )
 
-        # Default flank_init_prob if not provided
-        if flank_init_prob is None:
-            flank_init_prob = tf.ones(len(self.lengths), dtype=tf.float32) * 0.5
-
-        flank_scores = self.compute_flank_prior(transition_matrix, flank_init_prob)
+        flank_scores = self.compute_flank_prior(transition_matrix)
         hit_scores = self.compute_hit_prior(transition_matrix)
         global_scores = self.compute_global_prior(transition_matrix)
 
         # Sum all log densities
         return (match_scores + insert_scores + delete_scores +
                 flank_scores + hit_scores + global_scores)
+
+
+class TFPHMMStartPrior(TFPrior):
+    """A prior that scores the starting distribution of a profile HMM.
+    
+    This prior scores the probability of starting in the left flank state
+    versus starting in the begin state.
+    """
+
+    def __init__(
+        self,
+        lengths: Sequence[int] | np.ndarray,
+        prior_config: PHMMPriorConfig,
+        **kwargs
+    ) -> None:
+        """
+        Args:
+            lengths (Sequence[int] | np.ndarray): The number of match states in each head
+                of the pHMM.
+            prior_config (PHMMPriorConfig): Prior configuration containing alpha parameters
+                for the start distribution prior.
+        """
+        super().__init__(**kwargs)
+        self.lengths = np.asarray(lengths)
+        self.prior_config = prior_config
+
+    @override
+    def matrix(self) -> T_TFTensor:
+        """Not implemented for this prior."""
+        raise NotImplementedError(
+            "TFPHMMStartPrior doesn't have a matrix."
+        )
+
+    @override
+    def call(self, start_dist: T_TFTensor) -> T_TFTensor:
+        """Calls the prior with the given start distribution.
+
+        Args:
+            start_dist (Tensor):
+                The start distribution of shape (H, Q), where Q is the number
+                of states (including padding).
+
+        Returns:
+            Tensor: The output tensor of shape (H), with prior scores per head.
+        """
+        scores = []
+
+        for h in range(len(self.lengths)):
+            L = self.lengths[h]
+            # State indices (unfolded model):
+            # L (left flank) = 3*L - 1
+            # B (begin) = 3*L
+            left_idx = 3 * L - 1
+
+            # Extract the probability of starting in the left flank state
+            flank_init_prob = start_dist[h, left_idx]  # type: ignore
+
+            # Compute start prior using the same alpha parameters as flank prior
+            a = self.prior_config.alpha_flank
+            a_c = self.prior_config.alpha_flank_compl
+            score = (a - 1) * tf.math.log(flank_init_prob)
+            score += (a_c - 1) * tf.math.log(1.0 - flank_init_prob)
+
+            scores.append(score)
+
+        return tf.stack(scores)

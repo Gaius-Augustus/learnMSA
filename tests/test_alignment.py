@@ -5,12 +5,10 @@ import pytest
 import tensorflow as tf
 
 from learnMSA import Configuration
-from learnMSA.config.hmm import PHMMConfig
-from learnMSA.hmm.tf.layer import PHMMLayer
 from learnMSA.align.align import align
 from learnMSA.align.alignment_model import (AlignmentModel,
-                                             find_faulty_sequences,
-                                             non_homogeneous_mask_func)
+                                            find_faulty_sequences,
+                                            non_homogeneous_mask_func)
 from learnMSA.model.context import LearnMSAContext
 from learnMSA.model.tf.model import LearnMSAModel
 from learnMSA.util.aligned_dataset import AlignedDataset, SequenceDataset
@@ -41,11 +39,13 @@ def simple_config() -> Configuration:
     config.hmm.match_emissions = match_emissions
     config.hmm.insert_emissions = [1/23]*23
     config.hmm.use_prior_for_emission_init = False
-    config.hmm.p_right_right = 0.4
     config.hmm.p_end_right = 0.2
-    config.hmm.p_end_unannot = 0.5
+    config.hmm.p_end_unannot = 0.3
+    config.hmm.p_match_match = 0.5
     config.hmm.p_unannot_unannot = 0.5
-    config.hmm.p_begin_match = 0.95
+    config.hmm.p_left_left = 0.5
+    config.hmm.p_right_right = 0.4
+    config.hmm.p_begin_match = 0.9
 
     return config
 
@@ -117,12 +117,15 @@ def test_alignment_egf() -> None:
         config = Configuration()
         config.training.num_model = 1
         config.training.no_sequence_weights = True
-        config.training.epochs = [3, 1, 10]
+        config.training.epochs = [5, 1, 5]
         config.training.max_iterations = 2
-        config.training.length_init = [20]
-        config.training.use_anc_probs = False
-        config.advanced.jit_compile = True
+        config.training.length_init = [25]
+        # config.training.use_anc_probs = False
+        # config.advanced.jit_compile = True
         config.input_output.subset_ids = seq_ids
+        config.training.crop = 999999
+        config.training.auto_crop = False
+        config.training.frozen_insertions = True
 
         # Fit the alignment model
         am, best_index = align(data, config)
@@ -132,15 +135,33 @@ def test_alignment_egf() -> None:
 
     # Check some friendly thresholds to check if the alignment makes sense
     assert np.amin(eval_output["loglik"].mean()) > -70
+    # Surgery should have added match states
     assert am.model.lengths[best_index] > 25
+
+    am.model.phmm_layer.hmm.transitioner._launch()
+    with np.printoptions(precision=3, suppress=True, threshold=99999):
+        print("P0", am.model.phmm_layer.hmm.transitioner.start_dist().numpy())
+        print("A", am.model.phmm_layer.hmm.transitioner.matrix().numpy())
+        print("B", am.model.phmm_layer.hmm.emitter[0].matrix().numpy())
+        print("Q", am.model.anc_probs_layer.make_Q().numpy())
+        print("tau", am.model.anc_probs_layer.make_tau().numpy())
+        print("p", am.model.anc_probs_layer.make_p().numpy())
 
     am.to_file(egf_out_path, 0)
     with AlignedDataset(egf_out_path) as pred_msa:
         sp = pred_msa.SP_score(ref_msa)
+
+        print(f"EGF alignment SP score: {sp}")
+        for i in range(pred_msa.num_seq):
+            print(f">{pred_msa.seq_ids[i]}\n{pred_msa.get_record(i).seq}")
+        print("\n")
+        print("Reference MSA:")
+        for i in range(ref_msa.num_seq):
+            print(f">{ref_msa.seq_ids[i]}\n{ref_msa.get_record(i).seq}")
+
         # based on experience, any half decent hyperparameter choice
         # should yield at least this score
         assert sp > 0.7
-        print(f"EGF alignment SP score: {sp}")
     # Clean up output file
     os.remove(egf_out_path)
 
@@ -670,6 +691,9 @@ def test_viterbi(
         [5, 0, 1, 6, 6, 0, 6, 0, 1, 2, 7, 8, 8, 8, 8],
         [5, 5, 5, 0, 1, 2, 6, 6, 0, 1, 2, 8, 8, 8, 8]]
     ])
+
+    print(viterbi_seqs)
+    print(np.argwhere(viterbi_seqs != ref_seqs))
 
     np.testing.assert_equal(viterbi_seqs, ref_seqs)
 

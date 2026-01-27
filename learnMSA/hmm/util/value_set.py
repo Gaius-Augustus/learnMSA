@@ -81,6 +81,21 @@ class PHMMValueSet:
         transitions[ind.begin_to_delete[0, 0], ind.begin_to_delete[0, 1]] = \
             p_begin_delete
 
+        # Handle p_match_end: compute automatic values if None
+        if config.p_match_end is None:
+            p_match_end_values = np.zeros(L - 1, dtype=np.float32)
+            if L > 1:
+                p_match_end_values[0] = 0.5 / (L - 1)
+            # For i > 0: exit[i] = entry[i]
+            if isinstance(p_begin_match_inner, (Sequence, np.ndarray)):
+                # Use explicit entry probabilities
+                for i in range(1, L - 1):
+                    p_match_end_values[i] = p_begin_match_inner[i - 1]
+            else:
+                # Use uniform entry probability
+                for i in range(1, L - 1):
+                    p_match_end_values[i] = p_begin_match_inner
+
         for i in range(L - 1):
             # Begin to match i+1
             p_val = (p_begin_match_inner[i]
@@ -109,7 +124,8 @@ class PHMMValueSet:
             transitions[ind.match_to_delete[i, 0], ind.match_to_delete[i, 1]] = (
                 1 - get_value(config.p_match_match, h, i)
                 - get_value(config.p_match_insert, h, i)
-                - get_value(config.p_match_end, h, i)
+                - (p_match_end_values[i] if config.p_match_end is None
+                   else get_value(config.p_match_end, h, i))
             )
 
             # Delete to delete
@@ -122,7 +138,8 @@ class PHMMValueSet:
 
             # Match i to end
             transitions[ind.match_to_end[i, 0], ind.match_to_end[i, 1]] = \
-                get_value(config.p_match_end, h, i)
+                (p_match_end_values[i] if config.p_match_end is None 
+                 else get_value(config.p_match_end, h, i))
 
         # Match L to end
         transitions[ind.match_to_end[-1, 0], ind.match_to_end[-1, 1]] = 1.0

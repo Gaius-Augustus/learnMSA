@@ -356,14 +356,19 @@ def update_kernels(
     if p1 > 0 and p2 > 0:
         begin_to_match[1:] /= p1 / p2
 
+    if config.p_match_end is None:
+        p_match_end = 0.5 / (L - 1) if L > 2 else 0.0
+    else:
+        p_match_end = get_value(config.p_match_end, h, 0)
+
     if L in pos_expand:
-        match_to_end[-1] = get_value(config.p_match_end, h, 0)
+        match_to_end[-1] = p_match_end
     match_to_end = apply_mods(
         match_to_end,
         pos_expand,
         expansion_lens,
         pos_discard,
-        get_value(config.p_match_end, h, 0),
+        p_match_end,
     )
 
     new_config = config.model_copy(deep=True)

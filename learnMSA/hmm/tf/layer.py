@@ -8,7 +8,7 @@ from hidten.tf.prior import TFCombinedPrior, TFInverseGammaPrior
 
 from learnMSA.config import LanguageModelConfig, PHMMConfig, PHMMPriorConfig
 from learnMSA.hmm.tf.embedding_emitter import EmbeddingEmitter
-from learnMSA.hmm.tf.prior import TFPHMMTransitionPrior
+from learnMSA.hmm.tf.prior import TFPHMMStartPrior, TFPHMMTransitionPrior
 from learnMSA.hmm.tf.profile_emitter import ProfileEmitter
 from learnMSA.hmm.tf.transitioner import PHMMTransitioner
 from learnMSA.hmm.tf.padding_emitter import TFSubsetPaddingEmitter
@@ -115,6 +115,9 @@ class PHMMLayer(tf.keras.Layer):
         )
         if self.use_prior:
             self.hmm.transitioner.prior = TFPHMMTransitionPrior(
+                lengths, prior_config
+            )
+            self.hmm.transitioner.prior_start = TFPHMMStartPrior(
                 lengths, prior_config
             )
 
@@ -237,6 +240,7 @@ class PHMMLayer(tf.keras.Layer):
             New value sets with emissions replaced by prior distribution.
         """
         prior_dist = prior.matrix().numpy().flatten()
+        prior_dist = prior_dist / np.sum(prior_dist)
         updated_values = []
         for value_set in values:
             updated_values.append(PHMMValueSet(

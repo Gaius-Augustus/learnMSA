@@ -127,9 +127,11 @@ class PHMMConfig(BaseModel):
     """
 
     p_match_end: float | Sequence[float] | Sequence[Sequence[float]] | \
-        NPArray = 0.02
+        NPArray | None = None
     """Defines ``P(End | Match i; h)``.
     Can optionally depend on i and h.
+    Per default it is determined automatically such that ``exit[0] = 1/(L-1)`` and
+    ``exit[i] = entry[i]`` for i > 0.
     """
 
     p_insert_insert: float | Sequence[float] | Sequence[Sequence[float]] | \
@@ -144,28 +146,28 @@ class PHMMConfig(BaseModel):
     Can optionally depend on i and h.
     """
 
-    p_begin_delete: float | Sequence[float] | NPArray = 0.1
+    p_begin_delete: float | Sequence[float] | NPArray = 0.38
     """Defines ``P(Delete 1 | Begin; h)``.
     Can optionally depend on h. This value is not used, if ``p_begin_match``
     is provided as a nested list.
     """
 
-    p_left_left: float | Sequence[float] | NPArray = 0.7
+    p_left_left: float | Sequence[float] | NPArray = 0.75
     """Defines ``P(Left Flank | Left Flank; h)``.
     Can optionally depend on h.
     """
 
-    p_right_right: float | Sequence[float] | NPArray = 0.7
+    p_right_right: float | Sequence[float] | NPArray = 0.75
     """Defines ``P(Right Flank | Right Flank; h)``.
     Can optionally depend on h.
     """
 
-    p_unannot_unannot: float | Sequence[float] | NPArray = 0.7
+    p_unannot_unannot: float | Sequence[float] | NPArray = 0.75
     """Defines ``P(Unannotated | Unannotated; h)``.
     Can optionally depend on h.
     """
 
-    p_end_unannot: float | Sequence[float] | NPArray = 1e-5
+    p_end_unannot: float | Sequence[float] | NPArray = 5e-5
     """Defines ``P(Unannotated | End; h)``.
     Can optionally depend on h.
     """
@@ -207,6 +209,13 @@ class PHMMConfig(BaseModel):
         offset = cls._length_offsets.get(field, 0)
         if lengths is None:
             return v
+
+        # Case 0: None (only for p_match_end)
+        if v is None:
+            if field == "p_match_end":
+                return v
+            else:
+                raise ValueError(f"{field} cannot be None.")
 
         # Case 1: float
         if isinstance(v, float):

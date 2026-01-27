@@ -906,26 +906,28 @@ def test_prior_values() -> None:
     )
 
     # Test flank, hit, and global priors
-    # Get flank_init_prob from config
-    if isinstance(ref.config.p_start_left_flank, float):
-        flank_init_prob = tf.constant(
-            [ref.config.p_start_left_flank], dtype=tf.float32
-        )
-    else:
-        flank_init_prob = tf.constant(
-            ref.config.p_start_left_flank, dtype=tf.float32
-        )
-
-    flank_prior_scores = trans_prior.compute_flank_prior(A, flank_init_prob)
+    flank_prior_scores = trans_prior.compute_flank_prior(A)
     hit_prior_scores = trans_prior.compute_hit_prior(A)
     global_prior_scores = trans_prior.compute_global_prior(A)
 
+    # Test the start prior separately
+    start_prior = layer.hmm.transitioner.explicit_transitioner.prior_start
+    assert isinstance(start_prior, prior.TFPHMMStartPrior)
+
+    # Get the start distribution from the explicit transitioner
+    start_dist = layer.hmm.transitioner.explicit_transitioner.start_dist()
+    start_prior_scores = start_prior(start_dist)
+
+    # The legacy flank prior included both transition and start components
+    # Now we need to sum the transition flank prior and start prior
+    combined_flank_scores = flank_prior_scores + start_prior_scores
+
     np.testing.assert_allclose(
-        flank_prior_scores,
+        combined_flank_scores,
         legacy_flank_prior,
         atol=1e-4,
         rtol=1e-5,
-        err_msg="Flank prior does not match legacy implementation"
+        err_msg="Flank prior (transition + start) does not match legacy implementation"
     )
     np.testing.assert_allclose(
         hit_prior_scores,
@@ -943,7 +945,10 @@ def test_prior_values() -> None:
     )
 
     # Test the full prior call (sum of all components)
-    full_prior_scores = trans_prior(A, flank_init_prob)
+    # The transition prior now excludes the start distribution terms
+    trans_prior_scores = trans_prior(A)
+    # The full prior should equal transition prior + start prior
+    full_prior_scores = trans_prior_scores + start_prior_scores
     expected_full_prior = (
         legacy_match_prior + legacy_insert_prior + legacy_delete_prior +
         legacy_flank_prior + legacy_hit_prior + legacy_global_prior
@@ -970,7 +975,7 @@ def test_head_subset(
     viterbi_paths = layer(seq, padding).numpy()
     # Replace padding -1 with terminal state (normally automatically handled
     # by learnMSA model)
-    viterbi_paths[:,:,1][viterbi_paths[:,:,1] == -1] = 2*layer.lengths[1] + 2
+    viterbi_paths[:,:,0][viterbi_paths[:,:,0] == -1] = 2*layer.lengths[1] + 2
 
     np.testing.assert_allclose(loglik, np.log(ref.likelihoods[1]))
     np.testing.assert_allclose(

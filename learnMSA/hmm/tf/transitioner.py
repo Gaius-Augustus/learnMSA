@@ -123,6 +123,14 @@ class PHMMTransitioner(TFTransitioner):
     def prior(self, prior: "Prior[T_TFTensor]") -> None:
         self.explicit_transitioner.prior = prior
 
+    @property
+    def prior_start(self) -> "Prior[T_TFTensor] | None":
+        return self.explicit_transitioner.prior_start
+
+    @prior_start.setter
+    def prior_start(self, prior_start: "Prior[T_TFTensor]") -> None:
+        self.explicit_transitioner.prior_start = prior_start
+
     head_subset : Sequence[int] | None = None
     """If set, only these heads are used in computations."""
 
@@ -447,7 +455,6 @@ class PHMMTransitioner(TFTransitioner):
             start_probs.append(tf.expand_dims(start_left, 0))
 
             # Unannotated - can be reached via Begin -> deletes -> End -> Unannot
-            p_delete_to_end = get(idx.delete_to_end)
             p_end = get(idx.end)
 
             BE = start_begin + M_skip[0, -1]
