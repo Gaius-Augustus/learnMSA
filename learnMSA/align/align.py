@@ -119,6 +119,7 @@ def align(
     else:
         aligned_insertions = make_aligned_insertions(
             am,
+            best_model,
             config.advanced.insertion_aligner,
             config.advanced.aligner_threads,
             verbose=config.input_output.verbose
@@ -218,15 +219,6 @@ def _fit_and_align(
         model = LearnMSAModel(context)
         model.build()
         model.compile()
-
-        print("BEFORE TRAINING:")
-        with np.printoptions(precision=3, suppress=True, threshold=99999):
-            print("P0", model.phmm_layer.hmm.transitioner.start_dist().numpy())
-            print("A", model.phmm_layer.hmm.transitioner.matrix().numpy())
-            print("B", model.phmm_layer.hmm.emitter[0].matrix().numpy())
-            print("Q", model.anc_probs_layer.make_Q().numpy())
-            print("tau", model.anc_probs_layer.make_tau().numpy())
-            print("p", model.anc_probs_layer.make_p().numpy())
 
         # Run training
         model.fit(data, train_indices, i, batch_size)

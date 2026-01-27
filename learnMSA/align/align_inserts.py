@@ -188,17 +188,18 @@ def find_long_insertions_and_get_sequences(data : SequenceDataset, lens, starts,
     return None
 
 
-def make_aligned_insertions(am, method="famsa", threads=0, verbose=True):
+def make_aligned_insertions(am, best_model, method="famsa", threads=0, verbose=True):
     """
     Aligns insertions with the given method and adds them to the alignment model.
     Args:
         am: Alignment model.
+        best_model: The best model to use for extracting insertions.
         method: Alignment method. Currently, only famsa is supported.
         threads: Number of threads to use. If 0, uses all available threads.
     """
-    if not am.best_model in am.metadata:
-        am._build_alignment([am.best_model])
-    data = am.metadata[am.best_model]
+    if not best_model in am.metadata:
+        am._build_alignment([best_model])
+    data = am.metadata[best_model]
     num_seq = data.left_flank_len.shape[0]
 
     insertions_long = []
@@ -235,7 +236,7 @@ def make_aligned_insertions(am, method="famsa", threads=0, verbose=True):
     left_flank_long = (left_flank_long[0],  AlignedDataset(aligned_sequences = alignments["left_flank"])) if left_flank_long is not None else None
     right_flank_long = (right_flank_long[0],  AlignedDataset(aligned_sequences = alignments["right_flank"])) if right_flank_long is not None else None
     unannotated_long = [(x[0], AlignedDataset(aligned_sequences = alignments[f"unannotated_{r}"])) if x is not None else None for r,x in enumerate(unannotated_long)]
-    
+
     aligned_insertions = AlignedInsertions(insertions_long, left_flank_long, right_flank_long, unannotated_long)
     return aligned_insertions
 

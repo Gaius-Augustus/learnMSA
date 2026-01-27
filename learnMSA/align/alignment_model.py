@@ -718,6 +718,7 @@ class AlignmentModel():
 
         # TODO
         print("WARNING: Fixing faulty Viterbi sequences is currently not supported. SKIPPING.")
+        self.fixed_viterbi_seqs = np.array([], dtype=np.int32)
         return state_seqs_max_lik
 
         # state_seqs_max_lik has shape (num_model, num_seq, L)

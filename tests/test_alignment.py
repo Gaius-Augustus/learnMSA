@@ -138,27 +138,9 @@ def test_alignment_egf() -> None:
     # Surgery should have added match states
     assert am.model.lengths[best_index] > 25
 
-    am.model.phmm_layer.hmm.transitioner._launch()
-    with np.printoptions(precision=3, suppress=True, threshold=99999):
-        print("P0", am.model.phmm_layer.hmm.transitioner.start_dist().numpy())
-        print("A", am.model.phmm_layer.hmm.transitioner.matrix().numpy())
-        print("B", am.model.phmm_layer.hmm.emitter[0].matrix().numpy())
-        print("Q", am.model.anc_probs_layer.make_Q().numpy())
-        print("tau", am.model.anc_probs_layer.make_tau().numpy())
-        print("p", am.model.anc_probs_layer.make_p().numpy())
-
     am.to_file(egf_out_path, 0)
     with AlignedDataset(egf_out_path) as pred_msa:
         sp = pred_msa.SP_score(ref_msa)
-
-        print(f"EGF alignment SP score: {sp}")
-        for i in range(pred_msa.num_seq):
-            print(f">{pred_msa.seq_ids[i]}\n{pred_msa.get_record(i).seq}")
-        print("\n")
-        print("Reference MSA:")
-        for i in range(ref_msa.num_seq):
-            print(f">{ref_msa.seq_ids[i]}\n{ref_msa.get_record(i).seq}")
-
         # based on experience, any half decent hyperparameter choice
         # should yield at least this score
         assert sp > 0.7
@@ -691,9 +673,6 @@ def test_viterbi(
         [5, 0, 1, 6, 6, 0, 6, 0, 1, 2, 7, 8, 8, 8, 8],
         [5, 5, 5, 0, 1, 2, 6, 6, 0, 1, 2, 8, 8, 8, 8]]
     ])
-
-    print(viterbi_seqs)
-    print(np.argwhere(viterbi_seqs != ref_seqs))
 
     np.testing.assert_equal(viterbi_seqs, ref_seqs)
 
