@@ -17,7 +17,8 @@ from learnMSA.hmm.util.value_set import PHMMValueSet
 
 def logsumexp(x: T_TFTensor, y: T_TFTensor) -> T_TFTensor:
     """Compute log(exp(x) + exp(y)) in a numerically stable way."""
-    return tf.math.log(tf.math.exp(x) + tf.math.exp(y))
+    m = tf.maximum(x, y)
+    return m + tf.math.log(tf.exp(x - m) + tf.exp(y - m))
 
 
 class PHMMExplicitTransitioner(TFTransitioner):

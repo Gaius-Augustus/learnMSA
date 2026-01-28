@@ -330,7 +330,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         Compute the total loss which combines likelihood and prior.
 
         In training mode, returns scalar loss with averaged metrics.
-        In evaluation mode, returns scalar loss but accumulates per-model metrics.
+        In evaluation mode, returns scalar loss and per-model metrics.
         """
         weighted_loglik = self.weighted_loglik(x, y_pred)  # (num_models,)
         log_prior = self.log_prior()  # (num_models,)
@@ -514,8 +514,8 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         if self.phmm_layer.is_posterior_mode():
             decoded_array[decoded_array == -1] = 0
         elif self.phmm_layer.is_viterbi_mode():
-            for i in _models:
-                L = self.phmm_layer.lengths[i]
+            for i,j in enumerate(_models):
+                L = self.phmm_layer.lengths[j]
                 decoded_array[:,:,i][decoded_array[:,:,i] == -1] = 2*L + 2
 
         return decoded_array

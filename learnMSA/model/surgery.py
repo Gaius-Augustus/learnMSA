@@ -355,6 +355,11 @@ def update_kernels(
     p2 = 1 - begin_to_match[0] - begin_to_delete
     if p1 > 0 and p2 > 0:
         begin_to_match[1:] /= p1 / p2
+    elif p1 > 0 and p2 <= 0:
+        # If p2 <= 0, the first position and delete consume all probability
+        # Set internal positions to very small values
+        begin_to_match[1:] = 1e-10
+    # else: p1 == 0, keep begin_to_match[1:] as is (should be all zeros)
 
     if config.p_match_end is None:
         p_match_end = 0.5 / (L - 1) if L > 2 else 0.0
