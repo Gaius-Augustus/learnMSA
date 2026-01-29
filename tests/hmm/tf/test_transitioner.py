@@ -196,6 +196,7 @@ def test_gradient(hmm_config: HidtenHMMConfig) -> None:
 
     for i, grad in enumerate(grads):
         assert grad is not None, f"Gradient {i} is None!"
-
-    assert not tf.reduce_any(tf.math.is_nan(grad.values)).numpy(), \
-        f"Gradient {i} contains NaN!"
+        # Handle both regular tensors and indexed slices
+        grad_values = grad.values if hasattr(grad, 'values') else grad
+        assert not tf.reduce_any(tf.math.is_nan(grad_values)).numpy(), \
+            f"Gradient {i} contains NaN!"

@@ -217,7 +217,7 @@ def _fit_and_align(
         # Create and compile the model
         context.effective_num_seq = train_indices.shape[0] #todo: workaround
         model = LearnMSAModel(context)
-        model.build()
+        model.build(((batch_size,),))
         model.compile()
 
         # Run training
@@ -288,7 +288,7 @@ def _fit_and_align_with_logo_gif(
 
     # Create and compile the model
     model = LearnMSAModel(context)
-    model.build()
+    model.build(((batch_size,),))
     model.compile()
 
     # Run training

@@ -419,6 +419,7 @@ class LearnMSAContext:
         If not, setup a callback to automatically scale the batch size based
         on sequence lengths and available GPU memory.
         """
+        self.small_gpu = is_small_gpu()
         if self.config.training.tokens_per_batch > 0:
             def _batch_size_cb_with_tokens(data: SequenceDataset):
                 return training_util.tokens_per_batch_to_batch_size(
@@ -432,7 +433,6 @@ class LearnMSAContext:
 
         use_language_model = self.config.language_model.use_language_model
         #if there is at least one GPU, check its memory
-        self.small_gpu = is_small_gpu()
         if use_language_model:
             def _batch_size_cb_with_plm(data: SequenceDataset):
                 return training_util.get_adaptive_batch_size_with_language_model(

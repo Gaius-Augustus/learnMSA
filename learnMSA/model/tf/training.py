@@ -278,14 +278,14 @@ def make_dataset(
                 # unknown shapes
                 if batch_generator.static_shape_mode:
                     batch.set_shape(
-                        tf.TensorShape([None, batch_generator.num_models, int(batch_generator.crop_long_seqs)+1])
+                        tf.TensorShape([batch_size, batch_generator.num_models, int(batch_generator.crop_long_seqs)+1])
                     )
                 else:
                     batch.set_shape(
-                        tf.TensorShape([None, batch_generator.num_models, None])
+                        tf.TensorShape([batch_size, batch_generator.num_models, None])
                     )
                 ind.set_shape(
-                    tf.TensorShape([None, batch_generator.num_models])
+                    tf.TensorShape([batch_size, batch_generator.num_models])
                 )
                 return batch, ind
             else:
@@ -296,26 +296,26 @@ def make_dataset(
                 # unknown shapes
                 if batch_generator.static_shape_mode:
                     batch.set_shape(
-                        tf.TensorShape([None, batch_generator.num_models, int(batch_generator.crop_long_seqs)+1])
+                        tf.TensorShape([batch_size, batch_generator.num_models, int(batch_generator.crop_long_seqs)+1])
                     )
                     emb.set_shape(tf.TensorShape([
-                        None,
+                        batch_size,
                         batch_generator.num_models,
                         int(batch_generator.crop_long_seqs)+1,
                         batch_generator.scoring_model_config.dim+1
                     ]))
                 else:
                     batch.set_shape(
-                        tf.TensorShape([None, batch_generator.num_models, None])
+                        tf.TensorShape([batch_size, batch_generator.num_models, None])
                     )
                     emb.set_shape(tf.TensorShape([
-                        None,
+                        batch_size,
                         batch_generator.num_models,
                         None,
                         batch_generator.scoring_model_config.dim+1
                     ]))
                 ind.set_shape(
-                    tf.TensorShape([None, batch_generator.num_models])
+                    tf.TensorShape([batch_size, batch_generator.num_models])
                 )
                 return batch, ind, emb
         if bucket_by_seq_length:

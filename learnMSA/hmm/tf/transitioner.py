@@ -182,8 +182,23 @@ class PHMMTransitioner(TFTransitioner):
         # don't call super.build(), as this transitioner only folds and has no
         # own parameters
         self.explicit_transitioner.build()
-        # Initialize the precomputed tensors required to build matrix and start
-        self.refresh()
+
+    def _get_log_explicit_matrix(self) -> T_TFTensor:
+        """Lazily compute and cache the log explicit matrix."""
+        if not hasattr(self, '_log_explicit_matrix'):
+            self._log_explicit_matrix = safe_log(
+                self.explicit_transitioner.matrix()
+            )
+        return self._log_explicit_matrix
+
+    def _get_match_skip(self) -> list[T_TFTensor]:
+        """Lazily compute and cache the match skip matrices."""
+        if not hasattr(self, '_match_skip'):
+            self._match_skip = [
+                self._compute_match_skip_matrix(h)
+                for h in range(self.heads)
+            ]
+        return self._match_skip
 
     @override
     def _launch(
@@ -191,22 +206,20 @@ class PHMMTransitioner(TFTransitioner):
         mode: TransitionMode = TransitionMode.SUM,
         use_padding: bool = True, #not used
     ) -> T_TFTensor:
-        # Every time we launch, we need to refresh
-        self.refresh()
+        # Compute expensive matrices once before launching
+        self._get_log_explicit_matrix()
+        self._get_match_skip()
+
         # The HMM will pass `use_padding=True`, but we create the
         # padding state explicitly and don't want it to be added
         # automatically here. Pass `use_padding=False`!
-        return super()._launch(mode, use_padding=False)
+        result = super()._launch(mode, use_padding=False)
 
-    def refresh(self) -> None:
-        self.log_explicit_matrix = safe_log(
-            self.explicit_transitioner.matrix()
-        )
-        self.match_skip = []
-        for h in range(self.heads):
-            self.match_skip.append(
-                self._compute_match_skip_matrix(h)
-            )
+        # Clear cache immediately after use to free memory
+        del self._log_explicit_matrix
+        del self._match_skip
+
+        return result
 
     @override
     def matrix(self) -> T_TFTensor:
@@ -277,11 +290,13 @@ class PHMMTransitioner(TFTransitioner):
         """
         folded_probs = []
         max_states = PHMMTransitionIndexSet.num_states_unfolded(max(self.lengths))
+        log_explicit_matrix = self._get_log_explicit_matrix()
+        match_skip = self._get_match_skip()
 
         for h, L in enumerate(self.lengths):
             idx = PHMMTransitionIndexSet(L, folded=False)
-            log_mat = self.log_explicit_matrix[h]
-            M_skip = self.match_skip[h]
+            log_mat = log_explicit_matrix[h]
+            M_skip = match_skip[h]
 
             # Helper to extract log prob from matrix
             def get(indices):
@@ -419,11 +434,13 @@ class PHMMTransitioner(TFTransitioner):
 
         start_probs = []
         max_states = PHMMTransitionIndexSet.num_states_unfolded(max(self.lengths))
+        log_explicit_matrix = self._get_log_explicit_matrix()
+        match_skip = self._get_match_skip()
 
         for h, L in enumerate(self.lengths):
             idx = PHMMTransitionIndexSet(L, folded=False)
-            log_mat = self.log_explicit_matrix[h]
-            M_skip = self.match_skip[h]
+            log_mat = log_explicit_matrix[h]
+            M_skip = match_skip[h]
 
             # Helper to extract log prob from matrix
             def get(indices):
@@ -481,7 +498,11 @@ class PHMMTransitioner(TFTransitioner):
         With `M0 := Begin` and `ML+1 := End`.
         """
         L = self.lengths[h]
-        log_mat = self.log_explicit_matrix[h]
+        # Access cached value directly during _launch, compute if called independently
+        if hasattr(self, '_log_explicit_matrix'):
+            log_mat = self._log_explicit_matrix[h]
+        else:
+            log_mat = safe_log(self.explicit_transitioner.matrix())[h]
 
         # Create index sets for explicit and folded models
         idx = PHMMTransitionIndexSet(L, folded=False)
