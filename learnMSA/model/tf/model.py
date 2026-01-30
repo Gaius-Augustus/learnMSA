@@ -424,6 +424,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         models: list[int] | None = None,
         bucket_boundaries: Sequence[int | float] | None = None,
         bucket_batch_sizes: Sequence[int] | None = None,
+        reduce: bool = False,
     ) -> np.ndarray:
         """
         Computes predictions for all sequences specified by indices in data.
@@ -439,15 +440,21 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
                 uses default boundaries [200, 520, 700, 850, 1200, 2000, 4000, inf].
             bucket_batch_sizes: Batch sizes for each bucket. If None, uses the
                 adaptive batch size function from the batch generator.
+            reduce: If True and in posterior mode, reduces over sequences and
+                positions to return state expectations instead of full posteriors.
+                This saves memory for large datasets.
 
-        Returns: An array whose shape depends on the call mode:
+        Returns: An array whose shape depends on the call mode and reduce option:
             - Viterbi mode: (num_sequences, length, num_models) with the
                 most likely state sequences for each sequence and model.
             - Loglik mode: (num_sequences, num_models) with the loglikelihoods
               for each sequence and model.
-            - Posterior mode: (num_sequences, length, num_models, num_states)
+            - Posterior mode (reduce=False):
+                (num_sequences, length, num_models, num_states)
                 with the posterior state distribution per sequence position
                 and head. Outputs zeros for padding positions.
+            - Posterior mode (reduce=True): (num_models, max_num_states)
+                with the expected number of visits per state, averaged over sequences.
         """
         if indices is None:
             indices = np.arange(data.num_seq)
@@ -492,34 +499,51 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         # Compile to acccount for any changes in head_subset or call mode
         self.compile()
 
+        is_reduced_posterior = reduce and self.phmm_layer.is_posterior_mode()
+        if is_reduced_posterior:
+            # Special reduced posterior mode: accumulate state posteriors
+            # online to avoid storing full arrays in memory
+            Q = max(self.phmm_layer.states[m] for m in _models)
+            H = len(_models)
+            accumulated_posteriors = np.zeros((H, Q), dtype=np.float32)
+
+            @tf.function(jit_compile=self.context.config.advanced.jit_compile)
+            def reduce_batch(batch_data):
+                y = self.predict_step(batch_data)
+                # Drop indices if present (bucketing)
+                y = y[0] if isinstance(y, tuple) else y
+                # Sum over sequence positions (axis 1) and batch (axis 0)
+                return tf.reduce_sum(y, axis=[0, 1])
+
+            for batch_data in ds.take(steps):
+                y = reduce_batch(batch_data)
+                accumulated_posteriors += y.numpy()[..., :-1] #drop terminal
+
+            accumulated_posteriors /= len(indices)
+            self.context.batch_gen.crop_long_seqs = old_crop_long_seqs
+            return accumulated_posteriors
+
+        # Run a custom prediction loop with batching to collect all predictions
         all_predictions = []
         all_indices = []
-        batch_count = 0
 
         @tf.function(jit_compile=self.context.config.advanced.jit_compile)
         def predict_batch(batch_data):
             return self.predict_step(batch_data)
 
-        for batch_data in ds:
+        for batch_data in ds.take(steps):
             batch_result = predict_batch(batch_data)
-
-            # Check if we have bucketing (returns tuple of predictions and indices)
+            # Standard mode: collect predictions
             if isinstance(batch_result, tuple) and len(batch_result) == 2:
                 batch_pred, batch_idx = batch_result
-                # Move to CPU immediately to free GPU memory
                 all_predictions.append(batch_pred.numpy())
                 all_indices.append(batch_idx.numpy())
             elif isinstance(batch_result, tf.Tensor):
-                # No bucketing
                 all_predictions.append(batch_result.numpy())
-
-            batch_count += 1
-            if batch_count >= steps:
-                break
 
         # Handle variable lengths - slice bucket padding and optionally pad
         # Use actual data max length (+1 for terminal), not bucket padding
-        max_len = max(data.seq_lens[indices]) + 1
+        max_len = int(max(data.seq_lens[indices]) + 1)
 
         if self.phmm_layer.is_posterior_mode()\
                 or self.phmm_layer.is_viterbi_mode():

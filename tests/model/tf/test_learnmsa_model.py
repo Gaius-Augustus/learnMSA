@@ -537,3 +537,37 @@ def test_null_model_log_probs(context_amino_acid: LearnMSAContext) -> None:
         log_probs, expected_log_probs, rtol=1e-5,
         err_msg="Computed log probabilities do not match expected values"
     )
+
+def test_predict_posterior_reduce(context_amino_acid: LearnMSAContext) -> None:
+    """Test that predict with reduce=True matches manual reduction."""
+    model = LearnMSAModel(context_amino_acid)
+    model.compile()
+    model.posterior_mode()
+
+    # Create a small dataset
+    sequences = [
+        ("1", "ACDEFGHIKLMNPQRSTVWY"),
+        ("2", "MGKLPQRSTVWY"),
+        ("3", "ACDEFG"),
+    ]
+    data = SequenceDataset(sequences=sequences)
+    indices = np.arange(len(sequences))
+
+    # Get reduced predictions
+    reduced = model.predict(data, indices, reduce=True)
+
+    # Get full predictions and manually reduce
+    full = model.predict(data, indices, reduce=False)  # (B, T, H, Q)
+    full = full[:, :, :, :-1]  # Drop terminal state
+    manual_reduced = np.sum(full, axis=1)  # Sum over time/sequence positions
+    manual_reduced = np.mean(manual_reduced, axis=0)  # Average over batch
+
+    # Check shapes
+    assert reduced.shape == manual_reduced.shape, \
+        f"Shape mismatch: reduced={reduced.shape}, manual={manual_reduced.shape}"
+
+    # Check values match
+    np.testing.assert_allclose(
+        reduced, manual_reduced, rtol=1e-5,
+        err_msg="Reduced predictions do not match manually reduced values"
+    )

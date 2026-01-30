@@ -42,9 +42,7 @@ def get_discard_or_expand_positions(
     # num_models x max_num_states
     model.posterior_mode()
     model.compile()
-    expected_state = model.predict(data, indices) # (B, T, H, Q)
-    expected_state = np.sum(expected_state, axis=1)
-    expected_state = np.mean(expected_state, axis=0)  # (H, Q)
+    expected_state = model.predict(data, indices, reduce=True) # (H, Q)
     pos_expand = []
     expansion_lens = []
     pos_discard = []
