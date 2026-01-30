@@ -138,7 +138,7 @@ class PHMMValueSet:
 
             # Match i to end
             transitions[ind.match_to_end[i, 0], ind.match_to_end[i, 1]] = \
-                (p_match_end_values[i] if config.p_match_end is None 
+                (p_match_end_values[i] if config.p_match_end is None
                  else get_value(config.p_match_end, h, i))
 
         # Match L to end
@@ -179,6 +179,9 @@ class PHMMValueSet:
 
         # Terminal self-loop
         transitions[ind.terminal[0, 0], ind.terminal[0, 1]] = 1.0
+
+        # Avoid negative transition probabilities due to substractions
+        transitions = np.maximum(transitions, 0.0)
 
         # Starting probabilities
         start = np.array([

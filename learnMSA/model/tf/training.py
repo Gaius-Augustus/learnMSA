@@ -84,8 +84,7 @@ class BatchGenerator():
             max_len = min(max_len, self.crop_long_seqs)
 
             # When JIT compiling with bucketing, pad to bucket boundary for consistent shapes
-            if (self.bucket_boundaries is not None and
-                self.context.config.advanced.jit_compile):
+            if self.bucket_boundaries is not None:
                 # Find which bucket this batch belongs to
                 for boundary in self.bucket_boundaries:
                     if max_len <= boundary:

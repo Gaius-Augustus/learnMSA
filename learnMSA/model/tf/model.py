@@ -486,26 +486,69 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             bucket_batch_sizes=bucket_batch_sizes,
         )
 
+        assert steps > 0,\
+            "Prediction dataset must have a positive, finite number of steps."
+
         # Compile to acccount for any changes in head_subset or call mode
         self.compile()
 
-        # Use None for infinite steps (-1), otherwise use the computed steps
-        steps_param = None if steps == -1 else steps
-        result = super().predict(
-            ds, steps=steps_param, verbose=self.get_verbosity()
-        )
+        all_predictions = []
+        all_indices = []
+        batch_count = 0
 
-        # When bucketing is used, predict_step returns (predictions, indices)
-        if isinstance(result, tuple) and len(result) == 2:
-            predictions, bucket_indices = result
-            if isinstance(predictions, tf.RaggedTensor):
-                predictions = predictions.to_tensor(-1).numpy()
-            # Sort predictions back to original order using bucket_indices
-            sorted_order = np.argsort(bucket_indices)
-            decoded_array = predictions[sorted_order]
+        @tf.function(jit_compile=self.context.config.advanced.jit_compile)
+        def predict_batch(batch_data):
+            return self.predict_step(batch_data)
+
+        for batch_data in ds:
+            batch_result = predict_batch(batch_data)
+
+            # Check if we have bucketing (returns tuple of predictions and indices)
+            if isinstance(batch_result, tuple) and len(batch_result) == 2:
+                batch_pred, batch_idx = batch_result
+                # Move to CPU immediately to free GPU memory
+                all_predictions.append(batch_pred.numpy())
+                all_indices.append(batch_idx.numpy())
+            elif isinstance(batch_result, tf.Tensor):
+                # No bucketing
+                all_predictions.append(batch_result.numpy())
+
+            batch_count += 1
+            if batch_count >= steps:
+                break
+
+        # Handle variable lengths - slice bucket padding and optionally pad
+        # Use actual data max length (+1 for terminal), not bucket padding
+        max_len = max(data.seq_lens[indices]) + 1
+
+        if self.phmm_layer.is_posterior_mode()\
+                or self.phmm_layer.is_viterbi_mode():
+            # Process predictions: slice if too long, pad if needed (only in posterior/loglik modes)
+            processed_predictions = []
+            for pred in all_predictions:
+                # Slice off bucket padding if prediction is too long
+                if pred.shape[1] > max_len:
+                    pred = pred[:, :max_len]
+
+                # Pad if needed and in posterior/loglik mode
+                if pred.shape[1] < max_len:
+                    pad_width = [(0, 0)] * len(pred.shape)
+                    pad_width[1] = (0, max_len - pred.shape[1])
+                    pred = np.pad(pred, pad_width, constant_values=0)
+
+                processed_predictions.append(pred)
         else:
-            # No bucketing, result is just predictions
-            decoded_array = np.asarray(result)
+            # In loglik mode, no slicing/padding needed
+            processed_predictions = all_predictions
+
+        # Concatenate all predictions
+        decoded_array = np.concatenate(processed_predictions, axis=0)
+
+        # If bucketing was used, reorder to original sequence order
+        if all_indices:
+            bucket_indices = np.concatenate(all_indices, axis=0)
+            sorted_order = np.argsort(bucket_indices)
+            decoded_array = decoded_array[sorted_order]
 
         # Reset
         self.context.batch_gen.crop_long_seqs = old_crop_long_seqs
@@ -541,7 +584,9 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         if isinstance(x, tuple) and len(x) == 3:
             # Bucketed dataset: (batch, indices, j)
             batch, indices, j = x
+
             predictions = self((batch, indices), training=False)
+
             # Return predictions along with the index for reordering
             return predictions, j
         else:
