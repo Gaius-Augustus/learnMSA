@@ -30,7 +30,7 @@ def make_rate_matrix(exchangeabilities, equilibrium, epsilon=1e-16):
     mue = tf.reduce_sum(mue, axis=-2, keepdims=True)
     Q /= tf.maximum(mue, epsilon)
     return Q
-    
+
 def make_anc_probs(sequences, exchangeabilities, equilibrium, tau, equilibrium_sample=False, transposed=False):
     """Computes ancestral probabilities simultaneously for all sites and rate matrices.
     Args:
@@ -73,8 +73,8 @@ def make_anc_probs(sequences, exchangeabilities, equilibrium, tau, equilibrium_s
         else:
             ancprobs = tf.einsum("mbLz,mbkzs->mbLks", sequences, P)
     return ancprobs
-    
-class AncProbsLayer(tf.keras.layers.Layer): 
+
+class AncProbsLayer(tf.keras.layers.Layer):
     """A learnable layer for ancestral probabilities.
 
     Args:
@@ -82,7 +82,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
         num_rates: The number of different evolutionary times.
         num_matrices: The number of rate matrices.
         equilibrium_init: Initializer for the equilibrium distribution of the rate matrices
-        exchangeability_init: Initializer for the exchangeability matrices. Usually inverse_softplus 
+        exchangeability_init: Initializer for the exchangeability matrices. Usually inverse_softplus
                                 should be used on the initial matrix by the user.
         rate_init: Initializer for the rates.
         trainable_exchangeabilities: Flag that can prevent learning the exchangeabilities.
@@ -90,20 +90,20 @@ class AncProbsLayer(tf.keras.layers.Layer):
         per_matrix_rate: Learns an additional evolutionary time per rate matrix.
         matrix_rate_init: Initializer for the replacement rate per matrix.
         matrix_rate_l2: L2 regularizer strength that penalizes deviation of the parameters from the initial value.
-        shared_matrix: Make all weight matrices internally use the same weights. Only useful in combination with 
-                        num_matrices > 1 and per_matrix_rate = True. 
-        equilibrium_sample: If true, a 2-staged process is assumed where an amino acid is first sampled from 
+        shared_matrix: Make all weight matrices internally use the same weights. Only useful in combination with
+                        num_matrices > 1 and per_matrix_rate = True.
+        equilibrium_sample: If true, a 2-staged process is assumed where an amino acid is first sampled from
                         the equilibirium distribution and the ancestral probabilities are computed afterwards.
-        transposed: Transposes the probability matrix P = e^tQ. 
+        transposed: Transposes the probability matrix P = e^tQ.
         clusters: An optional vector that assigns each sequence to a cluster. If provided, the evolutionary time
                     is learned per cluster.
         use_lstm: Experimental setting that estimates the evolutionary distance of a sequence with an lstm.
         name: Layer name.
     """
 
-    def __init__(self, 
+    def __init__(self,
                  num_models,
-                 num_rates, 
+                 num_rates,
                  num_matrices,
                  equilibrium_init,
                  exchangeability_init,
@@ -130,7 +130,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
         self.trainable_distances = trainable_distances
         self.per_matrix_rate = per_matrix_rate
         self.matrix_rate_init = matrix_rate_init
-        self.matrix_rate_l2 = matrix_rate_l2 
+        self.matrix_rate_l2 = matrix_rate_l2
         self.shared_matrix = shared_matrix
         self.equilibrium_sample = equilibrium_sample
         self.transposed = transposed
@@ -138,29 +138,29 @@ class AncProbsLayer(tf.keras.layers.Layer):
         self.num_clusters = np.max(clusters) + 1 if clusters is not None else self.num_rates
         self.use_lstm = use_lstm
         self._head_subset = None
-    
+
     @property
     def head_subset(self):
         """If set, only these models are used in computations."""
         return self._head_subset
-    
+
     @head_subset.setter
     def head_subset(self, subset):
         self._head_subset = subset
-    
+
     def build(self, input_shape=None):
         if self.built:
             return
         if self.use_lstm:
             self.lstm_dim = 64
             self.lstm = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(self.lstm_dim, return_sequences=True, zero_output_for_mask=True), merge_mode="sum")
-            self.dense = tf.keras.layers.Dense(1, 
+            self.dense = tf.keras.layers.Dense(1,
                                             activation="softplus",
                                             #kernel_initializer="zeros",
                                             bias_initializer=self.rate_init)
         else:
-            self.tau_kernel = self.add_weight(shape=[self.num_models, self.num_clusters], 
-                                    name="tau_kernel", 
+            self.tau_kernel = self.add_weight(shape=[self.num_models, self.num_clusters],
+                                    name="tau_kernel",
                                     initializer=self.rate_init,
                                     trainable=self.trainable_distances)
         if self.shared_matrix:
@@ -168,29 +168,29 @@ class AncProbsLayer(tf.keras.layers.Layer):
                                                           name="exchangeability_kernel",
                                                            initializer=self.exchangeability_init,
                                                            trainable=self.trainable_rate_matrices)
-            
-            self.equilibrium_kernel = self.add_weight(shape=[self.num_models, 1, 20], 
+
+            self.equilibrium_kernel = self.add_weight(shape=[self.num_models, 1, 20],
                                                       name="equilibrium_kernel",
                                                       initializer=self.equilibrium_init,
                                                       trainable=self.trainable_rate_matrices)
         else:
-            self.exchangeability_kernel = self.add_weight(shape=[self.num_models, self.num_matrices, 20, 20], 
-                                                           name="exchangeability_kernel", 
+            self.exchangeability_kernel = self.add_weight(shape=[self.num_models, self.num_matrices, 20, 20],
+                                                           name="exchangeability_kernel",
                                                            initializer=self.exchangeability_init,
                                                            trainable=self.trainable_rate_matrices)
-            
-            self.equilibrium_kernel = self.add_weight(shape=[self.num_models, self.num_matrices, 20], 
+
+            self.equilibrium_kernel = self.add_weight(shape=[self.num_models, self.num_matrices, 20],
                                                       name="equilibrium_kernel",
                                                       initializer=self.equilibrium_init,
                                                       trainable=self.trainable_rate_matrices)
-            
+
         if self.per_matrix_rate:
-            self.per_matrix_rates_kernel = self.add_weight(shape=[self.num_models, self.num_matrices], 
+            self.per_matrix_rates_kernel = self.add_weight(shape=[self.num_models, self.num_matrices],
                                                       name="per_matrix_rates_kernel",
                                                       initializer=self.matrix_rate_init)
         self.built = True
 
-       
+
     def make_R(self, kernel=None):
         if kernel is None:
             kernel = self.exchangeability_kernel
@@ -200,13 +200,13 @@ class AncProbsLayer(tf.keras.layers.Layer):
         R = tf.math.softplus(R)
         R -= tf.linalg.diag(tf.linalg.diag_part(R)) #zero diagonal
         return R
-    
+
     def make_p(self):
         kernel = self.equilibrium_kernel
         if self._head_subset is not None:
             kernel = tf.gather(kernel, self._head_subset, axis=0)
         return tf.nn.softmax(kernel)
-    
+
     def make_Q(self):
         R, p = self.make_R(), self.make_p()
         R = tf.reshape(R, (-1, 20, 20))
@@ -215,7 +215,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
         num_models = len(self._head_subset) if self._head_subset is not None else self.num_models
         Q = tf.reshape(Q, (num_models, self.num_matrices, 20, 20))
         return Q
-        
+
     def make_tau(self, inputs=None, subset=None):
         if self.use_lstm:
             if len(inputs.shape) == 3:
@@ -281,9 +281,9 @@ class AncProbsLayer(tf.keras.layers.Layer):
         reg_tau = tf.reduce_sum(tf.square(self.tau_kernel + 3.))
         self.add_loss(self.matrix_rate_l2 * reg_tau)
         equilibrium = self.make_p()
-        anc_probs = make_anc_probs(only_std_aa_inputs, 
-                                   self.make_R(), 
-                                   equilibrium, 
+        anc_probs = make_anc_probs(only_std_aa_inputs,
+                                   self.make_R(),
+                                   equilibrium,
                                    mut_rates,
                                    self.equilibrium_sample,
                                    self.transposed)
@@ -305,7 +305,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
             num_model, b, L, _ = tf.unstack(tf.shape(inputs))
             anc_probs = tf.reshape(anc_probs, (num_model, b, L, self.num_matrices * 20) )
         return anc_probs
-        
+
     def get_config(self):
         config = super(AncProbsLayer, self).get_config()
         config.update({

@@ -350,6 +350,9 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
                 self.loglik_per_model_trackers[i].update_state(weighted_loglik[i])
                 self.prior_per_model_trackers[i].update_state(log_prior[i])
 
+        # Collect custom losses from layers
+        loss += sum(self.losses)
+
         return loss
 
     def weighted_loglik(self, x: Any, y_pred: tf.Tensor) -> tf.Tensor:
