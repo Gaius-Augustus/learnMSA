@@ -296,10 +296,11 @@ def test_from_config_scalar_params() -> None:
         p_begin_match=0.5,
         p_match_match=0.7,
         p_match_insert=0.1,
+        p_match_delete=0.15,
         p_match_end=0.05,
         p_insert_insert=0.4,
         p_delete_delete=0.3,
-        p_begin_delete=0.2,
+        p_begin_delete=0.1,
         p_left_left=0.8,
         p_right_right=0.8,
         p_unannot_unannot=0.7,
@@ -330,11 +331,11 @@ def test_from_config_scalar_params() -> None:
     np.testing.assert_almost_equal(value_set.transitions[3*L, 0], 0.5)  # B->M1
 
     # Check begin to other matches (uniform distribution)
-    np.testing.assert_almost_equal(value_set.transitions[3*L, 1], 0.25)  # B->M2
-    np.testing.assert_almost_equal(value_set.transitions[3*L, 2], 0.25)  # B->M3
+    np.testing.assert_almost_equal(value_set.transitions[3*L, 1], 0.2)  # B->M2
+    np.testing.assert_almost_equal(value_set.transitions[3*L, 2], 0.2)  # B->M3
 
     # Check begin to delete
-    np.testing.assert_almost_equal(value_set.transitions[3*L, 2*L-1], 0.2)  # B->D1
+    np.testing.assert_almost_equal(value_set.transitions[3*L, 2*L-1], 0.1)  # B->D1
 
     # Check match to match
     for i in range(L-1):
@@ -405,6 +406,8 @@ def test_from_config_multi_head() -> None:
         p_begin_match=[0.4, 0.5, 0.6],  # Different for each head
         p_match_match=[0.65, 0.7, 0.75],
         p_match_insert=[0.15, 0.1, 0.08],
+        p_match_delete=[0.2, 0.2, 0.17],
+        p_match_end=0,
         p_left_left=[0.75, 0.8, 0.85],
         p_start_left_flank=[0.2, 0.3, 0.4],
     )
@@ -445,6 +448,7 @@ def test_from_config_position_dependent() -> None:
         p_begin_match=[[0.5, 0.3, 0.2]],  # Position-dependent for 1 head
         p_match_match=[[0.7, 0.75, 0.8]],  # Different for each position
         p_match_insert=[[0.1, 0.12]],  # L-1 positions
+        p_match_delete=[[0.15, 0.1]],  # L-1 positions
         p_insert_insert=[[0.4, 0.35]],
         p_delete_delete=[[0.3, 0.25]],
         p_match_end=[[0.05, 0.03]],
@@ -508,6 +512,11 @@ def test_from_config_multi_head_position_dependent() -> None:
             [0.15],  # Head 0: P(I1|M1)
             [0.10]   # Head 1: P(I1|M1)
         ],
+        p_match_delete=[
+            [0.2],  # Head 0: P(I1|M1)
+            [0.15]   # Head 1: P(I1|M1)
+        ],
+        p_match_end=0,
     )
 
     # Test head 0
@@ -532,7 +541,7 @@ def test_from_config_edge_cases() -> None:
     from learnMSA.config.hmm import PHMMConfig
 
     # Test with L=1 (single match state)
-    config = PHMMConfig(p_begin_match=1.0)
+    config = PHMMConfig(p_begin_match=1.0, p_begin_delete=0.0)
     value_set = PHMMValueSet.from_config(L=1, h=0, config=config)
 
     assert value_set.match_emissions.shape == (1, len(config.alphabet))
@@ -555,7 +564,11 @@ def test_from_config_edge_cases() -> None:
     # Test with maximum probabilities
     config_max = PHMMConfig(
         p_begin_match=1.0,
+        p_begin_delete=0.0,
         p_match_match=1.0,
+        p_match_insert=0.0,
+        p_match_end=0.0,
+        p_match_delete=0.0,
         p_left_left=1.0,
         p_right_right=1.0,
     )

@@ -4,6 +4,7 @@ import numpy as np
 
 from learnMSA.util.aligned_dataset import AlignedDataset
 from learnMSA.hmm.util.transition_index_set import PHMMTransitionIndexSet
+from learnMSA.hmm.util.util import state_index_to_name
 from learnMSA.config.hmm import PHMMConfig
 from learnMSA.config.util import get_emission_dist
 
@@ -74,8 +75,16 @@ class PHMMValueSet:
             p_begin_delete = 1 - p_sum_prob_begin_match
         else:
             p = get_value(config.p_begin_match, h, 0)
-            p_begin_match_inner = (1 - p) / (L - 1) if L > 1 else 0
             p_begin_delete = get_value(config.p_begin_delete, h)
+            assert p + p_begin_delete <= 1, (
+                f"Sum of p_begin_match and p_begin_delete is "
+                f"{p + p_begin_delete}, which is > 1"
+            )
+            if L > 1:
+                p_begin_match_inner = (1 - p - p_begin_delete) / (L - 1)
+                p_begin_match_inner = max(1e-6, p_begin_match_inner)
+            else:
+                p_begin_match_inner = 0.0
 
         # Begin to delete 1
         transitions[ind.begin_to_delete[0, 0], ind.begin_to_delete[0, 1]] = \
@@ -121,12 +130,8 @@ class PHMMValueSet:
                 1 - get_value(config.p_insert_insert, h, i)
 
             # Match to delete
-            transitions[ind.match_to_delete[i, 0], ind.match_to_delete[i, 1]] = (
-                1 - get_value(config.p_match_match, h, i)
-                - get_value(config.p_match_insert, h, i)
-                - (p_match_end_values[i] if config.p_match_end is None
-                   else get_value(config.p_match_end, h, i))
-            )
+            transitions[ind.match_to_delete[i, 0], ind.match_to_delete[i, 1]] = \
+                get_value(config.p_match_delete, h, i)
 
             # Delete to delete
             transitions[ind.delete_to_delete[i, 0], ind.delete_to_delete[i, 1]] = \
@@ -140,6 +145,14 @@ class PHMMValueSet:
             transitions[ind.match_to_end[i, 0], ind.match_to_end[i, 1]] = \
                 (p_match_end_values[i] if config.p_match_end is None
                  else get_value(config.p_match_end, h, i))
+
+        # Rescale other outgoing transitions from match i
+        match_out_in_profile = np.sum(transitions[:L-1, :3*L-1], axis=-1)
+        match_out_in_profile = np.maximum(match_out_in_profile, 1e-6)
+        transitions[:L-1, :3*L-1] /= match_out_in_profile[:, np.newaxis]
+        transitions[:L, :3*L-1] *=\
+            (1 - transitions[ind.match_to_end[:, 0], ind.match_to_end[:, 1]])\
+            [:, np.newaxis]
 
         # Match L to end
         transitions[ind.match_to_end[-1, 0], ind.match_to_end[-1, 1]] = 1.0
@@ -180,8 +193,28 @@ class PHMMValueSet:
         # Terminal self-loop
         transitions[ind.terminal[0, 0], ind.terminal[0, 1]] = 1.0
 
-        # Avoid negative transition probabilities due to substractions
-        transitions = np.maximum(transitions, 0.0)
+        # Check that all transition values are in [0, 1]
+        if np.any((transitions < 0) | (transitions > 1)):
+            invalid_mask = (transitions < 0) | (transitions > 1)
+            invalid_indices = np.argwhere(invalid_mask)
+            if len(invalid_indices) > 0:
+                i, j = invalid_indices[0]
+                raise ValueError(
+                    f"Transition probability {state_index_to_name(i, L)} -> "
+                    f"{state_index_to_name(j, L)} in head {h} with length {L} "
+                    f"is {transitions[i, j]}, which is outside the "
+                    "range [0, 1]"
+                )
+
+        # Check for that transitions is stochastic
+        row_sums = np.sum(transitions, axis=-1)
+        for i, row_sum in enumerate(row_sums):
+            if not np.isclose(row_sum, 1.0):
+                raise ValueError(
+                    "Transition probabilities for state "
+                    f"{state_index_to_name(i, L)} in head {h} with "
+                    f"length {L} do not sum to 1 (sum={row_sum})"
+                )
 
         # Starting probabilities
         start = np.array([

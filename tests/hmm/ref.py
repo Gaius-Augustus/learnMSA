@@ -22,6 +22,7 @@ config: PHMMConfig = PHMMConfig(
     p_begin_match=[[0.6, 0.1, 0.1, 0.1], [0.7, 0.1, 0.1]],
     p_match_match=[[0.97, 0.5, 0.6], [0.97, 0.5]],
     p_match_insert=[[0.01, 0.05, 0.3], [0.01, 0.05]],
+    p_match_delete=[[0.01, 0.4, 0.05], [0.01, 0.4]],
     p_match_end=[[0.01, 0.05, 0.05, 1], [0.01, 0.05, 1]],
     p_insert_insert=[[0.5, 0.5, 0.5], [0.5, 0.1]],
     p_delete_delete=[[0.2, 0.5, 0.2], [0.2, 0.5]],

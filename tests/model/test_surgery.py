@@ -63,9 +63,9 @@ def model(data: SequenceDataset) -> LearnMSAModel:
     learnmsa_config.hmm.insert_emissions = insert_emissions
     learnmsa_config.hmm.use_prior_for_emission_init = False
     learnmsa_config.hmm.p_begin_match = 0.9
-    learnmsa_config.hmm.p_match_end = 0.3
-    learnmsa_config.hmm.p_match_match = 0.7
-    learnmsa_config.hmm.p_match_insert = 0.2
+    learnmsa_config.hmm.p_match_end = 0.2
+    learnmsa_config.hmm.p_match_match = 0.65
+    learnmsa_config.hmm.p_match_insert = 0.1
     learnmsa_config.hmm.p_insert_insert = 0.01
     learnmsa_config.hmm.p_delete_delete = 0.7
     learnmsa_config.hmm.p_begin_delete = 0.05
@@ -117,6 +117,7 @@ def model_single_head(data: SequenceDataset) -> LearnMSAModel:
     learnmsa_config.hmm.p_match_end = 0.3
     learnmsa_config.hmm.p_match_match = 0.3
     learnmsa_config.hmm.p_match_insert = 0.3
+    learnmsa_config.hmm.p_match_delete = 0.1
     learnmsa_config.hmm.p_insert_insert = 0.7
     learnmsa_config.hmm.p_delete_delete = 0.3
     learnmsa_config.hmm.p_begin_delete = 0.05
@@ -215,6 +216,7 @@ def test_update_kernels(model_single_head: LearnMSAModel) -> None:
     config.p_match_end = 0.2
     config.p_match_match = 0.1
     config.p_match_insert = 0.5
+    config.p_match_delete = 0.2
     config.p_insert_insert = 0.4
     config.p_delete_delete = 0.2
 
@@ -247,24 +249,17 @@ def test_update_kernels(model_single_head: LearnMSAModel) -> None:
 
     np.testing.assert_equal(emissions_new[:result.length], expected_emissions)
 
-    # The expected initial distribution after expanding and discarding
-    # must have inserted the default value 0.5/(L-1) (as per above config) for
-    # internal begin_to_match transitions and then renormalized
-    expected_begin_to_match = np.array([
-        0.35, 0.15, 0.5, 0.5, 0.15, 0.5, 0.15, 0.5, 0.5, 0.5
-    ])
-    expected_begin_to_match[1:] /= expected_begin_to_match[1:].sum()\
-        / (1 - 0.35 - 0.05) # must also account for begin -> D1
-
     ind = PHMMTransitionIndexSet(result.length)
+
+    # Begin to match transitions must have been reset to defaults
     np.testing.assert_almost_equal(
         transitions_new[ind.begin_to_match[:,0], ind.begin_to_match[:,1]],
-        expected_begin_to_match
+        [0.5] + [(0.5 - 0.05) / (result.length - 1)] * (result.length - 1)
     )
-
+    # Same for match to end transitions
     np.testing.assert_almost_equal(
         transitions_new[ind.match_to_end[:,0], ind.match_to_end[:,1]],
-        [.3, .3, .2, .2, .3, .2, .3, .2, .2, 1]
+        [0.2] * (result.length-1) + [1.0]
     )
     np.testing.assert_almost_equal(
         transitions_new[ind.match_to_match[:,0], ind.match_to_match[:,1]],

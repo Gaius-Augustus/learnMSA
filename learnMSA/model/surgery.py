@@ -314,9 +314,6 @@ def update_kernels(
     match_to_insert = A[ind.match_to_insert[:, 0], ind.match_to_insert[:, 1]]
     insert_to_insert = A[ind.insert_to_insert[:, 0], ind.insert_to_insert[:, 1]]
     delete_to_delete = A[ind.delete_to_delete[:, 0], ind.delete_to_delete[:, 1]]
-    begin_to_match = A[ind.begin_to_match[:, 0], ind.begin_to_match[:, 1]]
-    match_to_end = A[ind.match_to_end[:, 0], ind.match_to_end[:, 1]]
-    begin_to_delete = A[ind.begin_to_delete[:, 0], ind.begin_to_delete[:, 1]]
 
     h = model_index
     args = extend_mods(pos_expand, expansion_lens, pos_discard, L)
@@ -338,51 +335,12 @@ def update_kernels(
         insert_value = get_value(config.p_delete_delete, h, 0),
     )
 
-    begin_to_match = apply_mods(
-        begin_to_match,
-        pos_expand,
-        expansion_lens,
-        pos_discard,
-        get_value(config.p_begin_match, h, 1),
-    )
-    if 0 in pos_expand:
-        begin_to_match[0] = get_value(config.p_begin_match, h, 0)
-        begin_to_delete = get_value(config.p_begin_delete, h)
-    # Re-normalize the internal begin_to_match probabilities
-    p1 = begin_to_match[1:].sum()
-    p2 = 1 - begin_to_match[0] - begin_to_delete
-    if p1 > 0 and p2 > 0:
-        begin_to_match[1:] /= p1 / p2
-    elif p1 > 0 and p2 <= 0:
-        # If p2 <= 0, the first position and delete consume all probability
-        # Set internal positions to very small values
-        begin_to_match[1:] = 1e-10
-    # else: p1 == 0, keep begin_to_match[1:] as is (should be all zeros)
-
-    if config.p_match_end is None:
-        p_match_end = 0.5 / (L - 1) if L > 2 else 0.0
-    else:
-        p_match_end = get_value(config.p_match_end, h, 0)
-
-    if L in pos_expand:
-        match_to_end[-1] = p_match_end
-    match_to_end = apply_mods(
-        match_to_end,
-        pos_expand,
-        expansion_lens,
-        pos_discard,
-        p_match_end,
-    )
-
     new_config = config.model_copy(deep=True)
     new_config.match_emissions=aa_emissions_new[np.newaxis]
     new_config.p_match_match=match_to_match[np.newaxis]
     new_config.p_match_insert=match_to_insert[np.newaxis]
     new_config.p_insert_insert=insert_to_insert[np.newaxis]
     new_config.p_delete_delete=delete_to_delete[np.newaxis]
-    new_config.p_begin_match=begin_to_match[np.newaxis]
-    new_config.p_match_end=match_to_end[np.newaxis]
-    new_config.p_begin_delete=begin_to_delete
 
     if phmm_layer.use_language_model and plm_config is not None:
         new_plm_config = plm_config.model_copy(deep=True)

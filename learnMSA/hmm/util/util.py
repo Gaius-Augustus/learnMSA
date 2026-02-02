@@ -37,3 +37,36 @@ def make_phmm_explicit_transitions(length: int) -> np.ndarray:
         idx += 1
     transitions[idx] = (length - 1, length - 1)  # last match state self-loop
     return transitions
+
+
+def state_index_to_name(index: int, length: int) -> str:
+    """
+    Convert a state index to its corresponding name in the profile HMM.
+
+    Args:
+        index (int): The state index.
+        length (int): The number of match states / the length of the profile.
+
+    Returns:
+        str: The name of the state.
+    """
+    if index < length:
+        return f"M{index + 1}"
+    elif index < 2 * length - 1:
+        return f"I{index - length + 1}"
+    elif index < 3 * length - 1:
+        return f"D{index - (2 * length - 1) + 1}"
+    elif index == 3 * length - 1:
+        return "L"
+    elif index == 3 * length:
+        return "B"
+    elif index == 3 * length + 1:
+        return "E"
+    elif index == 3 * length + 2:
+        return "C"
+    elif index == 3 * length + 3:
+        return "R"
+    elif index == 3 * length + 4:
+        return "T"
+    else:
+        raise ValueError("Invalid state index")

@@ -126,12 +126,19 @@ class PHMMConfig(BaseModel):
     Can optionally depend on i and h.
     """
 
+    p_match_delete: float | Sequence[float] | Sequence[Sequence[float]] | \
+        NPArray = 0.12
+    """Defines ``P(Delete i+1 | Match i; h)``.
+    Can optionally depend on i and h.
+    """
+
     p_match_end: float | Sequence[float] | Sequence[Sequence[float]] | \
         NPArray | None = None
     """Defines ``P(End | Match i; h)``.
     Can optionally depend on i and h.
     Per default it is determined automatically such that ``exit[0] = 1/(L-1)`` and
-    ``exit[i] = entry[i]`` for i > 0.
+    ``exit[i] = entry[i]`` for i > 0 and the other outgoing transitions from
+    match i are rescaled accordingly.
     """
 
     p_insert_insert: float | Sequence[float] | Sequence[Sequence[float]] | \
@@ -184,6 +191,7 @@ class PHMMConfig(BaseModel):
         "p_begin_match": 0,
         "p_match_match": 0,
         "p_match_insert": -1,
+        "p_match_delete": -1,
         "p_match_end": -1,
         "p_insert_insert": -1,
         "p_delete_delete": 0,
@@ -194,6 +202,7 @@ class PHMMConfig(BaseModel):
         "p_begin_match",
         "p_match_match",
         "p_match_insert",
+        "p_match_delete",
         "p_match_end",
         "p_insert_insert",
         "p_delete_delete",
