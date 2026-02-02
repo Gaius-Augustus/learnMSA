@@ -458,7 +458,9 @@ def test_custom_alphabet() -> None:
         assert data.get_alphabet_no_gap() == "AB"
 
     # Test with aligned dataset
-    with AlignedDataset(aligned_sequences=sequences, alphabet="AB-") as data:
+    with AlignedDataset(
+        aligned_sequences=sequences, alphabet="AB-", replace_with_x=""
+    ) as data:
         assert data.alphabet == "AB-"
         assert data.alignment_len == 5
         # seq2 has a gap at position 1

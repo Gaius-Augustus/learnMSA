@@ -17,6 +17,7 @@ class AlignedDataset(SequenceDataset):
             indexed: bool = False,
             single_seq_ok: bool = False,
             alphabet: str | None = None,
+            replace_with_x: str = "BZJ",
     ) -> None:
         """
         Args:
@@ -33,6 +34,7 @@ class AlignedDataset(SequenceDataset):
                 If None, uses the default alphabet "ARNDCQEGHILKMFPSTWYVXUO-".
         """
         super().__init__(filepath, fmt, aligned_sequences, indexed, alphabet)
+        self._replace_with_x = replace_with_x
         self._single_seq_ok = single_seq_ok
         self.validate_dataset()
 
@@ -40,7 +42,10 @@ class AlignedDataset(SequenceDataset):
         self._msa_matrix = np.zeros((self.num_seq, len(self.get_record(0))), dtype=np.int16)
         for i in range(self.num_seq):
             self._msa_matrix[i,:] = self.get_encoded_seq(
-                i, remove_gaps=False, replace_with_x="", dtype=np.int16
+                i,
+                remove_gaps=False,
+                replace_with_x=self._replace_with_x,
+                dtype=np.int16,
             )
 
         # Compute a mapping from sequence positions to MSA-column index
