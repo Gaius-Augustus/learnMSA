@@ -366,10 +366,17 @@ def compute_dataset_steps(
         zip([0] + boundaries[:-1], boundaries, bucket_batch_sizes)
     ):
         # Count sequences in this bucket
+        # Match TensorFlow's bucket_by_sequence_length boundary conditions:
+        # - Bucket 0: length < boundary[0]
+        # - Bucket i (i>0): boundary[i-1] <= length < boundary[i]
+        # - Last bucket: length >= boundary[-1]
         if i == 0:
-            count = np.sum(seq_lengths <= upper)
+            count = np.sum(seq_lengths < upper)
+        elif i == len(bucket_batch_sizes) - 1:
+            # Last bucket: inclusive lower bound, no upper bound
+            count = np.sum(seq_lengths >= lower)
         else:
-            count = np.sum((seq_lengths > lower) & (seq_lengths <= upper))
+            count = np.sum((seq_lengths >= lower) & (seq_lengths < upper))
 
         # Compute number of batches for this bucket
         if count > 0:
