@@ -250,6 +250,18 @@ def _fit_and_align(
             if surgery_converged:
                 print("Surgery converged.")
 
+        if config.training.surgery_checkpoints:
+            # Save model checkpoint after surgery
+            surgery_checkpoint_path = (
+                Path(config.input_output.work_dir) /
+                f"surgery_checkpoint_iter_{i+1}.model"
+            )
+            am.save(surgery_checkpoint_path)
+            if config.input_output.verbose:
+                print(
+                    f"Saved surgery checkpoint to {surgery_checkpoint_path}."
+                )
+
         last_iteration = surgery_converged\
             or (i == config.training.max_iterations-2)
 

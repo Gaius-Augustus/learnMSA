@@ -353,27 +353,28 @@ class AlignmentModel():
                     f"{bitscore[idx]}"
                 ]) + "\n")
 
-    def save(self, filepath: str, pack: bool = True) -> None:
+    def save(self, filepath: str | Path, pack: bool = True) -> None:
         """ Writes the underlying models to file.
 
         Args:
             filepath: Path of the written file.
             pack: If true, the output will be a zip file, otherwise a directory.
         """
-        Path(filepath).mkdir(parents=True, exist_ok=True)
+        filepath = Path(filepath)
+        filepath.mkdir(parents=True, exist_ok=True)
         # Serialize metadata
         d: dict = {
             "gap_symbol" : self.gap_symbol,
             "gap_symbol_insertions" : self.gap_symbol_insertions,
         }
-        with open(filepath+"/meta.json", "w") as metafile:
+        with open(filepath / "meta.json", "w") as metafile:
             metafile.write(json.dumps(d, indent=4))
         # Serialize indices
-        np.savetxt(filepath+"/indices", self.indices, fmt='%i')
+        np.savetxt(filepath / "indices", self.indices, fmt='%i')
         # Save the model
-        self.model.save(filepath+".keras")
+        self.model.save(str(filepath) + ".keras")
         if pack:
-            shutil.make_archive(filepath, "zip", filepath)
+            shutil.make_archive(str(filepath), "zip", filepath)
             try:
                 shutil.rmtree(filepath)
             except OSError as e:
@@ -382,7 +383,7 @@ class AlignmentModel():
     @classmethod
     def load(
         cls,
-        filepath: str,
+        filepath: str | Path,
         data: SequenceDataset,
         from_packed: bool = True,
     ):
@@ -397,15 +398,16 @@ class AlignmentModel():
             An AlignmentModel instance with equivalent behavior as the
             AlignmentModel instance used while saving the model.
         """
+        filepath = Path(filepath)
         if from_packed:
-            shutil.unpack_archive(filepath+".zip", filepath)
+            shutil.unpack_archive(str(filepath) + ".zip", filepath)
 
         # Deserialize metadata
-        with open(filepath+"/meta.json") as metafile:
+        with open(filepath / "meta.json") as metafile:
             d = json.load(metafile)
 
         # Deserialize indices
-        indices = np.loadtxt(filepath+"/indices", dtype=int)
+        indices = np.loadtxt(filepath / "indices", dtype=int)
 
         # Load the model
         with warnings.catch_warnings():
@@ -416,7 +418,7 @@ class AlignmentModel():
                 category=UserWarning
             )
             model = tf.keras.models.load_model(
-                filepath+".keras",
+                str(filepath) + ".keras",
             )
 
         # Manually compile the model after loading

@@ -128,6 +128,9 @@ class TrainingConfig(BaseModel):
     """Omit all insertions in the output and write only those amino
         acids that are assigned to match states."""
 
+    surgery_checkpoints: bool = True
+    """Whether to save model checkpoints after each model surgery run."""
+
 
     @field_validator("learning_rate")
     def validate_learning_rate(cls, v: float) -> float:

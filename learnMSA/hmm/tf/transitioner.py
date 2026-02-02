@@ -7,7 +7,7 @@ from hidten.hmm import HMMConfig as HidtenHMMConfig
 from hidten.prior import Prior
 from hidten.tf.transitioner import (T_TFTensor, TFTransitioner, TransitionMode,
                                     shared_tensor)
-from hidten.tf.util import log_zero, safe_log
+from hidten.tf.util import log_zero, safe_log, zero_row_softmax
 
 from learnMSA.hmm.util import value_set
 from learnMSA.hmm.util import value_set
@@ -88,6 +88,28 @@ class PHMMExplicitTransitioner(TFTransitioner):
 
         self.allow_start = np.vstack(start)
         self.initializer_start = np.hstack(start_values)
+
+    @override
+    def matrix(self) -> T_TFTensor:
+        """Override to add numerical stability to avoid numerical issues
+        when folding."""
+        # Add epsilon in probability space to ensure that no allowed
+        # transition has vanishing probability
+        kernel = tf.math.log(tf.math.exp(self.kernel) + 1e-16)
+        dense_tensor = shared_tensor(
+            indices=self.allow, # type: ignore
+            values=kernel,
+            shape=tf.constant(
+                [
+                    self.heads,
+                    self.max_states,
+                    self.matrix_dim,
+                ],
+                dtype=tf.int64,
+            ),
+            share=self.share, # type: ignore
+        )
+        return zero_row_softmax(dense_tensor)
 
 
 class PHMMTransitioner(TFTransitioner):
