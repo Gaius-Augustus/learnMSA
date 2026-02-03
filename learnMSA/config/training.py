@@ -78,8 +78,8 @@ class TrainingConfig(BaseModel):
     """Automatically crop sequences longer than this factor times the
     average length during training."""
 
-    frozen_insertions: bool = False
-    """Insertions will be frozen during training."""
+    trainable_insertions: bool = False
+    """Insertions will be trainable during training."""
 
     no_sequence_weights: bool = False
     """Do not use sequence weights and strip mmseqs2 from requirements.

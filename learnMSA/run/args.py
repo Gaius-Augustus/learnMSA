@@ -262,10 +262,10 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
             "average length during training. (default: %(default)s)"
     )
     train_group.add_argument(
-        "--frozen_insertions",
-        dest="frozen_insertions",
+        "--trainable_insertions",
+        dest="trainable_insertions",
         action="store_true",
-        help="Insertions will be frozen during training."
+        help="Insertions will be trainable during training."
     )
     train_group.add_argument(
         "--no_sequence_weights",

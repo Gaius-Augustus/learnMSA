@@ -65,7 +65,7 @@ def args_to_config(args: Namespace) -> Configuration:
         crop=crop,
         auto_crop=auto_crop,
         auto_crop_scale=args.auto_crop_scale,
-        frozen_insertions=args.frozen_insertions,
+        trainable_insertions=args.trainable_insertions,
         no_sequence_weights=args.no_sequence_weights,
         skip_training=args.skip_training,
         trainable_rate_matrices=args.trainable_rate_matrices,

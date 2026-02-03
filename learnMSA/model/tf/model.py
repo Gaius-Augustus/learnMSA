@@ -73,7 +73,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             prior_config = context.config.hmm_prior,
             plm_config = context.config.language_model,
             use_prior = context.config.training.use_prior,
-            trainable_insertions = not train_cfg.frozen_insertions,
+            trainable_insertions = train_cfg.trainable_insertions,
         )
 
         # Metrics trackers

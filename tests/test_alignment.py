@@ -126,7 +126,6 @@ def test_alignment_egf() -> None:
         config.input_output.subset_ids = seq_ids
         config.training.crop = 999999
         config.training.auto_crop = False
-        config.training.frozen_insertions = True
 
         # Fit the alignment model
         am, best_index = align(data, config)

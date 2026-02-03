@@ -67,7 +67,7 @@ class TestArgsToConfig:
             "--unaligned_insertions",
             "--crop", "500",
             "--auto_crop_scale", "3.0",
-            "--frozen_insertions",
+            "--trainable_insertions",
             "--no_sequence_weights",
             "--skip_training",
             "--grow_mem",
@@ -96,7 +96,7 @@ class TestArgsToConfig:
         assert config.training.unaligned_insertions is True
         assert config.training.crop == 500
         assert config.training.auto_crop_scale == 3.0
-        assert config.training.frozen_insertions is True
+        assert config.training.trainable_insertions is True
         assert config.training.no_sequence_weights is True
         assert config.training.skip_training is True
         assert config.training.only_matches is True
@@ -297,7 +297,7 @@ class TestArgsToConfig:
             "-o", "output.a2m",
             "--indexed_data",
             "--unaligned_insertions",
-            "--frozen_insertions",
+            "--trainable_insertions",
             "--no_sequence_weights",
             "--skip_training",
             "--pseudocounts",
@@ -311,7 +311,7 @@ class TestArgsToConfig:
 
         assert config.training.indexed_data is True
         assert config.training.unaligned_insertions is True
-        assert config.training.frozen_insertions is True
+        assert config.training.trainable_insertions is True
         assert config.training.no_sequence_weights is True
         assert config.training.skip_training is True
         assert config.init_msa.pseudocounts is True

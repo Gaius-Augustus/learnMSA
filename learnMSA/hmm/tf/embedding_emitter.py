@@ -27,11 +27,20 @@ class EmbeddingEmitter(TFMVNormalEmitter):
     def __init__(
         self,
         values: Sequence[PHMMEmbeddingValueSet],
+        trainable_insertions: bool = True,
         **kwargs
     ) -> None:
+        """
+        Args:
+            values (Sequence[PHMMEmbeddingValueSet]): A sequence of value sets,
+                one per head, with embedding parameters.
+            trainable_insertions (bool): Whether insertion emissions are
+                trainable. Defaults to True.
+        """
         super().__init__(**kwargs)
 
         self._lengths = np.array([value_set.L for value_set in values])
+        self.trainable_insertions = trainable_insertions
 
         init_values = []
         # Initialization based on provided value sets
@@ -68,6 +77,20 @@ class EmbeddingEmitter(TFMVNormalEmitter):
             matrix = tf.gather(matrix, self.head_subset, axis=0)
             max_len_subset = max(self.lengths[h] for h in self.head_subset)
             matrix = matrix[:, :max_len_subset*2, :]
+
+        # TODO: to be tested..
+        if not self.trainable_insertions:
+            # Create mask for match states (True) vs insertion states (False)
+            # self.lengths gives the number of match states per head
+            max_states = tf.shape(matrix)[1]
+            mask = tf.sequence_mask(
+                self.lengths, maxlen=max_states, dtype=matrix.dtype
+            )
+            # Expand mask to cover the emission dimension
+            mask = mask[:, :, tf.newaxis]
+            # Apply mask: keep gradients for match states, stop for insertions
+            matrix = mask * matrix + (1 - mask) * tf.stop_gradient(matrix)
+
         return matrix
 
     @override
