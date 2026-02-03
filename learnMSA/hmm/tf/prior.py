@@ -259,11 +259,10 @@ class TFPHMMTransitionPrior(TFPrior):
             begin_to_match = transition_matrix[h, begin_idx, :L]  # (L,)
             match_to_end = transition_matrix[h, :L, 3*L + 1]  # (L,)
 
-            # Get match_to_delete[0] for rescaling
-            match_to_delete_0 = transition_matrix[h, -5, 2*L - 1]
+            begin_to_delete_0 = transition_matrix[h, begin_idx, 2*L - 1]
 
             # Rescale begin_to_match to sum to 1
-            div = tf.maximum(e, 1.0 - match_to_delete_0)
+            div = tf.maximum(e, 1.0 - begin_to_delete_0)
             btm = begin_to_match / div
 
             # Compute entry-exit matrix
@@ -334,7 +333,7 @@ class TFPHMMTransitionPrior(TFPrior):
 
 class TFPHMMStartPrior(TFPrior):
     """A prior that scores the starting distribution of a profile HMM.
-    
+
     This prior scores the probability of starting in the left flank state
     versus starting in the begin state.
     """
