@@ -104,7 +104,11 @@ def assert_anc_probs_layer(
 
 
 def get_test_configs(sequences : np.ndarray) -> list[dict]:
-    """Generate test configurations for ancestral probabilities."""
+    """Generate test configurations for ancestral probabilities.
+
+    Args:
+        sequences: Shape (b, L, num_model) with integer indices
+    """
     # Assuming sequences only contain the 20 standard AAs
     oh_sequences = tf.one_hot(sequences, 20)
     anc_probs_init = Initializers.make_default_anc_probs_init(1)
@@ -140,13 +144,24 @@ def get_test_configs(sequences : np.ndarray) -> list[dict]:
                 case["encoder_initializer"] = encoder_initializer
 
                 if rate_init == -100.:
-                    case["expected_anc_probs"] = tf.one_hot(sequences, len(SequenceDataset._default_alphabet)).numpy()
+                    expected_anc_probs = tf.one_hot(
+                        sequences, len(SequenceDataset._default_alphabet)
+                    ).numpy()
+                    # Shape: (B, L, H, S)
+                    case["expected_anc_probs"] = expected_anc_probs
                 elif rate_init == 100.:
-                    anc = np.concatenate([p, np.zeros((1, 1, len(SequenceDataset._default_alphabet) - 20), dtype=np.float32)], axis=-1)
-                    anc = np.concatenate([anc] * sequences.shape[0] * sequences.shape[1] * sequences.shape[2], axis=1)
-                    anc = np.reshape(anc, (sequences.shape[0], sequences.shape[1], sequences.shape[2], len(SequenceDataset._default_alphabet)))
+                    anc = np.concatenate(
+                        [p, np.zeros((1, 1, len(SequenceDataset._default_alphabet) - 20), dtype=np.float32)],
+                        axis=-1,
+                    )
+                    b, L, num_model = sequences.shape
+                    anc = np.concatenate([anc] * b * L * num_model, axis=1)
+                    anc = np.reshape(anc, (b, L, num_model, len(SequenceDataset._default_alphabet)))
+                    # Shape: (B, L, H, S)
                     case["expected_anc_probs"] = anc
+
                 if equilibrium_sample:
+                    # Shape: (b, L, num_model)
                     expected_freq = tf.linalg.matvec(p, oh_sequences).numpy()
                     case["expected_freq"] = expected_freq
                     if rate_init != -3.:
@@ -195,7 +210,8 @@ def get_simple_seq(data: SequenceDataset) -> np.ndarray:
     )
     for (seq, _), _ in ds.take(1):
         sequences = seq.numpy()[:, :, :-1]
-        sequences = np.transpose(sequences, [1, 0, 2])
+        # transpose to shape (b, L, num_model)
+        sequences = np.transpose(sequences, [0, 2, 1]) # TODO: fix batch gen
         break
     return sequences
 
@@ -226,24 +242,33 @@ def test_anc_probs_layer() -> None:
     """Test ancestral probability calculations."""
     filename = os.path.dirname(__file__) + "/../tests/data/simple.fa"
     with SequenceDataset(filename) as data:
-        sequences = get_simple_seq(data)
-    n = sequences.shape[1]
+        sequences = get_simple_seq(data)  # Shape: (b, L, num_model)
+    n = sequences.shape[0]
+    # rate_indices should be (b, num_model)
+    rate_indices = np.arange(n)[:, np.newaxis]
+
     for case in get_test_configs(sequences):
         anc_probs_layer = make_anc_probs_layer(
             case["config"], case["encoder_initializer"], n
         )
         assert_anc_probs_layer(anc_probs_layer, case["config"])
-        anc_prob_seqs = anc_probs_layer(sequences, np.arange(n)[np.newaxis, :]).numpy()
+        anc_prob_seqs = anc_probs_layer(
+            sequences, rate_indices=rate_indices
+        ).numpy()
         shape = (
-            case["config"].training.num_model,
             n,
-            sequences.shape[2],
+            sequences.shape[1],  # L is at index 1
+            case["config"].training.num_model,
             case["config"].training.num_rate_matrices,
             len(SequenceDataset._default_alphabet)
         )
         anc_prob_seqs = np.reshape(anc_prob_seqs, shape)
         if "expected_anc_probs" in case:
-            assert_anc_probs(anc_prob_seqs, case["expected_freq"], case["expected_anc_probs"])
+            assert_anc_probs(
+                anc_prob_seqs,
+                case["expected_freq"],
+                case["expected_anc_probs"],
+            )
         else:
             assert_anc_probs(anc_prob_seqs, case["expected_freq"])
 
@@ -252,8 +277,8 @@ def test_encoder_model() -> None:
     """Test encoder model with ancestral probabilities layer."""
     filename = os.path.dirname(__file__) + "/../tests/data/simple.fa"
     with SequenceDataset(filename) as data:
-        sequences = get_simple_seq(data)
-        n = sequences.shape[1]
+        sequences = get_simple_seq(data)  # Shape: (b, L, num_model)
+        n = sequences.shape[0]
         ind = np.arange(n)
         model_length = 10
         # this test is currently a bit messy, although it works...
@@ -277,11 +302,18 @@ def test_encoder_model() -> None:
             assert_anc_probs_layer(model.anc_probs_layer, config)
             ds, steps = training.make_dataset(ind, batch_gen, batch_size=n, shuffle=False)
             for x, _ in ds.take(1):
-                anc_prob_seqs = model.encode_batch(x).numpy()[:, :, :-1]
+                # encode_batch now returns (b, L, num_model, features)
+                # features = num_rate_matrices * alphabet_size (24 amino acids, no padding)
+                anc_prob_seqs = model.encode_batch(x).numpy()
+
+                # Trim to the original sequence length (remove padding positions)
+                L = sequences.shape[1]  # L is at index 1
+                anc_prob_seqs = anc_prob_seqs[:, :L, :, :]
+
                 shape = (
-                    config.training.num_model,
                     n,
-                    sequences.shape[2],
+                    L,  # Use original sequence length
+                    config.training.num_model,
                     config.training.num_rate_matrices,
                     len(SequenceDataset._default_alphabet)
                 )
@@ -302,8 +334,8 @@ def test_transposed() -> None:
     # Load data and prepare sequences
     filename = os.path.dirname(__file__) + "/../tests/data/simple.fa"
     with SequenceDataset(filename) as data:
-        sequences = get_simple_seq(data)
-    n = sequences.shape[1]
+        sequences = get_simple_seq(data)  # Shape: (b, L, num_model)
+    n = sequences.shape[0]
 
     # Create a configuration
     config = Configuration()
@@ -328,28 +360,32 @@ def test_transposed() -> None:
         (None, None, n, context.config.hmm.alphabet_size),
         (None, None, n, 1),
     ))
-    B = phmm_layer.hmm.emitter[0].matrix()[0]
+    B = phmm_layer.hmm.emitter[0].matrix()[0] # (H, Q, S)
     # Add terminal state to make this test work
     # TODO: clean up
     B = tf.concat([B, tf.zeros((B.shape[0], 1), dtype=B.dtype)], axis=1)
 
-    # Verify transposed works
+    rate_indices = np.arange(n)[:, np.newaxis]
+
     anc_prob_seqs = anc_probs_layer_transposed(
-        sequences, np.arange(n)[np.newaxis, :]
-    ).numpy()
+        sequences, rate_indices=rate_indices
+    ).numpy() # (B, L, H, M*S)
     shape = (
-        config.training.num_model,
         n,
-        sequences.shape[2],
+        sequences.shape[1],  # L is at index 1
+        config.training.num_model,
         config.training.num_rate_matrices,
         len(SequenceDataset._default_alphabet)
     )
-    anc_prob_seqs = np.reshape(anc_prob_seqs, shape)
+    anc_prob_seqs = np.reshape(anc_prob_seqs, shape) # (B, L, H, M, S)
     anc_prob_seqs = tf.cast(anc_prob_seqs, B.dtype)
+
+    B_batch_first = B[tf.newaxis, :, tf.newaxis, :20]
     anc_prob_B = anc_probs_layer(
-        B[tf.newaxis, tf.newaxis, :, :20], rate_indices=[[0]]
+        B_batch_first, rate_indices=[[0]]
     )
-    anc_prob_B = tf.squeeze(anc_prob_B)
+    # Output is (1, M, 1, features), squeeze to (M, features)
+    anc_prob_B = tf.squeeze(anc_prob_B, axis=[0, 2])
     prob1 = tf.linalg.matvec(B, anc_prob_seqs)
     oh_seqs = tf.one_hot(sequences, 20, dtype=anc_prob_B.dtype)
     oh_seqs = tf.expand_dims(oh_seqs, -2)

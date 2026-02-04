@@ -254,7 +254,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
         Q = tf.reshape(Q, (num_models, self.num_matrices, 20, 20))
         return Q
 
-    def make_tau(self, inputs=None, subset=None):
+    def make_tau(self, subset=None):
         tau = self.tau_kernel
         if self._head_subset is not None:
             tau = tf.gather(tau, self._head_subset, axis=0)
@@ -273,16 +273,25 @@ class AncProbsLayer(tf.keras.layers.Layer):
         return backend.make_branch_lengths(kernel)
 
     def call(self, inputs, rate_indices, replace_rare_with_equilibrium=True):
-        """ Computes anchestral probabilities of the inputs.
+        """ Computes ancestral probabilities of the inputs.
         Args:
-            inputs: Input sequences. Shape: (num_model, b, L) or (num_models, b, L, s). The latter format (non index)
+            inputs: Input sequences. Shape: (b, L, num_model) or (b, L, num_model, s). The latter format (non index)
                     is only supported for raw amino acid input.
-            rate_indices: Indices that map each input sequences to an evolutionary time. Shape: (num_model, b)
-            replace_rate_with_equilibrium: If true, replaces non-standard amino acids with the equilibrium distribution.
+            rate_indices: Indices that map each input sequences to an evolutionary time. Shape: (b, num_model)
+            replace_rare_with_equilibrium: If true, replaces non-standard amino acids with the equilibrium distribution.
         Returns:
-            Ancestral probabilities. Shape: (num_model, b, L, num_matrices*s)
+            Ancestral probabilities. Shape: (b, L, num_model, num_matrices*s)
         """
+        # Transpose inputs from (b, L, num_model[, s]) to (num_model, b, L[, s])
         input_indices = len(inputs.shape) == 3
+        if input_indices:
+            inputs = tf.transpose(inputs, [2, 0, 1])  # (b, L, num_model) -> (num_model, b, L)
+        else:
+            inputs = tf.transpose(inputs, [2, 0, 1, 3])  # (b, L, num_model, s) -> (num_model, b, L, s)
+
+        # Transpose rate_indices from (b, num_model) to (num_model, b)
+        rate_indices = tf.transpose(rate_indices, [1, 0])
+
         def _make_mask(bools):
             mask = tf.cast(bools, self.dtype)
             mask = tf.expand_dims(mask, -1)
@@ -294,7 +303,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
             only_std_aa_inputs = inputs * tf.cast(bool_mask, inputs.dtype)
         else:
             only_std_aa_inputs = inputs
-        tau_subset = self.make_tau(inputs, tf.expand_dims(rate_indices, -1))
+        tau_subset = self.make_tau(tf.expand_dims(rate_indices, -1))
         if self.per_matrix_rate:
             per_matrix_rates = self.make_per_matrix_rate()
             per_matrix_rates = tf.expand_dims(per_matrix_rates, 1)
@@ -341,6 +350,10 @@ class AncProbsLayer(tf.keras.layers.Layer):
         else:
             num_model, b, L, _ = tf.unstack(tf.shape(inputs))
             anc_probs = tf.reshape(anc_probs, (num_model, b, L, self.num_matrices * 20) )
+
+        # Transpose output from (num_model, b, L, features) to (b, L, num_model, features)
+        anc_probs = tf.transpose(anc_probs, [1, 2, 0, 3])
+
         return anc_probs
 
     def get_config(self):

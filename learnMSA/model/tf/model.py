@@ -119,11 +119,10 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         # Pass through encoder layers
         forward_seq = self.encode_batch(inputs, training=training)
 
-        # transpose back
-        # TODO: clean up later, no transpose should be necessary
-        forward_seq = tf.transpose(forward_seq, [1, 2, 0, 3])
+        # encode_batch now returns (batch, L, num_models, features)
         if self.context.config.language_model.use_language_model:
             embeddings = inputs[-1]
+            # TODO: looks wrong? remove transpose?
             embeddings = tf.transpose(embeddings, [0, 2, 1, 3])
         else:
             embeddings = None
@@ -146,8 +145,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         training: bool|None=None,
     ) -> tf.Tensor:
         """
-        Encodes a batch of sequences with the ancestor probabilities layer,
-        i.e. computes the HMM inputs.
+        Encodes a batch of sequences with the ancestral probabilities layer.
 
         Args:
             inputs: Tuple of (sequences, indices) where:
@@ -178,28 +176,24 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             if embeddings is not None:
                 embeddings = tf.tile(embeddings, [1, n, 1, 1])
 
-        # Transpose: (batch, num_models, L) -> (num_models, batch, L)
-        # In the input pipeline, we need the batch dimension to come first to
-        # make multi GPU work. We transpose here, because all learnMSA layers
-        # require the model dimension to come first
-        # TODO: clean this up; hidten does not use heads first order anymore;
-        # needs merging of tree branch first
-        transposed_sequences = tf.transpose(sequences, [1, 0, 2])
-        transposed_indices = tf.transpose(indices, [1, 0])
-
         # Pass through encoder layers
-        encoded_seq = transposed_sequences
+        # Transpose sequences from (batch, num_models, L) to (batch, L, num_models)
+        sequences_transposed = tf.transpose(sequences, [0, 2, 1])
+
         if self.context.config.training.use_anc_probs\
                 and self.encode_hmm_inputs:
+            # AncProbsLayer now accepts (batch, L, num_models) and returns
+            # (batch, L, num_models, features)
             encoded_seq = self.anc_probs_layer(
-                encoded_seq, rate_indices=transposed_indices, training=training # type: ignore
+                sequences_transposed, rate_indices=indices, training=training # type: ignore
             )
         else:
             encoded_seq = tf.one_hot(
-                encoded_seq,
+                sequences_transposed,
                 depth=self.context.config.hmm.alphabet_size+1, # including padding
                 dtype=self.phmm_layer.dtype
             )
+
         return encoded_seq
 
     @override
@@ -215,10 +209,11 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         batch_size = input_shapes[0][0]
         s = self.context.config.hmm.alphabet_size
         n = self.phmm_layer.heads
-        seq_shape_t = (n, batch_size, None)
-        ind_shape_t = (n, batch_size)
+        # AncProbsLayer now expects (batch, L, num_models) shape
+        seq_shape_batch_first = (batch_size, None, n)
+        ind_shape_batch_first = (batch_size, n)
         if self.context.config.training.use_anc_probs:
-            self.anc_probs_layer.build([seq_shape_t, ind_shape_t])
+            self.anc_probs_layer.build([seq_shape_batch_first, ind_shape_batch_first])
 
         # Build the pHMM layer
         if self.context.config.language_model.use_language_model:
