@@ -1,10 +1,10 @@
 import tensorflow as tf
 import numpy as np
 import os
-import learnMSA.msa_hmm.Initializers as initializers
-import learnMSA.msa_hmm.Priors as priors
+import learnMSA.legacy.Initializers as initializers
+import learnMSA.legacy.Priors as priors
 from learnMSA.util.sequence_dataset import SequenceDataset
-from learnMSA.msa_hmm.Utility import get_num_states, deserialize
+from learnMSA.legacy.Utility import get_num_states, deserialize
 # from learnMSA.protein_language_models.BilinearSymmetric import make_scoring_model
 # import learnMSA.protein_language_models.Common as Common
 from packaging import version

@@ -746,7 +746,7 @@ def test_prior_values() -> None:
 
     # Test the transitioners priors
     # Get the legacy density values
-    from learnMSA.msa_hmm.Transitioner import ProfileHMMTransitioner
+    from learnMSA.legacy.Transitioner import ProfileHMMTransitioner
 
     transitioner = ProfileHMMTransitioner()
     transitioner.set_lengths(lengths)

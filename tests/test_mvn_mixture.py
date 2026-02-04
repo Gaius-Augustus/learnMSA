@@ -1,6 +1,6 @@
 import numpy as np
 from learnMSA.protein_language_models import MvnMixture
-from learnMSA.msa_hmm import Utility
+from learnMSA.legacy import Utility
 
 
 def test_mvn_single_diag_only() -> None:

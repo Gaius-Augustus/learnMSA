@@ -1,5 +1,5 @@
 import tensorflow as tf
-from learnMSA.msa_hmm.Utility import deserialize
+from learnMSA.legacy.Utility import deserialize
 
 
 class Bidirectional(tf.keras.layers.Layer):

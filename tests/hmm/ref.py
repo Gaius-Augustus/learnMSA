@@ -1,7 +1,7 @@
 import numpy as np
 
 from learnMSA.config.hmm import PHMMConfig
-from learnMSA.msa_hmm import Initializers
+from learnMSA.legacy import Initializers
 
 
 config: PHMMConfig = PHMMConfig(

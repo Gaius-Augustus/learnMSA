@@ -1,8 +1,8 @@
 import tensorflow as tf
 import numpy as np
-import learnMSA.msa_hmm.Initializers as initializers
-import learnMSA.msa_hmm.Priors as priors
-from learnMSA.msa_hmm.Utility import get_num_states, get_num_states_implicit, deserialize
+import learnMSA.legacy.Initializers as initializers
+import learnMSA.legacy.Priors as priors
+from learnMSA.legacy.Utility import get_num_states, get_num_states_implicit, deserialize
 from packaging import version
 if version.parse(tf.__version__) < version.parse("2.10.0"):
     from tensorflow.python.training.tracking.data_structures import NoDependency #see https://github.com/tensorflow/tensorflow/issues/36916

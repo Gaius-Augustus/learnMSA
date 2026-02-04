@@ -1,5 +1,5 @@
 import tempfile
-from learnMSA.msa_hmm import clustering
+from learnMSA.util import clustering
 
 
 def test_clustering_with_ids() -> None:

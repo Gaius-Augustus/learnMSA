@@ -6,7 +6,7 @@ import networkx as nx
 import pandas as pd
 import numpy as np
 import tensorflow as tf
-from learnMSA import msa_hmm
+from learnMSA import legacy as msa_hmm # TODO fix import
 import itertools
 import seaborn as sns
 import imageio

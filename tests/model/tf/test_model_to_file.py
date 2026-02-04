@@ -7,14 +7,14 @@ import tensorflow as tf
 
 from learnMSA import Configuration
 from learnMSA.model.tf import training
-from learnMSA.msa_hmm import Initializers
+from learnMSA.legacy import Initializers
 from learnMSA.align.alignment_model import AlignmentModel
-from learnMSA.msa_hmm.Emitter import ProfileHMMEmitter
-from learnMSA.msa_hmm.Initializers import ConstantInitializer
+from learnMSA.legacy.Emitter import ProfileHMMEmitter
+from learnMSA.legacy.Initializers import ConstantInitializer
 from learnMSA.model.context import LearnMSAContext
 from learnMSA.model.tf.model import LearnMSAModel
 from learnMSA.util.sequence_dataset import SequenceDataset
-from learnMSA.msa_hmm.Transitioner import ProfileHMMTransitioner
+from learnMSA.legacy.Transitioner import ProfileHMMTransitioner
 
 
 def string_to_one_hot(s : str) -> tf.Tensor:

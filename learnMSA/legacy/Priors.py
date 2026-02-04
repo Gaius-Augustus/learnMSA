@@ -1,10 +1,10 @@
 import os
 import tensorflow as tf
-import learnMSA.msa_hmm.DirichletMixture as dm
+import learnMSA.legacy.DirichletMixture as dm
 from learnMSA.util.sequence_dataset import SequenceDataset
 #from learnMSA.protein_language_models.MultivariateNormalPrior import MultivariateNormalPrior, make_pdf_model
 from learnMSA.protein_language_models.BilinearSymmetric import make_scoring_model
-from learnMSA.msa_hmm.Utility import deserialize
+from learnMSA.legacy.Utility import deserialize
 
 
 class AminoAcidPrior(tf.keras.layers.Layer):

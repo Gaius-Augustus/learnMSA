@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 import tensorflow as tf
 
-import learnMSA.msa_hmm.training_util as training_util
+import learnMSA.model.training_util as training_util
 from learnMSA import Configuration
 from learnMSA.align.align_inserts import make_aligned_insertions
 from learnMSA.align.alignment_model import AlignmentModel
@@ -274,7 +274,7 @@ def _fit_and_align_with_logo_gif(
     data: SequenceDataset,
     context : LearnMSAContext
 ) -> AlignmentModel:
-    from learnMSA.msa_hmm.Visualize import LogoPlotterCallback, make_logo_gif
+    from learnMSA.util.visualize import LogoPlotterCallback, make_logo_gif
     config = context.config
     indices = np.arange(data.num_seq)
     if config.visualization.logo_gif:

@@ -3,7 +3,7 @@ import tensorflow as tf
 import numpy as np
 import learnMSA.protein_language_models.Common as Common
 from learnMSA.protein_language_models.MvnMixture import MvnMixture 
-from learnMSA.msa_hmm.Utility import DefaultDiagBijector
+from learnMSA.legacy.Utility import DefaultDiagBijector
 
 
 class MvnPrior(tf.keras.layers.Layer):

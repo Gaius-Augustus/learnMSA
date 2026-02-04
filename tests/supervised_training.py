@@ -3,12 +3,12 @@ sys.path.insert(0, "..")
 import numpy as np
 import tensorflow as tf
 
-from learnMSA.msa_hmm.MsaHmmLayer import MsaHmmLayer
-from learnMSA.msa_hmm.MsaHmmCell import HmmCell
-from learnMSA.msa_hmm.Initializers import ConstantInitializer
-# from learnMSA.msa_hmm import Align, Emitter, Transitioner, Initializers, MsaHmmCell, MsaHmmLayer, Training, Configuration, Viterbi, AncProbsLayer, Priors, DirichletMixture
-# from learnMSA.msa_hmm.SequenceDataset import SequenceDataset, AlignedDataset
-# from learnMSA.msa_hmm.AlignmentModel import AlignmentModel
+from learnMSA.legacy.MsaHmmLayer import MsaHmmLayer
+from learnMSA.legacy.MsaHmmCell import HmmCell
+from learnMSA.legacy.Initializers import ConstantInitializer
+# from learnMSA.legacy import Align, Emitter, Transitioner, Initializers, MsaHmmCell, MsaHmmLayer, Training, Configuration, Viterbi, AncProbsLayer, Priors, DirichletMixture
+# from learnMSA.legacy.SequenceDataset import SequenceDataset, AlignedDataset
+# from learnMSA.legacy.AlignmentModel import AlignmentModel
 
 
 # Generate simulated data from the occasionally dishonest casino.

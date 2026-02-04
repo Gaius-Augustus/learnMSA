@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 import tensorflow as tf
 
-import learnMSA.msa_hmm.training_util as training_util
+import learnMSA.model.training_util as training_util
 import tests.hmm.ref as ref
 from learnMSA.config import Configuration, TrainingConfig
 from learnMSA.config.hmm import PHMMPriorConfig

@@ -296,7 +296,6 @@ def test_init_from_msa(
         context = LearnMSAContext(config=config, data=data)
 
         # Should have initializers set from MSA
-        assert context.initializers is not None
         assert context.model_lengths_cb is not None
 
         # Model length should match MSA structure

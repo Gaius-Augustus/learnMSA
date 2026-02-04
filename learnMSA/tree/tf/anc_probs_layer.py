@@ -1,8 +1,8 @@
 import tensorflow as tf
 import numpy as np
-import learnMSA.msa_hmm.Initializers as initializers
+import learnMSA.tree.tf.initializer as initializer
 from learnMSA.util.sequence_dataset import SequenceDataset
-from learnMSA.msa_hmm.Utility import inverse_softplus, deserialize
+from learnMSA.tree.util import inverse_softplus, deserialize
 
 """Ancestral Probability Layer
 Learn one or several rate matrices jointly with a downstream model. Amino acid sequences can be smeared towards expected amino acid distributions after
@@ -107,7 +107,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
                  num_matrices,
                  equilibrium_init,
                  exchangeability_init,
-                 rate_init=initializers.ConstantInitializer(-3.),
+                 rate_init=initializer.ConstantInitializer(-3.),
                  trainable_rate_matrices=True,
                  trainable_distances=True,
                  per_matrix_rate=False,
@@ -312,13 +312,13 @@ class AncProbsLayer(tf.keras.layers.Layer):
              "num_models" : self.num_models,
              "num_rates" : self.num_rates,
              "num_matrices" : self.num_matrices,
-             "equilibrium_init" : initializers.ConstantInitializer(self.equilibrium_kernel.numpy()),
-             "exchangeability_init" : initializers.ConstantInitializer(self.exchangeability_kernel.numpy()),
-             "rate_init" : initializers.ConstantInitializer(self.tau_kernel.numpy()),
+             "equilibrium_init" : initializer.ConstantInitializer(self.equilibrium_kernel.numpy()),
+             "exchangeability_init" : initializer.ConstantInitializer(self.exchangeability_kernel.numpy()),
+             "rate_init" : initializer.ConstantInitializer(self.tau_kernel.numpy()),
              "trainable_rate_matrices" : self.trainable_rate_matrices,
             "trainable_distances" : self.trainable_distances,
              "per_matrix_rate" : self.per_matrix_rate,
-             "matrix_rate_init" : initializers.ConstantInitializer(self.per_matrix_rates_kernel) if self.per_matrix_rate else None,
+             "matrix_rate_init" : initializer.ConstantInitializer(self.per_matrix_rates_kernel) if self.per_matrix_rate else None,
              "matrix_rate_l2" : self.matrix_rate_l2,
              "shared_matrix" : self.shared_matrix,
              "equilibrium_sample" : self.equilibrium_sample,

@@ -9,8 +9,9 @@ from learnMSA import Configuration
 from learnMSA.hmm.tf.layer import PHMMLayer
 from learnMSA.model import LearnMSAModel, LearnMSAContext
 from learnMSA.model.tf import training
-from learnMSA.msa_hmm import Utility, Initializers
-from learnMSA.msa_hmm.AncProbsLayer import AncProbsLayer, make_rate_matrix
+import learnMSA.tree.util as Utility
+import learnMSA.tree.tf.initializer as Initializers
+from learnMSA.tree.tf.anc_probs_layer import AncProbsLayer, make_rate_matrix
 from learnMSA.util import SequenceDataset
 
 

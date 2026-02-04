@@ -1,6 +1,6 @@
 import numpy as np
 from learnMSA.protein_language_models import embedding_cache
-from learnMSA.msa_hmm import Priors
+from learnMSA.legacy import Priors
 
 
 def test_embedding_cache() -> None:

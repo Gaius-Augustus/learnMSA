@@ -4,24 +4,24 @@ from typing import Any, Callable
 
 import numpy as np
 
-import learnMSA.msa_hmm.Initializers as initializers
 import learnMSA.model.tf.training as train
-import learnMSA.msa_hmm.training_util as training_util
+import learnMSA.model.training_util as training_util
 import learnMSA.protein_language_models.Common as Common
 import learnMSA.protein_language_models.EmbeddingBatchGenerator as EmbeddingBatchGenerator
+import learnMSA.tree.tf.initializer as initializers
 from learnMSA import Configuration
+from learnMSA.hmm.tf.prior import TFPHMMTransitionPrior
+from learnMSA.hmm.tf.util import load_dirichlet
 from learnMSA.hmm.util import value_set
-from learnMSA.msa_hmm import clustering
-from learnMSA.protein_language_models.MvnEmitter import (
-    AminoAcidPlusMvnEmissionInitializer)
+from learnMSA.protein_language_models.MvnEmitter import \
+    AminoAcidPlusMvnEmissionInitializer
 from learnMSA.run.util import is_small_gpu, validate_filepath
+from learnMSA.util import clustering
 
-from ..msa_hmm.AncProbsLayer import inverse_softplus
+from ..tree.tf.anc_probs_layer import inverse_softplus
+from ..tree.tf.initializer import ConstantInitializer
 from ..util.aligned_dataset import AlignedDataset
 from ..util.sequence_dataset import SequenceDataset
-from ..msa_hmm import Priors
-from ..msa_hmm.Initializers import (ConstantInitializer, PHMMInitializerSet,
-                           make_initializers_from)
 
 # Type alias for model length callback
 ModelLengthsCallback = Callable[[SequenceDataset], np.ndarray]
@@ -51,7 +51,6 @@ class LearnMSAContext:
     model_lengths_cb: ModelLengthsCallback
     model_lengths: np.ndarray
     scoring_model_config: Common.ScoringModelConfig #legacy, will be removed in future
-    initializers: PHMMInitializerSet
     batch_size: int | Callable[[SequenceDataset], int]
     batch_gen: train.BatchGenerator
     sequence_weights: np.ndarray | None
@@ -108,10 +107,8 @@ class LearnMSAContext:
         model_len_cb = None
 
         # Set up initializers
-        if self.config.init_msa.from_msa is None:
-            self.initializers = self._setup_initializers()
-        else:
-            self.initializers, model_len_cb = self._setup_init_msa()
+        if self.config.init_msa.from_msa is not None:
+            model_len_cb = self._setup_init_msa()
         self._setup_visualization()
 
         # When not included in the initializers, set up lengths from the config
@@ -279,58 +276,29 @@ class LearnMSAContext:
 
         return context
 
-    def _setup_initializers(self) -> PHMMInitializerSet:
-        num_model = self.config.training.num_model
-        if self.config.language_model.use_language_model:
-            emission_init = [
-                AminoAcidPlusMvnEmissionInitializer(
-                    scoring_model_config=self.scoring_model_config,
-                    num_prior_components=self.config.language_model.embedding_prior_components
-                )
-            for _ in range(num_model)]
-            insertion_init = [
-                AminoAcidPlusMvnEmissionInitializer(
-                    scoring_model_config=self.scoring_model_config,
-                    num_prior_components=self.config.language_model.embedding_prior_components
-                )
-                for _ in range(num_model)]
-        else:
-            emission_init = [
-                initializers.make_default_emission_init()
-                for _ in range(num_model)
-            ]
-            insertion_init = [
-                initializers.make_default_insertion_init()
-                for _ in range(num_model)
-            ]
-
-        transition_init = [initializers.make_default_transition_init()
-                for _ in range(num_model)]
-        flank_init = [initializers.make_default_flank_init()
-                for _ in range(num_model)]
-
-        return PHMMInitializerSet(
-            match_emissions=emission_init,
-            insert_emissions=insertion_init,
-            transitions=transition_init,
-            start=flank_init
-        )
-
-    def _setup_init_msa(self) -> tuple[PHMMInitializerSet, ModelLengthsCallback]:
+    def _setup_init_msa(self) -> ModelLengthsCallback:
         """Set up model initializers based on configuration."""
         from_msa = self.config.init_msa.from_msa
         if self.config.init_msa.pseudocounts:
             # Infer meaningful pseudocounts from Dirichlet priors
-            aa_prior = Priors.AminoAcidPrior()
-            aa_prior.build()
-            aa_psc = aa_prior.emission_dirichlet_mix.make_alpha()[0].numpy()
+            # Get amino acid pseudocounts
+            aa_prior = load_dirichlet(
+                "amino_acid_dirichlet.weights",
+                dim = len(SequenceDataset._default_alphabet)-1
+            )
+            aa_psc = aa_prior.matrix()[0, 0].numpy()
+
             # Add counts for special amino acids
             aa_psc = np.pad(aa_psc, (0, 3), constant_values=1e-2)
-            transition_prior = Priors.ProfileHMMTransitionPrior()
-            transition_prior.build()
-            match_psc = transition_prior.match_dirichlet.make_alpha()[0].numpy()
-            ins_psc = transition_prior.insert_dirichlet.make_alpha()[0].numpy()
-            del_psc = transition_prior.delete_dirichlet.make_alpha()[0].numpy()
+
+            # Get transition pseudocounts
+            transition_prior = TFPHMMTransitionPrior(
+                self.model_lengths, self.config.hmm_prior
+            )
+            match_psc = transition_prior.match_prior.matrix()[0,0].numpy()
+            ins_psc = transition_prior.insert_prior.matrix()[0,0].numpy()
+            del_psc = transition_prior.delete_prior.matrix()[0,0].numpy()
+
             del aa_prior
             del transition_prior
         else:
@@ -377,12 +345,15 @@ class LearnMSAContext:
                 random_scale=self.config.init_msa.random_scale
             else:
                 random_scale=0.0
-            initializers = make_initializers_from(
-                values,
-                num_models=self.config.training.num_model,
-                random_scale=random_scale,
-                emission_kernel_extra=emb_kernel,
-            )
+
+            # TODO: needs fix, create a new PHMMConfig here from the ValueSets
+            # initializers = make_initializers_from(
+            #     values,
+            #     num_models=self.config.training.num_model,
+            #     random_scale=random_scale,
+            #     emission_kernel_extra=emb_kernel,
+            # )
+
             model_lengths_cb = lambda data: \
                 np.array([values.matches()]*self.config.training.num_model)
             if self.config.input_output.verbose:
@@ -391,7 +362,7 @@ class LearnMSAContext:
                     f"{values.matches()} match states."
                 )
 
-            return initializers, model_lengths_cb
+            return model_lengths_cb
 
 
     def _setup_lengths(self) -> ModelLengthsCallback | None:
@@ -517,7 +488,7 @@ class LearnMSAContext:
     def _get_clustering(
         self, data: SequenceDataset
     ) -> tuple[np.ndarray | None, Any]:
-        from ..msa_hmm import SequenceDataset
+        from ..util import SequenceDataset
         if not self.config.training.no_sequence_weights:
             os.makedirs(self.config.input_output.work_dir, exist_ok=True)
             try:

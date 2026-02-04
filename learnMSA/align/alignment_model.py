@@ -8,10 +8,10 @@ import tensorflow as tf
 from packaging import version
 
 from learnMSA.config.config import Configuration
-import learnMSA.msa_hmm.AncProbsLayer as anc_probs
-import learnMSA.msa_hmm.Emitter as emit
-import learnMSA.msa_hmm.Priors as priors
-import learnMSA.msa_hmm.Transitioner as trans
+import learnMSA.tree.tf.anc_probs_layer as anc_probs
+import learnMSA.legacy.Emitter as emit
+import learnMSA.legacy.Priors as priors
+import learnMSA.legacy.Transitioner as trans
 from learnMSA.model.tf.model import LearnMSAModel
 from learnMSA.align.alignment_metadata import AlignmentMetaData
 from learnMSA.model.context import LearnMSAContext

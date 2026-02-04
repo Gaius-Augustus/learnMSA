@@ -5,7 +5,7 @@ import numpy as np
 import tensorflow as tf
 from functools import partial
 
-import learnMSA.msa_hmm.training_util as training_util
+import learnMSA.model.training_util as training_util
 from learnMSA.util.sequence_dataset import SequenceDataset
 
 if TYPE_CHECKING:

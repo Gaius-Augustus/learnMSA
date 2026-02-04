@@ -1,9 +1,9 @@
 import os
 import tensorflow as tf
 import numpy as np
-import learnMSA.msa_hmm.Emitter as emit
-import learnMSA.msa_hmm.Transitioner as trans
-from learnMSA.msa_hmm.Utility import get_num_states, get_num_states_implicit, deserialize
+import learnMSA.legacy.Emitter as emit
+import learnMSA.legacy.Transitioner as trans
+from learnMSA.legacy.Utility import get_num_states, get_num_states_implicit, deserialize
 
 
 

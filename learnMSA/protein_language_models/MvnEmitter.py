@@ -2,14 +2,14 @@ import tensorflow as tf
 import numpy as np
 import os
 from learnMSA.util.sequence_dataset import SequenceDataset
-from learnMSA.msa_hmm.Emitter import ProfileHMMEmitter
-import learnMSA.msa_hmm.Initializers as Initializers
-import learnMSA.msa_hmm.Priors as priors
+from learnMSA.legacy.Emitter import ProfileHMMEmitter
+import learnMSA.legacy.Initializers as Initializers
+import learnMSA.legacy.Priors as priors
 from learnMSA.protein_language_models.BilinearSymmetric import make_scoring_model
 from learnMSA.protein_language_models.MvnMixture import MvnMixture
 from learnMSA.protein_language_models.MvnPrior import MvnPrior, InverseGammaPrior, get_expected_emb
 import learnMSA.protein_language_models.Common as Common
-from learnMSA.msa_hmm.Utility import DefaultDiagBijector, deserialize
+from learnMSA.legacy.Utility import DefaultDiagBijector, deserialize
 
 
 

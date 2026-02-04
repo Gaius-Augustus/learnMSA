@@ -16,7 +16,7 @@ setup(
         include=[
             "learnMSA", 
             "learnMSA.run", 
-            "learnMSA.msa_hmm", 
+            "learnMSA.legacy", 
             "learnMSA.protein_language_models"
         ]
     ),

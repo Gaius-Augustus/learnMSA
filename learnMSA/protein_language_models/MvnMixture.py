@@ -1,7 +1,7 @@
 import tensorflow as tf
 import numpy as np
 import math
-from learnMSA.msa_hmm.Utility import DefaultDiagBijector, FillScaleTriL
+from learnMSA.legacy.Utility import DefaultDiagBijector, FillScaleTriL
 
 
 class MvnMixture():

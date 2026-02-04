@@ -6,10 +6,8 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.keras.initializers import Initializer
 
-import learnMSA.msa_hmm.DirichletMixture as dm
+import learnMSA.legacy.DirichletMixture as dm
 from learnMSA.hmm.util.value_set import PHMMTransitionIndexSet, PHMMValueSet
-from learnMSA.util.sequence_dataset import SequenceDataset
-from learnMSA.msa_hmm.Utility import LG_paml, inverse_softplus, parse_paml
 
 
 class EmissionInitializer(Initializer):
@@ -73,11 +71,6 @@ class ConstantInitializer(tf.keras.initializers.Constant):
         return cls(np.array(config["value"]))
 
 
-
-R, p = parse_paml(LG_paml, SequenceDataset._default_alphabet[:-1])
-exchangeability_init = inverse_softplus(R + 1e-32).numpy()
-
-
 prior_path = os.path.dirname(__file__)+"/trained_prior/"
 model_path = prior_path+"_".join([str(1), "True", "float32", "_dirichlet.h5"])
 model = dm.load_mixture_model(model_path, 1, 20, trainable=False, dtype=tf.float32)
@@ -88,15 +81,6 @@ background_distribution = dirichlet.expectation()
 extra = [7.92076933e-04, 5.84256792e-08, 1e-32]
 background_distribution = np.concatenate([background_distribution, extra], axis=0)
 background_distribution /= np.sum(background_distribution)
-
-def make_default_anc_probs_init(num_models):
-    exchangeability_stack = np.stack([exchangeability_init]*num_models, axis=0)
-    log_p_stack = np.stack([np.log(p)]*num_models, axis=0)
-    exchangeability_stack = np.expand_dims(exchangeability_stack, axis=1) #"k" in AncProbLayer
-    log_p_stack = np.expand_dims(log_p_stack, axis=1) #"k" in AncProbLayer
-    return [ConstantInitializer(-3),
-            ConstantInitializer(exchangeability_stack),
-            ConstantInitializer(log_p_stack)]
 
 def make_default_emission_init():
     return EmissionInitializer(np.log(background_distribution))

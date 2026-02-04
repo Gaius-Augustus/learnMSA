@@ -1,8 +1,8 @@
 import tensorflow as tf
 import numpy as np
-from learnMSA.msa_hmm.TotalProbabilityCell import TotalProbabilityCell
-from learnMSA.msa_hmm.Utility import deserialize
-from learnMSA.msa_hmm.Bidirectional import Bidirectional
+from learnMSA.legacy.TotalProbabilityCell import TotalProbabilityCell
+from learnMSA.legacy.Utility import deserialize
+from learnMSA.legacy.Bidirectional import Bidirectional
 
 
 class MsaHmmLayer(tf.keras.layers.Layer):
