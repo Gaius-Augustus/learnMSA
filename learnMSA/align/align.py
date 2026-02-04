@@ -64,6 +64,8 @@ def align(
         # Load a model without any training
         am = AlignmentModel.load(config.input_output.load_model, data)
     else:
+        # Train a new model
+        config.hmm.use_noise = config.training.use_noise
         try:
             t_a = time.time()
             if config.visualization.logo_gif:

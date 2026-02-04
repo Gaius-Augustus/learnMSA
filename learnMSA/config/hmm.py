@@ -107,7 +107,7 @@ class PHMMConfig(BaseModel):
     """
 
     p_begin_match: float | Sequence[float] | Sequence[Sequence[float]] | \
-        NPArray = 0.5
+        NPArray = 0.7
     """If provided a scalar value, is interpreted as ``P(Match 1 | Begin)``.
     In that case, ``P(Match i | Begin)`` for i > 1 will be chosen uniformly
     depending on head length.
@@ -186,6 +186,12 @@ class PHMMConfig(BaseModel):
 
     p_start_left_flank: float | Sequence[float] | NPArray = 0.5
     """Defines the starting probability ``P(Left Flank; h)``."""
+
+    use_noise: bool = False
+    """Whether to add Dirichlet noise during HMM initialization."""
+
+    noise_concentration: float = 100.0
+    """Concentration of Dirichlet noise added during HMM initialization."""
 
     _length_offsets: ClassVar[dict[str, int]] = {
         "p_begin_match": 0,

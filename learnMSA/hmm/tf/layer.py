@@ -86,6 +86,11 @@ class PHMMLayer(tf.keras.Layer):
             for h, L in enumerate(lengths)
         ]
 
+        # Apply random noise
+        if config.use_noise:
+            for value_set in values:
+                value_set.add_noise(concentration=config.noise_concentration)
+
         if prior_config.use_amino_acid_prior:
             # Set up the Dirichlet prior for emissions
             emission_prior = load_dirichlet(

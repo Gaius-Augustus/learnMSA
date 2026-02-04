@@ -131,6 +131,10 @@ class TrainingConfig(BaseModel):
     surgery_checkpoints: bool = True
     """Whether to save model checkpoints after each model surgery run."""
 
+    use_noise: bool = True
+    """Whether to add Dirichlet noise during HMM initialization. Override the
+    corresponding HMM config parameter for training."""
+
 
     @field_validator("learning_rate")
     def validate_learning_rate(cls, v: float) -> float:

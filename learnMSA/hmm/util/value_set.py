@@ -59,8 +59,8 @@ class PHMMValueSet:
             1 - get_value(config.p_left_left, h)
 
         # Begin to match 1
-        transitions[ind.begin_to_match[0, 0], ind.begin_to_match[0, 1]] = \
-            get_value(config.p_begin_match, h, 0)
+        bm1 = get_value(config.p_begin_match, h, 0)
+        transitions[ind.begin_to_match[0, 0], ind.begin_to_match[0, 1]] = bm1
 
         # Check if transition probs to other match states are provided
         if isinstance(config.p_begin_match, (Sequence, np.ndarray)) and \
@@ -94,7 +94,7 @@ class PHMMValueSet:
         if config.p_match_end is None:
             p_match_end_values = np.zeros(L - 1, dtype=np.float32)
             if L > 1:
-                p_match_end_values[0] = 0.5 / (L - 1)
+                p_match_end_values[0] = max((1 - bm1), 1e-10) / (L - 1)
             # For i > 0: exit[i] = entry[i]
             if isinstance(p_begin_match_inner, (Sequence, np.ndarray)):
                 # Use explicit entry probabilities
@@ -618,6 +618,65 @@ class PHMMValueSet:
                     "Consider adding pseudocounts using add_pseudocounts() before "
                     "calling log_normalize()."
                 ) from e
+
+        return self
+
+    def add_noise(
+        self, concentration: float = 100.0
+    ) -> "PHMMValueSet":
+        """
+        Adds Dirichlet noise to probability distributions.
+
+        Args:
+            concentration: Concentration parameter controlling noise strength.
+                Higher values produce smaller perturbations.
+
+        Returns:
+            Reference to the modified PHMMValueSet object.
+        """
+        def add_dirichlet_noise_sparse(
+            probs: np.ndarray, concentration: float
+        ) -> np.ndarray:
+            """Add Dirichlet noise while preserving zeros (sparsity)."""
+            result = probs.copy()
+
+            if probs.ndim == 1:
+                # Single distribution
+                mask = probs > 0
+                if np.any(mask):
+                    nonzero_probs = probs[mask]
+                    alpha = concentration * nonzero_probs
+                    alpha = np.maximum(alpha, 1e-6)
+                    sampled = np.random.dirichlet(alpha)
+                    result[mask] = sampled
+            else:
+                # Multiple distributions (rows)
+                for i in range(probs.shape[0]):
+                    mask = probs[i] > 0
+                    if np.any(mask):
+                        nonzero_probs = probs[i, mask]
+                        alpha = concentration * nonzero_probs
+                        alpha = np.maximum(alpha, 1e-6)
+                        sampled = np.random.dirichlet(alpha)
+                        result[i, mask] = sampled
+
+            return result
+
+        # Apply Dirichlet noise to emissions (all entries typically non-zero)
+        self.match_emissions = add_dirichlet_noise_sparse(
+            self.match_emissions, concentration
+        )
+        self.insert_emissions = add_dirichlet_noise_sparse(
+            self.insert_emissions, concentration
+        )
+        self.start = add_dirichlet_noise_sparse(self.start, concentration)
+
+        # Apply Dirichlet noise to transitions (preserving structural zeros!)
+        self.transitions = add_dirichlet_noise_sparse(
+            self.transitions, concentration
+        )
+        # Ensure terminal state loops to itself
+        self.transitions[-1, -1] = 1.0
 
         return self
 
