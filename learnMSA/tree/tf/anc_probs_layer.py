@@ -18,27 +18,31 @@ some amount of evolutionary time has passed under a substitution model. This can
 def make_anc_probs(sequences, exchangeabilities, equilibrium, tau, equilibrium_sample=False, transposed=False, gtr_decomp=None):
     """Computes ancestral probabilities simultaneously for all sites and rate matrices.
     Args:
-        sequences: Sequences either as integers (faster embedding lookup) or in vector format. Shape: (num_model, b, L) or (num_model, b, L, s)
+        sequences: Sequences in one-hot vector format. Shape: (b, L, num_model, s)
         exchangeabilities: A stack of symmetric exchangeability matrices. Shape: (num_model, k, s, s). Not used if gtr_decomp is provided.
         equilibrium: A stack of equilibrium distributions. Shape: (num_model, k, s). Required for equilibrium_sample or when gtr_decomp is None.
-        tau: Evolutionary times for all sequences (1 time unit = 1 expected mutation per site). Shape: (num_model, b) or (num_model,b,k)
+        tau: Evolutionary times for all sequences (1 time unit = 1 expected mutation per site). Shape: (b, num_model) or (b, num_model, k)
         equilibrium_sample: If true, a 2-staged process is assumed where an amino acid is first sampled from the equilibirium distribution
                     and the ancestral probabilities are computed afterwards.
         transposed: Transposes the probability matrix P = e^tQ.
         gtr_decomp: Optional precomputed GTR decomposition. If provided, uses expm_gtr_from_decomp for efficiency.
     Returns:
-        A tensor with the expected amino acids frequencies after time tau. Output shape: (num_model, b, L, k, s)
+        A tensor with the expected amino acids frequencies after time tau. Output shape: (b, L, num_model, k, s)
     """
     while len(tau.shape) < 5:
         tau = tf.expand_dims(tau, -1)
 
-    # Extract tau: shape is (num_model, b, k, 1, 1), we need (num_model, b, k)
-    tau_extracted = tau[..., 0, 0]  # Shape: (num_model, b, k)
+    # Extract tau: shape is (b, num_model, k, 1, 1), we need (b, num_model, k)
+    tau_extracted = tau[..., 0, 0]  # Shape: (b, num_model, k)
 
     # Use precomputed decomposition if available, otherwise compute on the fly
     if gtr_decomp is not None:
+        # Transpose tau from (b, num_model, k) to (num_model, b, k) for expm_gtr_from_decomp
+        tau_transposed = tf.transpose(tau_extracted, [1, 0, 2])
         # expm_gtr_from_decomp will broadcast to (num_model, b, k, s, s)
-        P = expm_gtr_from_decomp(gtr_decomp, tau_extracted)
+        P = expm_gtr_from_decomp(gtr_decomp, tau_transposed)
+        # Transpose P from (num_model, b, k, s, s) to (b, num_model, k, s, s)
+        P = tf.transpose(P, [1, 0, 2, 3, 4])
         # Extract shape info from the result
         shape = tf.shape(P)
         _, _, k, s, _ = tf.unstack(shape, 5)
@@ -60,34 +64,25 @@ def make_anc_probs(sequences, exchangeabilities, equilibrium, tau, equilibrium_s
         Q_exp = tf.expand_dims(Q, 1)  # (num_model, 1, k, s, s)
         equilibrium_exp = tf.expand_dims(equilibrium, 1)  # (num_model, 1, k, s)
 
+        # Transpose tau from (b, num_model, k) to (num_model, b, k) for expm_gtr
+        tau_transposed = tf.transpose(tau_extracted, [1, 0, 2])
         # expm_gtr will broadcast to (num_model, b, k, s, s)
-        P = expm_gtr(Q_exp, tau_extracted, equilibrium_exp)
+        P = expm_gtr(Q_exp, tau_transposed, equilibrium_exp)
+        # Transpose P from (num_model, b, k, s, s) to (b, num_model, k, s, s)
+        P = tf.transpose(P, [1, 0, 2, 3, 4])
 
     if equilibrium_sample:
-        # Get num_model from sequences for proper reshaping
+        # Reshape equilibrium from (num_model, k, s) to (1, num_model, k, s, 1) for broadcasting with P
         num_model_seq = tf.shape(equilibrium)[0]
-        equilibrium_reshaped = tf.reshape(equilibrium, (num_model_seq, 1, k, s, 1))
+        equilibrium_reshaped = tf.reshape(equilibrium, (1, num_model_seq, k, s, 1))
         P *= equilibrium_reshaped
 
-    if len(sequences.shape) == 3:  # assume index format
-        # Extract dimensions from sequences to ensure consistency
-        num_model_seq = tf.shape(sequences)[0]
-        b_actual = tf.shape(sequences)[1]
-        if transposed:
-            P = tf.transpose(P, [0, 1, 4, 2, 3])
-        else:
-            P = tf.transpose(P, [0, 1, 3, 2, 4])
-        P = tf.reshape(P, (-1, k, s))
-        sequences = tf.cast(sequences, tf.int32)
-        sequences = tf.reshape(sequences, (-1, tf.shape(sequences)[-1]))
-        sequences += tf.expand_dims(tf.range(num_model_seq * b_actual) * s, -1)
-        ancprobs = tf.nn.embedding_lookup(P, sequences)
-        ancprobs = tf.reshape(ancprobs, (num_model_seq, b_actual, -1, k, s))
-    else:  # assume vector format
-        if transposed:
-            ancprobs = tf.einsum("mbLz,mbksz->mbLks", sequences, P)
-        else:
-            ancprobs = tf.einsum("mbLz,mbkzs->mbLks", sequences, P)
+    # Vector format: use einsum for matrix-vector multiplication
+    if transposed:
+        ancprobs = tf.einsum("bLmz,bmksz->bLmks", sequences, P)
+    else:
+        ancprobs = tf.einsum("bLmz,bmkzs->bLmks", sequences, P)
+
     return ancprobs
 
 class AncProbsLayer(tf.keras.layers.Layer):
@@ -261,7 +256,14 @@ class AncProbsLayer(tf.keras.layers.Layer):
         if self.clusters is not None:
             tau = tf.gather(tau, self.clusters, axis=-1)
         if subset is not None:
-            tau = tf.gather_nd(tau, subset, batch_dims=1)
+            # subset has shape (b, num_model, 1) in batch-first format
+            # tau has shape (num_models, num_clusters)
+            # We need to gather for each (b, num_model) position
+            # Transpose subset from (b, num_model, 1) to (num_model, b, 1)
+            subset_transposed = tf.transpose(subset, [1, 0, 2])
+            tau = tf.gather_nd(tau, subset_transposed, batch_dims=1)
+            # tau is now (num_model, b), transpose back to (b, num_model)
+            tau = tf.transpose(tau, [1, 0])
         # Use evoten backend to convert kernel to branch lengths
         return backend.make_branch_lengths(tau)
 
@@ -275,39 +277,19 @@ class AncProbsLayer(tf.keras.layers.Layer):
     def call(self, inputs, rate_indices, replace_rare_with_equilibrium=True):
         """ Computes ancestral probabilities of the inputs.
         Args:
-            inputs: Input sequences. Shape: (b, L, num_model) or (b, L, num_model, s). The latter format (non index)
-                    is only supported for raw amino acid input.
+            inputs: Input sequences in one-hot vector format. Shape: (b, L, num_model, s)
             rate_indices: Indices that map each input sequences to an evolutionary time. Shape: (b, num_model)
             replace_rare_with_equilibrium: If true, replaces non-standard amino acids with the equilibrium distribution.
         Returns:
             Ancestral probabilities. Shape: (b, L, num_model, num_matrices*s)
         """
-        # Transpose inputs from (b, L, num_model[, s]) to (num_model, b, L[, s])
-        input_indices = len(inputs.shape) == 3
-        if input_indices:
-            inputs = tf.transpose(inputs, [2, 0, 1])  # (b, L, num_model) -> (num_model, b, L)
-        else:
-            inputs = tf.transpose(inputs, [2, 0, 1, 3])  # (b, L, num_model, s) -> (num_model, b, L, s)
-
-        # Transpose rate_indices from (b, num_model) to (num_model, b)
-        rate_indices = tf.transpose(rate_indices, [1, 0])
-
-        def _make_mask(bools):
-            mask = tf.cast(bools, self.dtype)
-            mask = tf.expand_dims(mask, -1)
-            mask = tf.expand_dims(mask, -1)
-            return mask
-        if input_indices:
-            bool_mask = inputs < 20
-            mask = _make_mask(bool_mask)
-            only_std_aa_inputs = inputs * tf.cast(bool_mask, inputs.dtype)
-        else:
-            only_std_aa_inputs = inputs
+        # rate_indices shape is (b, num_model), make_tau expects indices of shape (b, num_model, 1)
         tau_subset = self.make_tau(tf.expand_dims(rate_indices, -1))
         if self.per_matrix_rate:
-            per_matrix_rates = self.make_per_matrix_rate()
-            per_matrix_rates = tf.expand_dims(per_matrix_rates, 1)
-            tau_subset = tf.expand_dims(tau_subset, 2)
+            per_matrix_rates = self.make_per_matrix_rate()  # (num_model, num_matrices)
+            # Expand to (1, num_model, num_matrices) for broadcasting with tau_subset (b, num_model, 1)
+            per_matrix_rates = tf.expand_dims(per_matrix_rates, 0)
+            tau_subset = tf.expand_dims(tau_subset, 2)  # (b, num_model, 1, 1) -> add matrix dim
             mut_rates = tau_subset * per_matrix_rates
             reg = tf.reduce_mean(tf.square(self.per_matrix_rates_kernel - inverse_softplus(1.)))
             self.add_loss(self.matrix_rate_l2 * reg)
@@ -326,33 +308,18 @@ class AncProbsLayer(tf.keras.layers.Layer):
             exchangeabilities = self.make_R()
             equilibrium = self.make_p()
 
-        anc_probs = make_anc_probs(only_std_aa_inputs,
+        # Compute ancestral probabilities
+        anc_probs = make_anc_probs(inputs,
                                    exchangeabilities,
                                    equilibrium,
                                    mut_rates,
                                    self.equilibrium_sample,
                                    self.transposed,
                                    gtr_decomp=self._gtr_decomp)
-        if input_indices:
-            anc_probs *= mask
-            anc_probs = tf.pad(anc_probs, [[0,0], [0,0], [0,0], [0,0], [0,len(SequenceDataset._default_alphabet)-20]])
-            if replace_rare_with_equilibrium:
-                rare_mask = _make_mask(tf.math.logical_and(inputs >= 20, inputs < len(SequenceDataset._default_alphabet)-1)) #do not count padding
-                padding_mask = _make_mask(inputs == len(SequenceDataset._default_alphabet)-1)
-                equilibrium = tf.concat([equilibrium, tf.zeros_like(equilibrium)[..., :tf.shape(anc_probs)[-1]-20]], -1)
-                rest = (tf.zeros_like(anc_probs) + equilibrium[:,tf.newaxis,tf.newaxis]) * rare_mask
-                rest += tf.expand_dims(tf.one_hot(inputs, len(SequenceDataset._default_alphabet)), -2) * padding_mask
-            else:
-                rest = tf.expand_dims(tf.one_hot(inputs, len(SequenceDataset._default_alphabet)), -2) * (1-mask)
-            anc_probs += rest
-            num_model, b, L = tf.unstack(tf.shape(inputs))
-            anc_probs = tf.reshape(anc_probs, (num_model, b, L, self.num_matrices * len(SequenceDataset._default_alphabet)) )
-        else:
-            num_model, b, L, _ = tf.unstack(tf.shape(inputs))
-            anc_probs = tf.reshape(anc_probs, (num_model, b, L, self.num_matrices * 20) )
 
-        # Transpose output from (num_model, b, L, features) to (b, L, num_model, features)
-        anc_probs = tf.transpose(anc_probs, [1, 2, 0, 3])
+        # Reshape from (b, L, num_model, k, s) to (b, L, num_model, k*s)
+        b, L, num_model, _, s = tf.unstack(tf.shape(anc_probs))
+        anc_probs = tf.reshape(anc_probs, (b, L, num_model, self.num_matrices * s))
 
         return anc_probs
 

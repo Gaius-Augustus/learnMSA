@@ -244,6 +244,8 @@ def test_anc_probs_layer() -> None:
     with SequenceDataset(filename) as data:
         sequences = get_simple_seq(data)  # Shape: (b, L, num_model)
     n = sequences.shape[0]
+    # Convert to one-hot: (b, L, num_model, 20)
+    sequences_onehot = tf.one_hot(sequences, depth=20, dtype=tf.float32).numpy()
     # rate_indices should be (b, num_model)
     rate_indices = np.arange(n)[:, np.newaxis]
 
@@ -253,14 +255,14 @@ def test_anc_probs_layer() -> None:
         )
         assert_anc_probs_layer(anc_probs_layer, case["config"])
         anc_prob_seqs = anc_probs_layer(
-            sequences, rate_indices=rate_indices
+            sequences_onehot, rate_indices=rate_indices
         ).numpy()
         shape = (
             n,
             sequences.shape[1],  # L is at index 1
             case["config"].training.num_model,
             case["config"].training.num_rate_matrices,
-            len(SequenceDataset._default_alphabet)
+            20  # Only 20 amino acids, not full alphabet
         )
         anc_prob_seqs = np.reshape(anc_prob_seqs, shape)
         if "expected_anc_probs" in case:
@@ -336,6 +338,8 @@ def test_transposed() -> None:
     with SequenceDataset(filename) as data:
         sequences = get_simple_seq(data)  # Shape: (b, L, num_model)
     n = sequences.shape[0]
+    # Convert to one-hot: (b, L, num_model, 20)
+    sequences_onehot = tf.one_hot(sequences, depth=20, dtype=tf.float32).numpy()
 
     # Create a configuration
     config = Configuration()
@@ -368,24 +372,27 @@ def test_transposed() -> None:
     rate_indices = np.arange(n)[:, np.newaxis]
 
     anc_prob_seqs = anc_probs_layer_transposed(
-        sequences, rate_indices=rate_indices
-    ).numpy() # (B, L, H, M*S)
+        sequences_onehot, rate_indices=rate_indices
+    ).numpy() # (b, L, num_model, num_matrices*20)
     shape = (
         n,
         sequences.shape[1],  # L is at index 1
         config.training.num_model,
         config.training.num_rate_matrices,
-        len(SequenceDataset._default_alphabet)
+        20  # Only 20 amino acids
     )
-    anc_prob_seqs = np.reshape(anc_prob_seqs, shape) # (B, L, H, M, S)
+    anc_prob_seqs = np.reshape(anc_prob_seqs, shape) # (b, L, num_model, num_matrices, 20)
     anc_prob_seqs = tf.cast(anc_prob_seqs, B.dtype)
 
-    B_batch_first = B[tf.newaxis, :, tf.newaxis, :20]
+    # For B matrix test: create one-hot version of B
+    B_onehot = tf.one_hot(tf.range(B.shape[0]), depth=20, dtype=B.dtype)  # (M, 20)
+    B_batch_first = B_onehot[tf.newaxis, :, tf.newaxis, :]  # (1, M, 1, 20)
     anc_prob_B = anc_probs_layer(
         B_batch_first, rate_indices=[[0]]
     )
-    # Output is (1, M, 1, features), squeeze to (M, features)
-    anc_prob_B = tf.squeeze(anc_prob_B, axis=[0, 2])
+    # Output is (1, M, 1, num_matrices*20), reshape to (M, num_matrices, 20)
+    anc_prob_B = tf.squeeze(anc_prob_B, axis=[0, 2])  # (M, num_matrices*20)
+    anc_prob_B = tf.reshape(anc_prob_B, (tf.shape(B)[0], config.training.num_rate_matrices, 20))  # (M, num_matrices, 20)
     prob1 = tf.linalg.matvec(B, anc_prob_seqs)
     oh_seqs = tf.one_hot(sequences, 20, dtype=anc_prob_B.dtype)
     oh_seqs = tf.expand_dims(oh_seqs, -2)

@@ -180,19 +180,22 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         # Transpose sequences from (batch, num_models, L) to (batch, L, num_models)
         sequences_transposed = tf.transpose(sequences, [0, 2, 1])
 
+        # Convert to one-hot for AncProbsLayer (now requires 4D input)
+        sequences_onehot = tf.one_hot(
+            sequences_transposed,
+            depth=20,  # Only 20 standard amino acids for AncProbsLayer
+            dtype=self.phmm_layer.dtype
+        )
+
         if self.context.config.training.use_anc_probs\
                 and self.encode_hmm_inputs:
-            # AncProbsLayer now accepts (batch, L, num_models) and returns
-            # (batch, L, num_models, features)
+            # AncProbsLayer accepts (batch, L, num_models, 20) and returns
+            # (batch, L, num_models, num_matrices*20)
             encoded_seq = self.anc_probs_layer(
-                sequences_transposed, rate_indices=indices, training=training # type: ignore
+                sequences_onehot, rate_indices=indices, training=training # type: ignore
             )
         else:
-            encoded_seq = tf.one_hot(
-                sequences_transposed,
-                depth=self.context.config.hmm.alphabet_size+1, # including padding
-                dtype=self.phmm_layer.dtype
-            )
+            encoded_seq = sequences_onehot
 
         return encoded_seq
 
