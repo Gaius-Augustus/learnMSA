@@ -5,7 +5,7 @@ from learnMSA.util.sequence_dataset import SequenceDataset
 from learnMSA.tree.util import inverse_softplus, deserialize
 
 from evoten.backend_tf import BackendTF
-from evoten.expm_gtr import expm_gtr
+from evoten.expm_gtr import expm_gtr, precompute_gtr, expm_gtr_from_decomp
 
 # Initialize evoten backend
 backend = BackendTF()
@@ -15,60 +15,63 @@ Learn one or several rate matrices jointly with a downstream model. Amino acid s
 some amount of evolutionary time has passed under a substitution model. This can help to train models on distantly related sequences.
 """
 
-def make_anc_probs(sequences, exchangeabilities, equilibrium, tau, equilibrium_sample=False, transposed=False):
+def make_anc_probs(sequences, exchangeabilities, equilibrium, tau, equilibrium_sample=False, transposed=False, gtr_decomp=None):
     """Computes ancestral probabilities simultaneously for all sites and rate matrices.
     Args:
         sequences: Sequences either as integers (faster embedding lookup) or in vector format. Shape: (num_model, b, L) or (num_model, b, L, s)
-        exchangeabilities: A stack of symmetric exchangeability matrices. Shape: (num_model, k, s, s)
-        equilibrium: A stack of equilibrium distributions. Shape: (num_model, k, s)
+        exchangeabilities: A stack of symmetric exchangeability matrices. Shape: (num_model, k, s, s). Not used if gtr_decomp is provided.
+        equilibrium: A stack of equilibrium distributions. Shape: (num_model, k, s). Required for equilibrium_sample or when gtr_decomp is None.
         tau: Evolutionary times for all sequences (1 time unit = 1 expected mutation per site). Shape: (num_model, b) or (num_model,b,k)
         equilibrium_sample: If true, a 2-staged process is assumed where an amino acid is first sampled from the equilibirium distribution
                     and the ancestral probabilities are computed afterwards.
         transposed: Transposes the probability matrix P = e^tQ.
+        gtr_decomp: Optional precomputed GTR decomposition. If provided, uses expm_gtr_from_decomp for efficiency.
     Returns:
         A tensor with the expected amino acids frequencies after time tau. Output shape: (num_model, b, L, k, s)
     """
     while len(tau.shape) < 5:
         tau = tf.expand_dims(tau, -1)
-    shape = tf.shape(exchangeabilities)
-    num_model, k, s, _ = tf.unstack(shape, 4)
-    
-    # Reshape for evoten backend
-    exchangeabilities = tf.reshape(exchangeabilities, (-1, s, s))
-    equilibrium_flat = tf.reshape(equilibrium, (-1, s))
-    
-    # Use evoten backend to create rate matrices
-    Q = backend.make_rate_matrix(exchangeabilities, equilibrium_flat)
-    Q = tf.reshape(Q, (num_model, k, s, s))
-    
+
     # Extract tau: shape is (num_model, b, k, 1, 1), we need (num_model, b, k)
     tau_extracted = tau[..., 0, 0]  # Shape: (num_model, b, k)
-    
-    # Use evoten's expm_gtr to create transition probabilities
-    # expm_gtr(Q, t, pi) expects:
-    #   Q: (..., d, d) - rate matrices
-    #   t: (...) - times  
-    #   pi: (..., d) - equilibrium distributions
-    # It will broadcast and compute exp(t*Q) for each combination
-    # 
-    # We have:
-    #   Q: (num_model, k, s, s)
-    #   tau: (num_model, b, k)
-    #   equilibrium: (num_model, k, s)
-    # We want P[m,b,k,i,j]
-    
-    # Add b dimension to Q and equilibrium
-    Q_exp = tf.expand_dims(Q, 1)  # (num_model, 1, k, s, s)
-    equilibrium_exp = tf.expand_dims(equilibrium, 1)  # (num_model, 1, k, s)
-    
-    # expm_gtr will broadcast to (num_model, b, k, s, s)
-    P = expm_gtr(Q_exp, tau_extracted, equilibrium_exp)
-    
+
+    # Use precomputed decomposition if available, otherwise compute on the fly
+    if gtr_decomp is not None:
+        # expm_gtr_from_decomp will broadcast to (num_model, b, k, s, s)
+        P = expm_gtr_from_decomp(gtr_decomp, tau_extracted)
+        # Extract shape info from the result
+        shape = tf.shape(P)
+        _, _, k, s, _ = tf.unstack(shape, 5)
+    else:
+        # Compute rate matrices when decomposition is not provided
+        shape = tf.shape(exchangeabilities)
+        _, k, s, _ = tf.unstack(shape, 4)
+
+        # Reshape for evoten backend
+        exchangeabilities = tf.reshape(exchangeabilities, (-1, s, s))
+        equilibrium_flat = tf.reshape(equilibrium, (-1, s))
+
+        # Use evoten backend to create rate matrices
+        num_model = tf.shape(exchangeabilities)[0] // (k * s)
+        Q = backend.make_rate_matrix(exchangeabilities, equilibrium_flat)
+        Q = tf.reshape(Q, (num_model, k, s, s))
+
+        # Add b dimension to Q and equilibrium
+        Q_exp = tf.expand_dims(Q, 1)  # (num_model, 1, k, s, s)
+        equilibrium_exp = tf.expand_dims(equilibrium, 1)  # (num_model, 1, k, s)
+
+        # expm_gtr will broadcast to (num_model, b, k, s, s)
+        P = expm_gtr(Q_exp, tau_extracted, equilibrium_exp)
+
     if equilibrium_sample:
-        equilibrium_reshaped = tf.reshape(equilibrium, (num_model, 1, k, s, 1))
+        # Get num_model from sequences for proper reshaping
+        num_model_seq = tf.shape(equilibrium)[0]
+        equilibrium_reshaped = tf.reshape(equilibrium, (num_model_seq, 1, k, s, 1))
         P *= equilibrium_reshaped
-        
+
     if len(sequences.shape) == 3:  # assume index format
+        # Extract dimensions from sequences to ensure consistency
+        num_model_seq = tf.shape(sequences)[0]
         b_actual = tf.shape(sequences)[1]
         if transposed:
             P = tf.transpose(P, [0, 1, 4, 2, 3])
@@ -77,9 +80,9 @@ def make_anc_probs(sequences, exchangeabilities, equilibrium, tau, equilibrium_s
         P = tf.reshape(P, (-1, k, s))
         sequences = tf.cast(sequences, tf.int32)
         sequences = tf.reshape(sequences, (-1, tf.shape(sequences)[-1]))
-        sequences += tf.expand_dims(tf.range(num_model * b_actual) * s, -1)
+        sequences += tf.expand_dims(tf.range(num_model_seq * b_actual) * s, -1)
         ancprobs = tf.nn.embedding_lookup(P, sequences)
-        ancprobs = tf.reshape(ancprobs, (num_model, b_actual, -1, k, s))
+        ancprobs = tf.reshape(ancprobs, (num_model_seq, b_actual, -1, k, s))
     else:  # assume vector format
         if transposed:
             ancprobs = tf.einsum("mbLz,mbksz->mbLks", sequences, P)
@@ -110,7 +113,6 @@ class AncProbsLayer(tf.keras.layers.Layer):
         transposed: Transposes the probability matrix P = e^tQ.
         clusters: An optional vector that assigns each sequence to a cluster. If provided, the evolutionary time
                     is learned per cluster.
-        use_lstm: Experimental setting that estimates the evolutionary distance of a sequence with an lstm.
         name: Layer name.
     """
 
@@ -121,7 +123,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
                  equilibrium_init,
                  exchangeability_init,
                  rate_init=initializer.ConstantInitializer(-3.),
-                 trainable_rate_matrices=True,
+                 trainable_rate_matrices=False,
                  trainable_distances=True,
                  per_matrix_rate=False,
                  matrix_rate_init=None,
@@ -130,7 +132,6 @@ class AncProbsLayer(tf.keras.layers.Layer):
                  equilibrium_sample=False,
                  transposed=False,
                  clusters=None,
-                 use_lstm=False,
                  **kwargs):
         super(AncProbsLayer, self).__init__(**kwargs)
         self.num_models = num_models
@@ -149,8 +150,8 @@ class AncProbsLayer(tf.keras.layers.Layer):
         self.transposed = transposed
         self.clusters = clusters
         self.num_clusters = np.max(clusters) + 1 if clusters is not None else self.num_rates
-        self.use_lstm = use_lstm
         self._head_subset = None
+        self._gtr_decomp = None
 
     @property
     def head_subset(self):
@@ -164,18 +165,10 @@ class AncProbsLayer(tf.keras.layers.Layer):
     def build(self, input_shape=None):
         if self.built:
             return
-        if self.use_lstm:
-            self.lstm_dim = 64
-            self.lstm = tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(self.lstm_dim, return_sequences=True, zero_output_for_mask=True), merge_mode="sum")
-            self.dense = tf.keras.layers.Dense(1,
-                                            activation="softplus",
-                                            #kernel_initializer="zeros",
-                                            bias_initializer=self.rate_init)
-        else:
-            self.tau_kernel = self.add_weight(shape=[self.num_models, self.num_clusters],
-                                    name="tau_kernel",
-                                    initializer=self.rate_init,
-                                    trainable=self.trainable_distances)
+        self.tau_kernel = self.add_weight(shape=[self.num_models, self.num_clusters],
+                                name="tau_kernel",
+                                initializer=self.rate_init,
+                                trainable=self.trainable_distances)
         if self.shared_matrix:
             self.exchangeability_kernel = self.add_weight(shape=[self.num_models, 1, 20, 20],
                                                           name="exchangeability_kernel",
@@ -201,8 +194,40 @@ class AncProbsLayer(tf.keras.layers.Layer):
             self.per_matrix_rates_kernel = self.add_weight(shape=[self.num_models, self.num_matrices],
                                                       name="per_matrix_rates_kernel",
                                                       initializer=self.matrix_rate_init)
+
+        # Precompute GTR decomposition if rate matrices are not trainable
+        if not self.trainable_rate_matrices:
+            self._precompute_gtr_decomposition()
+
         self.built = True
 
+
+    def _precompute_gtr_decomposition(self):
+        """Precompute GTR eigendecomposition for non-trainable rate matrices.
+        Stores the result as a constant tensor to optimize computation.
+        """
+        # Compute rate matrices
+        R, p = self.make_R(), self.make_p()
+        R_flat = tf.reshape(R, (-1, 20, 20))
+        p_flat = tf.reshape(p, (-1, 20))
+        Q = backend.make_rate_matrix(R_flat, p_flat)
+        Q = tf.reshape(Q, (self.num_models, self.num_matrices, 20, 20))
+
+        # Add batch dimension for compatibility with make_anc_probs
+        Q_exp = tf.expand_dims(Q, 1)  # (num_models, 1, num_matrices, 20, 20)
+        p_exp = tf.expand_dims(p, 1)  # (num_models, 1, num_matrices, 20)
+
+        # Precompute GTR decomposition
+        decomp = precompute_gtr(Q_exp, p_exp)
+
+        # Store as non-trainable constants for use in forward pass
+        # Use tf.constant to ensure it's treated as a constant in the graph
+        self._gtr_decomp = type(decomp)(
+            eigvals=tf.constant(decomp.eigvals.numpy()),
+            eigvecs=tf.constant(decomp.eigvecs.numpy()),
+            sqrt_pi=tf.constant(decomp.sqrt_pi.numpy()),
+            inv_sqrt_pi=tf.constant(decomp.inv_sqrt_pi.numpy())
+        )
 
     def make_R(self, kernel=None):
         if kernel is None:
@@ -230,29 +255,15 @@ class AncProbsLayer(tf.keras.layers.Layer):
         return Q
 
     def make_tau(self, inputs=None, subset=None):
-        if self.use_lstm:
-            if len(inputs.shape) == 3:
-                num_model, b, L = tf.unstack(tf.shape(inputs))
-            else:
-                num_model, b, L, _ = tf.unstack(tf.shape(inputs))
-            lstm_input = tf.one_hot(inputs, len(SequenceDataset._default_alphabet))
-            lstm_input = tf.reshape(lstm_input, (num_model*b, L, len(SequenceDataset._default_alphabet)))
-            lstm_mask = tf.reshape(inputs < len(SequenceDataset._default_alphabet)-1, (num_model*b, L))
-            seq_lens = tf.reduce_sum(tf.cast(lstm_mask, lstm_input.dtype), axis=-1, keepdims=True)
-            lstm_output = self.lstm(lstm_input, mask=lstm_mask)
-            lstm_output = tf.reduce_sum(lstm_output, axis=-2) / (seq_lens * self.lstm_dim)
-            lstm_output = tf.reshape(lstm_output, (num_model, b, self.lstm_dim))
-            return self.dense(lstm_output)[...,0]
-        else:
-            tau = self.tau_kernel
-            if self._head_subset is not None:
-                tau = tf.gather(tau, self._head_subset, axis=0)
-            if self.clusters is not None:
-                tau = tf.gather(tau, self.clusters, axis=-1)
-            if subset is not None:
-                tau = tf.gather_nd(tau, subset, batch_dims=1)
-            # Use evoten backend to convert kernel to branch lengths
-            return backend.make_branch_lengths(tau)
+        tau = self.tau_kernel
+        if self._head_subset is not None:
+            tau = tf.gather(tau, self._head_subset, axis=0)
+        if self.clusters is not None:
+            tau = tf.gather(tau, self.clusters, axis=-1)
+        if subset is not None:
+            tau = tf.gather_nd(tau, subset, batch_dims=1)
+        # Use evoten backend to convert kernel to branch lengths
+        return backend.make_branch_lengths(tau)
 
     def make_per_matrix_rate(self):
         kernel = self.per_matrix_rates_kernel
@@ -295,13 +306,24 @@ class AncProbsLayer(tf.keras.layers.Layer):
             mut_rates = tau_subset
         reg_tau = tf.reduce_sum(tf.square(self.tau_kernel + 3.))
         self.add_loss(self.matrix_rate_l2 * reg_tau)
-        equilibrium = self.make_p()
+
+        # Only compute R and equilibrium if we don't have a precomputed decomposition
+        if self._gtr_decomp is not None:
+            # Pass None for exchangeabilities since we have precomputed decomposition
+            exchangeabilities = None
+            # Still need equilibrium for equilibrium_sample and replace_rare_with_equilibrium
+            equilibrium = self.make_p() if (self.equilibrium_sample or replace_rare_with_equilibrium) else None
+        else:
+            exchangeabilities = self.make_R()
+            equilibrium = self.make_p()
+
         anc_probs = make_anc_probs(only_std_aa_inputs,
-                                   self.make_R(),
+                                   exchangeabilities,
                                    equilibrium,
                                    mut_rates,
                                    self.equilibrium_sample,
-                                   self.transposed)
+                                   self.transposed,
+                                   gtr_decomp=self._gtr_decomp)
         if input_indices:
             anc_probs *= mask
             anc_probs = tf.pad(anc_probs, [[0,0], [0,0], [0,0], [0,0], [0,len(SequenceDataset._default_alphabet)-20]])
@@ -338,8 +360,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
              "shared_matrix" : self.shared_matrix,
              "equilibrium_sample" : self.equilibrium_sample,
              "transposed" : self.transposed,
-                "clusters" : self.clusters,
-             "use_lstm" : self.use_lstm
+                "clusters" : self.clusters
         })
         return config
 
