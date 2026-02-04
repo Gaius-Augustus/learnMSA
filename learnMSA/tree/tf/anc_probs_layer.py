@@ -4,32 +4,16 @@ import learnMSA.tree.tf.initializer as initializer
 from learnMSA.util.sequence_dataset import SequenceDataset
 from learnMSA.tree.util import inverse_softplus, deserialize
 
+from evoten.backend_tf import BackendTF
+from evoten.expm_gtr import expm_gtr
+
+# Initialize evoten backend
+backend = BackendTF()
+
 """Ancestral Probability Layer
 Learn one or several rate matrices jointly with a downstream model. Amino acid sequences can be smeared towards expected amino acid distributions after
 some amount of evolutionary time has passed under a substitution model. This can help to train models on distantly related sequences.
 """
-
-def make_rate_matrix(exchangeabilities, equilibrium, epsilon=1e-16):
-    """Constructs a stack of k rate matrices.
-    Args:
-        exchangeabilities: Symmetric exchangeability matrices with zero diagonals. Shape: (k, 25, 25)
-        equilibrium: A vector of relative amino acid frequencies. Shape: (k, 25)
-    Returns:
-        Normalized rate matrices. Output shape: (k, 25, 25)
-    """
-    if len(exchangeabilities.shape) == 2:
-        exchangeabilities = tf.expand_dims(exchangeabilities, 0)
-    if len(equilibrium.shape) == 1:
-        equilibrium = tf.expand_dims(equilibrium, 0)
-    Q = exchangeabilities *  tf.expand_dims(equilibrium, 1)
-    diag = tf.reduce_sum(Q, axis=-1, keepdims=True)
-    eye = tf.eye(tf.shape(diag)[1], batch_shape=tf.shape(diag)[:1], dtype=equilibrium.dtype)
-    Q -= diag * eye
-    #normalize, 1 time unit = 1 expected mutation per site
-    mue = tf.expand_dims(equilibrium, -1) * diag
-    mue = tf.reduce_sum(mue, axis=-2, keepdims=True)
-    Q /= tf.maximum(mue, epsilon)
-    return Q
 
 def make_anc_probs(sequences, exchangeabilities, equilibrium, tau, equilibrium_sample=False, transposed=False):
     """Computes ancestral probabilities simultaneously for all sites and rate matrices.
@@ -38,36 +22,65 @@ def make_anc_probs(sequences, exchangeabilities, equilibrium, tau, equilibrium_s
         exchangeabilities: A stack of symmetric exchangeability matrices. Shape: (num_model, k, s, s)
         equilibrium: A stack of equilibrium distributions. Shape: (num_model, k, s)
         tau: Evolutionary times for all sequences (1 time unit = 1 expected mutation per site). Shape: (num_model, b) or (num_model,b,k)
-        equi_init: If true, a 2-staged process is assumed where an amino acid is first sampled from the equilibirium distribution
+        equilibrium_sample: If true, a 2-staged process is assumed where an amino acid is first sampled from the equilibirium distribution
                     and the ancestral probabilities are computed afterwards.
+        transposed: Transposes the probability matrix P = e^tQ.
     Returns:
         A tensor with the expected amino acids frequencies after time tau. Output shape: (num_model, b, L, k, s)
     """
     while len(tau.shape) < 5:
         tau = tf.expand_dims(tau, -1)
     shape = tf.shape(exchangeabilities)
-    exchangeabilities = tf.reshape(exchangeabilities, (-1, 20, 20))
-    equilibrium = tf.reshape(equilibrium, (-1, 20))
-    Q = make_rate_matrix(exchangeabilities, equilibrium)
-    Q = tf.reshape(Q, shape)
-    tauQ = tau * tf.expand_dims(Q, 1)
-    P = tf.linalg.expm(tauQ) # P[m,b,k,i,j] = P(X(tau_b) = j | X(0) = i; Q_k, model m))
-    num_model,b,k,s,s = tf.unstack(tf.shape(P), 5)
+    num_model, k, s, _ = tf.unstack(shape, 4)
+    
+    # Reshape for evoten backend
+    exchangeabilities = tf.reshape(exchangeabilities, (-1, s, s))
+    equilibrium_flat = tf.reshape(equilibrium, (-1, s))
+    
+    # Use evoten backend to create rate matrices
+    Q = backend.make_rate_matrix(exchangeabilities, equilibrium_flat)
+    Q = tf.reshape(Q, (num_model, k, s, s))
+    
+    # Extract tau: shape is (num_model, b, k, 1, 1), we need (num_model, b, k)
+    tau_extracted = tau[..., 0, 0]  # Shape: (num_model, b, k)
+    
+    # Use evoten's expm_gtr to create transition probabilities
+    # expm_gtr(Q, t, pi) expects:
+    #   Q: (..., d, d) - rate matrices
+    #   t: (...) - times  
+    #   pi: (..., d) - equilibrium distributions
+    # It will broadcast and compute exp(t*Q) for each combination
+    # 
+    # We have:
+    #   Q: (num_model, k, s, s)
+    #   tau: (num_model, b, k)
+    #   equilibrium: (num_model, k, s)
+    # We want P[m,b,k,i,j]
+    
+    # Add b dimension to Q and equilibrium
+    Q_exp = tf.expand_dims(Q, 1)  # (num_model, 1, k, s, s)
+    equilibrium_exp = tf.expand_dims(equilibrium, 1)  # (num_model, 1, k, s)
+    
+    # expm_gtr will broadcast to (num_model, b, k, s, s)
+    P = expm_gtr(Q_exp, tau_extracted, equilibrium_exp)
+    
     if equilibrium_sample:
-        equilibrium = tf.reshape(equilibrium, (num_model,1,k,s,1))
-        P *= equilibrium
-    if len(sequences.shape) == 3: #assume index format
+        equilibrium_reshaped = tf.reshape(equilibrium, (num_model, 1, k, s, 1))
+        P *= equilibrium_reshaped
+        
+    if len(sequences.shape) == 3:  # assume index format
+        b_actual = tf.shape(sequences)[1]
         if transposed:
-            P = tf.transpose(P, [0,1,4,2,3])
+            P = tf.transpose(P, [0, 1, 4, 2, 3])
         else:
-            P = tf.transpose(P, [0,1,3,2,4])
+            P = tf.transpose(P, [0, 1, 3, 2, 4])
         P = tf.reshape(P, (-1, k, s))
         sequences = tf.cast(sequences, tf.int32)
         sequences = tf.reshape(sequences, (-1, tf.shape(sequences)[-1]))
-        sequences += tf.expand_dims( tf.range(num_model*b) * s, -1)
+        sequences += tf.expand_dims(tf.range(num_model * b_actual) * s, -1)
         ancprobs = tf.nn.embedding_lookup(P, sequences)
-        ancprobs = tf.reshape(ancprobs, (num_model, b, -1, k, s))
-    else: #assume vector format
+        ancprobs = tf.reshape(ancprobs, (num_model, b_actual, -1, k, s))
+    else:  # assume vector format
         if transposed:
             ancprobs = tf.einsum("mbLz,mbksz->mbLks", sequences, P)
         else:
@@ -196,22 +209,22 @@ class AncProbsLayer(tf.keras.layers.Layer):
             kernel = self.exchangeability_kernel
             if self._head_subset is not None:
                 kernel = tf.gather(kernel, self._head_subset, axis=0)
-        R = 0.5 * (kernel + tf.transpose(kernel, [0,1,3,2])) #make symmetric
-        R = tf.math.softplus(R)
-        R -= tf.linalg.diag(tf.linalg.diag_part(R)) #zero diagonal
-        return R
+        # Use evoten backend to make symmetric positive semi-definite matrix
+        return backend.make_symmetric_pos_semidefinite(kernel)
 
     def make_p(self):
         kernel = self.equilibrium_kernel
         if self._head_subset is not None:
             kernel = tf.gather(kernel, self._head_subset, axis=0)
-        return tf.nn.softmax(kernel)
+        # Use evoten backend to make equilibrium distribution
+        return backend.make_equilibrium(kernel)
 
     def make_Q(self):
         R, p = self.make_R(), self.make_p()
         R = tf.reshape(R, (-1, 20, 20))
         p = tf.reshape(p, (-1, 20))
-        Q = make_rate_matrix(R, p)
+        # Use evoten backend to create rate matrices
+        Q = backend.make_rate_matrix(R, p)
         num_models = len(self._head_subset) if self._head_subset is not None else self.num_models
         Q = tf.reshape(Q, (num_models, self.num_matrices, 20, 20))
         return Q
@@ -238,13 +251,15 @@ class AncProbsLayer(tf.keras.layers.Layer):
                 tau = tf.gather(tau, self.clusters, axis=-1)
             if subset is not None:
                 tau = tf.gather_nd(tau, subset, batch_dims=1)
-            return tf.math.softplus(tau)
+            # Use evoten backend to convert kernel to branch lengths
+            return backend.make_branch_lengths(tau)
 
     def make_per_matrix_rate(self):
         kernel = self.per_matrix_rates_kernel
         if self._head_subset is not None:
             kernel = tf.gather(kernel, self._head_subset, axis=0)
-        return tf.math.softplus(kernel)
+        # Use evoten backend to convert kernel to branch lengths
+        return backend.make_branch_lengths(kernel)
 
     def call(self, inputs, rate_indices, replace_rare_with_equilibrium=True):
         """ Computes anchestral probabilities of the inputs.
