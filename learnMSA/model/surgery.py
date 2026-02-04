@@ -315,6 +315,11 @@ def update_kernels(
     insert_to_insert = A[ind.insert_to_insert[:, 0], ind.insert_to_insert[:, 1]]
     delete_to_delete = A[ind.delete_to_delete[:, 0], ind.delete_to_delete[:, 1]]
 
+    # Preserve Begin -> {M1, D1}, but reset entry probabilities uniformly
+    # according to the remaining probability mass
+    begin_match = A[ind.begin_to_match[0, 0], 0]
+    begin_delete = A[ind.begin_to_delete[0,0], ind.begin_to_delete[0,1]]
+
     h = model_index
     args = extend_mods(pos_expand, expansion_lens, pos_discard, L)
 
@@ -341,6 +346,8 @@ def update_kernels(
     new_config.p_match_insert=match_to_insert[np.newaxis]
     new_config.p_insert_insert=insert_to_insert[np.newaxis]
     new_config.p_delete_delete=delete_to_delete[np.newaxis]
+    new_config.p_begin_match = begin_match
+    new_config.p_begin_delete = begin_delete
 
     if phmm_layer.use_language_model and plm_config is not None:
         new_plm_config = plm_config.model_copy(deep=True)

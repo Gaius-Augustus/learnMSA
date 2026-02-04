@@ -107,7 +107,7 @@ class PHMMConfig(BaseModel):
     """
 
     p_begin_match: float | Sequence[float] | Sequence[Sequence[float]] | \
-        NPArray = 0.7
+        NPArray = 0.5
     """If provided a scalar value, is interpreted as ``P(Match 1 | Begin)``.
     In that case, ``P(Match i | Begin)`` for i > 1 will be chosen uniformly
     depending on head length.
@@ -153,7 +153,7 @@ class PHMMConfig(BaseModel):
     Can optionally depend on i and h.
     """
 
-    p_begin_delete: float | Sequence[float] | NPArray = 0.15
+    p_begin_delete: float | Sequence[float] | NPArray = 0.38
     """Defines ``P(Delete 1 | Begin; h)``.
     Can optionally depend on h. This value is not used, if ``p_begin_match``
     is provided as a nested list.
