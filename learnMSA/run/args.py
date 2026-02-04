@@ -449,10 +449,10 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
 
     advanced_group = parser.add_argument_group("Advanced arguments")
     advanced_group.add_argument(
-        "--jit_compile",
-        dest="jit_compile",
+        "--no_jit",
+        dest="no_jit",
         action='store_true',
-        help="Enable XLA JIT compilation in TensorFlow."
+        help="Disable XLA JIT compilation in TensorFlow."
     )
 
     deprecated_group = parser.add_argument_group("Deprecated arguments")

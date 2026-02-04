@@ -78,7 +78,7 @@ class BatchGenerator():
 
         # In static shape mode, always use crop_long_seqs as the sequence length
         if self.static_shape_mode:
-            max_len = int(self.crop_long_seqs)
+            max_len = min(self.data.max_len, int(self.crop_long_seqs))
         else:
             max_len = np.max(self.data.seq_lens[permutated_indices])
             max_len = min(max_len, self.crop_long_seqs)
@@ -268,6 +268,15 @@ def make_dataset(
             ds = ds.shuffle(indices.size, reshuffle_each_iteration=True)
             ds = ds.repeat()
         ds = ds.batch(batch_size)
+
+        if batch_generator.static_shape_mode:
+            seq_dim = min(
+                int(batch_generator.crop_long_seqs),
+                batch_generator.data.max_len,
+            ) + 1
+        else:
+            seq_dim = None
+
         def _batch_func(i):
             if len(batch_generator.get_out_types()) == 2:
                 batch, ind = tf.numpy_function(
@@ -275,14 +284,9 @@ def make_dataset(
                 )
                 # explicitly set output shapes or tf 2.17 will complain about
                 # unknown shapes
-                if batch_generator.static_shape_mode:
-                    batch.set_shape(
-                        tf.TensorShape([batch_size, batch_generator.num_models, int(batch_generator.crop_long_seqs)+1])
-                    )
-                else:
-                    batch.set_shape(
-                        tf.TensorShape([batch_size, batch_generator.num_models, None])
-                    )
+                batch.set_shape(
+                    tf.TensorShape([batch_size, batch_generator.num_models, seq_dim])
+                )
                 ind.set_shape(
                     tf.TensorShape([batch_size, batch_generator.num_models])
                 )
@@ -293,26 +297,15 @@ def make_dataset(
                 )
                 # explicitly set output shapes or tf 2.17 will complain about
                 # unknown shapes
-                if batch_generator.static_shape_mode:
-                    batch.set_shape(
-                        tf.TensorShape([batch_size, batch_generator.num_models, int(batch_generator.crop_long_seqs)+1])
-                    )
-                    emb.set_shape(tf.TensorShape([
-                        batch_size,
-                        batch_generator.num_models,
-                        int(batch_generator.crop_long_seqs)+1,
-                        batch_generator.scoring_model_config.dim+1
-                    ]))
-                else:
-                    batch.set_shape(
-                        tf.TensorShape([batch_size, batch_generator.num_models, None])
-                    )
-                    emb.set_shape(tf.TensorShape([
-                        batch_size,
-                        batch_generator.num_models,
-                        None,
-                        batch_generator.scoring_model_config.dim+1
-                    ]))
+                batch.set_shape(
+                    tf.TensorShape([batch_size, batch_generator.num_models, seq_dim])
+                )
+                emb.set_shape(tf.TensorShape([
+                    batch_size,
+                    batch_generator.num_models,
+                    seq_dim,
+                    batch_generator.scoring_model_config.dim+1
+                ]))
                 ind.set_shape(
                     tf.TensorShape([batch_size, batch_generator.num_models])
                 )

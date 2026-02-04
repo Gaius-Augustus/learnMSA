@@ -37,13 +37,12 @@ def test_static_shape_batch_gen() -> None:
         config = Configuration()
         config.training.num_model = 1
         config.training.no_sequence_weights = True
-        config.training.crop = 50  # Set a finite crop length
 
         batch_gen.configure(data, LearnMSAContext(config, data))
 
         # Test that all batches have the same shape
         test_batches = [[0], [1], [4], [0, 2], [0, 1, 2, 3, 4], [2, 3, 4]]
-        expected_seq_len = config.training.crop + 1  # +1 for terminal symbol
+        expected_seq_len = data.max_len + 1
 
         for ind in test_batches:
             ind = np.array(ind)

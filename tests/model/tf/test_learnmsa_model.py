@@ -306,7 +306,9 @@ def test_predict(context_binary: LearnMSAContext) -> None:
     # Test that the predict method correctly computes log-likelihoods
     # for sequences in a binary alphabet
     model = LearnMSAModel(context_binary)
+    model.build()
     model.loglik_mode()
+    model.compile()
 
     # Create a dataset with the test sequence "ABA"
     # and longer "BBBBB" sequences to test if the output ordering is correct
@@ -334,8 +336,10 @@ def test_predict(context_binary: LearnMSAContext) -> None:
     context_binary.config.training.batch_size = batch_cb
 
     # Predict log-likelihoods for the sequence
-    bucket_boundaries = [4]
-    bucket_batch_sizes = [2, 3]
+    # Note: When JIT is enabled, pad_to_bucket_boundary=True requires
+    # all buckets to have explicit upper bounds.
+    bucket_boundaries = [4, 20]
+    bucket_batch_sizes = [2, 3, 3]
     predictions = model.predict(
         data,
         bucket_boundaries=bucket_boundaries,
@@ -382,7 +386,6 @@ def test_predict(context_binary: LearnMSAContext) -> None:
 
     # Posterior predictions
     model.posterior_mode()
-    model.compile()
     posterior = model.predict(
         data,
         bucket_boundaries=bucket_boundaries,
@@ -419,7 +422,7 @@ def test_evaluate(context_binary: LearnMSAContext) -> None:
     # for sequences in a binary alphabet
     context_binary.sequence_weights = np.arange(1, 401, dtype=float) / 200.0
     model = LearnMSAModel(context_binary)
-    model.compile()
+    model.build()
 
     # Create a dataset with the test sequence "ABA"
     data = SequenceDataset(
@@ -468,7 +471,7 @@ def test_estimate_loglik(context_amino_acid: LearnMSAContext) -> None:
     # Test that the estimate_loglik method correctly computes
     # log-likelihoods for sequences in an amino acid alphabet
     model = LearnMSAModel(context_amino_acid)
-    model.compile()
+    model.build()
 
     # Create a dataset with random sequences
     np.random.seed(42)
@@ -498,7 +501,7 @@ def test_null_model_log_probs(context_amino_acid: LearnMSAContext) -> None:
     # Test that compute_null_model_log_probs correctly computes
     # log probabilities under a null model
     model = LearnMSAModel(context_amino_acid)
-    model.compile()
+    model.build()
 
     # Create a dataset with sequences of varying lengths
     sequences = [
@@ -541,7 +544,7 @@ def test_null_model_log_probs(context_amino_acid: LearnMSAContext) -> None:
 def test_predict_posterior_reduce(context_amino_acid: LearnMSAContext) -> None:
     """Test that predict with reduce=True matches manual reduction."""
     model = LearnMSAModel(context_amino_acid)
-    model.compile()
+    model.build()
     model.posterior_mode()
 
     # Create a small dataset

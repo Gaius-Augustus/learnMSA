@@ -121,8 +121,6 @@ def test_alignment_egf() -> None:
         config.training.epochs = [5, 1, 5]
         config.training.max_iterations = 2
         config.training.length_init = [25]
-        # config.training.use_anc_probs = False
-        # config.advanced.jit_compile = True
         config.input_output.subset_ids = seq_ids
         config.training.crop = 999999
         config.training.auto_crop = False

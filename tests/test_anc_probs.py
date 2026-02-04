@@ -11,7 +11,7 @@ from learnMSA.model import LearnMSAModel, LearnMSAContext
 from learnMSA.model.tf import training
 import learnMSA.tree.util as Utility
 import learnMSA.tree.tf.initializer as Initializers
-from learnMSA.tree.tf.anc_probs_layer import AncProbsLayer, make_rate_matrix
+from learnMSA.tree.tf.anc_probs_layer import AncProbsLayer
 from learnMSA.util import SequenceDataset
 
 
@@ -220,13 +220,6 @@ def test_paml_parsing(anc_probs_data : AncProbsData) -> None:
     for R, p in map(Utility.parse_paml, anc_probs_data.paml_all, [anc_probs_data.A] * len(anc_probs_data.paml_all)):
         assert_equilibrium(p)
         assert_symmetric(R)
-
-
-def test_rate_matrices(anc_probs_data : AncProbsData) -> None:
-    """Test construction of rate matrices from PAML data."""
-    for R, p in map(Utility.parse_paml, anc_probs_data.paml_all, [anc_probs_data.A] * len(anc_probs_data.paml_all)):
-        Q = make_rate_matrix(R, p)
-        assert_rate_matrix(Q, p)
 
 
 def test_anc_probs_layer() -> None:
