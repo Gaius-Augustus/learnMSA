@@ -153,7 +153,7 @@ class PHMMConfig(BaseModel):
     Can optionally depend on i and h.
     """
 
-    p_begin_delete: float | Sequence[float] | NPArray = 0.38
+    p_begin_delete: float | Sequence[float] | NPArray = 0.15
     """Defines ``P(Delete 1 | Begin; h)``.
     Can optionally depend on h. This value is not used, if ``p_begin_match``
     is provided as a nested list.
