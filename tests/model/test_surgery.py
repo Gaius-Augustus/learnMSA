@@ -212,7 +212,8 @@ def test_update_kernels(model_single_head: LearnMSAModel) -> None:
     config = model_single_head.context.config.hmm.model_copy(deep=True)
     # Override some parameters to check if they are correctly used as updates
     config.background_distribution = dummy_emission
-    config.p_begin_match = 0.5
+    config.p_begin_match = 0.66
+    config.p_begin_delete = 0.04
     config.p_match_end = 0.2
     config.p_match_match = 0.1
     config.p_match_insert = 0.5
@@ -251,10 +252,11 @@ def test_update_kernels(model_single_head: LearnMSAModel) -> None:
 
     ind = PHMMTransitionIndexSet(result.length)
 
-    # Begin to match transitions must have been reset to defaults
+    # Begin to first match transition must have been preserved
+    # other entry transitions should be reset uniformly
     np.testing.assert_almost_equal(
         transitions_new[ind.begin_to_match[:,0], ind.begin_to_match[:,1]],
-        [0.5] + [(0.5 - 0.05) / (result.length - 1)] * (result.length - 1)
+        [0.35] + [0.6 / (result.length - 1)] * (result.length - 1)
     )
     # Same for match to end transitions
     np.testing.assert_almost_equal(

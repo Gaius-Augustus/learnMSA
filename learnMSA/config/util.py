@@ -39,8 +39,8 @@ def get_value(param, head: int, index: int | None = None) -> float:
         head: The head index.
         index: The index within the head, if applicable.
     """
-    if isinstance(param, float):
-        return param
+    if isinstance(param, (float, np.floating)):
+        return float(param)
     elif isinstance(param, np.ndarray):
         if param.ndim == 0:
             return float(param.item())
