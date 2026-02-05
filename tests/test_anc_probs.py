@@ -144,19 +144,13 @@ def get_test_configs(sequences : np.ndarray) -> list[dict]:
                 case["encoder_initializer"] = encoder_initializer
 
                 if rate_init == -100.:
-                    expected_anc_probs = tf.one_hot(
-                        sequences, len(SequenceDataset._default_alphabet)
-                    ).numpy()
+                    expected_anc_probs = tf.one_hot(sequences, 20).numpy()
                     # Shape: (B, L, H, S)
                     case["expected_anc_probs"] = expected_anc_probs
                 elif rate_init == 100.:
-                    anc = np.concatenate(
-                        [p, np.zeros((1, 1, len(SequenceDataset._default_alphabet) - 20), dtype=np.float32)],
-                        axis=-1,
-                    )
                     b, L, num_model = sequences.shape
-                    anc = np.concatenate([anc] * b * L * num_model, axis=1)
-                    anc = np.reshape(anc, (b, L, num_model, len(SequenceDataset._default_alphabet)))
+                    anc = np.concatenate([p] * b * L * num_model, axis=1)
+                    anc = np.reshape(anc, (b, L, num_model, 20))
                     # Shape: (B, L, H, S)
                     case["expected_anc_probs"] = anc
 
@@ -185,7 +179,6 @@ def make_anc_probs_layer(config : Configuration, enc_init, num_seq) -> AncProbsL
         exchangeability_init=enc_init[1],
         trainable_rate_matrices=config.training.trainable_rate_matrices,
         trainable_distances=config.training.trainable_distances,
-        per_matrix_rate=config.training.per_matrix_rate,
         matrix_rate_l2=config.training.matrix_rate_l2,
         shared_matrix=config.training.shared_rate_matrix,
         equilibrium_sample=config.training.equilibrium_sample,
@@ -255,7 +248,7 @@ def test_anc_probs_layer() -> None:
         )
         assert_anc_probs_layer(anc_probs_layer, case["config"])
         anc_prob_seqs = anc_probs_layer(
-            sequences_onehot, rate_indices=rate_indices
+            sequences_onehot, rate_indices=rate_indices # type: ignore
         ).numpy()
         shape = (
             n,
@@ -364,15 +357,12 @@ def test_transposed() -> None:
         (None, None, n, context.config.hmm.alphabet_size),
         (None, None, n, 1),
     ))
-    B = phmm_layer.hmm.emitter[0].matrix()[0] # (H, Q, S)
-    # Add terminal state to make this test work
-    # TODO: clean up
-    B = tf.concat([B, tf.zeros((B.shape[0], 1), dtype=B.dtype)], axis=1)
+    B = phmm_layer.hmm.emitter[0].matrix()[0, :, :20] # (Q, 20)
 
     rate_indices = np.arange(n)[:, np.newaxis]
 
     anc_prob_seqs = anc_probs_layer_transposed(
-        sequences_onehot, rate_indices=rate_indices
+        sequences_onehot, rate_indices=rate_indices # type: ignore
     ).numpy() # (b, L, num_model, num_matrices*20)
     shape = (
         n,
@@ -383,20 +373,25 @@ def test_transposed() -> None:
     )
     anc_prob_seqs = np.reshape(anc_prob_seqs, shape) # (b, L, num_model, num_matrices, 20)
     anc_prob_seqs = tf.cast(anc_prob_seqs, B.dtype)
+    # compute emission scores after ancestral probs
+    prob1 = tf.linalg.matvec(B, anc_prob_seqs) # (b, L, num_model, num_matrices, Q)
 
     # For B matrix test: create one-hot version of B
-    B_onehot = tf.one_hot(tf.range(B.shape[0]), depth=20, dtype=B.dtype)  # (M, 20)
-    B_batch_first = B_onehot[tf.newaxis, :, tf.newaxis, :]  # (1, M, 1, 20)
+    B_onehot = tf.one_hot(tf.range(B.shape[0]), depth=20, dtype=B.dtype)  # (Q, 20)
+    B_batch_first = B_onehot[tf.newaxis, :, tf.newaxis, :]  # (1, Q, 1, 20)
     anc_prob_B = anc_probs_layer(
-        B_batch_first, rate_indices=[[0]]
-    )
-    # Output is (1, M, 1, num_matrices*20), reshape to (M, num_matrices, 20)
-    anc_prob_B = tf.squeeze(anc_prob_B, axis=[0, 2])  # (M, num_matrices*20)
-    anc_prob_B = tf.reshape(anc_prob_B, (tf.shape(B)[0], config.training.num_rate_matrices, 20))  # (M, num_matrices, 20)
-    prob1 = tf.linalg.matvec(B, anc_prob_seqs)
+        B_batch_first, rate_indices=[[0]] # type: ignore
+    ) # (1, Q, 1, num_matrices*20)
+    # Output is (1, M, 1, num_matrices*20), reshape to (Q, num_matrices, 20)
+    anc_prob_B = tf.squeeze(anc_prob_B, axis=[0, 2])  # (Q, num_matrices*20)
+    anc_prob_B = tf.reshape(
+        anc_prob_B, (tf.shape(B)[0], config.training.num_rate_matrices, 20)
+    )  # (Q, num_matrices, 20)
     oh_seqs = tf.one_hot(sequences, 20, dtype=anc_prob_B.dtype)
     oh_seqs = tf.expand_dims(oh_seqs, -2)
     prob2 = tf.linalg.matvec(anc_prob_B, oh_seqs)
+    prob2 = tf.transpose(prob2, [0, 1, 2, 4, 3]) # (b, L, num_model, num_matrices, Q)
+
     np.testing.assert_allclose(
         prob1.numpy(), prob2.numpy(),
         rtol=1e-5, atol=1e-4,

@@ -1,7 +1,8 @@
 import numpy as np
 import tensorflow as tf
 
-from learnMSA.tree.util import LG_paml, inverse_softplus, parse_paml
+from learnMSA.tree.util import LG_paml, parse_paml
+from learnMSA.tree.tf.util import inverse_softplus
 from learnMSA.util.sequence_dataset import SequenceDataset
 
 

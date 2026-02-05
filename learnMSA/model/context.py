@@ -18,7 +18,7 @@ from learnMSA.protein_language_models.MvnEmitter import \
 from learnMSA.run.util import is_small_gpu, validate_filepath
 from learnMSA.util import clustering
 
-from ..tree.tf.anc_probs_layer import inverse_softplus
+from ..tree.tf.util import inverse_softplus
 from ..tree.tf.initializer import ConstantInitializer
 from ..util.aligned_dataset import AlignedDataset
 from ..util.sequence_dataset import SequenceDataset

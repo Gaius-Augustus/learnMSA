@@ -109,9 +109,6 @@ class TrainingConfig(BaseModel):
     num_rate_matrices: int = 1
     """Number of rate matrices to use."""
 
-    per_matrix_rate: bool = False
-    """Whether to use a separate rate for each rate matrix."""
-
     matrix_rate_l2: float = 0.0
     """L2 regularization strength for rate matrices."""
 

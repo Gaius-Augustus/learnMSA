@@ -45,10 +45,6 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
 
         # Create the ancestor probabilities layer
         if train_cfg.use_anc_probs:
-            if len(context.encoder_initializer) > 3:
-                matrix_rate_init = context.encoder_initializer[3]
-            else:
-                matrix_rate_init = None
             self.anc_probs_layer = AncProbsLayer(
                 train_cfg.num_model,
                 context.num_seq,
@@ -58,8 +54,6 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
                 exchangeability_init=context.encoder_initializer[1],
                 trainable_rate_matrices=train_cfg.trainable_rate_matrices,
                 trainable_distances=train_cfg.trainable_distances,
-                per_matrix_rate=train_cfg.per_matrix_rate,
-                matrix_rate_init=matrix_rate_init,
                 matrix_rate_l2=train_cfg.matrix_rate_l2,
                 shared_matrix=train_cfg.shared_rate_matrix,
                 equilibrium_sample=train_cfg.equilibrium_sample,
@@ -183,7 +177,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         # Convert to one-hot for AncProbsLayer (now requires 4D input)
         sequences_onehot = tf.one_hot(
             sequences_transposed,
-            depth=20,  # Only 20 standard amino acids for AncProbsLayer
+            depth=self.context.config.hmm.alphabet_size+1, # including terminal
             dtype=self.phmm_layer.dtype
         )
 
