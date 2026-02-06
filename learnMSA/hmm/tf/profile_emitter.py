@@ -28,6 +28,7 @@ class ProfileEmitter(TFCategoricalEmitter):
         self,
         values: Sequence[PHMMValueSet],
         trainable_insertions: bool = True,
+        use_full_matmul: bool = True,
         **kwargs
     ) -> None:
         """
@@ -36,11 +37,15 @@ class ProfileEmitter(TFCategoricalEmitter):
                 one per head, with probabilities.
             trainable_insertions (bool): Whether insertion emissions are
                 trainable. Defaults to True.
+            use_full_matmul (bool): Whether to compute emission scores via
+                a full matrix multiplication instead of copying insertion
+                emissions.
         """
         super().__init__(**kwargs)
 
         self._lengths = np.array([value_set.L for value_set in values])
         self.trainable_insertions = trainable_insertions
+        self.use_full_matmul = use_full_matmul
 
         init_values = []
         # Initialization based on provided value sets
@@ -105,25 +110,28 @@ class ProfileEmitter(TFCategoricalEmitter):
         return matrix
 
     def emission_scores(self, observations: T_TFTensor) -> T_TFTensor:
-        # Override to handle insertion state via copying instead of
-        # explicit computations
-        # Keep match states + single insertion state
-        reduced_matrix = self.matrix()[:, :self.lengths.max()+1, :]
-        if observations.ndim == 3:
-            emission_scores = tf.einsum(
-                "btd,hqd->bthq", observations, reduced_matrix
-            )
+        if self.use_full_matmul:
+            return super().emission_scores(observations)
         else:
-            emission_scores = tf.einsum(
-                "bthd,hqd->bthq", observations, reduced_matrix
+            # Override to handle insertion state via copying instead of
+            # explicit computations
+            # Keep match states + single insertion state
+            reduced_matrix = self.matrix()[:, :self.lengths.max()+1, :]
+            if observations.ndim == 3:
+                emission_scores = tf.einsum(
+                    "btd,hqd->bthq", observations, reduced_matrix
+                )
+            else:
+                emission_scores = tf.einsum(
+                    "bthd,hqd->bthq", observations, reduced_matrix
+                )
+
+            # Mask invalid positions in shorter heads
+            emission_scores *= tf.sequence_mask(
+                self.lengths+1, dtype=emission_scores.dtype
             )
 
-        # Mask invalid positions in shorter heads
-        emission_scores *= tf.sequence_mask(
-            self.lengths+1, dtype=emission_scores.dtype
-        )
-
-        return emission_scores
+            return emission_scores
 
     @override
     def call(
@@ -133,39 +141,43 @@ class ProfileEmitter(TFCategoricalEmitter):
     ) -> T_TFTensor:
         # Compute the emission scores for matches + single insertion
         emission_scores = super().call(emissions, use_padding=False)
-        # emission_scores has the form
-        # [[..., head 1, L1 x match + 1 x insert + (padding)]
-        # [..., head 2, L2 x match + 1 x insert + (padding)]]
-        # Expand to the full form
-        # [[..., head 1, L1 x match + (L1+3) x insert + (padding)]
-        # [..., head 2, L2 x match + (L2+3) x insert + (padding)]]
-        B, T, H, Q = tf.unstack(tf.shape(emission_scores))
-        emission_scores = tf.reshape(emission_scores, (B, T, H*Q))
 
-        # Build gather indices for XLA compatibility (instead of tf.repeat)
-        indices = []
-        ML = self.lengths.max()
-        offset = 0
-        for L in self.lengths:
-            # Match states: copy once each
-            indices.extend(list(range(offset, offset + L)))
-            # Insertion state: repeat L+2 times
-            indices.extend([offset + L] * (L + 2))
-            offset += L + 1  # Move to next head (L matches + 1 insert)
-            # Padding states
-            if L < ML:
-                indices.extend([offset] * (ML - L + 1))  # repeat first padding
-                indices.extend(list(range(offset + 1, offset + ML - L)))  # rest of padding
-                offset += ML - L
+        if not self.use_full_matmul:
+            # emission_scores has the form
+            # [[..., head 1, L1 x match + 1 x insert + (padding)]
+            # [..., head 2, L2 x match + 1 x insert + (padding)]]
+            # Expand to the full form
+            # [[..., head 1, L1 x match + (L1+3) x insert + (padding)]
+            # [..., head 2, L2 x match + (L2+3) x insert + (padding)]]
+            B, T, H, Q = tf.unstack(tf.shape(emission_scores))
+            emission_scores = tf.reshape(emission_scores, (B, T, H*Q))
 
-        # Use tf.gather instead of tf.repeat for XLA compatibility
-        indices_tensor = tf.constant(indices, dtype=tf.int32)
-        emission_scores = tf.gather(emission_scores, indices_tensor, axis=-1)
-        emission_scores = tf.reshape(emission_scores, (B, T, H, 2*Q))
+            # Build gather indices for XLA compatibility (instead of tf.repeat)
+            indices = []
+            ML = self.lengths.max()
+            offset = 0
+            for L in self.lengths:
+                # Match states: copy once each
+                indices.extend(list(range(offset, offset + L)))
+                # Insertion state: repeat L+2 times
+                indices.extend([offset + L] * (L + 2))
+                offset += L + 1  # Move to next head (L matches + 1 insert)
+                # Padding states
+                if L < ML:
+                    indices.extend([offset] * (ML - L + 1))  # repeat first padding
+                    indices.extend(list(range(offset + 1, offset + ML - L)))  # rest of padding
+                    offset += ML - L
+
+            # Use tf.gather instead of tf.repeat for XLA compatibility
+            indices_tensor = tf.constant(indices, dtype=tf.int32)
+            emission_scores = tf.gather(emission_scores, indices_tensor, axis=-1)
+            emission_scores = tf.reshape(emission_scores, (B, T, H, 2*Q))
+
         if use_padding:
             emission_scores = tf.pad(
                 emission_scores,
                 [[0, 0], [0, 0], [0, 0], [0, 1]],
                 constant_values=1.0,
             )
+
         return emission_scores
