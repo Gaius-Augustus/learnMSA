@@ -268,6 +268,7 @@ def _fit_and_align(
             or (i == config.training.max_iterations-2)
 
         # Free compiled graphs and cached memory
+        del model
         tf.keras.backend.clear_session()
 
     return am

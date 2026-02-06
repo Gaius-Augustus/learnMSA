@@ -417,7 +417,7 @@ class LearnMSAContext:
             def _batch_size_cb(data: SequenceDataset):
                 return training_util.get_adaptive_batch_size(
                     self.model_lengths.tolist(),
-                    min(data.max_len, int(self.config.training.crop)),
+                    min(data.max_len, int(self.config.training.crop)) + 1,
                     small_gpu=self.small_gpu,
                 )
             return _batch_size_cb
