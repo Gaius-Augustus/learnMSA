@@ -32,7 +32,7 @@ def args_to_config(args: Namespace) -> Configuration:
     # Create input/output configuration
     input_output_config = InputOutputConfig(
         input_file=args.input_file,
-        output_file=args.output_file,
+        output_file=args.output_file if args.output_file is not None else "",
         format=args.format,
         input_format=args.input_format,
         save_model=args.save_model,

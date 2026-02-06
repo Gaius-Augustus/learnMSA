@@ -87,7 +87,7 @@ def get_num_gpus() -> int:
 
 def get_batch_multiplicator() -> int:
     """Returns the number of devices for batch size scaling.
-    
+
     Returns the number of GPUs if at least one GPU is available,
     otherwise returns 1 (for CPU-only case).
     """
@@ -116,7 +116,7 @@ def get_gpu_memory() -> list[int]:
 
 def is_small_gpu() -> bool:
     """Check if the first GPU has less than 32GB of memory.
-    
+
     Returns:
         True if the first GPU has less than 32GB memory, False otherwise.
         Returns False if no GPUs are detected.
@@ -141,3 +141,40 @@ def validate_filepath(filepath : str, expected_ext : str) -> Path:
             path = path.with_suffix(expected_ext)
 
     return path
+
+
+def validate_output_file_requirements(config, parser) -> None:
+    """Validate that output_file is provided when required.
+
+    Output file is required unless:
+    - Only --scores is used (and no other output options)
+    - Only --save_model is used (and no other output options)
+    - Only --logo is used (and no other output options)
+
+    Args:
+        config: Configuration object
+        parser: Argument parser for error reporting
+    """
+    output_file_provided = config.input_output.output_file != Path()
+
+    # Check if output_file is required
+    if not output_file_provided:
+        # Convert mode always requires output_file
+        if config.input_output.convert:
+            parser.error(
+                "argument -o/--out_file is required when using --convert"
+            )
+
+        # If not using any output options, output_file is required for alignment
+        using_scores = config.input_output.scores != Path()
+        using_save_model = config.input_output.save_model != ""
+        using_logo = config.visualization.logo != ""
+
+        # If none of these alternative outputs are being used,
+        # we need an output file
+        if not (using_scores or using_save_model or using_logo):
+            parser.error(
+                "argument -o/--out_file is required (or use --scores, "
+                "--save_model, or --logo to save alternative outputs)"
+            )
+

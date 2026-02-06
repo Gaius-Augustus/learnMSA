@@ -20,6 +20,9 @@ def run_main():
     # Convert args to configuration
     config = args_to_config(args)
 
+    # Validate that output_file is provided when required
+    util.validate_output_file_requirements(config, parser)
+
     # Print brief description of the tool
     if config.input_output.verbose and parser.description:
         print(parser.description.split("\n")[0])
