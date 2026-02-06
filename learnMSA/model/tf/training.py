@@ -1,9 +1,11 @@
 import math
+import os
+from datetime import datetime
+from functools import partial
 from typing import TYPE_CHECKING, Sequence
 
 import numpy as np
 import tensorflow as tf
-from functools import partial
 
 import learnMSA.model.training_util as training_util
 from learnMSA.util.sequence_dataset import SequenceDataset
@@ -376,3 +378,38 @@ def compute_dataset_steps(
             total_steps += int(np.ceil(count / bsize))
 
     return total_steps
+
+
+class TerminateOnNaNWithCheckpoint(tf.keras.callbacks.TerminateOnNaN):
+    """Callback that terminates training when a NaN loss is encountered and
+    saves a model checkpoint for debugging.
+    """
+
+    def __init__(self, model: "tf.keras.Model", work_dir: str):
+        super().__init__()
+        self.learnmsa_model = model
+        self.work_dir = work_dir
+
+    def on_batch_end(self, batch, logs=None):
+        logs = logs or {}
+        loss = logs.get("loss")
+        if loss is not None:
+            if np.isnan(loss) or np.isinf(loss):
+                # Save checkpoint before terminating
+                os.makedirs(self.work_dir, exist_ok=True)
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                checkpoint_path = os.path.join(
+                    self.work_dir, f"nan_checkpoint_{timestamp}.keras"
+                )
+                try:
+                    self.learnmsa_model.save(checkpoint_path)
+                    print(
+                        f"\nNaN detected in loss. Model checkpoint saved to: "
+                        f"{checkpoint_path}"
+                    )
+                except Exception as e:
+                    print(
+                        f"\nNaN detected but failed to save checkpoint: {e}"
+                    )
+        # Call parent to terminate training
+        super().on_batch_end(batch, logs)

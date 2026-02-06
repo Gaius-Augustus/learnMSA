@@ -8,7 +8,7 @@ from learnMSA.hmm.tf.layer import PHMMLayer
 from learnMSA.model.tf.phmm_mixin import PHMMMixin
 from learnMSA.tree.tf.anc_probs_layer import AncProbsLayer
 from learnMSA.model.context import LearnMSAContext
-from learnMSA.model.tf.training import make_dataset
+from learnMSA.model.tf.training import make_dataset, TerminateOnNaNWithCheckpoint
 from learnMSA.util.sequence_dataset import SequenceDataset
 
 
@@ -992,7 +992,9 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         Returns:
             List of Keras callbacks for training.
         """
-        terminate_on_nan = tf.keras.callbacks.TerminateOnNaN()
+        terminate_on_nan = TerminateOnNaNWithCheckpoint(
+            self, self.context.config.input_output.work_dir
+        )
         early_stopping = tf.keras.callbacks.EarlyStopping("loss", patience=1)
         return [terminate_on_nan, early_stopping]
 

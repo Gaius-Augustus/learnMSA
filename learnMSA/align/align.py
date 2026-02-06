@@ -82,7 +82,7 @@ def align(
             )
             sys.exit(e.error_code)
 
-    tf.keras.backend.clear_session() # TODO: not sure if necessary
+    tf.keras.backend.clear_session()
 
     if data.num_seq > config.training.max_seq_model_select:
         # Sample a random subset of sequences for model selection
@@ -266,6 +266,9 @@ def _fit_and_align(
 
         last_iteration = surgery_converged\
             or (i == config.training.max_iterations-2)
+
+        # Free compiled graphs and cached memory
+        tf.keras.backend.clear_session()
 
     return am
 

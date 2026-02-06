@@ -139,6 +139,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
         """
         # Compute rate matrices
         R, p = self.make_R(), self.make_p()
+
         num_models = len(self._head_subset) if self._head_subset is not None else self.num_models
         R_flat = tf.reshape(R, (-1, 20, 20))
         p_flat = tf.reshape(p, (-1, 20))
@@ -181,7 +182,10 @@ class AncProbsLayer(tf.keras.layers.Layer):
         R = tf.reshape(R, (-1, 20, 20))
         p = tf.reshape(p, (-1, 20))
         Q = backend.make_rate_matrix(R, p)
-        num_models = len(self._head_subset) if self._head_subset is not None else self.num_models
+        if self._head_subset is None:
+            num_models = self.num_models
+        else:
+            num_models = len(self._head_subset)
         Q = tf.reshape(Q, (num_models, self.num_matrices, 20, 20))
         return Q
 
