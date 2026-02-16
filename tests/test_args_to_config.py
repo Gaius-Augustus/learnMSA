@@ -42,7 +42,6 @@ class TestArgsToConfig:
         assert config.language_model.use_language_model is False
         assert config.visualization.logo == ""
         assert config.hmm_prior.alpha_flank == 7000
-        assert config.advanced.grow_mem is False
 
     def test_args_to_config_with_training_args(self):
         """Test conversion with training-related arguments."""
@@ -70,7 +69,6 @@ class TestArgsToConfig:
             "--trainable_insertions",
             "--no_sequence_weights",
             "--skip_training",
-            "--grow_mem",
             "--silent",
             "--only_matches",
             "--scores", "scores.tsv",
@@ -100,7 +98,6 @@ class TestArgsToConfig:
         assert config.training.no_sequence_weights is True
         assert config.training.skip_training is True
         assert config.training.only_matches is True
-        assert config.advanced.grow_mem is True
         assert config.input_output.verbose is False
         assert config.input_output.scores == Path("scores.tsv")
 

@@ -119,7 +119,6 @@ def args_to_config(args: Namespace) -> Configuration:
     advanced_config = AdvancedConfig(
         dist_out=args.dist_out,
         initial_distance=args.initial_distance,
-        grow_mem=args.grow_mem,
         jit_compile=not args.no_jit,
     )
 

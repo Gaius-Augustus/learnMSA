@@ -16,9 +16,8 @@ def get_version() -> str:
 
 
 def setup_devices(
-        cuda_visible_devices : str,
-        verbose : bool,
-        grow_mem : bool = False
+    cuda_visible_devices : str,
+    verbose : bool,
 ) -> None:
     """
     Args:
@@ -26,8 +25,6 @@ def setup_devices(
             The value to set for the environment variable.
         verbose: bool
             Whether to enable std output messages.
-        grow_mem: bool
-            Whether to enable memory growth for GPUs.
 
     Sets up the GPU environment for TensorFlow based on the command line.
     Avoids importing TensorFlow until the user has set the CUDA_VISIBLE_DEVICES.
@@ -37,9 +34,8 @@ def setup_devices(
     if not cuda_visible_devices == "default":
         os.environ["CUDA_VISIBLE_DEVICES"] = cuda_visible_devices
 
-    # IMPORTANT: Memory growth must be set before any TensorFlow operations
-    if grow_mem:
-        os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
+    # Must be set before any TensorFlow operations
+    os.environ["TF_GPU_ALLOCATOR"] = "cuda_malloc_async"
 
     import tensorflow as tf
     from tensorflow.python.client import device_lib

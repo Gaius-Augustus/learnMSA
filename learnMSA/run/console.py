@@ -36,7 +36,6 @@ def run_main():
     util.setup_devices(
         config.input_output.cuda_visible_devices,
         config.input_output.verbose,
-        config.advanced.grow_mem,
     )
 
     from learnMSA.legacy import SequenceDataset, plot_and_save_logo

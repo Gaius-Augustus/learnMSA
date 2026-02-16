@@ -10,9 +10,6 @@ class AdvancedConfig(BaseModel):
     initial_distance: float = 0.05
     """Initial distance value."""
 
-    grow_mem: bool = False
-    """Enable memory growth for GPUs."""
-
     insertion_aligner: str = "famsa"
     """Insertion aligner to use."""
 

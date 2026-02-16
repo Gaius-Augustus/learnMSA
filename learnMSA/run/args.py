@@ -553,11 +553,5 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         action="store_true",
         help=argparse.SUPPRESS
     )
-    parser.add_argument(
-        "--grow_mem",
-        dest="grow_mem",
-        action='store_true',
-        help=argparse.SUPPRESS
-    )
 
     return parser
