@@ -7,7 +7,7 @@ from hidten.hmm import HMMConfig as HidtenHMMConfig
 from hidten.prior import Prior
 from hidten.tf.transitioner import (T_TFTensor, TFTransitioner, TransitionMode,
                                     shared_tensor)
-from hidten.tf.util import log_zero, safe_log, zero_row_softmax
+from hidten.tf.util import log_zero, safe_log, tiny, zero_row_softmax
 
 from learnMSA.hmm.util.transition_index_set import PHMMTransitionIndexSet
 from learnMSA.hmm.util.value_set import PHMMValueSet
@@ -203,51 +203,46 @@ class PHMMTransitioner(TFTransitioner):
         # own parameters
         self.explicit_transitioner.build()
 
-    def _get_log_explicit_matrix(self) -> T_TFTensor:
-        """Lazily compute and cache the log explicit matrix."""
-        if not hasattr(self, '_log_explicit_matrix'):
-            self._log_explicit_matrix = safe_log(
-                self.explicit_transitioner.matrix()
-            )
-        return self._log_explicit_matrix
-
-    def _get_match_skip(self) -> list[T_TFTensor]:
-        """Lazily compute and cache the match skip matrices."""
-        if not hasattr(self, '_match_skip'):
-            self._match_skip = [
-                self._compute_match_skip_matrix(h)
-                for h in range(self.heads)
-            ]
-        return self._match_skip
-
     @override
     def _launch(
         self,
         mode: TransitionMode = TransitionMode.SUM,
         use_padding: bool = True, #not used
     ) -> T_TFTensor:
-        # Compute expensive matrices once before launching
-        self._get_log_explicit_matrix()
-        self._get_match_skip()
+        # The HMM may pass use_padding=True, but this transitioner already
+        # manages the terminal/padding semantics explicitly.
+        # Keep the folded matrix/start dimensions at Q (no extra padding row/col).
+        self.mode = mode
 
-        # The HMM will pass `use_padding=True`, but we create the
-        # padding state explicitly and don't want it to be added
-        # automatically here. Pass `use_padding=False`!
-        result = super()._launch(mode, use_padding=False)
+        log_explicit_matrix = safe_log(self.explicit_transitioner.matrix())
+        folded_transition_probs, folded_start_probs = \
+            self._compute_folded_prob_vectors(log_explicit_matrix)
 
-        # Clear cache immediately after use to free memory
-        del self._log_explicit_matrix
-        del self._match_skip
+        self._A = self._build_folded_matrix(folded_transition_probs)
 
-        return result
+        H, Q, _ = tf.unstack(tf.shape(self._A))
 
-    @override
-    def matrix(self) -> T_TFTensor:
-        # Construct the matrix like usual in the transitioner, but instead of
-        # using a parameter kernel, we use the folded transition probabilities
+        # Compute a starting distribution depending on the mode
+        if TransitionMode.REVERSE in mode:
+            start_dist = tf.ones(shape=(H, Q), dtype=self._A.dtype)
+        else:
+            start_dist = self._build_folded_start_dist(folded_start_probs)
+
+        if TransitionMode.ALLOWED in mode:
+            self._A = tf.where(self._A > tiny(self._A), 1., 0.)
+
+        if TransitionMode.LOG_SUM_EXP in mode or TransitionMode.MAX in mode:
+            self._A_log = safe_log(self._A)
+            self._A_log_T = tf.transpose(self._A_log, [0, 2, 1])
+
+        return start_dist
+
+    def _build_folded_matrix(
+        self, folded_transition_probs: T_TFTensor
+    ) -> T_TFTensor:
         matrix = tf.math.exp(shared_tensor(
             indices=tf.constant(self.allow, dtype=tf.int64),
-            values=self._get_folded_transition_probs(),
+            values=folded_transition_probs,
             shape=tf.constant(
                 [self.heads, self.max_states, self.matrix_dim],
                 dtype=tf.int64,
@@ -255,30 +250,25 @@ class PHMMTransitioner(TFTransitioner):
             share=None,
         ))
         if self.head_subset is not None:
-            # Select only the specified heads
             matrix = tf.gather(matrix, self.head_subset, axis=0)
             max_states_subset = max(
                 [self.hmm_config.states[h] for h in self.head_subset]
             )
-            # Keep terminal state
             terminal_state_in = matrix[:, :max_states_subset, -1:]
             terminal_state_out = tf.one_hot(
                 [[max_states_subset]], depth=max_states_subset+1
             )
-            # Keep only relevant states
             matrix = matrix[:, :max_states_subset, :max_states_subset]
-            # Re-append terminal state
             matrix = tf.concat([matrix, terminal_state_in], axis=2)
             matrix = tf.concat([matrix, terminal_state_out], axis=1)
         return matrix
 
-    @override
-    def start_dist(self) -> T_TFTensor:
-        # Same principle: construct start distribution from explicit transition
-        # probabilities
+    def _build_folded_start_dist(
+        self, folded_start_probs: T_TFTensor
+    ) -> T_TFTensor:
         start_dist = tf.math.exp(shared_tensor(
             indices=tf.constant(self.allow_start, dtype=tf.int64),
-            values=self._get_folded_start_probs(),
+            values=folded_start_probs,
             shape=tf.constant(
                 [self.heads, self.max_states],
                 dtype=tf.int64,
@@ -286,7 +276,6 @@ class PHMMTransitioner(TFTransitioner):
             share=None,
         ))
         if self.head_subset is not None:
-            # Select only the specified heads
             start_dist = tf.gather(start_dist, self.head_subset, axis=0)
             max_states_subset = max(
                 [self.hmm_config.states[h] for h in self.head_subset]
@@ -297,231 +286,133 @@ class PHMMTransitioner(TFTransitioner):
         return start_dist
 
     @override
+    def matrix(self) -> T_TFTensor:
+        log_explicit_matrix = safe_log(self.explicit_transitioner.matrix())
+        folded_transition_probs, _ = self._compute_folded_prob_vectors(
+            log_explicit_matrix
+        )
+        return self._build_folded_matrix(folded_transition_probs)
+
+    @override
+    def start_dist(self) -> T_TFTensor:
+        log_explicit_matrix = safe_log(self.explicit_transitioner.matrix())
+        _, folded_start_probs = self._compute_folded_prob_vectors(
+            log_explicit_matrix
+        )
+        return self._build_folded_start_dist(folded_start_probs)
+
+    @override
     def prior_scores(self) -> T_TFTensor:
         return self.explicit_transitioner.prior_scores()
 
-    def _get_folded_transition_probs(self) -> T_TFTensor:
-        """Computes folded transition probabilities by marginalizing over
-        silent delete, begin, and end states.
+    def _compute_folded_prob_vectors(
+        self,
+        log_explicit_matrix: T_TFTensor,
+    ) -> tuple[T_TFTensor, T_TFTensor]:
+        """Compute folded transition and start log-probabilities in one pass.
 
         Returns:
-            A 1D tensor containing all folded transition probabilities,
-            ordered according to self.allow indices.
+            Tuple of flat tensors (transition_probs, start_probs), each ordered
+            according to self.allow and self.allow_start respectively.
         """
-        folded_probs = []
+        explicit_start = safe_log(self.explicit_transitioner.start_dist())
         max_states = PHMMTransitionIndexSet.num_states_unfolded(max(self.lengths))
-        log_explicit_matrix = self._get_log_explicit_matrix()
-        match_skip = self._get_match_skip()
+
+        folded_transition_probs = []
+        folded_start_probs = []
 
         for h, L in enumerate(self.lengths):
             idx = PHMMTransitionIndexSet(L, folded=False)
             log_mat = log_explicit_matrix[h]
-            M_skip = match_skip[h]
+            M_skip = self._compute_match_skip_matrix(h, log_mat=log_mat)
 
-            # Helper to extract log prob from matrix
             def get(indices):
-                indices[indices < 0] += max_states
-                return tf.gather_nd(log_mat, indices)
+                gather_indices = np.array(indices, copy=True)
+                gather_indices[gather_indices < 0] += max_states
+                return tf.gather_nd(log_mat, gather_indices)
 
-            # Get begin and end related transitions
-            BM = get(idx.begin_to_match)  # Shape: (L,)
-            ME = get(idx.match_to_end)  # Shape: (L,)
-            E = get(idx.end)  # Shape: (3,) - [to_unannot, to_right, to_terminal]
+            BM = get(idx.begin_to_match)
+            ME = get(idx.match_to_end)
+            E = get(idx.end)
 
             log_z = log_zero(log_mat)
-
-            # The added costs of entering all match states either with direct
-            # edges or via deletes
             entry_add = logsumexp(
                 BM,
-                # Add log_zero at the first position, as M1 can not be reached
-                # via deletes
-                tf.pad(M_skip[0, :-1], [[1,0]], constant_values=log_z)
-            ) # Shape: (L,)
-
-            # The added costs of exiting from all match states (analogously)
+                tf.pad(M_skip[0, :-1], [[1, 0]], constant_values=log_z)
+            )
             exit_add = logsumexp(
                 ME,
-                # Add log_zero at the last position, as ML can not go to End
-                # via deletes
-                tf.pad(M_skip[1:,-1], [[0,1]], constant_values=log_z)
-            ) # Shape: (L,)
+                tf.pad(M_skip[1:, -1], [[0, 1]], constant_values=log_z)
+            )
 
-            # Now build the folded transition probabilities in the order
-            # specified by folded_idx
-
-            # Common transitions (same in both folded and unfolded)
+            # Folded transition probabilities
             MM = get(idx.match_to_match)
             MI = get(idx.match_to_insert)
             II = get(idx.insert_to_insert)
             IM = get(idx.insert_to_match)
+            folded_transition_probs.extend([MM, MI, II, IM])
 
-            folded_probs.extend([MM, MI, II, IM])
-
-            # Match to match jump transitions
-            # Extract upper triangle of M_skip
             for i in range(1, L - 1):
-                jump_probs = M_skip[i, i:-1]
-                # Jumps from M_{i+1} to M_{i+3}, M_{i+4}, ..., M_L
-                folded_probs.append(jump_probs)
+                folded_transition_probs.append(M_skip[i, i:-1])
 
-            # Match to unannotated: M_i -> End -> Unannotated
             MU = exit_add + E[0]
-            folded_probs.append(MU)
-
-            # Match to right flank: M_i -> End -> Right
             MR = exit_add + E[1]
-            folded_probs.append(MR)
-
-            # Match to terminal: M_i -> End -> Terminal
             MT = exit_add + E[2]
-            folded_probs.append(MT)
+            folded_transition_probs.extend([MU, MR, MT])
 
-            # Left flank transitions
             LF = get(idx.left_flank)
+            folded_transition_probs.append(LF[:1])
+            folded_transition_probs.append(LF[1:2] + entry_add)
 
-            # Left flank self-loop
-            folded_probs.append(LF[:1])
+            LFE = LF[1:2] + M_skip[0, -1]
+            folded_transition_probs.append(LFE + E[0])
+            folded_transition_probs.append(LFE + E[1])
+            folded_transition_probs.append(LFE + E[2])
 
-            # Left flank to match states: L -> Begin -> M_i
-            LFM = LF[1:2] + entry_add
-            folded_probs.append(LFM)
-
-            # For left flank to unannotated/right/terminal, we need the path:
-            # LF -> Begin -> D_1 -> ... -> D_L -> End -> (Unannot/Right/Terminal)
-            LFE = LF[1:2] + M_skip[0,-1]
-
-            LFU = LFE + E[0]
-            folded_probs.append(LFU)
-
-            LFR = LFE + E[1]
-            folded_probs.append(LFR)
-
-            LFT = LFE + E[2]
-            folded_probs.append(LFT)
-
-            # Right flank transitions
             p_right_flank = get(idx.right_flank)
-            folded_probs.extend([
+            folded_transition_probs.extend([
                 tf.expand_dims(p_right_flank[0], 0),
-                tf.expand_dims(p_right_flank[1], 0)
+                tf.expand_dims(p_right_flank[1], 0),
             ])
 
-            # Unannotated transitions
             U = get(idx.unannotated)
-
-            # Compute path U -> Begin -> deletes -> End for reuse
             UE = U[1] + M_skip[0, -1]
-
-            # Unannotated self-loop: direct loop OR U -> Begin -> all deletes -> End -> U
             UU = logsumexp(U[0], UE + E[0])
-            folded_probs.append(tf.expand_dims(UU, 0))
+            folded_transition_probs.append(tf.expand_dims(UU, 0))
+            folded_transition_probs.append(U[1] + entry_add)
+            folded_transition_probs.append(tf.expand_dims(UE + E[1], 0))
+            folded_transition_probs.append(tf.expand_dims(UE + E[2], 0))
 
-            # Unannotated to match: U -> Begin -> M_i
-            UM = U[1] + entry_add
-            folded_probs.append(UM)
+            folded_transition_probs.append(get(idx.terminal))
 
-            # Unannotated to right: U -> Begin -> deletes -> End -> Right
-            URF = UE + E[1]
-            folded_probs.append(tf.expand_dims(URF, 0))
-
-            # Unannotated to terminal
-            UT = UE + E[2]
-            folded_probs.append(tf.expand_dims(UT, 0))
-
-            # Terminal self-loop
-            folded_probs.append(get(idx.terminal))
-
-        # Concatenate across all heads
-        return tf.concat(folded_probs, axis=0)
-
-    def _get_folded_start_probs(self) -> T_TFTensor:
-        """Computes folded start probabilities.
-
-        In the folded model, we can start in:
-        - Left flank L
-        - Match states M_1, ..., M_L (via Begin state)
-        - Unannotated C (via Begin state)
-        - Right flank R (via Begin state)
-        - Terminal T (via Begin state)
-
-        Returns:
-            A 1D tensor containing start probabilities for allowed starting
-            states.
-        """
-        # Get the explicit start distribution - use safe_log to avoid -inf
-        explicit_start = safe_log(self.explicit_transitioner.start_dist())
-
-        start_probs = []
-        max_states = PHMMTransitionIndexSet.num_states_unfolded(max(self.lengths))
-        log_explicit_matrix = self._get_log_explicit_matrix()
-        match_skip = self._get_match_skip()
-
-        for h, L in enumerate(self.lengths):
-            idx = PHMMTransitionIndexSet(L, folded=False)
-            log_mat = log_explicit_matrix[h]
-            M_skip = match_skip[h]
-
-            # Helper to extract log prob from matrix
-            def get(indices):
-                indices[indices < 0] += max_states
-                return tf.gather_nd(log_mat, indices)
-
-            log_z = log_zero(log_mat)
-
-            # The added costs of entering all match states either with direct
-            # edges or via deletes
-            entry_add = logsumexp(
-                get(idx.begin_to_match),
-                # Add log_zero at the first position, as M1 can not be reached
-                # via deletes
-                tf.pad(M_skip[0, :-1], [[1,0]], constant_values=log_z)
-            ) # Shape: (L,)
-
-            # In explicit model, we can start in:
-            # - Left flank (index 3*L-1)
-            # - Begin (index 3*L)
-
+            # Folded start probabilities
             start_left = explicit_start[h, 3*L - 1]
             start_begin = explicit_start[h, 3*L]
-
-            # Match states
-            p_start_match = start_begin + entry_add
-            start_probs.append(p_start_match)
-
-            # Left flank
-            start_probs.append(tf.expand_dims(start_left, 0))
-
-            # Unannotated - can be reached via Begin -> deletes -> End -> Unannot
-            p_end = get(idx.end)
-
             BE = start_begin + M_skip[0, -1]
 
-            p_start_unannot = BE + p_end[0]
-            start_probs.append(tf.expand_dims(p_start_unannot, 0))
+            folded_start_probs.append(start_begin + entry_add)
+            folded_start_probs.append(tf.expand_dims(start_left, 0))
+            folded_start_probs.append(tf.expand_dims(BE + E[0], 0))
+            folded_start_probs.append(tf.expand_dims(BE + E[1], 0))
+            folded_start_probs.append(tf.expand_dims(BE + E[2], 0))
 
-            # Right flank
-            p_start_right = BE + p_end[1]
-            start_probs.append(tf.expand_dims(p_start_right, 0))
+        return (
+            tf.concat(folded_transition_probs, axis=0),
+            tf.concat(folded_start_probs, axis=0),
+        )
 
-            # Terminal
-            p_start_terminal = BE + p_end[2]
-            start_probs.append(tf.expand_dims(p_start_terminal, 0))
-
-        # Concatenate across all heads
-        return tf.concat(start_probs, axis=0)
-
-    def _compute_match_skip_matrix(self, h: int) -> T_TFTensor:
+    def _compute_match_skip_matrix(
+        self,
+        h: int,
+        log_mat: T_TFTensor | None = None,
+    ) -> T_TFTensor:
         """
         Utility method that computes the `L x L` match skip transition matrix
         for head `h` with `match_skip(i,j) = P(Mj+2 | Mi)`.
         With `M0 := Begin` and `ML+1 := End`.
         """
         L = self.lengths[h]
-        # Access cached value directly during _launch, compute if called independently
-        if hasattr(self, '_log_explicit_matrix'):
-            log_mat = self._log_explicit_matrix[h]
-        else:
+        if log_mat is None:
             log_mat = safe_log(self.explicit_transitioner.matrix())[h]
 
         # Create index sets for explicit and folded models
