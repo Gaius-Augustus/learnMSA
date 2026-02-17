@@ -663,11 +663,10 @@ class PHMMValueSet:
             return result
 
         # Apply Dirichlet noise to emissions (all entries typically non-zero)
+        # Skip insertions since they are typically initialized with a
+        # background distribution and not trained
         self.match_emissions = add_dirichlet_noise_sparse(
             self.match_emissions, concentration
-        )
-        self.insert_emissions = add_dirichlet_noise_sparse(
-            self.insert_emissions, concentration
         )
         self.start = add_dirichlet_noise_sparse(self.start, concentration)
 

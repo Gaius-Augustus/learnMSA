@@ -468,7 +468,11 @@ def model_surgery(
 
         # Simple 1D case (like p_begin_delete): just concatenate
         if arrays[0].ndim == 1:
-            return np.concatenate(arrays, axis=0)
+            y = np.concatenate(arrays, axis=0)
+            if y.size == 1:
+                return y[0]
+            else:
+                return y
 
         # 2D or higher: create zeros array and fill
         num_heads = len(arrays)
@@ -481,22 +485,27 @@ def model_surgery(
 
         return result
 
-    merged_config = configs[0].model_copy(deep=True)
-    merged_config.match_emissions = concat_param("match_emissions")
-    merged_config.insert_emissions = concat_param("insert_emissions")
-    merged_config.p_begin_match = concat_param("p_begin_match")
-    merged_config.p_match_match = concat_param("p_match_match")
-    merged_config.p_match_insert = concat_param("p_match_insert")
-    merged_config.p_match_end = concat_param("p_match_end")
-    merged_config.p_insert_insert = concat_param("p_insert_insert")
-    merged_config.p_delete_delete = concat_param("p_delete_delete")
-    merged_config.p_begin_delete = concat_param("p_begin_delete")
-    merged_config.p_left_left = concat_param("p_left_left")
-    merged_config.p_right_right = concat_param("p_right_right")
-    merged_config.p_unannot_unannot = concat_param("p_unannot_unannot")
-    merged_config.p_end_unannot = concat_param("p_end_unannot")
-    merged_config.p_end_right = concat_param("p_end_right")
-    merged_config.p_start_left_flank = concat_param("p_start_left_flank")
+    config = configs[0].model_copy(deep=True)
+    config.match_emissions = concat_param("match_emissions")
+    config.insert_emissions = concat_param("insert_emissions")
+    config.p_begin_match = concat_param("p_begin_match")
+    config.p_match_match = concat_param("p_match_match")
+    config.p_match_insert = concat_param("p_match_insert")
+    config.p_match_end = concat_param("p_match_end")
+    config.p_insert_insert = concat_param("p_insert_insert")
+    config.p_delete_delete = concat_param("p_delete_delete")
+    config.p_begin_delete = concat_param("p_begin_delete")
+    config.p_left_left = concat_param("p_left_left")
+    config.p_right_right = concat_param("p_right_right")
+    config.p_unannot_unannot = concat_param("p_unannot_unannot")
+    config.p_end_unannot = concat_param("p_end_unannot")
+    config.p_end_right = concat_param("p_end_right")
+    config.p_start_left_flank = concat_param("p_start_left_flank")
+    config.use_prior_for_emission_init = False
+    config.use_noise = False
+
+    # validate the config again
+    config = type(config).model_validate(config.model_dump())
 
     if plm_configs[0] is not None:
         merged_plm_config = plm_configs[0].model_copy(deep=True)
@@ -518,6 +527,6 @@ def model_surgery(
     return ModelSurgeryResult(
         model_lengths=np.array(model_lengths, dtype=np.int32),
         surgery_converged=surgery_converged,
-        config=merged_config,
+        config=config,
         plm_config=merged_plm_config,
     )
