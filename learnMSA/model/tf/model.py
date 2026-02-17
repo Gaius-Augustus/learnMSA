@@ -5,10 +5,11 @@ import numpy as np
 import tensorflow as tf
 
 from learnMSA.hmm.tf.layer import PHMMLayer
-from learnMSA.model.tf.phmm_mixin import PHMMMixin
-from learnMSA.tree.tf.anc_probs_layer import AncProbsLayer
 from learnMSA.model.context import LearnMSAContext
-from learnMSA.model.tf.training import make_dataset, TerminateOnNaNWithCheckpoint
+from learnMSA.model.tf.phmm_mixin import PHMMMixin
+from learnMSA.model.tf.training import (TerminateOnNaNWithCheckpoint,
+                                        make_dataset)
+from learnMSA.tree.tf.anc_probs_layer import AncProbsLayer
 from learnMSA.util.sequence_dataset import SequenceDataset
 
 
@@ -110,6 +111,16 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             - Without prior: (loglik, aggregated_loglik)
             - With prior: (loglik, aggregated_loglik, prior, aux_loss)
         """
+        first_input = inputs[0]
+        if isinstance(first_input, tf.Tensor):
+            B = first_input.shape[0]
+            if B is None:
+                B = tf.get_static_value(tf.shape(first_input)[0])
+            if B is not None:
+                self.context.last_runtime_batch_size = int(B)
+        elif isinstance(first_input, np.ndarray):
+            self.context.last_runtime_batch_size = int(first_input.shape[0])
+
         # Pass through encoder layers
         forward_seq = self.encode_batch(inputs, training=training)
 
@@ -231,19 +242,25 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             )
 
     @override
-    def compile(self) -> None:
+    def compile(self, total_steps: int | None = None) -> None:
         """
         Compile the model with Adam optimizer.
 
         This method compiles the LearnMSA model using the Adam optimizer
         with the learning rate specified in the configuration.
+
+        Args:
+            total_steps: The total number of steps the model will be called
+                (optional). If provided, it is used to decide if the model
+                should be jit-compiled.
+
         """
         optimizer = tf.keras.optimizers.Adam(
             self.context.config.training.learning_rate
         )
         super().compile(
             optimizer=optimizer,
-            jit_compile=self.context.config.advanced.jit_compile,
+            jit_compile=self.use_jit_compile(total_steps),
         )
 
     @override
@@ -275,15 +292,13 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         """
         self.phmm_layer.loglik_mode()
         self.context.batch_gen.configure(data, self.context)
-        # use static shapes when JIT is enabled
-        self.context.batch_gen.static_shape_mode =\
-            self.context.config.advanced.jit_compile
 
         if batch_size is None:
-            if callable(self.context.batch_size):
-                batch_size = self.context.batch_size(data)
-            else:
-                batch_size = self.context.batch_size
+            batch_size = self.get_batch_size(data)
+        # Half the batch size for training, when gradients are needed
+        batch_size = max(batch_size // 2, 1)
+        # Limit the training batch size to avoid convergence issues
+        batch_size = min(batch_size, 1024)
 
         if indices is None:
             indices = np.arange(data.num_seq)
@@ -293,6 +308,11 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
 
         if steps_per_epoch is None:
             steps_per_epoch = self.get_num_steps(indices.shape[0], batch_size)
+
+        # use static shapes when JIT is enabled
+        s = steps_per_epoch
+        self.context.batch_gen.static_shape_mode = self.use_jit_compile(s)
+        self.compile(total_steps=s)
 
         self._print_train_header(indices, batch_size, data)
         dataset, _ = make_dataset(
@@ -449,7 +469,8 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
                 with the posterior state distribution per sequence position
                 and head. Outputs zeros for padding positions.
             - Posterior mode (reduce=True): (num_models, max_num_states)
-                with the expected number of visits per state, averaged over sequences.
+                with the expected number of visits per state, averaged over
+                sequences.
         """
         if indices is None:
             indices = np.arange(data.num_seq)
@@ -492,7 +513,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             "Prediction dataset must have a positive, finite number of steps."
 
         # Compile to acccount for any changes in head_subset or call mode
-        self.compile()
+        self.compile(total_steps=steps)
 
         is_reduced_posterior = reduce and self.phmm_layer.is_posterior_mode()
         if is_reduced_posterior:
@@ -502,13 +523,15 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             H = len(_models)
             accumulated_posteriors = np.zeros((H, Q), dtype=np.float32)
 
-            @tf.function(jit_compile=self.context.config.advanced.jit_compile)
             def reduce_batch(batch_data):
                 y = self.predict_step(batch_data)
                 # Drop indices if present (bucketing)
                 y = y[0] if isinstance(y, tuple) else y
                 # Sum over sequence positions (axis 1) and batch (axis 0)
                 return tf.reduce_sum(y, axis=[0, 1])
+
+            if self.use_jit_compile(steps):
+                reduce_batch = tf.function(reduce_batch, jit_compile=True)
 
             for batch_data in ds.take(steps):
                 y = reduce_batch(batch_data)
@@ -522,9 +545,11 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         all_predictions = []
         all_indices = []
 
-        @tf.function(jit_compile=self.context.config.advanced.jit_compile)
         def predict_batch(batch_data):
             return self.predict_step(batch_data)
+
+        if self.use_jit_compile(steps):
+            predict_batch = tf.function(predict_batch, jit_compile=True)
 
         for batch_data in ds.take(steps):
             batch_result = predict_batch(batch_data)
@@ -542,7 +567,8 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
 
         if self.phmm_layer.is_posterior_mode()\
                 or self.phmm_layer.is_viterbi_mode():
-            # Process predictions: slice if too long, pad if needed (only in posterior/loglik modes)
+            # Process predictions: slice if too long, pad if needed
+            # (only in posterior/loglik modes)
             processed_predictions = []
             for pred in all_predictions:
                 # Slice off bucket padding if prediction is too long
@@ -551,9 +577,17 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
 
                 # Pad if needed and in posterior/loglik mode
                 if pred.shape[1] < max_len:
+                    if self.phmm_layer.is_posterior_mode():
+                        pad_value = 0
+                    else:
+                        pad_value = -1
                     pad_width = [(0, 0)] * len(pred.shape)
                     pad_width[1] = (0, max_len - pred.shape[1])
-                    pred = np.pad(pred, pad_width, constant_values=0)
+                    pred = np.pad(pred, pad_width, constant_values=pad_value)
+                    if self.phmm_layer.is_viterbi_mode():
+                        for i, j in enumerate(_models):
+                            q = self.phmm_layer.states[j]
+                            pred[...,i][pred[...,i] == -1] = q
 
                 processed_predictions.append(pred)
         else:
@@ -665,7 +699,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         )
 
         # Compile to acccount for any changes in head_subset or call mode
-        self.compile()
+        self.compile(total_steps=steps)
 
         # Enable eval mode and reset per-model trackers
         self._eval_mode = True
@@ -771,7 +805,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             return self.evaluate(data, indices, models)["loglik"]
         else:
             self.loglik_mode()
-            self.compile()
+            self.compile(total_steps=len(indices))
             return self.predict(data, indices, models)
 
     def compute_null_model_log_probs(
@@ -809,10 +843,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         self.context.batch_gen.configure(data, self.context)
 
         # Determine batch size
-        if callable(self.context.batch_size):
-            batch_size = self.context.batch_size(data)
-        else:
-            batch_size = self.context.batch_size
+        batch_size = self.get_batch_size(data)
 
         ds, _ = make_dataset(
             np.arange(n),
@@ -952,6 +983,12 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         consensus_score = tf.reduce_mean(consensus_logliks, axis=1)
         return consensus_score
 
+    def get_batch_size(self, data:SequenceDataset) -> int:
+        if callable(self.context.batch_size):
+            return self.context.batch_size(data)
+        else:
+            return self.context.batch_size
+
     def get_num_epochs(self, iteration: int) -> int:
         """
         Determine the number of epochs for the current training iteration.
@@ -970,7 +1007,9 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         ]
         return epochs
 
-    def get_num_steps(self, num_sequences: int, batch_size: int) -> int:
+    def get_num_steps(
+        self, num_sequences: int, batch_size: int, min_steps: int = 5
+    ) -> int:
         """
         Determine the number of steps per epoch based on the number of sequences
         and batch size.
@@ -982,7 +1021,10 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         Returns:
             Number of steps per epoch.
         """
-        return min(max(10, int(100*np.sqrt(num_sequences)/batch_size)), 500)
+        if num_sequences == 0 or batch_size == 0:
+            return 0
+        steps = int(100*np.sqrt(num_sequences)/batch_size)
+        return min(max(min_steps, steps), 500)
 
     def get_train_callbacks(self) -> list[tf.keras.callbacks.Callback]:
         """
@@ -997,6 +1039,24 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         )
         early_stopping = tf.keras.callbacks.EarlyStopping("loss", patience=1)
         return [terminate_on_nan, early_stopping]
+
+    def use_jit_compile(self, total_steps: int | None = None) -> bool:
+        """
+        Determine whether to use JIT compilation for training.
+
+        Args:
+            total_steps: The total number of steps the model will be called for
+                (optional). If provided, it is used to decide if JIT should be
+                enabled based on the threshold.
+
+        Returns:
+            True if JIT compilation should be used, False otherwise.
+        """
+        jit_compile = self.context.config.advanced.jit_compile
+        if total_steps is not None:
+            # For short runs, disable JIT to avoid overhead
+            jit_compile = jit_compile and total_steps >= 20
+        return jit_compile
 
     def get_verbosity(self) -> Literal[0, 2]:
         """

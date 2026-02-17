@@ -1,9 +1,8 @@
-from logging import config
-from typing import Sequence
-
 import numpy as np
 
-from learnMSA.run.util import get_batch_multiplicator
+from learnMSA.run.util import get_batch_multiplicator, get_gpu_memory
+
+DEFAULT_IMPL_FACTOR = 15.0
 
 
 def get_initial_model_lengths(
@@ -75,75 +74,48 @@ def get_low_seq_num_batch_size(num_seq: int) -> int:
 
 
 def get_adaptive_batch_size(
-       model_lengths : Sequence[int], max_seq_len: int, small_gpu: bool
+    model_len: int,
+    num_model: int,
+    seq_len: int,
+    impl_factor: float = DEFAULT_IMPL_FACTOR,
+    safety_margin: float = 0.8,
+    data_type_size: int = 4,
 ) -> int:
     """
     Computes an adaptive batch size depending on sequence and model lengths.
-    Scales automatically with the number of GPUs.
-    """
-    # Compute the number of computing devices, which is the number of GPUs
-    # if there is at least one GPU, else 1 (for CPU-only case)
-    num_devices = get_batch_multiplicator()
-    model_length = max(model_lengths) if len(model_lengths) > 0 else 0
-    if max_seq_len < 200 and model_length < 180:
-        batch_size = 512*num_devices
-    elif max_seq_len < 520 and model_length < 230:
-        batch_size = 256*num_devices
-    elif max_seq_len < 700 and model_length < 420:
-        batch_size = 128*num_devices
-    elif max_seq_len < 850 and model_length < 550:
-        batch_size = 64*num_devices
-    elif max_seq_len < 1200 and model_length < 700:
-        batch_size = 32*num_devices
-    elif max_seq_len < 2000 and model_length < 1000:
-        batch_size = 8*num_devices
-    elif max_seq_len < 4000 and model_length < 1500:
-        batch_size = 4*num_devices
-    else:
-        batch_size = 2*num_devices
-    if small_gpu:
-        batch_size = max(1, batch_size//2)
-    return max(1, batch_size)
 
-def get_adaptive_batch_size_with_language_model(
-    model_lengths: Sequence[int],
-    max_seq_len: int,
-    embedding_dim: int,
-    small_gpu: bool
-) -> int:
+    Args:
+        model_len: (int) The maximum number of match states.
+        num_model: (int) The number of models.
+        seq_len: (int) The maximum sequence length.
+        impl_factor: (float) An empirical factor to account for
+            implementation-specific memory overhead.
+        safety_margin: (float) A safety margin to reduce the batch size to
+            avoid OOM from edge cases.
+        data_type_size: (int) The size of the data type in bytes
+            (e.g., 4 for float32).
     """
-    Computes an adaptive batch size depending on sequence and model lengths
-    for use in language model mode.
-    """
-    # Compute the number of computing devices, which is the number of GPUs
-    # if there is at least one GPU, else 1 (for CPU-only case)
-    num_devices = get_batch_multiplicator()
-    model_length = max(model_lengths) if len(model_lengths) > 0 else 0
-    if max_seq_len < 200 and model_length < 180:
-        batch_size = (20 + 180*32//embedding_dim)*num_devices
-    elif max_seq_len < 520 and model_length < 230:
-        batch_size = (10 + 90*32//embedding_dim)*num_devices
-    elif max_seq_len < 700 and model_length < 420:
-        batch_size = (5 + 45*32//embedding_dim)*num_devices
-    elif max_seq_len < 850 and model_length < 550:
-        batch_size = (3 + 22*32//embedding_dim)*num_devices
-    elif max_seq_len < 1200 and model_length < 700:
-        batch_size = (1 + 9*32//embedding_dim)*num_devices
-    elif max_seq_len < 2000 and model_length < 1000:
-        batch_size = (1 + 4*32//embedding_dim)*num_devices
-    elif max_seq_len < 4000 and model_length < 1500:
-        batch_size = (1 + 32//embedding_dim)*num_devices
-    else:
-        batch_size = 1*num_devices
-    if small_gpu:
-        batch_size = max(1, batch_size//2)
-    return max(1, batch_size)
+    mem_avail = float(get_gpu_memory()[0]) * 1e6 # in byte
+    batch_size = safety_margin * mem_avail /\
+        (impl_factor * model_len * num_model * seq_len * data_type_size)
+    batch_size = int(np.floor(batch_size))
+    return max(batch_size, 1)
 
 def tokens_per_batch_to_batch_size(
-    model_lengths: Sequence[int], max_seq_len: int, tokens_per_batch: int
+    tokens_per_batch: int,
+    seq_len: int,
+    impl_factor: float = DEFAULT_IMPL_FACTOR,
 ) -> int:
-    # Convert tokens per batch to batch size
-    _model_length = max(model_lengths) if len(model_lengths) > 0 else 0  # unused
-    if max_seq_len < 1:
-        return 1
-    return int(max(1, tokens_per_batch // max_seq_len))
+    """
+    Computes the batch size corresponding to a given number of tokens per batch.
+
+    Args:
+        tokens_per_batch: (int) The desired number of tokens per batch.
+        seq_len: (int) The maximum sequence length.
+        impl_factor: (float) An empirical factor to account for
+            implementation-specific memory overhead.
+    """
+    batch_size = tokens_per_batch /\
+        (impl_factor * seq_len)
+    batch_size = int(np.floor(batch_size))
+    return max(batch_size, 1)

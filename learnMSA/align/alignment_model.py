@@ -5,18 +5,10 @@ from pathlib import Path
 
 import numpy as np
 import tensorflow as tf
-from packaging import version
 
-from learnMSA.config.config import Configuration
-import learnMSA.tree.tf.anc_probs_layer as anc_probs
-import learnMSA.legacy.Emitter as emit
-import learnMSA.legacy.Priors as priors
-import learnMSA.legacy.Transitioner as trans
-from learnMSA.model.tf.model import LearnMSAModel
-from learnMSA.align.alignment_metadata import AlignmentMetaData
-from learnMSA.model.context import LearnMSAContext
 from learnMSA.align.align_inserts import AlignedInsertions
-from learnMSA.model.tf.training import BatchGenerator
+from learnMSA.align.alignment_metadata import AlignmentMetaData
+from learnMSA.model.tf.model import LearnMSAModel
 from learnMSA.util.aligned_dataset import AlignedDataset, SequenceDataset
 
 

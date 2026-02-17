@@ -110,17 +110,6 @@ def get_gpu_memory() -> list[int]:
     return memory_free_values
 
 
-def is_small_gpu() -> bool:
-    """Check if the first GPU has less than 32GB of memory.
-
-    Returns:
-        True if the first GPU has less than 32GB memory, False otherwise.
-        Returns False if no GPUs are detected.
-    """
-    gpu_mem = get_gpu_memory()
-    return gpu_mem[0] < 32000 if len(gpu_mem) > 0 else False
-
-
 def validate_filepath(filepath : str, expected_ext : str) -> Path:
     """Ensure filepath has the correct extension and return as Path object."""
     # Convert to Path object

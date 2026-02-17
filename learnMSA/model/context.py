@@ -13,13 +13,11 @@ from learnMSA import Configuration
 from learnMSA.hmm.tf.prior import TFPHMMTransitionPrior
 from learnMSA.hmm.tf.util import load_dirichlet
 from learnMSA.hmm.util import value_set
-from learnMSA.protein_language_models.MvnEmitter import \
-    AminoAcidPlusMvnEmissionInitializer
-from learnMSA.run.util import is_small_gpu, validate_filepath
+from learnMSA.run.util import validate_filepath
 from learnMSA.util import clustering
 
-from ..tree.tf.util import inverse_softplus
 from ..tree.tf.initializer import ConstantInitializer
+from ..tree.tf.util import inverse_softplus
 from ..util.aligned_dataset import AlignedDataset
 from ..util.sequence_dataset import SequenceDataset
 
@@ -53,6 +51,7 @@ class LearnMSAContext:
     scoring_model_config: Common.ScoringModelConfig #legacy, will be removed in future
     batch_size: int | Callable[[SequenceDataset], int]
     batch_gen: train.BatchGenerator
+    last_runtime_batch_size: int | None
     sequence_weights: np.ndarray | None
     clusters: Any
     subset: np.ndarray
@@ -171,6 +170,7 @@ class LearnMSAContext:
             self.config.training.epochs = [0]*3
 
         self.batch_gen = self._get_batch_generator()
+        self.last_runtime_batch_size = None
         if data is not None:
             self.sequence_weights, self.clusters = self._get_clustering(data)
         else:
@@ -390,35 +390,35 @@ class LearnMSAContext:
         If not, setup a callback to automatically scale the batch size based
         on sequence lengths and available GPU memory.
         """
-        self.small_gpu = is_small_gpu()
+        use_language_model = self.config.language_model.use_language_model
+
         if self.config.training.tokens_per_batch > 0:
             def _batch_size_cb_with_tokens(data: SequenceDataset):
+                seq_len = min(data.max_len, int(self.config.training.crop)) + 1
+                implementation_factor = 2.0 if use_language_model else 1.0
                 return training_util.tokens_per_batch_to_batch_size(
-                    self.model_lengths.tolist(),
-                    min(data.max_len, int(self.config.training.crop)),
-                    tokens_per_batch=self.config.training.tokens_per_batch
+                    tokens_per_batch=self.config.training.tokens_per_batch,
+                    seq_len=seq_len,
+                    impl_factor=implementation_factor,
                 )
             return _batch_size_cb_with_tokens
+
         elif self.config.training.batch_size > 0:
             return self.config.training.batch_size
 
-        use_language_model = self.config.language_model.use_language_model
-        #if there is at least one GPU, check its memory
-        if use_language_model:
-            def _batch_size_cb_with_plm(data: SequenceDataset):
-                return training_util.get_adaptive_batch_size_with_language_model(
-                    self.model_lengths.tolist(),
-                    min(data.max_len, int(self.config.training.crop)),
-                    embedding_dim=self.scoring_model_config.dim,
-                    small_gpu=self.small_gpu,
-                )
-            return _batch_size_cb_with_plm
         else:
+            #if there is at least one GPU, check its memory
             def _batch_size_cb(data: SequenceDataset):
+                seq_len = min(data.max_len, int(self.config.training.crop)) + 1
+                if use_language_model:
+                    implementation_factor = 2 * training_util.DEFAULT_IMPL_FACTOR
+                else:
+                    implementation_factor = training_util.DEFAULT_IMPL_FACTOR
                 return training_util.get_adaptive_batch_size(
-                    self.model_lengths.tolist(),
-                    min(data.max_len, int(self.config.training.crop)) + 1,
-                    small_gpu=self.small_gpu,
+                    model_len=self.model_lengths.max(),
+                    num_model=self.config.training.num_model,
+                    seq_len=seq_len,
+                    impl_factor=implementation_factor,
                 )
             return _batch_size_cb
 

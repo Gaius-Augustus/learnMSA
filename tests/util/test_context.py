@@ -7,8 +7,8 @@ import pytest
 from learnMSA import Configuration
 from learnMSA.config import InputOutputConfig, TrainingConfig
 from learnMSA.model.context import LearnMSAContext
+from learnMSA.model.training_util import get_adaptive_batch_size
 from learnMSA.util.sequence_dataset import SequenceDataset
-from learnMSA.run.util import get_batch_multiplicator, is_small_gpu
 
 DIR = "tests/data/"
 
@@ -416,9 +416,8 @@ def test_serialization_with_callable_batch_size(config: Configuration) -> None:
 
     # Should respect cropping (max sequence length is > 150)
     # We should map to the biggest batch size
-    ref_bs = 512 * get_batch_multiplicator()
-    if is_small_gpu():
-        ref_bs = max(1, ref_bs // 2)
+    # Note that +1 is added internally due to the terminal token
+    ref_bs = get_adaptive_batch_size(5, 1, 151)
     assert context.batch_size(long_data) == ref_bs
 
     # Serialize and deserialize

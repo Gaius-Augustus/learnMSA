@@ -327,7 +327,9 @@ def test_predict(context_binary: LearnMSAContext) -> None:
 
     # Manually set an adaptive batch size function for testing
     batch_cb = training_util.get_adaptive_batch_size(
-        context_binary.model_lengths.tolist(), 20, False
+        context_binary.model_lengths.max(),
+        len(context_binary.model_lengths),
+        20,
     )
     context_binary.config.training.batch_size = batch_cb
 

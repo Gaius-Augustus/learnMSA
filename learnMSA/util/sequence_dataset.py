@@ -49,6 +49,7 @@ class SequenceDataset:
                 If None, uses the default alphabet "ARNDCQEGHILKMFPSTWYVXUO-".
         """
         self.alphabet = alphabet if alphabet is not None else type(self)._default_alphabet
+        self._invalid_char_pattern = re.compile(rf"[^{re.escape(self.alphabet)}]")
 
         if sequences is None:
             # Attempt to parse the file when no sequences are given
@@ -254,7 +255,7 @@ class SequenceDataset:
         )
         # Make sure the sequences do not contain any other symbols
         if validate_alphabet:
-            if bool(re.compile(rf"[^{self.alphabet}]").search(seq_str)):
+            if bool(self._invalid_char_pattern.search(seq_str)):
                 raise ValueError(
                     "Found unknown character(s) in sequence "\
                     f"{self.seq_ids[i]}. Allowed alphabet: {self.alphabet}."

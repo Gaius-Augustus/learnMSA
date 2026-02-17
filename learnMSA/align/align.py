@@ -76,9 +76,12 @@ def align(
                 print("Time for alignment:", "%.4f" % (time.time()-t_a))
         except tf.errors.ResourceExhaustedError as e:
             print("Out of memory. A resource was exhausted.")
+            runtime_batch_size = context.last_runtime_batch_size
+            if runtime_batch_size is None:
+                runtime_batch_size = config.training.batch_size
             print(
                 "Try reducing the batch size (-b). The current batch size "\
-                "was: "+str(config.training.batch_size)+"."
+                "was: "+str(runtime_batch_size)+"."
             )
             sys.exit(e.error_code)
 
@@ -220,7 +223,6 @@ def _fit_and_align(
         context.effective_num_seq = train_indices.shape[0] #todo: workaround
         model = LearnMSAModel(context)
         model.build(((batch_size,),))
-        model.compile()
 
         # Run training
         model.fit(data, train_indices, i, batch_size)
