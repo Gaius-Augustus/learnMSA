@@ -298,7 +298,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         # Half the batch size for training, when gradients are needed
         batch_size = max(batch_size // 2, 1)
         # Limit the training batch size to avoid convergence issues
-        batch_size = min(batch_size, 1024)
+        batch_size = min(batch_size, 512)
 
         if indices is None:
             indices = np.arange(data.num_seq)
