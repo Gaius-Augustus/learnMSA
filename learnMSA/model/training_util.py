@@ -99,7 +99,7 @@ def get_adaptive_batch_size(
     batch_size = safety_margin * mem_avail /\
         (impl_factor * model_len * num_model * seq_len * data_type_size)
     batch_size = int(np.floor(batch_size))
-    return max(batch_size, 1)
+    return min(max(batch_size, 1), 8192)
 
 def tokens_per_batch_to_batch_size(
     tokens_per_batch: int,
