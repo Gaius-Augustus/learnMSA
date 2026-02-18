@@ -92,6 +92,8 @@ def get_batch_multiplicator() -> int:
 
 def get_gpu_memory() -> list[int]:
     """Returns a list of total memory (in MB) for each GPU detected."""
+    if get_num_gpus() == 0:
+        return []
     command = "nvidia-smi --query-gpu=memory.total --format=csv"
     try:
         memory_free_info = sp.check_output(command.split()).decode('ascii').split('\n')[:-1][1:]
