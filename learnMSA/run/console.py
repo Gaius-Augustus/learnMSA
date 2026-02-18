@@ -5,8 +5,12 @@ import learnMSA.run.util as util
 from learnMSA import Configuration
 from learnMSA.run import args_to_config, handle_help_command, parse_args
 
-# Hide tensorflow messages and warnings
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+# Hide TensorFlow/absl startup logs as early as possible.
+# Use defaults so users can still override through environment variables.
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+os.environ.setdefault("TF_CPP_MIN_VLOG_LEVEL", "3")
+os.environ.setdefault("GLOG_minloglevel", "3")
+os.environ.setdefault("ABSL_MIN_LOG_LEVEL", "3")
 
 
 def run_main():

@@ -197,7 +197,7 @@ def make_dataset(
         # Use provided bucket boundaries or defaults
         if bucket_boundaries is None:
             # Infer unique bucket boundaries from observed sequence lengths
-            max_num_buckets = 6
+            max_num_buckets = max(min(indices.size // 10000, 7), 1)
             quantiles = np.quantile(
                 seq_lens,
                 q=np.linspace(0, 1, max_num_buckets + 1)[1:-1],
@@ -294,6 +294,8 @@ def make_dataset(
             ) + 1
         else:
             seq_dim = None
+
+        batch_generator.bucket_boundaries = None
 
         def _batch_func(i):
             if len(batch_generator.get_out_types()) == 2:
