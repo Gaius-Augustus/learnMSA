@@ -3,7 +3,7 @@ import numpy as np
 
 from learnMSA.run.util import get_batch_multiplicator, get_avail_memory_bytes
 
-DEFAULT_IMPL_FACTOR = 0.15
+DEFAULT_IMPL_FACTOR = 0.25
 MAX_BATCH_SIZE = 4096
 DEFAULT_FALLBACK_MEMORY_MB = 4096
 
