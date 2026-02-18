@@ -5,9 +5,11 @@ import numpy as np
 import tensorflow as tf
 
 from learnMSA.hmm.tf.layer import PHMMLayer
+from learnMSA.model import training_util
 from learnMSA.model.context import LearnMSAContext
 from learnMSA.model.tf.phmm_mixin import PHMMMixin
 from learnMSA.model.tf.training import (TerminateOnNaNWithCheckpoint,
+                                        make_default_bucket_scheme,
                                         make_dataset)
 from learnMSA.tree.tf.anc_probs_layer import AncProbsLayer
 from learnMSA.util.sequence_dataset import SequenceDataset
@@ -295,8 +297,6 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
 
         if batch_size is None:
             batch_size = self.get_batch_size(data)
-        # Half the batch size for training, when gradients are needed
-        batch_size = max(batch_size // 2, 1)
         # Limit the training batch size to avoid convergence issues
         batch_size = min(batch_size, 512)
 
@@ -319,7 +319,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             indices,
             self.context.batch_gen,
             batch_size,
-            shuffle=True
+            shuffle=True,
         )
         history = super().fit(
             dataset,
@@ -498,15 +498,28 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         if self.phmm_layer.head_subset is not None:
             self.context.batch_gen.num_models = len(self.phmm_layer.head_subset)
 
+        if bucket_boundaries is None or bucket_batch_sizes is None:
+            bucket_boundaries, bucket_batch_sizes = make_default_bucket_scheme(
+                indices=indices,
+                batch_generator=self.context.batch_gen,
+                model_lengths=[self.phmm_layer.lengths[m] for m in _models],
+                # effectively doubles the batch size for prediction
+                # compared to training
+                batch_size_impl_factor=0.5,
+            )
+
         # Create dataset and get number of steps
         ds, steps = make_dataset(
             indices,
             self.context.batch_gen,
             shuffle=False,
             bucket_by_seq_length=True,
-            model_lengths=[self.phmm_layer.lengths[m] for m in _models],
             bucket_boundaries=bucket_boundaries,
             bucket_batch_sizes=bucket_batch_sizes,
+        )
+
+        self._print_predict_header(
+            indices, bucket_boundaries, bucket_batch_sizes
         )
 
         assert steps > 0,\
@@ -690,12 +703,26 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             self.context.batch_gen.num_models = len(self.phmm_layer.head_subset)
 
         # Create dataset and get number of steps
+        bucket_boundaries, bucket_batch_sizes = make_default_bucket_scheme(
+            indices=indices,
+            batch_generator=self.context.batch_gen,
+            model_lengths=[self.phmm_layer.lengths[m] for m in _models],
+            # effectively doubles the batch size for evaluation
+            # compared to training
+            batch_size_impl_factor=0.5,
+        )
+
+        self._print_predict_header(
+            indices, bucket_boundaries, bucket_batch_sizes
+        )
+
         ds, steps = make_dataset(
             indices,
             self.context.batch_gen,
             shuffle=False,
             bucket_by_seq_length=True,
-            model_lengths=[self.phmm_layer.lengths[m] for m in _models],
+            bucket_boundaries=bucket_boundaries,
+            bucket_batch_sizes=bucket_batch_sizes,
         )
 
         # Compile to acccount for any changes in head_subset or call mode
@@ -842,16 +869,22 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         # Configure batch generator
         self.context.batch_gen.configure(data, self.context)
 
-        # Determine batch size
-        batch_size = self.get_batch_size(data)
+        null_indices = np.arange(n)
+        bucket_boundaries, bucket_batch_sizes = make_default_bucket_scheme(
+            indices=null_indices,
+            batch_generator=self.context.batch_gen,
+            model_lengths=self.phmm_layer.lengths,
+            # effectively doubles the batch size compared to training
+            batch_size_impl_factor=0.5,
+        )
 
         ds, _ = make_dataset(
-            np.arange(n),
+            null_indices,
             self.context.batch_gen,
-            batch_size,
             shuffle=False,
             bucket_by_seq_length=True,
-            model_lengths=self.phmm_layer.lengths
+            bucket_boundaries=bucket_boundaries,
+            bucket_batch_sizes=bucket_batch_sizes,
         )
 
         # Prepare the background frequencies
@@ -1116,14 +1149,14 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         if self.context.config.input_output.verbose:
             print(
                 "Fitting models of lengths",
-                self.context.model_lengths, "on", indices.shape[0], "sequences."
+                self.context.model_lengths, "on", indices.shape[0], "sequences"
             )
             print(
                 "Batch size=", batch_size,
                 "Learning rate=", self.context.config.training.learning_rate
             )
             if self.context.sequence_weights is not None:
-                print("Using sequence weights ", self.context.sequence_weights, ".")
+                print("Using sequence weights ", self.context.sequence_weights, "")
             else:
                 print("Don't use sequence weights.")
             if int(self.context.batch_gen.crop_long_seqs) < math.inf:
@@ -1145,6 +1178,18 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
                 print("Using CPU.")
             else:
                 print("Using GPU.")
+
+    def _print_predict_header(
+        self, indices: np.ndarray,
+        bucket_boundaries: Sequence[int | float],
+        bucket_batch_sizes: Sequence[int]
+    ) -> None:
+        if self.context.config.input_output.verbose:
+            print(
+                "Predicting on", indices.shape[0], "sequences with bucket " \
+                "boundaries", bucket_boundaries, "and batch sizes",
+                bucket_batch_sizes[:-1]
+            )
 
     def _check_training_complete(
         self,

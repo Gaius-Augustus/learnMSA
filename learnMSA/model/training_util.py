@@ -2,7 +2,7 @@ import numpy as np
 
 from learnMSA.run.util import get_batch_multiplicator, get_gpu_memory
 
-DEFAULT_IMPL_FACTOR = 15.0
+DEFAULT_IMPL_FACTOR = 0.5
 
 
 def get_initial_model_lengths(
@@ -77,7 +77,7 @@ def get_adaptive_batch_size(
     model_len: int,
     num_model: int,
     seq_len: int,
-    impl_factor: float = DEFAULT_IMPL_FACTOR,
+    impl_factor: float = 1.0,
     safety_margin: float = 0.8,
     data_type_size: int = 4,
 ) -> int:
@@ -95,16 +95,17 @@ def get_adaptive_batch_size(
         data_type_size: (int) The size of the data type in bytes
             (e.g., 4 for float32).
     """
-    mem_avail = float(get_gpu_memory()[0]) * 1e6 # in byte
-    batch_size = safety_margin * mem_avail /\
-        (impl_factor * model_len * num_model * seq_len * data_type_size)
+    mem_avail = float(get_gpu_memory()[0]) * 1e6  # in byte
+    denominator = float(num_model) * float(model_len)**2 * float(seq_len)
+    denominator *= impl_factor * DEFAULT_IMPL_FACTOR * data_type_size
+    batch_size = safety_margin * mem_avail / denominator
     batch_size = int(np.floor(batch_size))
     return min(max(batch_size, 1), 4096)
 
 def tokens_per_batch_to_batch_size(
     tokens_per_batch: int,
     seq_len: int,
-    impl_factor: float = DEFAULT_IMPL_FACTOR,
+    impl_factor: float = 1.0,
 ) -> int:
     """
     Computes the batch size corresponding to a given number of tokens per batch.
@@ -116,6 +117,6 @@ def tokens_per_batch_to_batch_size(
             implementation-specific memory overhead.
     """
     batch_size = tokens_per_batch /\
-        (impl_factor * seq_len)
+        (impl_factor * seq_len * DEFAULT_IMPL_FACTOR)
     batch_size = int(np.floor(batch_size))
-    return max(batch_size, 1)
+    return min(max(batch_size, 1), 4096)

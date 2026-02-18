@@ -410,10 +410,7 @@ class LearnMSAContext:
             #if there is at least one GPU, check its memory
             def _batch_size_cb(data: SequenceDataset):
                 seq_len = min(data.max_len, int(self.config.training.crop)) + 1
-                if use_language_model:
-                    implementation_factor = 2 * training_util.DEFAULT_IMPL_FACTOR
-                else:
-                    implementation_factor = training_util.DEFAULT_IMPL_FACTOR
+                implementation_factor = 2.0 if use_language_model else 1.0
                 return training_util.get_adaptive_batch_size(
                     model_len=self.model_lengths.max(),
                     num_model=self.config.training.num_model,

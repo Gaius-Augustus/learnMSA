@@ -144,9 +144,8 @@ def make_dataset(
     batch_size:int = 512,
     shuffle:bool = True,
     bucket_by_seq_length:bool = False,
-    model_lengths:Sequence[int] = [0],
-    bucket_boundaries: Sequence[int] | None = None,
-    bucket_batch_sizes: Sequence[int] | None = None,
+    bucket_boundaries: Sequence[int] = [],
+    bucket_batch_sizes: Sequence[int] = [],
 ) -> tuple[tf.data.Dataset, int]:
     """
     Creates a dataset for training and inference.
@@ -159,30 +158,24 @@ def make_dataset(
         shuffle: Whether to shuffle the dataset.
         bucket_by_seq_length: Whether to use bucketing by sequence length.
         model_lengths: List of model lengths for adaptive batching.
-        bucket_boundaries: Sequence length boundaries for bucketing. If None,
-            uses boundaries inferred from the data.
-        bucket_batch_sizes: Batch sizes for each bucket. If None, uses the
-            adaptive batch size function from the batch generator.
+        bucket_boundaries: Sequence length boundaries for bucketing.
+        bucket_batch_sizes: Batch sizes for each bucket.
 
     Returns:
         A tuple of (dataset, steps) where steps is the number of steps needed
-        to iterate through the entire dataset, or -1 for repeated (infinite) datasets.
+        to iterate through the entire dataset, or -1 for repeated (infinite)
+        datasets.
     """
     shuffle = shuffle and not bucket_by_seq_length
     batch_generator.shuffle = shuffle
     ds = tf.data.Dataset.from_tensor_slices(indices)
-    # TODO: clean up
-    # we can not use the context's adaptive batch, because it takes in a
-    # dataset, here we only have the sequence lengths as a numpy array
-    if batch_generator.context.config.language_model.use_language_model:
-        implementation_factor = 2 * training_util.DEFAULT_IMPL_FACTOR
-    else:
-        implementation_factor = training_util.DEFAULT_IMPL_FACTOR
-    adaptive_batch = partial(
-        training_util.get_adaptive_batch_size,
-            impl_factor=implementation_factor,
-    )
-    if bucket_by_seq_length and callable(adaptive_batch):
+    if bucket_by_seq_length:
+        if len(bucket_boundaries) == 0 or len(bucket_batch_sizes) == 0:
+            raise ValueError(
+                "bucket_boundaries and bucket_batch_sizes must be provided "
+                "when bucket_by_seq_length=True."
+            )
+
         # Bucketing only usable if user has not set a fixed batch size
         seq_lens = batch_generator.data.seq_lens[indices]
         ds_len = tf.data.Dataset.from_tensor_slices(
@@ -192,32 +185,8 @@ def make_dataset(
             np.arange(indices.size)
         )
         ds = tf.data.Dataset.zip((ds, ds_len, ds_ind))
-        max_model_len = max(model_lengths)
-        num_model = batch_generator.num_models
-        # Use provided bucket boundaries or defaults
-        if bucket_boundaries is None:
-            # Infer unique bucket boundaries from observed sequence lengths
-            max_num_buckets = max(min(indices.size // 10000, 7), 1)
-            quantiles = np.quantile(
-                seq_lens,
-                q=np.linspace(0, 1, max_num_buckets + 1)[1:-1],
-            ).astype(int)
-            _bucket_boundaries = np.unique(quantiles).tolist()
-
-            # pad_to_bucket_boundary=True requires every sequence length to be
-            # strictly smaller than max(bucket_boundaries).
-            max_seq_len = int(np.max(seq_lens))
-            if len(_bucket_boundaries) == 0\
-                    or _bucket_boundaries[-1] <= max_seq_len:
-                _bucket_boundaries.append(max_seq_len + 1)
-        else:
-            _bucket_boundaries = bucket_boundaries
-
-        if bucket_batch_sizes is None:
-            bucket_batch_sizes = [
-                adaptive_batch(max_model_len, num_model, int(b))
-                for b in _bucket_boundaries
-            ] + [adaptive_batch(max_model_len, num_model, int(1e6))]
+        _bucket_boundaries = list(bucket_boundaries)
+        bucket_batch_sizes = list(bucket_batch_sizes)
 
         # Set bucket boundaries on batch generator for JIT-friendly padding
         batch_generator.bucket_boundaries = _bucket_boundaries
@@ -396,6 +365,54 @@ def compute_dataset_steps(
             total_steps += int(np.ceil(count / bsize))
 
     return total_steps
+
+
+def make_default_bucket_scheme(
+    indices: np.ndarray,
+    batch_generator: BatchGenerator,
+    model_lengths: Sequence[int],
+    batch_size_impl_factor: float = 1.0,
+) -> tuple[list[int], list[int]]:
+    """
+    Create inferred bucketing boundaries and adaptive bucket batch sizes.
+
+    Args:
+        indices: The indices of the sequences to include in the dataset.
+        batch_generator: The batch generator (must be configured).
+        model_lengths: List of model lengths for adaptive batching.
+        batch_size_impl_factor: Implementation factor passed to adaptive
+            batch-size computation.
+
+    Returns:
+        A tuple of (bucket_boundaries, bucket_batch_sizes).
+    """
+    seq_lens = batch_generator.data.seq_lens[indices]
+
+    max_num_buckets = max(min(indices.size // 10000, 7), 1)
+    quantiles = np.quantile(
+        seq_lens,
+        q=np.linspace(0, 1, max_num_buckets + 1)[1:-1],
+    ).astype(int)
+    bucket_boundaries = np.unique(quantiles).tolist()
+
+    # pad_to_bucket_boundary=True requires every sequence length to be
+    # strictly smaller than max(bucket_boundaries).
+    max_seq_len = int(np.max(seq_lens))
+    if len(bucket_boundaries) == 0 or bucket_boundaries[-1] <= max_seq_len:
+        bucket_boundaries.append(max_seq_len + 1)
+
+    adaptive_batch = partial(
+        training_util.get_adaptive_batch_size,
+        impl_factor=batch_size_impl_factor,
+    )
+    max_model_len = max(model_lengths)
+    num_model = batch_generator.num_models
+    bucket_batch_sizes = [
+        adaptive_batch(max_model_len, num_model, int(boundary))
+        for boundary in bucket_boundaries
+    ] + [adaptive_batch(max_model_len, num_model, int(1e6))]
+
+    return bucket_boundaries, bucket_batch_sizes
 
 
 class TerminateOnNaNWithCheckpoint(tf.keras.callbacks.TerminateOnNaN):

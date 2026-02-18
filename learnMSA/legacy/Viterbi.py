@@ -328,12 +328,19 @@ def get_state_seqs_max_lik(
     hmm_cell.recurrent_init()
     old_crop_long_seqs = batch_generator.crop_long_seqs
     batch_generator.crop_long_seqs = math.inf #do not crop sequences
+    bucket_boundaries, bucket_batch_sizes = train.make_default_bucket_scheme(
+        indices=indices,
+        batch_generator=batch_generator,
+        model_lengths=hmm_cell.length,
+    )
     ds = train.make_dataset(indices, 
                             batch_generator, 
                             batch_size,
                             shuffle=False,
                             bucket_by_seq_length=True,
-                            model_lengths=hmm_cell.length)
+                            model_lengths=hmm_cell.length,
+                            bucket_boundaries=bucket_boundaries,
+                            bucket_batch_sizes=bucket_batch_sizes)
     seq_len = np.amax(data.seq_lens[indices]+1)
 
     #initialize with terminal states

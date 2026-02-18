@@ -295,7 +295,14 @@ def test_encoder_model() -> None:
             context.effective_num_seq = n
             model = LearnMSAModel(context)
             assert_anc_probs_layer(model.anc_probs_layer, config)
-            ds, steps = training.make_dataset(ind, batch_gen, batch_size=n, shuffle=False)
+            ds, steps = training.make_dataset(
+                ind,
+                batch_gen,
+                batch_size=n,
+                shuffle=False,
+                bucket_boundaries=[],
+                bucket_batch_sizes=[],
+            )
             for x, _ in ds.take(1):
                 # encode_batch now returns (b, L, num_model, features)
                 # features = num_rate_matrices * alphabet_size (24 amino acids, no padding)

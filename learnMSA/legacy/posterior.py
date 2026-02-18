@@ -45,12 +45,19 @@ def get_state_expectations(
     cell = msa_hmm_layer.cell
     old_crop_long_seqs = batch_generator.crop_long_seqs
     batch_generator.crop_long_seqs = math.inf #do not crop sequences
+    bucket_boundaries, bucket_batch_sizes = train.make_default_bucket_scheme(
+        indices=sorted_indices[:, 0],
+        batch_generator=batch_generator,
+        model_lengths=cell.length,
+    )
     ds = train.make_dataset(sorted_indices[:,0],
                             batch_generator,
                             batch_size,
                             shuffle=False,
                             bucket_by_seq_length=True,
-                            model_lengths=cell.length)
+                            model_lengths=cell.length,
+                            bucket_boundaries=bucket_boundaries,
+                            bucket_batch_sizes=bucket_batch_sizes)
 
     if with_plm:
         signature = [[
