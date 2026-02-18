@@ -109,6 +109,26 @@ def get_gpu_memory() -> list[int]:
         return []
     return memory_free_values
 
+def get_avail_memory_bytes() -> float:
+    """Returns the available VRAM in bytes. If no GPU is available, returns
+    the available RAM in bytes."""
+    gpu_memory = get_gpu_memory()
+    if gpu_memory and gpu_memory[0] > 0:
+        return float(gpu_memory[0]) * 1e6  # nvidia-smi reports MB
+
+    # No usable GPU memory -> use currently available RAM
+    try:
+        # Linux/Unix: free physical pages * page size
+        avail_pages = os.sysconf("SC_AVPHYS_PAGES")
+        page_size = os.sysconf("SC_PAGE_SIZE")
+        ram_bytes = int(avail_pages) * int(page_size)
+        if ram_bytes > 0:
+            return float(ram_bytes)
+    except (OSError, ValueError, AttributeError):
+        pass
+
+    return float(DEFAULT_FALLBACK_MEMORY_MB) * 1e6
+
 
 def validate_filepath(filepath : str, expected_ext : str) -> Path:
     """Ensure filepath has the correct extension and return as Path object."""
