@@ -2,7 +2,8 @@ import numpy as np
 
 from learnMSA.run.util import get_batch_multiplicator, get_gpu_memory
 
-DEFAULT_IMPL_FACTOR = 0.5
+DEFAULT_IMPL_FACTOR = 0.15
+MAX_BATCH_SIZE = 4096
 
 
 def get_initial_model_lengths(
@@ -100,7 +101,7 @@ def get_adaptive_batch_size(
     denominator *= impl_factor * DEFAULT_IMPL_FACTOR * data_type_size
     batch_size = safety_margin * mem_avail / denominator
     batch_size = int(np.floor(batch_size))
-    return min(max(batch_size, 1), 4096)
+    return min(max(batch_size, 1), MAX_BATCH_SIZE)
 
 def tokens_per_batch_to_batch_size(
     tokens_per_batch: int,
@@ -119,4 +120,4 @@ def tokens_per_batch_to_batch_size(
     batch_size = tokens_per_batch /\
         (impl_factor * seq_len * DEFAULT_IMPL_FACTOR)
     batch_size = int(np.floor(batch_size))
-    return min(max(batch_size, 1), 4096)
+    return min(max(batch_size, 1), MAX_BATCH_SIZE)

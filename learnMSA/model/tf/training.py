@@ -407,10 +407,21 @@ def make_default_bucket_scheme(
     )
     max_model_len = max(model_lengths)
     num_model = batch_generator.num_models
-    bucket_batch_sizes = [
+    boundary_batch_sizes = [
         adaptive_batch(max_model_len, num_model, int(boundary))
         for boundary in bucket_boundaries
-    ] + [adaptive_batch(max_model_len, num_model, int(1e6))]
+    ]
+
+    if boundary_batch_sizes:
+        # Keep the last boundary for each repeated batch size.
+        _, rev_idx = np.unique(boundary_batch_sizes[::-1], return_index=True)
+        keep_idx = np.sort(len(boundary_batch_sizes) - 1 - rev_idx)
+        bucket_boundaries = [bucket_boundaries[i] for i in keep_idx]
+        boundary_batch_sizes = [boundary_batch_sizes[i] for i in keep_idx]
+
+    bucket_batch_sizes = boundary_batch_sizes + [
+        adaptive_batch(max_model_len, num_model, int(1e6))
+    ]
 
     return bucket_boundaries, bucket_batch_sizes
 
