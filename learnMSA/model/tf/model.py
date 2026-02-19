@@ -1087,8 +1087,13 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         """
         jit_compile = self.context.config.advanced.jit_compile
         if total_steps is not None:
-            # For short runs, disable JIT to avoid overhead
+            # jit compilation becomes very slow for long HMMs
+            # (say > 450 matches)
+            # make sure we only enable it if we will be running long enough to
+            # benefit from it
             jit_compile = jit_compile and total_steps >= 20
+            if max(self.context.model_lengths) > 450:
+                jit_compile = jit_compile and total_steps >= 100
         return jit_compile
 
     def get_verbosity(self) -> Literal[0, 2]:
