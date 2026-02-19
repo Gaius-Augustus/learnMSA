@@ -388,7 +388,7 @@ def make_default_bucket_scheme(
     """
     seq_lens = batch_generator.data.seq_lens[indices]
 
-    max_num_buckets = max(indices.size // 10000 + 1, 7)
+    max_num_buckets = min(indices.size // 10000 + 1, 7)
     if max_num_buckets > 1:
         # Use uniform percentile tiles only up to the 95th percentile and
         # always keep [0.95, 1.0] as a dedicated tail bucket.
