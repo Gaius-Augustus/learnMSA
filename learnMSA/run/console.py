@@ -19,6 +19,9 @@ def run_main():
     if handle_help_command():
         return
     parser = parse_args(version)
+    pre_args, _ = parser.parse_known_args()
+    if pre_args.config:
+        util.apply_baseline_config_defaults(parser, pre_args.config)
     args = parser.parse_args()
 
     # Convert args to configuration

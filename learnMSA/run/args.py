@@ -1,6 +1,7 @@
 import argparse
 import sys
 from pathlib import Path
+from learnMSA.run import util
 
 
 class LearnMSAArgumentParser(argparse.ArgumentParser):
@@ -53,6 +54,13 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         type=str,
         default="fasta",
         help="Format of the input alignment file."
+    )
+    io_group.add_argument(
+        "--config",
+        dest="config",
+        type=lambda filepath: str(util.validate_filepath(filepath, ".json")),
+        default=None,
+        help="Path to a JSON configuration file."
     )
     io_group.add_argument(
         "--save_model",

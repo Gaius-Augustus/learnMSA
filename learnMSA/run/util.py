@@ -1,6 +1,12 @@
 import os
+import json
+import sys
 import subprocess as sp
+from argparse import ArgumentParser
 from pathlib import Path
+from typing import Any
+
+from learnMSA import Configuration
 
 
 def get_version() -> str:
@@ -184,4 +190,73 @@ def validate_output_file_requirements(config, parser) -> None:
                 "argument -o/--out_file is required (or use --scores, "
                 "--save_model, or --logo to save alternative outputs)"
             )
+
+
+def _flatten_nested_dict(data: dict[str, Any]) -> dict[str, Any]:
+    """Flatten nested dictionaries by keeping leaf keys as destinations."""
+    flattened: dict[str, Any] = {}
+    for key, value in data.items():
+        if isinstance(value, dict):
+            flattened.update(_flatten_nested_dict(value))
+        else:
+            flattened[key] = value
+    return flattened
+
+
+def _config_to_argparse_defaults(config: Configuration) -> dict[str, Any]:
+    """Convert Configuration to argparse defaults with minimal special mapping."""
+    conf = config.model_dump(mode="json")
+    defaults = _flatten_nested_dict(conf)
+
+    training = conf.get("training", {})
+    input_output = conf.get("input_output", {})
+    advanced = conf.get("advanced", {})
+
+    if training.get("auto_crop", True):
+        defaults["crop"] = "auto"
+    elif training.get("crop", 0) == sys.maxsize:
+        defaults["crop"] = "disable"
+    else:
+        defaults["crop"] = str(training.get("crop"))
+
+    defaults["silent"] = not input_output.get("verbose", True)
+    defaults["no_jit"] = not advanced.get("jit_compile", True)
+    defaults["frozen_distances"] = not training.get("trainable_distances", True)
+
+    return defaults
+
+
+def apply_baseline_config_defaults(
+    parser: ArgumentParser, config_path: str
+) -> None:
+    """Load baseline configuration from JSON and apply as parser defaults."""
+    path = Path(config_path)
+    try:
+        with open(path, "r", encoding="utf-8") as file:
+            config_dict = json.load(file)
+    except OSError as exc:
+        parser.error(f"Could not read config file '{path}': {exc}")
+    except json.JSONDecodeError as exc:
+        parser.error(f"Config file '{path}' is not valid JSON: {exc}")
+
+    try:
+        config = Configuration.model_validate(config_dict)
+    except Exception as exc:
+        parser.error(f"Invalid config file '{path}': {exc}")
+
+    all_defaults = _config_to_argparse_defaults(config)
+    parser_dests = {action.dest for action in parser._actions}
+    defaults = {
+        key: value for key, value in all_defaults.items() if key in parser_dests
+    }
+    parser.set_defaults(**defaults)
+
+    for action in parser._actions:
+        if not action.required:
+            continue
+        if action.dest not in defaults:
+            continue
+        value = defaults[action.dest]
+        if value not in (None, "", []):
+            action.required = False
 
