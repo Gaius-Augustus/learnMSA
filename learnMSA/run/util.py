@@ -1,7 +1,5 @@
 import os
 import json
-import sys
-import io
 import subprocess as sp
 from argparse import ArgumentParser
 from pathlib import Path
@@ -10,57 +8,7 @@ from typing import Any
 from learnMSA import Configuration
 
 
-TF_IMPORT_WARNING_FILTERS = (
-    "'+ptx85' is not a recognized feature for this target (ignoring feature)",
-    "not a recognized feature for this target (ignoring feature)",
-)
-
-
-_ORIGINAL_STDERR = None
-
-
-class _FilteredStderr(io.TextIOBase):
-    def __init__(self, stream, suppressed_texts):
-        self._stream = stream
-        self._suppressed_texts = tuple(suppressed_texts)
-        self._buffer = ""
-
-    def write(self, text):
-        if not text:
-            return 0
-
-        self._buffer += text
-        lines = self._buffer.splitlines(keepends=True)
-
-        # Keep incomplete trailing line in buffer for future writes
-        if lines and not lines[-1].endswith(("\n", "\r")):
-            self._buffer = lines.pop()
-        else:
-            self._buffer = ""
-
-        written = len(text)
-        for line in lines:
-            if any(s in line for s in self._suppressed_texts):
-                continue
-            self._stream.write(line)
-
-        return written
-
-    def flush(self):
-        if self._buffer:
-            if not any(s in self._buffer for s in self._suppressed_texts):
-                self._stream.write(self._buffer)
-            self._buffer = ""
-        return self._stream.flush()
-
-
-def install_stderr_warning_filter() -> None:
-    """Install a process-wide stderr filter for noisy TensorFlow CUDA warnings."""
-    global _ORIGINAL_STDERR
-    if isinstance(sys.stderr, _FilteredStderr):
-        return
-    _ORIGINAL_STDERR = sys.stderr
-    sys.stderr = _FilteredStderr(sys.stderr, TF_IMPORT_WARNING_FILTERS)
+DEFAULT_FALLBACK_MEMORY_MB = 4096
 
 
 def get_version() -> str:
@@ -96,8 +44,6 @@ def setup_devices(
 
     # Must be set before any TensorFlow operations
     os.environ["TF_GPU_ALLOCATOR"] = "cuda_malloc_async"
-
-    install_stderr_warning_filter()
 
     import tensorflow as tf
     from tensorflow.python.client import device_lib
