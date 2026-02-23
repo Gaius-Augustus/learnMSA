@@ -527,7 +527,7 @@ class PHMMValueSet:
         insert_transition = _expand(insert_transition, 2)
         delete_transition = _expand(delete_transition, 2)
         if isinstance(begin_to_match, (list, np.ndarray)):
-            begin_to_match = np.concat((
+            begin_to_match = np.concatenate((
                 begin_to_match[0:1],
                 _expand(begin_to_match[1], L-1)
             ))

@@ -1,12 +1,33 @@
 import os
 import json
 import sys
+import io
+import contextlib
 import subprocess as sp
 from argparse import ArgumentParser
 from pathlib import Path
 from typing import Any
 
 from learnMSA import Configuration
+
+
+TF_IMPORT_WARNING_FILTERS = (
+    "'+ptx85' is not a recognized feature for this target (ignoring feature)",
+)
+
+
+class _FilteredStderr(io.TextIOBase):
+    def __init__(self, stream, suppressed_texts):
+        self._stream = stream
+        self._suppressed_texts = tuple(suppressed_texts)
+
+    def write(self, text):
+        if any(s in text for s in self._suppressed_texts):
+            return len(text)
+        return self._stream.write(text)
+
+    def flush(self):
+        return self._stream.flush()
 
 
 def get_version() -> str:
@@ -43,8 +64,11 @@ def setup_devices(
     # Must be set before any TensorFlow operations
     os.environ["TF_GPU_ALLOCATOR"] = "cuda_malloc_async"
 
-    import tensorflow as tf
-    from tensorflow.python.client import device_lib
+    with contextlib.redirect_stderr(
+        _FilteredStderr(sys.stderr, TF_IMPORT_WARNING_FILTERS)
+    ):
+        import tensorflow as tf
+        from tensorflow.python.client import device_lib
 
     # Check if multiple GPUs are installed / set in the environment variable
     if get_num_gpus() > 1:

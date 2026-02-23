@@ -528,8 +528,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         # Compile to acccount for any changes in head_subset or call mode
         self.compile(total_steps=steps)
 
-        is_reduced_posterior = reduce and self.phmm_layer.is_posterior_mode()
-        if is_reduced_posterior:
+        if reduce and self.phmm_layer.is_posterior_mode():
             # Special reduced posterior mode: accumulate state posteriors
             # online to avoid storing full arrays in memory
             Q = max(self.phmm_layer.states[m] for m in _models)

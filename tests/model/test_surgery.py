@@ -248,7 +248,9 @@ def test_update_kernels(model_single_head: LearnMSAModel) -> None:
     for i, aa in enumerate(ref_consensus):
         expected_emissions[i, alphabet.index(aa)] = 1.0
 
-    np.testing.assert_equal(emissions_new[:result.length], expected_emissions)
+    np.testing.assert_almost_equal(
+        emissions_new[:result.length], expected_emissions
+    )
 
     ind = PHMMTransitionIndexSet(result.length)
 

@@ -21,16 +21,16 @@ setup(
         ]
     ),
     install_requires=[
-        "tensorflow[and-cuda]==2.19",
+        "tensorflow[and-cuda]==2.17",
         "networkx",
         "logomaker", 
         "seaborn",
         "biopython>=1.69",
         "pyfamsa", 
-        "transformers",
+        #"transformers",
         "imageio",
-        "tf-keras==2.19",
-        "SentencePiece",
+        #"tf-keras==2.19",
+        #"SentencePiece",
         "pydantic"
     ],
     include_package_data=True,

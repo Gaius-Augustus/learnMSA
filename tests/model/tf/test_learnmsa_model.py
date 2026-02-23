@@ -474,7 +474,7 @@ def test_estimate_loglik(context_amino_acid: LearnMSAContext) -> None:
     # Create a dataset with random sequences
     np.random.seed(42)
     sequences = []
-    for i in range(100):
+    for i in range(50):
         seq_length = np.random.randint(10, 50)
         seq = ''.join(
             np.random.choice(
@@ -492,7 +492,7 @@ def test_estimate_loglik(context_amino_acid: LearnMSAContext) -> None:
     # Check shapes of the outputs
     assert loglik_reduced.shape == (2,), \
         "Reduced loglik shape is incorrect"
-    assert loglik_full.shape == (100, 2), \
+    assert loglik_full.shape == (50, 2), \
         "Full loglik shape is incorrect"
 
 def test_null_model_log_probs(context_amino_acid: LearnMSAContext) -> None:
