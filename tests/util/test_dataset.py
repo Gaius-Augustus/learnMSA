@@ -468,3 +468,15 @@ def test_custom_alphabet() -> None:
             data.get_encoded_seq(1, replace_with_x=""), [0, 1, 1, 0]
         )
         np.testing.assert_equal(data.get_column_map(1), [0, 2, 3, 4])
+
+
+def test_reorder() -> None:
+    sequences = [("s1", "AAAA"), ("s2", "BBB"), ("s3", "CC")]
+    with SequenceDataset(sequences=sequences) as data:
+        data.reorder([2, 0, 1])
+
+        assert data.seq_ids == ["s3", "s1", "s2"]
+        assert str(data.get_record(0).seq) == "CC"
+        assert str(data.get_record(1).seq) == "AAAA"
+        assert str(data.get_record(2).seq) == "BBB"
+        np.testing.assert_equal(data.seq_lens, [2, 4, 3])

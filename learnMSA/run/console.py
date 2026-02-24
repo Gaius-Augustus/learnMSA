@@ -1,6 +1,7 @@
 import os
-
+from contextlib import ExitStack
 from pathlib import Path
+
 import learnMSA.run.util as util
 from learnMSA import Configuration
 from learnMSA.run import args_to_config, handle_help_command, parse_args
@@ -13,7 +14,7 @@ os.environ.setdefault("GLOG_minloglevel", "3")
 os.environ.setdefault("ABSL_MIN_LOG_LEVEL", "3")
 
 
-def run_main():
+def run_main() -> None:
     # Get version and parse arguments
     version = util.get_version()
     if handle_help_command():
@@ -45,17 +46,41 @@ def run_main():
         config.input_output.verbose,
     )
 
-    from learnMSA.legacy import SequenceDataset, plot_and_save_logo
     from learnMSA.align.align import align
+    from learnMSA.legacy import SequenceDataset, plot_and_save_logo
 
-    # Call the main method that runs learnMSA
-    with SequenceDataset(
-        config.input_output.input_file,
-        config.input_output.input_format,
-        indexed=config.training.indexed_data,
-    ) as data:
+    with ExitStack() as stack:
+        ## Load the amino acid dataset (mandatory)
+        data = stack.enter_context(
+            SequenceDataset(
+                config.input_output.input_file,
+                config.input_output.input_format,
+                indexed=config.training.indexed_data,
+            )
+        )
+
+        ## Load a structural dataset (optional)
+        struct_data = None
+        if config.input_output.struct_file is not None:
+            struct_data = stack.enter_context(
+                SequenceDataset(
+                    config.input_output.struct_file,
+                    "fasta",
+                    indexed=config.training.indexed_data,
+                )
+            )
+
         # Check if the input data is valid
         data.validate_dataset()
+        if struct_data is not None:
+            struct_data.validate_dataset()
+            if set(struct_data.seq_ids) != set(data.seq_ids):
+                raise ValueError(
+                    "The sequence IDs in the structural dataset do not match "\
+                    "those in the input dataset."
+                )
+            perm = [struct_data.seq_ids.index(seq_id) for seq_id in data.seq_ids]
+            struct_data.reorder(perm)
 
         # Run a training to align the sequences
         alignment_model, best_model = align(data, config)

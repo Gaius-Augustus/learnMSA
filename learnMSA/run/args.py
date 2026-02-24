@@ -111,6 +111,13 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         default="",
         help="Additional table file containing per-sequence likelihoods.",
     )
+    io_group.add_argument(
+        "--struct",
+        dest="struct_file",
+        type=str,
+        default=None,
+        help="Path to a fasta file containing 3Di states for each sequence."
+    )
 
     # Training
     train_group = parser.add_argument_group("Training")

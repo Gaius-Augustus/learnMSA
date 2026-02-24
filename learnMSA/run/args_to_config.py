@@ -42,6 +42,7 @@ def args_to_config(args: Namespace) -> Configuration:
         cuda_visible_devices=args.cuda_visible_devices,
         work_dir=args.work_dir,
         convert=args.convert,
+        struct_file=args.struct_file,
     )
 
     # Create nested configuration objects

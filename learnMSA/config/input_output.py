@@ -59,6 +59,9 @@ class InputOutputConfig(BaseModel):
     """If set, only align the sequences with these IDs from the input file, but
     train on all sequences."""
 
+    struct_file: PathField | None = None
+    """If set, path to a fasta file containing 3Di states for each sequence."""
+
     @field_validator("format")
     @classmethod
     def validate_format(cls, v: str) -> str:

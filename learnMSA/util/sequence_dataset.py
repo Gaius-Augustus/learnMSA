@@ -343,3 +343,16 @@ class SequenceDataset:
                 s.seq = Seq.Seq(s.seq)
             s.description = ""
         SeqIO.write(sequences, filepath, fmt)
+
+    def reorder(self, permutation: list[int] | np.ndarray) -> None:
+        """
+        Reorder sequences in-place using a permutation of sequence indices.
+
+        Args:
+            permutation: A 1D permutation containing each index in
+                [0, num_seq - 1] exactly once.
+        """
+        perm = np.asarray(permutation)
+        perm = perm.astype(np.int64, copy=False)
+        self._seq_ids = [self._seq_ids[i] for i in perm]
+        self._seq_lens = self._seq_lens[perm]
