@@ -1,4 +1,5 @@
 import math
+import time
 from typing import Any, Literal, Sequence, override
 
 import numpy as np
@@ -474,6 +475,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         """
         if indices is None:
             indices = np.arange(data.num_seq)
+        start_time = time.perf_counter()
 
         # restrict to specified models
         # TODO: revert head_subset later?
@@ -551,6 +553,11 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
 
             accumulated_posteriors /= len(indices)
             self.context.batch_gen.crop_long_seqs = old_crop_long_seqs
+            self._print_predict_timing(
+                elapsed_seconds=time.perf_counter() - start_time,
+                num_sequences=len(indices),
+                steps=steps,
+            )
             return accumulated_posteriors
 
         # Run a custom prediction loop with batching to collect all predictions
@@ -625,6 +632,12 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             for i,j in enumerate(_models):
                 L = self.phmm_layer.lengths[j]
                 decoded_array[:,:,i][decoded_array[:,:,i] == -1] = 2*L + 2
+
+        self._print_predict_timing(
+            elapsed_seconds=time.perf_counter() - start_time,
+            num_sequences=len(indices),
+            steps=steps,
+        )
 
         return decoded_array
 
@@ -1195,6 +1208,25 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
                 "boundaries", bucket_boundaries, "and batch sizes",
                 bucket_batch_sizes[:-1], "for", steps, "steps"
             )
+
+    def _print_predict_timing(
+        self,
+        elapsed_seconds: float,
+        num_sequences: int,
+        steps: int,
+    ) -> None:
+        if self.context.config.input_output.verbose:
+            if elapsed_seconds > 0.0:
+                seq_per_s = num_sequences / elapsed_seconds
+                print(
+                    f"Prediction finished in {elapsed_seconds:.3f}s "
+                    f"({seq_per_s:.2f} seq/s, {steps} steps)"
+                )
+            else:
+                print(
+                    f"Prediction finished in {elapsed_seconds:.3f}s "
+                    f"({steps} steps)"
+                )
 
     def _check_training_complete(
         self,
