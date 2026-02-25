@@ -242,26 +242,22 @@ def test_get_standardized_seq() -> None:
         assert data.get_standardized_seq(1, replace_with_x="BD") == "AX*CX"
 
 
-def test_crop_to_length() -> None:
-    """Test sequence cropping functionality."""
+def test_crop_bounds() -> None:
+    """Test sequence cropping via explicit start/end bounds."""
     sequences = [("s1", "ABCDEFGHIJ")]
     with SequenceDataset(sequences=sequences) as data:
         # Test normal encoding
         seq = data.get_encoded_seq(0)
         assert len(seq) == 10
 
-        # Test cropping
-        seq_cropped = data.get_encoded_seq(0, crop_to_length=5)
+        # Test fixed-bound cropping
+        seq_cropped = data.get_encoded_seq(0, crop_start=2, crop_end=7)
         assert len(seq_cropped) == 5
 
-        # Test with crop boundaries
-        seq_cropped, start, end = data.get_encoded_seq(
-            0, crop_to_length=5, return_crop_boundaries=True
+        seq_cropped = data.get_encoded_seq(
+            0, crop_start=2, crop_end=7
         )
         assert len(seq_cropped) == 5
-        assert end - start == 5
-        assert 0 <= start <= 5
-        assert start < end <= 10
 
 
 def test_context_manager() -> None:
@@ -348,21 +344,21 @@ def test_dtype_parameter() -> None:
     with SequenceDataset(sequences=sequences) as data:
         # Test np.int16 (default)
         seq16 = data.get_encoded_seq(
-            0, dtype=np.int16, return_crop_boundaries=False
+            0, dtype=np.int16
         )
         assert isinstance(seq16, np.ndarray)
         assert seq16.dtype == np.int16
 
         # Test np.int32
         seq32 = data.get_encoded_seq(
-            0, dtype=np.int32, return_crop_boundaries=False
+            0, dtype=np.int32
         )
         assert isinstance(seq32, np.ndarray)
         assert seq32.dtype == np.int32
 
         # Test np.int64
         seq64 = data.get_encoded_seq(
-            0, dtype=np.int64, return_crop_boundaries=False
+            0, dtype=np.int64
         )
         assert isinstance(seq64, np.ndarray)
         assert seq64.dtype == np.int64

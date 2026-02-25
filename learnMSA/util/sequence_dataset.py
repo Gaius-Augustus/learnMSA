@@ -227,11 +227,11 @@ class SequenceDataset:
         gap_symbols: str = "-.",
         ignore_symbols: str = "",
         replace_with_x: str = "BZJ",
-        crop_to_length: float = math.inf,
+        crop_start: int | None = None,
+        crop_end: int | None = None,
         validate_alphabet: bool = True,
         dtype: type[np.integer] = np.int16,
-        return_crop_boundaries: bool = False
-    ) -> np.ndarray | tuple[np.ndarray, int, int]:
+    ) -> np.ndarray:
         """
         Returns sequence i encoded as a numpy array of integers.
 
@@ -241,14 +241,13 @@ class SequenceDataset:
             gap_symbols (str): Passed to get_standardized_seq.
             ignore_symbols (str): Passed to get_standardized_seq.
             replace_with_x (str): Passed to get_standardized_seq.
-            crop_to_length (float): If the sequence is longer than this length,
-                a random crop of this length is returned. If the sequence is
-                shorter than this length, the whole sequence is returned.
+            crop_start (int | None): Optional inclusive crop start index.
+                If None, defaults to 0.
+            crop_end (int | None): Optional exclusive crop end index.
+                If None, defaults to sequence length.
             validate_alphabet (bool): If True, check that the sequence contains
                 only characters from the defined alphabet.
             dtype (type): Numpy integer type to use for the encoded sequence.
-            return_crop_boundaries (bool): If True, also return the start and
-                end indices of the crop within the original sequence.
         """
         seq_str = self.get_standardized_seq(
             i, remove_gaps, gap_symbols, ignore_symbols, replace_with_x
@@ -263,18 +262,22 @@ class SequenceDataset:
         seq = np.array(
             [self.alphabet.index(aa) for aa in seq_str], dtype=dtype
         )
-        if seq.shape[0] > crop_to_length:
-            # Crop randomly
-            start = np.random.randint(0, seq.shape[0] - crop_to_length + 1)
-            end = start + crop_to_length
-        else:
-            start = 0
-            end = seq.shape[0]
-        seq = seq[start:end]
-        if return_crop_boundaries:
-            return seq, start, end
-        else:
-            return seq
+
+        start = 0 if crop_start is None else crop_start
+        end = seq.shape[0] if crop_end is None else crop_end
+
+        if start < 0 or end < 0:
+            raise ValueError("crop_start and crop_end must be non-negative.")
+        if end < start:
+            raise ValueError(
+                f"crop_end must be >= crop_start, got start={start}, end={end}."
+            )
+        if end > seq.shape[0]:
+            raise ValueError(
+                f"crop_end {end} exceeds sequence length {seq.shape[0]}."
+            )
+
+        return seq[start:end]
 
 
     def validate_dataset(

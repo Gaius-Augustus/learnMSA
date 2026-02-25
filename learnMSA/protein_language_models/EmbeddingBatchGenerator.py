@@ -52,7 +52,7 @@ class EmbeddingBatchGenerator(BatchGenerator):
         context: "LearnMSAContext",
         verbose: bool=False
     ) -> None:
-        super().configure(data, context)
+        super().configure(data, context=context)
 
         # nothing to do if embeddings are already computed
         if self.cache is not None and self.cache.is_filled():

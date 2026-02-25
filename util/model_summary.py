@@ -85,7 +85,7 @@ def print_model_matrices(model: tf.keras.Model) -> None:
 def make_batch(model: tf.keras.Model, fasta_path: Path | None):
 	single_data = make_single_sequence_dataset(fasta_path)
 	batch_gen = BatchGenerator(static_shape_mode=True)
-	batch_gen.configure(single_data, model.context)
+	batch_gen.configure(single_data, context=model.context)
 	return batch_gen(np.arange(1))
 
 

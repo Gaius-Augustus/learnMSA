@@ -294,7 +294,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             Training history object containing loss and metrics
         """
         self.phmm_layer.loglik_mode()
-        self.context.batch_gen.configure(data, self.context)
+        self.context.batch_gen.configure(data, context=self.context)
 
         if batch_size is None:
             batch_size = self.get_batch_size(data)
@@ -490,7 +490,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
 
         # Additional setup required before running Viterbi
         # TODO: clean up later
-        self.context.batch_gen.configure(data, self.context)
+        self.context.batch_gen.configure(data, context=self.context)
         # Don't use static shapes for prediction - we'll use bucketing
         self.context.batch_gen.static_shape_mode = False
         old_crop_long_seqs = self.context.batch_gen.crop_long_seqs
@@ -704,7 +704,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
 
         # Additional setup required before running Viterbi
         # TODO: clean up later
-        self.context.batch_gen.configure(data, self.context)
+        self.context.batch_gen.configure(data, context=self.context)
         # Don't use static shapes for prediction - we'll use bucketing
         self.context.batch_gen.static_shape_mode = False
         old_crop_long_seqs = self.context.batch_gen.crop_long_seqs
@@ -879,7 +879,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         n = data.num_seq
 
         # Configure batch generator
-        self.context.batch_gen.configure(data, self.context)
+        self.context.batch_gen.configure(data, context=self.context)
 
         null_indices = np.arange(n)
         bucket_boundaries, bucket_batch_sizes = make_default_bucket_scheme(

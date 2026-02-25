@@ -16,7 +16,7 @@ def test_default_batch_gen() -> None:
         config = Configuration()
         config.training.num_model = 1
         config.training.no_sequence_weights = True
-        batch_gen.configure(data, LearnMSAContext(config, data))
+        batch_gen.configure(data, context=LearnMSAContext(config, data))
         test_batches = [[0], [1], [4], [0, 2], [0, 1, 2, 3, 4], [2, 3, 4]]
         alphabet = np.array(list(SequenceDataset._default_alphabet))
         for ind in test_batches:
@@ -38,7 +38,7 @@ def test_static_shape_batch_gen() -> None:
         config.training.num_model = 1
         config.training.no_sequence_weights = True
 
-        batch_gen.configure(data, LearnMSAContext(config, data))
+        batch_gen.configure(data, context = LearnMSAContext(config, data))
 
         # Test that all batches have the same shape
         test_batches = [[0], [1], [4], [0, 2], [0, 1, 2, 3, 4], [2, 3, 4]]
@@ -68,3 +68,34 @@ def test_static_shape_batch_gen() -> None:
                 padding = s[batch_idx, 0, seq_len:]
                 assert np.all(padding == len(alphabet) - 1), \
                     f"Expected padding to be {len(alphabet) - 1}, got {padding}"
+
+
+def test_multi_dataset_batch_gen_returns_multiple_batches() -> None:
+    fn = (os.path.dirname(__file__)
+            + "/../tests/data/felix_insert_delete.fa")
+    with SequenceDataset(fn) as data_a, SequenceDataset(fn) as data_b:
+        batch_gen = training.BatchGenerator(shuffle=False)
+        config = Configuration()
+        config.training.num_model = 1
+        config.training.no_sequence_weights = True
+        batch_gen.configure(
+            data_a, data_b, context=LearnMSAContext(config, data_a)
+        )
+
+        indices = np.array([0, 2, 4])
+        s_a, s_b, ind = batch_gen(indices) # type: ignore
+
+        assert s_a.shape[0] == indices.shape[0]
+        assert s_b.shape[0] == indices.shape[0]
+        assert s_a.shape[1] == 1
+        assert s_b.shape[1] == 1
+        np.testing.assert_equal(ind[:, 0], indices)
+
+        alphabet = np.array(list(SequenceDataset._default_alphabet))
+        for row_idx, seq_idx in enumerate(indices):
+            ref = str(data_a.get_record(seq_idx).seq).upper()
+            seq_len = data_a.seq_lens[seq_idx]
+            dec_a = "".join(alphabet[s_a[row_idx, 0, :seq_len]])
+            dec_b = "".join(alphabet[s_b[row_idx, 0, :seq_len]])
+            assert dec_a == ref
+            assert dec_b == ref

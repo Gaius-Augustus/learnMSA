@@ -2,7 +2,7 @@ import math
 import os
 from datetime import datetime
 from functools import partial
-from typing import TYPE_CHECKING, Sequence
+from typing import TYPE_CHECKING, Any, Sequence, cast
 
 import numpy as np
 import tensorflow as tf
@@ -34,34 +34,43 @@ class BatchGenerator():
 
     def configure(
         self,
-        data : SequenceDataset,
+        *data : SequenceDataset,
         context: "LearnMSAContext",
     ):
+        if len(data) == 0:
+            raise ValueError(
+                "BatchGenerator.configure requires at least one dataset."
+            )
+
         self.data = data
-        self.alphabet_size = len(data.alphabet)-1
+        self.alphabet_size = len(data[0].alphabet)-1
+        self.alphabet_sizes = [len(dataset.alphabet)-1 for dataset in data]
         self.context = context
         self.config = context.config
         self.num_models = self.config.training.num_model
-        self.crop_long_seqs = self.config.training.crop
+        self.crop_long_seqs = float(self.config.training.crop)
 
         # Validate crop_long_seqs in static shape mode
         if self.static_shape_mode:
-            if not isinstance(self.crop_long_seqs, (int, np.integer)):
+            if not float(self.crop_long_seqs).is_integer():
                 raise ValueError(
-                    f"static_shape_mode requires crop_long_seqs to be an integer, "
-                    f"got {type(self.crop_long_seqs).__name__}: {self.crop_long_seqs}"
+                    f"static_shape_mode requires crop_long_seqs to be an "
+                    f"integer, got {type(self.crop_long_seqs).__name__}: "
+                    f"{self.crop_long_seqs}"
                 )
             if self.crop_long_seqs <= 0:
                 raise ValueError(
-                    f"static_shape_mode requires crop_long_seqs to be positive, "
-                    f"got {self.crop_long_seqs}"
+                    f"static_shape_mode requires crop_long_seqs to be "
+                    f"positive, got {self.crop_long_seqs}"
                 )
-            if self.crop_long_seqs == math.inf:
+            if not np.isfinite(self.crop_long_seqs):
                 raise ValueError(
                     "static_shape_mode requires a finite crop_long_seqs value"
                 )
 
-        self.permutations = [np.arange(data.num_seq) for _ in range(self.num_models)]
+        self.permutations = [
+            np.arange(data[0].num_seq) for _ in range(self.num_models)
+        ]
         for p in self.permutations:
             np.random.shuffle(p)
         self.configured = True
@@ -78,11 +87,11 @@ class BatchGenerator():
         else:
             permutated_indices = np.stack([indices]*self.num_models, axis=1)
 
-        # In static shape mode, always use crop_long_seqs as the sequence length
+        # Assume sequence lengths are identical across datasets.
         if self.static_shape_mode:
-            max_len = min(self.data.max_len, int(self.crop_long_seqs))
+            max_len = min(self.data[0].max_len, int(self.crop_long_seqs))
         else:
-            max_len = np.max(self.data.seq_lens[permutated_indices])
+            max_len = np.max(self.data[0].seq_lens[permutated_indices])
             max_len = min(max_len, self.crop_long_seqs)
 
             # When JIT compiling with bucketing, pad to bucket boundary for consistent shapes
@@ -93,50 +102,105 @@ class BatchGenerator():
                         max_len = boundary
                         break
 
-        batch = np.zeros((indices.shape[0], self.num_models, max_len+1), dtype=np.uint8)
+        max_len = int(max_len)
+
+        batches = [
+            np.zeros(
+                (indices.shape[0], self.num_models, max_len + 1),
+                dtype=np.uint8,
+            )
+            for _ in self.data
+        ]
         if return_crop_boundaries:
             start = np.zeros((indices.shape[0], self.num_models), dtype=np.int32)
             end = np.zeros((indices.shape[0], self.num_models), dtype=np.int32)
-        batch += self.alphabet_size # Initialize with terminal symbols
+        for batch, alphabet_size in zip(batches, self.alphabet_sizes):
+            batch += alphabet_size # Initialize with terminal symbols
+
+        # Compute random crop bounds once per (batch item, model) and reuse
+        # them for all datasets.
+        crop_starts = np.zeros(
+            (indices.shape[0], self.num_models),
+            dtype=np.int32,
+        )
+        crop_ends = np.zeros(
+            (indices.shape[0], self.num_models),
+            dtype=np.int32,
+        )
+        for i, perm_ind in enumerate(permutated_indices):
+            for k, j in enumerate(perm_ind):
+                seq_len = int(self.data[0].seq_lens[j])
+                if np.isfinite(self.crop_long_seqs):
+                    crop_len = int(self.crop_long_seqs)
+                    if seq_len > crop_len:
+                        crop_start = np.random.randint(
+                            0,
+                            seq_len - crop_len + 1,
+                        )
+                        crop_end = crop_start + crop_len
+                    else:
+                        crop_start = 0
+                        crop_end = seq_len
+                else:
+                    crop_start = 0
+                    crop_end = seq_len
+
+                crop_starts[i, k] = crop_start
+                crop_ends[i, k] = crop_end
+
+        if return_crop_boundaries:
+            start[:, :] = crop_starts
+            end[:, :] = crop_ends
+
         for i,perm_ind in enumerate(permutated_indices):
             for k,j in enumerate(perm_ind):
-                if self.data.alphabet == SequenceDataset._default_alphabet:
-                    # Replace rare amino acids with X if the amino acid
-                    # alphabet if used
-                    replace_with_x = "BZJ"
-                else:
-                    replace_with_x = ""
-                if return_crop_boundaries:
-                    seq, start[i, k], end[i, k] = self.data.get_encoded_seq(
+                crop_start = int(crop_starts[i, k])
+                crop_end = int(crop_ends[i, k])
+
+                for d, dataset in enumerate(self.data):
+                    if dataset.alphabet == SequenceDataset._default_alphabet:
+                        # Replace rare amino acids with X if the amino acid
+                        # alphabet if used
+                        replace_with_x = "BZJ"
+                    else:
+                        replace_with_x = ""
+                    seq = dataset.get_encoded_seq(
                         j,
-                        crop_to_length=self.crop_long_seqs,
-                        return_crop_boundaries=True,
+                        crop_start=crop_start,
+                        crop_end=crop_end,
                         replace_with_x=replace_with_x,
                     )
-                else:
-                    seq = self.data.get_encoded_seq(
-                        j,
-                        crop_to_length=self.crop_long_seqs,
-                        return_crop_boundaries=False,
-                        replace_with_x=replace_with_x,
-                    )
-                batch[i, k, :min(self.data.seq_lens[j], self.crop_long_seqs)] = seq
+                    seq_array = np.asarray(seq, dtype=np.uint8)
+                    batches[d][i, k, :seq_array.shape[0]] = seq_array
+
+        if len(batches) == 1:
+            batch_output: tuple[np.ndarray, ...] | np.ndarray = batches[0]
+        else:
+            batch_output = tuple(batches)
+
         if self.return_only_sequences:
             if return_crop_boundaries:
-                return batch, start, end
+                if isinstance(batch_output, tuple):
+                    return *batch_output, start, end
+                return batch_output, start, end
             else:
-                return batch
+                return batch_output
         else:
             if return_crop_boundaries:
-                return batch, permutated_indices, start, end
+                if isinstance(batch_output, tuple):
+                    return *batch_output, permutated_indices, start, end
+                return batch_output, permutated_indices, start, end
             else:
-                return batch, permutated_indices
+                if isinstance(batch_output, tuple):
+                    return *batch_output, permutated_indices
+                return batch_output, permutated_indices
 
     def get_out_types(self):
+        batch_types = tuple(tf.uint8 for _ in self.data)
         if self.return_only_sequences:
-            return (tf.uint8, )
+            return batch_types
         else:
-            return (tf.uint8, tf.int64)
+            return batch_types + (tf.int64,)
 
 def make_dataset(
     indices: np.ndarray,
@@ -166,6 +230,11 @@ def make_dataset(
         to iterate through the entire dataset, or -1 for repeated (infinite)
         datasets.
     """
+    def _to_tuple(output):
+        if isinstance(output, tuple):
+            return output
+        return (output,)
+
     shuffle = shuffle and not bucket_by_seq_length
     batch_generator.shuffle = shuffle
     ds = tf.data.Dataset.from_tensor_slices(indices)
@@ -177,7 +246,7 @@ def make_dataset(
             )
 
         # Bucketing only usable if user has not set a fixed batch size
-        seq_lens = batch_generator.data.seq_lens[indices]
+        seq_lens = batch_generator.data[0].seq_lens[indices]
         ds_len = tf.data.Dataset.from_tensor_slices(
             seq_lens.astype(np.int32)
         )
@@ -200,7 +269,7 @@ def make_dataset(
         )
 
         ds = ds.bucket_by_sequence_length(
-            element_length_func=lambda i,L,j: L,
+            element_length_func=cast(Any, lambda i, L, j: L),
             bucket_boundaries=_bucket_boundaries,
             bucket_batch_sizes=bucket_batch_sizes,
             # when jit-compiling, make sure compilation only happens once
@@ -210,35 +279,46 @@ def make_dataset(
         )
 
         batch_func_out_types = batch_generator.get_out_types() + (tf.int64,)
-        if len(batch_func_out_types) == 2:
-            # return_only_sequences=True case: (batch, j)
-            func = (lambda i,j: (batch_generator(i), j))
-        else:
-            # return_only_sequences=False case: (batch, indices, j)
-            func = lambda i,j: (*batch_generator(i), j)
+        num_batch_outputs = len(batch_generator.data)
 
-        def batch_func(i,_,j):
+        def func(i, j):
+            return *_to_tuple(batch_generator(i)), j
+
+        def _bucket_batch_func(i,_,j):
             results = tf.numpy_function(
                 func=func, inp=[i,j], Tout=batch_func_out_types
             )
-            # Set shapes explicitly for TensorFlow 2.17+
-            if len(batch_func_out_types) == 2:
-                batch, j_out = results
+            if not isinstance(results, (tuple, list)):
+                results = (results,)
+
+            batches = list(results[:num_batch_outputs])
+            extras = list(results[num_batch_outputs:-1])
+            j_out = results[-1]
+
+            for batch in batches:
                 batch.set_shape(
                     tf.TensorShape([None, batch_generator.num_models, None])
                 )
-                j_out.set_shape(tf.TensorShape([None]))
-                return batch, j_out
-            else:
-                batch, ind, j_out = results
-                batch.set_shape(
-                    tf.TensorShape([None, batch_generator.num_models, None])
-                )
-                ind.set_shape(
+
+            if extras:
+                extras[0].set_shape(
                     tf.TensorShape([None, batch_generator.num_models])
                 )
-                j_out.set_shape(tf.TensorShape([None]))
-                return batch, ind, j_out
+            scoring_model_config = getattr(
+                batch_generator, "scoring_model_config", None
+            )
+            if len(extras) > 1 and scoring_model_config is not None:
+                extras[1].set_shape(tf.TensorShape([
+                    None,
+                    batch_generator.num_models,
+                    None,
+                    int(scoring_model_config.dim)+1
+                ]))
+
+            j_out.set_shape(tf.TensorShape([None]))
+            return tuple(batches + extras + [j_out])
+
+        map_func = _bucket_batch_func
     else:
         # Compute steps for non-bucketed dataset
         if shuffle:
@@ -257,60 +337,65 @@ def make_dataset(
         ds = ds.batch(batch_size)
 
         if batch_generator.static_shape_mode:
-            seq_dim = min(
-                int(batch_generator.crop_long_seqs),
-                batch_generator.data.max_len,
-            ) + 1
+            seq_dims = [
+                min(int(batch_generator.crop_long_seqs), dataset.max_len) + 1
+                for dataset in batch_generator.data
+            ]
         else:
-            seq_dim = None
+            seq_dims = [None] * len(batch_generator.data)
 
         batch_generator.bucket_boundaries = None
+        num_batch_outputs = len(batch_generator.data)
 
         def _batch_func(i):
-            if len(batch_generator.get_out_types()) == 2:
-                batch, ind = tf.numpy_function(
-                    batch_generator, [i], batch_generator.get_out_types()
-                )
+            results = tf.numpy_function(
+                batch_generator, [i], batch_generator.get_out_types()
+            )
+
+            if not isinstance(results, (tuple, list)):
+                results = (results,)
+
+            batches = list(results[:num_batch_outputs])
+            extras = list(results[num_batch_outputs:])
+
+            for batch, seq_dim in zip(batches, seq_dims):
                 # explicitly set output shapes or tf 2.17 will complain about
                 # unknown shapes
                 batch.set_shape(
                     tf.TensorShape([batch_size, batch_generator.num_models, seq_dim])
                 )
-                ind.set_shape(
+
+            if extras:
+                extras[0].set_shape(
                     tf.TensorShape([batch_size, batch_generator.num_models])
                 )
-                return batch, ind
-            else:
-                batch, ind, emb = tf.numpy_function(
-                    batch_generator, [i], batch_generator.get_out_types()
-                )
-                # explicitly set output shapes or tf 2.17 will complain about
-                # unknown shapes
-                batch.set_shape(
-                    tf.TensorShape([batch_size, batch_generator.num_models, seq_dim])
-                )
-                emb.set_shape(tf.TensorShape([
+            scoring_model_config = getattr(
+                batch_generator, "scoring_model_config", None
+            )
+            if len(extras) > 1 and scoring_model_config is not None:
+                extras[1].set_shape(tf.TensorShape([
                     batch_size,
                     batch_generator.num_models,
-                    seq_dim,
-                    batch_generator.scoring_model_config.dim+1
+                    seq_dims[0],
+                    int(scoring_model_config.dim)+1
                 ]))
-                ind.set_shape(
-                    tf.TensorShape([batch_size, batch_generator.num_models])
-                )
-                return batch, ind, emb
+
+            return tuple(batches + extras)
         if bucket_by_seq_length:
             def batch_func(i,j):
                 return *_batch_func(i), j
         else:
-            batch_func = _batch_func
+            def batch_func(i):
+                return _batch_func(i)
+
+        map_func = batch_func
 
 
-    ds = ds.map(batch_func,
+    ds = ds.map(map_func,
                 # no parallel processing if using an indexed dataset
-                num_parallel_calls=None if batch_generator.data.indexed else tf.data.AUTOTUNE,
+                num_parallel_calls=None if batch_generator.data[0].indexed else tf.data.AUTOTUNE,
                 deterministic=True)
-    if not batch_generator.data.indexed:
+    if not batch_generator.data[0].indexed:
         ds = ds.prefetch(2) #preprocessings and training steps in parallel
     # get rid of a warning, see https://github.com/tensorflow/tensorflow/issues/42146
     # in case of multi GPU, we want to split the data dimension accross GPUs
@@ -340,7 +425,7 @@ def compute_dataset_steps(
         Number of steps to iterate through the bucketed dataset.
     """
     # Compute number of steps for bucketed dataset
-    seq_lengths = batch_generator.data.seq_lens[indices]
+    seq_lengths = batch_generator.data[0].seq_lens[indices]
     total_steps = 0
     boundaries = list(bucket_boundaries) + [math.inf]
 
@@ -386,7 +471,7 @@ def make_default_bucket_scheme(
     Returns:
         A tuple of (bucket_boundaries, bucket_batch_sizes).
     """
-    seq_lens = batch_generator.data.seq_lens[indices]
+    seq_lens = batch_generator.data[0].seq_lens[indices]
 
     max_num_buckets = min(indices.size // 10000 + 1, 7)
     if max_num_buckets > 1:
