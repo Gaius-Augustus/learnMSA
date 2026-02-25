@@ -690,6 +690,8 @@ def test_prior_values() -> None:
     Test that the priors are correctly set in the layer.
     """
     config = ref.config.model_copy(deep=True)
+    config.match_emissions = None
+    config.insert_emissions = None
     config.use_prior_for_emission_init = True
 
     # Test model A
