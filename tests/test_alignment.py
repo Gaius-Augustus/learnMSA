@@ -234,23 +234,23 @@ def test_alignment_decoding(simple_data : SequenceDataset) -> None:
     # States: [MATCH x length, INSERT x length-1, LEFT_FLANK, UNANNOTATED_SEGMENT, RIGHT_FLANK, END]
     viterbi_seqs = np.array([
         # model 1 (FELIK - length 5)
-        [[1, 2, 3, 4, 5, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12],
-         [0, 0, 0, 1, 2, 3, 4, 5, 12, 12, 12, 12, 12, 12, 12],
-         [1, 2, 3, 4, 5, 11, 11, 11, 12, 12, 12, 12, 12, 12, 12],
-         [1, 2, 3, 4, 5, 10, 10, 10, 1, 2, 3, 4, 5, 11, 12],
-         [0, 2, 3, 4, 11, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12],
-         [1, 2, 7, 7, 7, 3, 4, 5, 12, 12, 12, 12, 12, 12, 12],
-         [1, 6, 6, 2, 3, 8, 4, 9, 9, 9, 5, 12, 12, 12, 12],
-         [1, 2, 3, 8, 8, 8, 4, 5, 11, 11, 11, 12, 12, 12, 12]],
+        [[0, 1, 2, 3, 4, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12],
+         [9, 9, 9, 0, 1, 2, 3, 4, 12, 12, 12, 12, 12, 12, 12],
+         [0, 1, 2, 3, 4, 11, 11, 11, 12, 12, 12, 12, 12, 12, 12],
+         [0, 1, 2, 3, 4, 10, 10, 10, 0, 1, 2, 3, 4, 11, 12],
+         [9, 1, 2, 3, 11, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12],
+         [0, 1, 6, 6, 6, 2, 3, 4, 12, 12, 12, 12, 12, 12, 12],
+         [0, 5, 5, 1, 2, 7, 3, 8, 8, 8, 4, 12, 12, 12, 12],
+         [0, 1, 2, 7, 7, 7, 3, 4, 11, 11, 11, 12, 12, 12, 12]],
         # model 2 (AHC - length 3)
-        [[0, 0, 0, 0, 0, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8],
-         [1, 2, 3, 7, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 8],
-         [0, 0, 0, 0, 0, 0, 1, 3, 8, 8, 8, 8, 8, 8, 8],
-         [0, 0, 0, 0, 0, 1, 2, 3, 6, 6, 6, 6, 6, 1, 8],
-         [1, 4, 4, 4, 2, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8],
-         [0, 0, 1, 2, 3, 7, 7, 7, 8, 8, 8, 8, 8, 8, 8],
-         [0, 1, 2, 6, 6, 1, 6, 1, 2, 3, 7, 8, 8, 8, 8],
-         [0, 0, 0, 1, 2, 3, 6, 6, 1, 2, 3, 8, 8, 8, 8]]
+        [[5, 5, 5, 5, 5, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8],
+         [0, 1, 2, 7, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 8],
+         [5, 5, 5, 5, 5, 5, 0, 2, 8, 8, 8, 8, 8, 8, 8],
+         [5, 5, 5, 5, 5, 0, 1, 2, 6, 6, 6, 6, 6, 0, 8],
+         [0, 3, 3, 3, 1, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8],
+         [5, 5, 0, 1, 2, 7, 7, 7, 8, 8, 8, 8, 8, 8, 8],
+         [5, 0, 1, 6, 6, 0, 6, 0, 1, 2, 7, 8, 8, 8, 8],
+         [5, 5, 5, 0, 1, 2, 6, 6, 0, 1, 2, 8, 8, 8, 8]]
     ])
 
     sequences = np.zeros(
@@ -559,7 +559,7 @@ def test_alignment_decoding(simple_data : SequenceDataset) -> None:
         # Test decode_flank for left flank
         left_flank_lens, left_flank_start = AlignmentModel.decode_flank(
             viterbi_seqs[i],
-            flank_state_id=0,
+            flank_state_id=length[i]*2-1,  # LEFT_FLANK state
             indices=np.array([0, 0, 0, 0, 0, 0, 0, 0])
         )
         np.testing.assert_equal(left_flank_lens, ref_left_flank_lens[i])
@@ -652,53 +652,27 @@ def test_viterbi(
     viterbi_seqs = np.transpose(viterbi_seqs, (2, 0, 1))
 
     ref_seqs = np.array([
-        # model 1
+        # model 1 (FELIK - length 5)
         [[0, 1, 2, 3, 4, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12],
-        [9, 9, 9, 0, 1, 2, 3, 4, 12, 12, 12, 12, 12, 12, 12],
-        [0, 1, 2, 3, 4, 11, 11, 11, 12, 12, 12, 12, 12, 12, 12],
-        [0, 1, 2, 3, 4, 10, 10, 10, 0, 1, 2, 3, 4, 11, 12],
-        [9, 1, 2, 3, 11, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12],
-        [0, 1, 6, 6, 6, 2, 3, 4, 12, 12, 12, 12, 12, 12, 12],
-        [0, 5, 5, 1, 2, 7, 3, 8, 8, 8, 4, 12, 12, 12, 12],
-        [0, 1, 2, 7, 7, 7, 3, 4, 11, 11, 11, 12, 12, 12, 12]],
-        # model 2
+         [9, 9, 9, 0, 1, 2, 3, 4, 12, 12, 12, 12, 12, 12, 12],
+         [0, 1, 2, 3, 4, 11, 11, 11, 12, 12, 12, 12, 12, 12, 12],
+         [0, 1, 2, 3, 4, 10, 10, 10, 0, 1, 2, 3, 4, 11, 12],
+         [9, 1, 2, 3, 11, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12],
+         [0, 1, 6, 6, 6, 2, 3, 4, 12, 12, 12, 12, 12, 12, 12],
+         [0, 5, 5, 1, 2, 7, 3, 8, 8, 8, 4, 12, 12, 12, 12],
+         [0, 1, 2, 7, 7, 7, 3, 4, 11, 11, 11, 12, 12, 12, 12]],
+        # model 2 (AHC - length 3)
         [[5, 5, 5, 5, 5, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8],
-        [0, 1, 2, 7, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 8],
-        [5, 5, 5, 5, 5, 5, 0, 2, 8, 8, 8, 8, 8, 8, 8],
-        [5, 5, 5, 5, 5, 0, 1, 2, 6, 6, 6, 6, 6, 0, 8],
-        [0, 3, 3, 3, 1, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8],
-        [5, 5, 0, 1, 2, 7, 7, 7, 8, 8, 8, 8, 8, 8, 8],
-        [5, 0, 1, 6, 6, 0, 6, 0, 1, 2, 7, 8, 8, 8, 8],
-        [5, 5, 5, 0, 1, 2, 6, 6, 0, 1, 2, 8, 8, 8, 8]]
+         [0, 1, 2, 7, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 8],
+         [5, 5, 5, 5, 5, 5, 0, 2, 8, 8, 8, 8, 8, 8, 8],
+         [5, 5, 5, 5, 5, 0, 1, 2, 6, 6, 6, 6, 6, 0, 8],
+         [0, 3, 3, 3, 1, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8],
+         [5, 5, 0, 1, 2, 7, 7, 7, 8, 8, 8, 8, 8, 8, 8],
+         [5, 0, 1, 6, 6, 0, 6, 0, 1, 2, 7, 8, 8, 8, 8],
+         [5, 5, 5, 0, 1, 2, 6, 6, 0, 1, 2, 8, 8, 8, 8]]
     ])
 
     np.testing.assert_equal(viterbi_seqs, ref_seqs)
-
-    # Translate from current indexing to legacy indexing for decode functions
-    # legacy: 0: left flank, 1..C: match states, C+1..2C-1: insert states,
-    # 2C: right flank, 2C+1: unannotated, 2C+2: terminal state
-    # current: 0..C-1: match states, C..2C-2: insert states,
-    # 2C-1: left flank, 2C: right flank, 2C+1: unannotated, 2C+2: terminal state
-    viterbi_seqs_legacy = np.copy(viterbi_seqs)
-    for i, C in enumerate(length):
-        states = viterbi_seqs[i]
-        translated_states = np.copy(states)
-
-        # Left flank: 2C-1 → 0
-        translated_states[states == 2*C-1] = 0
-
-        # Match and insert states: [0, 2C-1) → [1, 2C)
-        mask = states < 2*C-1
-        translated_states[mask] = states[mask] + 1
-
-        # Right flank: 2C → 2C (stays the same)
-        # Unannotated: 2C+1 → 2C+1 (stays the same)
-        # Terminal: 2C+2 → 2C+2 (stays the same)
-
-        viterbi_seqs_legacy[i] = translated_states
-
-    # Use legacy format for all decode operations
-    viterbi_seqs = viterbi_seqs_legacy
 
     indices = np.array([
         [0, 3, 0, 0, 1, 0, 0, 0],
@@ -925,7 +899,7 @@ def test_viterbi(
         # test left flank insertions isolated
         left_flank_lens, left_flank_start = AlignmentModel.decode_flank(
             viterbi_seqs[i],
-            flank_state_id=0,
+            flank_state_id=2*L-1,
             indices=np.array([0, 0, 0, 0, 0, 0, 0, 0]),
         )
         np.testing.assert_equal(

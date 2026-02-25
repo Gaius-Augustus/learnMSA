@@ -78,7 +78,6 @@ class EmbeddingEmitter(TFMVNormalEmitter):
             max_len_subset = max(self.lengths[h] for h in self.head_subset)
             matrix = matrix[:, :max_len_subset*2, :]
 
-        # TODO: to be tested..
         if not self.trainable_insertions:
             # Create mask for match states (True) vs insertion states (False)
             # self.lengths gives the number of match states per head

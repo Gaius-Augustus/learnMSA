@@ -1,4 +1,5 @@
 import math
+import time
 from typing import Any, Literal, Sequence, override
 
 import numpy as np
@@ -474,6 +475,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         """
         if indices is None:
             indices = np.arange(data.num_seq)
+        start_time = time.perf_counter()
 
         # restrict to specified models
         # TODO: revert head_subset later?
@@ -519,7 +521,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         )
 
         self._print_predict_header(
-            indices, bucket_boundaries, bucket_batch_sizes
+            indices, bucket_boundaries, bucket_batch_sizes, steps
         )
 
         assert steps > 0,\
@@ -551,6 +553,11 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
 
             accumulated_posteriors /= len(indices)
             self.context.batch_gen.crop_long_seqs = old_crop_long_seqs
+            self._print_predict_timing(
+                elapsed_seconds=time.perf_counter() - start_time,
+                num_sequences=len(indices),
+                steps=steps,
+            )
             return accumulated_posteriors
 
         # Run a custom prediction loop with batching to collect all predictions
@@ -625,6 +632,12 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             for i,j in enumerate(_models):
                 L = self.phmm_layer.lengths[j]
                 decoded_array[:,:,i][decoded_array[:,:,i] == -1] = 2*L + 2
+
+        self._print_predict_timing(
+            elapsed_seconds=time.perf_counter() - start_time,
+            num_sequences=len(indices),
+            steps=steps,
+        )
 
         return decoded_array
 
@@ -711,10 +724,6 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             batch_size_impl_factor=0.5,
         )
 
-        self._print_predict_header(
-            indices, bucket_boundaries, bucket_batch_sizes
-        )
-
         ds, steps = make_dataset(
             indices,
             self.context.batch_gen,
@@ -722,6 +731,10 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             bucket_by_seq_length=True,
             bucket_boundaries=bucket_boundaries,
             bucket_batch_sizes=bucket_batch_sizes,
+        )
+
+        self._print_predict_header(
+            indices, bucket_boundaries, bucket_batch_sizes, steps
         )
 
         # Compile to acccount for any changes in head_subset or call mode
@@ -1186,14 +1199,34 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
     def _print_predict_header(
         self, indices: np.ndarray,
         bucket_boundaries: Sequence[int | float],
-        bucket_batch_sizes: Sequence[int]
+        bucket_batch_sizes: Sequence[int],
+        steps: int,
     ) -> None:
         if self.context.config.input_output.verbose:
             print(
-                "Predicting on", indices.shape[0], "sequences with bucket " \
+                "Predicting on", indices.shape[0], "sequences with bucket ",
                 "boundaries", bucket_boundaries, "and batch sizes",
-                bucket_batch_sizes[:-1]
+                bucket_batch_sizes[:-1], "for", steps, "steps"
             )
+
+    def _print_predict_timing(
+        self,
+        elapsed_seconds: float,
+        num_sequences: int,
+        steps: int,
+    ) -> None:
+        if self.context.config.input_output.verbose:
+            if elapsed_seconds > 0.0:
+                seq_per_s = num_sequences / elapsed_seconds
+                print(
+                    f"Prediction finished in {elapsed_seconds:.3f}s "
+                    f"({seq_per_s:.2f} seq/s, {steps} steps)"
+                )
+            else:
+                print(
+                    f"Prediction finished in {elapsed_seconds:.3f}s "
+                    f"({steps} steps)"
+                )
 
     def _check_training_complete(
         self,

@@ -109,7 +109,12 @@ class PHMMLayer(tf.keras.Layer):
                 "Cannot use prior for emission initialization if no "
                 "emission prior is set."
             )
-            values = self._override_emissions_with_prior(values, emission_prior)
+            values = self._override_emissions_with_prior(
+                values,
+                emission_prior,
+                override_matches=config.match_emissions is None,
+                override_insertions=config.insert_emissions is None,
+            )
 
         # Create the HMM, with 2*L+2 states per head
         self.hmm = TFHMM(states=self.states, heads=self.heads)
@@ -233,13 +238,17 @@ class PHMMLayer(tf.keras.Layer):
     @staticmethod
     def _override_emissions_with_prior(
         values: Sequence[PHMMValueSet],
-        prior
+        prior,
+        override_matches: bool,
+        override_insertions: bool,
     ) -> list[PHMMValueSet]:
         """Override emission values in value sets with prior distribution.
 
         Args:
             values: The original value sets.
             prior: The Dirichlet prior for emissions.
+            override_matches: Whether to override match state emissions.
+            override_insertions: Whether to override insertion state emissions.
 
         Returns:
             New value sets with emissions replaced by prior distribution.
@@ -247,11 +256,21 @@ class PHMMLayer(tf.keras.Layer):
         prior_dist = prior.matrix().numpy().flatten()
         prior_dist = prior_dist / np.sum(prior_dist)
         updated_values = []
+        if not override_matches and not override_insertions:
+            return list(values)
         for value_set in values:
+            if override_matches:
+                match_emissions = np.tile(prior_dist, (value_set.L, 1))
+            else:
+                match_emissions = value_set.match_emissions
+            if override_insertions:
+                insert_emissions = prior_dist
+            else:
+                insert_emissions = value_set.insert_emissions
             updated_values.append(PHMMValueSet(
                 L=value_set.L,
-                match_emissions=np.tile(prior_dist, (value_set.L, 1)),
-                insert_emissions=prior_dist,
+                match_emissions=match_emissions,
+                insert_emissions=insert_emissions,
                 transitions=value_set.transitions,
                 start=value_set.start,
             ))

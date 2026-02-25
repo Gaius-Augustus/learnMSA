@@ -52,18 +52,17 @@ def align(
     if config.input_output.verbose:
         print(f"Configuration saved to {config_path}")
 
-    if config.input_output.verbose:
-        print(
-            f"Training of {config.training.num_model} models on file "\
-            f"{Path(config.input_output.input_file).name}"
-        )
-
     # Either load a model from file or train a new model
-    if config.input_output.load_model == Path() and \
+    if config.input_output.load_model != Path() and \
             config.training.skip_training:
         # Load a model without any training
         am = AlignmentModel.load(config.input_output.load_model, data)
     else:
+        if config.input_output.verbose:
+            print(
+                f"Training of {config.training.num_model} models on file "\
+                f"{Path(config.input_output.input_file).name}"
+            )
         # Train a new model
         config.hmm.use_noise = config.training.use_noise
         try:

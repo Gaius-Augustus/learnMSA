@@ -501,7 +501,6 @@ def model_surgery(
     config.p_end_unannot = concat_param("p_end_unannot")
     config.p_end_right = concat_param("p_end_right")
     config.p_start_left_flank = concat_param("p_start_left_flank")
-    config.use_prior_for_emission_init = False
     config.use_noise = False
 
     # validate the config again

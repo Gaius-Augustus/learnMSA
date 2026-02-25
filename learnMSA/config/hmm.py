@@ -77,8 +77,9 @@ class PHMMConfig(BaseModel):
 
     use_prior_for_emission_init: bool = True
     """Whether to use the amino acid prior distribution for initializing
-    the emissions in the profile emitter. If False, the initialization is based
-    on the provided emission parameters below.
+    the emissions in the profile emitter. If False, the background_distribution
+    is used for initialization. No effect when match_emissions or\
+    insert_emissions are provided, respectively, for the relevant states.
     """
 
     match_emissions: (Sequence[float] | Sequence[Sequence[float]] |
@@ -462,14 +463,3 @@ class PHMMConfig(BaseModel):
             "insert_emissions must be None, a sequence of floats, or a sequence "
             "of sequences of floats."
         )
-
-    @model_validator(mode='after')
-    def validate_emission_init(self):
-        """Validate that match_emissions is None when use_prior_for_emission_init is True."""
-        if self.use_prior_for_emission_init and self.match_emissions is not None:
-            raise ValueError(
-                "match_emissions must be None when use_prior_for_emission_init is True. "
-                "Either set use_prior_for_emission_init=False to use custom match_emissions, "
-                "or set match_emissions=None to use the prior-based initialization."
-            )
-        return self
