@@ -519,7 +519,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         )
 
         self._print_predict_header(
-            indices, bucket_boundaries, bucket_batch_sizes
+            indices, bucket_boundaries, bucket_batch_sizes, steps
         )
 
         assert steps > 0,\
@@ -711,10 +711,6 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             batch_size_impl_factor=0.5,
         )
 
-        self._print_predict_header(
-            indices, bucket_boundaries, bucket_batch_sizes
-        )
-
         ds, steps = make_dataset(
             indices,
             self.context.batch_gen,
@@ -722,6 +718,10 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             bucket_by_seq_length=True,
             bucket_boundaries=bucket_boundaries,
             bucket_batch_sizes=bucket_batch_sizes,
+        )
+
+        self._print_predict_header(
+            indices, bucket_boundaries, bucket_batch_sizes, steps
         )
 
         # Compile to acccount for any changes in head_subset or call mode
@@ -1186,13 +1186,14 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
     def _print_predict_header(
         self, indices: np.ndarray,
         bucket_boundaries: Sequence[int | float],
-        bucket_batch_sizes: Sequence[int]
+        bucket_batch_sizes: Sequence[int],
+        steps: int,
     ) -> None:
         if self.context.config.input_output.verbose:
             print(
-                "Predicting on", indices.shape[0], "sequences with bucket " \
+                "Predicting on", indices.shape[0], "sequences with bucket ",
                 "boundaries", bucket_boundaries, "and batch sizes",
-                bucket_batch_sizes[:-1]
+                bucket_batch_sizes[:-1], "for", steps, "steps"
             )
 
     def _check_training_complete(

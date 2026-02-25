@@ -468,8 +468,8 @@ class AlignmentModel():
         A = np.arange(n)
         while True:
             q = state_seqs_max_lik[A, indices]
-            is_match = ((q > 0) & (q < c+1))
-            is_insert = ((q >= c+1) & (q < 2*c))
+            is_match = ((q >= 0) & (q < c))
+            is_insert = ((q >= c) & (q < 2*c-1))
             is_insert_start = is_insert & ~last_insert
             is_unannotated = (q == 2*c)
             is_at_end = ((q == 2*c+1) | (q == 2*c+2))
@@ -477,12 +477,12 @@ class AlignmentModel():
                 finished = ~is_unannotated
                 break
             # track matches
-            consensus_columns[A[is_match], q[is_match]-1] = indices[is_match]
+            consensus_columns[A[is_match], q[is_match]] = indices[is_match]
             # track insertions
             is_insert_subset = A[is_insert]
             is_insert_start_subset = A[is_insert_start]
-            insertion_lens[is_insert_subset, q[is_insert]-c-1] += 1
-            insertion_start[is_insert_start_subset, q[is_insert_start]-c-1] = indices[is_insert_start]
+            insertion_lens[is_insert_subset, q[is_insert]-c] += 1
+            insertion_start[is_insert_start_subset, q[is_insert_start]-c] = indices[is_insert_start]
             indices[is_match | is_insert] += 1
             last_insert = is_insert
         return consensus_columns, insertion_lens, insertion_start, finished
@@ -534,7 +534,7 @@ class AlignmentModel():
         n = state_seqs_max_lik.shape[0]
         c = model_length #alias for code readability
         indices = np.zeros(n, np.int16) # active positions in the sequence
-        left_flank = cls.decode_flank(state_seqs_max_lik, 0, indices)
+        left_flank = cls.decode_flank(state_seqs_max_lik, 2*c-1, indices)
         core_blocks = []
         unannotated_segments = []
         while True:
@@ -666,45 +666,16 @@ class AlignmentModel():
         self.model.viterbi_mode()
         state_seqs_max_lik = self.model.predict(
             self.data, self.indices, models
-        )
-
-        # TODO: transpose needed to make legacy code work, fix later
-        state_seqs_max_lik = np.transpose(state_seqs_max_lik, (2, 0, 1)) # (num_model, num_seq, L)
-        state_seqs_max_lik[state_seqs_max_lik == -1] = 2*self.model.context.model_lengths[0]+2 # terminal state
-
-        # TODO: the legacy code assumes a different indexing of the pHMM states
-        # legacy: 0: left flank, 1..C: match states, C+1..2C-1: insert states,
-        # 2C: right flank, 2C+1: unannotated, -1: terminal state
-        # current: 0..C-1: match states, C..2C-2: insert states,
-        # 2C-1: left flank, 2C: right flank, 2C+1: unannotated, 2C+2: terminal state
-
-        # Translate from current indexing to legacy indexing
-        for model_idx in models:
-            C = self.model.context.model_lengths[model_idx]
-            states = state_seqs_max_lik[models.index(model_idx)]
-
-            # Create a copy to avoid in-place modification issues
-            translated_states = np.copy(states)
-
-            # Left flank: 2C-1 → 0
-            translated_states[states == 2*C-1] = 0
-
-            # Match and insert states: [0, 2C-1) → [1, 2C)
-            mask = states < 2*C-1
-            translated_states[mask] = states[mask] + 1
-
-            # Right flank, unannotated, terminal: >= 2C stay the same
-            # (already copied, no change needed)
-
-            state_seqs_max_lik[models.index(model_idx)] = translated_states
+        ) # (B, T, H)
 
         state_seqs_max_lik = self._clean_up_viterbi_seqs(
             state_seqs_max_lik, models
         )
-        for i,max_lik_seqs in zip(models, state_seqs_max_lik):
-            model_len = self.model.context.model_lengths[i]
-            decoded_data = AlignmentModel.decode(model_len, max_lik_seqs)
-            self.metadata[i] = AlignmentMetaData(*decoded_data)
+        for i,j in enumerate(models):
+            model_len = self.model.context.model_lengths[j]
+            s = state_seqs_max_lik[:,:,i]
+            decoded_data = AlignmentModel.decode(model_len, s)
+            self.metadata[j] = AlignmentMetaData(*decoded_data)
 
     def _clean_up_viterbi_seqs(self, state_seqs_max_lik, models):
 
