@@ -88,12 +88,16 @@ class PHMMExplicitTransitioner(TFTransitioner):
         self.initializer_start = np.hstack(start_values)
 
     @override
-    def matrix(self) -> T_TFTensor:
+    def matrix(self, transition_delta: T_TFTensor | None = None) -> T_TFTensor:
         """Override to add numerical stability to avoid numerical issues
         when folding."""
+        if transition_delta is not None:
+            kernel = self.kernel + transition_delta
+        else:
+            kernel = self.kernel
         # Add epsilon in probability space to ensure that no allowed
         # transition has vanishing probability
-        kernel = tf.math.log(tf.math.exp(self.kernel) + 1e-16)
+        kernel = tf.math.log(tf.math.exp(kernel) + 1e-16)
         dense_tensor = shared_tensor(
             indices=self.allow, # type: ignore
             values=kernel,
@@ -206,6 +210,7 @@ class PHMMTransitioner(TFTransitioner):
     @override
     def _launch(
         self,
+        transition_delta: T_TFTensor | None = None,
         mode: TransitionMode = TransitionMode.SUM,
         use_padding: bool = True, #not used
     ) -> T_TFTensor:
@@ -214,7 +219,9 @@ class PHMMTransitioner(TFTransitioner):
         # Keep the folded matrix/start dimensions at Q (no extra padding row/col).
         self.mode = mode
 
-        log_explicit_matrix = safe_log(self.explicit_transitioner.matrix())
+        log_explicit_matrix = safe_log(
+            self.explicit_transitioner.matrix(transition_delta)
+        )
         folded_transition_probs, folded_start_probs = \
             self._compute_folded_prob_vectors(log_explicit_matrix)
 
@@ -286,8 +293,10 @@ class PHMMTransitioner(TFTransitioner):
         return start_dist
 
     @override
-    def matrix(self) -> T_TFTensor:
-        log_explicit_matrix = safe_log(self.explicit_transitioner.matrix())
+    def matrix(self, transition_delta: T_TFTensor | None = None) -> T_TFTensor:
+        log_explicit_matrix = safe_log(
+            self.explicit_transitioner.matrix(transition_delta)
+        )
         folded_transition_probs, _ = self._compute_folded_prob_vectors(
             log_explicit_matrix
         )
