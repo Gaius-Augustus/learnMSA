@@ -96,7 +96,7 @@ def select_model_posterior(
 ) -> np.ndarray:
     model.posterior_mode()
     model.compile()
-    expected_state = model.predict(data, sequence_indices, reduce=True)
+    expected_state = model.predict(data, indices=sequence_indices, reduce=True)
     posterior_sums = np.array([
         np.sum(expected_state[i, :model.lengths[i]])
         for i in range(model.heads)

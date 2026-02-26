@@ -6,7 +6,6 @@ import numpy as np
 import tensorflow as tf
 
 from learnMSA.hmm.tf.layer import PHMMLayer
-from learnMSA.model import training_util
 from learnMSA.model.context import LearnMSAContext
 from learnMSA.model.tf.phmm_mixin import PHMMMixin
 from learnMSA.model.tf.training import (TerminateOnNaNWithCheckpoint,
@@ -269,7 +268,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
     @override
     def fit(
         self,
-        data: SequenceDataset,
+        data: SequenceDataset | tuple[SequenceDataset, ...],
         indices: np.ndarray | None = None,
         iteration: int = 0,
         batch_size: int | None = None,
@@ -281,7 +280,15 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         Fit the LearnMSA model on the specified sequences.
 
         Args:
-            data: SequenceDataset containing the sequences to train on
+            data: SequenceDataset or tuple of SequenceDataset(s) containing
+                the sequences to
+                train on. When multiple datasets are provided, they are
+                required to have the same order (i.e. index i in each
+                dataset corresponds to the same sequence) and the HMM must
+                use a fitting emitter for each dataset. The first dataset
+                will be used to query metadata such as the number of sequences
+                and sequence lengths, although these metrics should be
+                consistent across datasets.
             indices: Array of sequence indices to train on
             iteration: Current iteration number in the training loop
             batch_size: Number of sequences per batch
@@ -293,16 +300,18 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         Returns:
             Training history object containing loss and metrics
         """
+        data = self._pack_datasets(data, "fit")
+
         self.phmm_layer.loglik_mode()
-        self.context.batch_gen.configure(data, context=self.context)
+        self.context.batch_gen.configure(*data, context=self.context)
 
         if batch_size is None:
-            batch_size = self.get_batch_size(data)
+            batch_size = self.get_batch_size(data[0])
         # Limit the training batch size to avoid convergence issues
         batch_size = min(batch_size, 512)
 
         if indices is None:
-            indices = np.arange(data.num_seq)
+            indices = np.arange(data[0].num_seq)
 
         if epochs is None:
             epochs = self.get_num_epochs(iteration)
@@ -315,7 +324,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         self.context.batch_gen.static_shape_mode = self.use_jit_compile(s)
         self.compile(total_steps=s)
 
-        self._print_train_header(indices, batch_size, data)
+        self._print_train_header(indices, batch_size, data[0])
         dataset, _ = make_dataset(
             indices,
             self.context.batch_gen,
@@ -435,7 +444,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
 
     def predict(
         self,
-        data: SequenceDataset,
+        data: SequenceDataset | tuple[SequenceDataset, ...],
         indices: np.ndarray | None = None,
         models: list[int] | None = None,
         bucket_boundaries: Sequence[int | float] | None = None,
@@ -449,7 +458,15 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         Specify a call mode before running this method, e.g. `viterbi_mode()`.
 
         Args:
-            data: SequenceDataset containing the sequences to predict on
+            data: SequenceDataset or tuple of SequenceDataset(s) containing
+                the sequences to
+                train on. When multiple datasets are provided, they are
+                required to have the same order (i.e. index i in each
+                dataset corresponds to the same sequence) and the HMM must
+                use a fitting emitter for each dataset. The first dataset
+                will be used to query metadata such as the number of sequences
+                and sequence lengths, although these metrics should be
+                consistent across datasets.
             indices: Array of sequence indices to predict on
             models: List of model indices to use for prediction
             bucket_boundaries: Sequence length boundaries for bucketing. If None,
@@ -473,8 +490,10 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
                 with the expected number of visits per state, averaged over
                 sequences.
         """
+        data = self._pack_datasets(data, "predict")
+
         if indices is None:
-            indices = np.arange(data.num_seq)
+            indices = np.arange(data[0].num_seq)
         start_time = time.perf_counter()
 
         # restrict to specified models
@@ -490,7 +509,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
 
         # Additional setup required before running Viterbi
         # TODO: clean up later
-        self.context.batch_gen.configure(data, context=self.context)
+        self.context.batch_gen.configure(*data, context=self.context)
         # Don't use static shapes for prediction - we'll use bucketing
         self.context.batch_gen.static_shape_mode = False
         old_crop_long_seqs = self.context.batch_gen.crop_long_seqs
@@ -582,7 +601,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
 
         # Handle variable lengths - slice bucket padding and optionally pad
         # Use actual data max length (+1 for terminal), not bucket padding
-        max_len = int(max(data.seq_lens[indices]) + 1)
+        max_len = int(max(data[0].seq_lens[indices]) + 1)
 
         if self.phmm_layer.is_posterior_mode()\
                 or self.phmm_layer.is_viterbi_mode():
@@ -674,7 +693,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
 
     def evaluate(
         self,
-        data: SequenceDataset,
+        data: SequenceDataset | tuple[SequenceDataset, ...],
         indices: np.ndarray | None = None,
         models: list[int] | None = None,
     ) -> dict[str, np.ndarray]:
@@ -686,8 +705,10 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             Dictionary with keys 'loss' (scalar), 'loglik' (per-model),
             and 'prior' (per-model) when in evaluation mode.
         """
+        data = self._pack_datasets(data, "evaluate")
+
         if indices is None:
-            indices = np.arange(data.num_seq)
+            indices = np.arange(data[0].num_seq)
 
         self.loglik_mode()
 
@@ -704,7 +725,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
 
         # Additional setup required before running Viterbi
         # TODO: clean up later
-        self.context.batch_gen.configure(data, context=self.context)
+        self.context.batch_gen.configure(*data, context=self.context)
         # Don't use static shapes for prediction - we'll use bucketing
         self.context.batch_gen.static_shape_mode = False
         old_crop_long_seqs = self.context.batch_gen.crop_long_seqs
@@ -841,11 +862,22 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         else:
             indices = np.arange(n)
         if reduce:
-            return self.evaluate(data, indices, models)["loglik"]
+            return self.evaluate(data, indices=indices, models=models)["loglik"]
         else:
             self.loglik_mode()
             self.compile(total_steps=len(indices))
-            return self.predict(data, indices, models)
+            return self.predict(data, indices=indices, models=models)
+
+    def _pack_datasets(
+        self,
+        data: SequenceDataset | tuple[SequenceDataset, ...],
+        method_name: str,
+    ) -> tuple[SequenceDataset, ...]:
+        if isinstance(data, SequenceDataset):
+            return (data,)
+        if len(data) == 0:
+            raise ValueError(f"Model.{method_name} requires at least one dataset.")
+        return data
 
     def compute_null_model_log_probs(
         self,

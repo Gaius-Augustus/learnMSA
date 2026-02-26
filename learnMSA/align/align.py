@@ -224,7 +224,9 @@ def _fit_and_align(
         model.build(((batch_size,),))
 
         # Run training
-        model.fit(data, train_indices, i, batch_size)
+        model.fit(
+            data, indices=train_indices, iteration=i, batch_size=batch_size
+        )
 
         am = AlignmentModel(data, model, decode_indices)
 
@@ -311,7 +313,13 @@ def _fit_and_align_with_logo_gif(
     model.compile()
 
     # Run training
-    model.fit(data, indices, 0, batch_size, callbacks=[logo_plotter_callback])
+    model.fit(
+        data,
+        indices=indices,
+        iteration=0,
+        batch_size=batch_size,
+        callbacks=[logo_plotter_callback],
+    )
 
     make_logo_gif(logo_plotter_callback.frame_dir, logo_dir / "training.gif") # type: ignore
     am = AlignmentModel(data, model, indices)

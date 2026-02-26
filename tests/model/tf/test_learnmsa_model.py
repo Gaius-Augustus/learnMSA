@@ -555,10 +555,10 @@ def test_predict_posterior_reduce(context_amino_acid: LearnMSAContext) -> None:
     indices = np.arange(len(sequences))
 
     # Get reduced predictions
-    reduced = model.predict(data, indices, reduce=True)
+    reduced = model.predict(data, indices=indices, reduce=True)
 
     # Get full predictions and manually reduce
-    full = model.predict(data, indices, reduce=False)  # (B, T, H, Q)
+    full = model.predict(data, indices=indices, reduce=False)  # (B, T, H, Q)
     full = full[:, :, :, :-1]  # Drop terminal state
     manual_reduced = np.sum(full, axis=1)  # Sum over time/sequence positions
     manual_reduced = np.mean(manual_reduced, axis=0)  # Average over batch

@@ -8,7 +8,6 @@ import tests.hmm.ref as ref
 from learnMSA.config.hmm import PHMMConfig, PHMMPriorConfig
 from learnMSA.hmm.tf import prior
 from learnMSA.hmm.tf.layer import PHMMLayer
-from learnMSA.align.alignment_model import AlignmentModel
 from learnMSA.util.sequence_dataset import SequenceDataset
 
 

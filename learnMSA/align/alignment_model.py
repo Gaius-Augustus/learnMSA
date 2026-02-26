@@ -665,7 +665,7 @@ class AlignmentModel():
 
         self.model.viterbi_mode()
         state_seqs_max_lik = self.model.predict(
-            self.data, self.indices, models
+            self.data, indices=self.indices, models=models
         ) # (B, T, H)
 
         state_seqs_max_lik = self._clean_up_viterbi_seqs(
