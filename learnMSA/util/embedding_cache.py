@@ -1,5 +1,5 @@
 import numpy as np
-from typing import Callable
+from typing import Callable, Optional
 
 
 class EmbeddingCache:
@@ -11,23 +11,41 @@ class EmbeddingCache:
         seq_lens: An array that contains the lengths of the sequences.
         dim: The dimensionality of the embeddings returned by compute_emb_func.
         dtype: The data type of the embeddings.
+        cache: An optional pre-computed cache array of shape
+            (sum(seq_lens), dim). If provided, the cache is used directly
+            and ``fill_cache`` does not need to be called. The dtype of the
+            provided array is preserved.
     """
     def __init__(
         self,
         seq_lens: np.ndarray,
         dim: int,
         dtype: type[np.floating] = np.float16,
+        cache: Optional[np.ndarray] = None,
     ) -> None:
         self.seq_lens = seq_lens
         self.dim = dim
         self.cum_lens = np.cumsum(seq_lens)
-        self.cache = np.zeros((self.cum_lens[-1], dim), dtype=dtype)
-        self.cum_lens -= seq_lens #make exclusive cumsum
-        self._filled = False
+        if cache is not None:
+            expected_rows = self.cum_lens[-1]
+            if cache.shape != (expected_rows, dim):
+                raise ValueError(
+                    f"Expected cache of shape ({expected_rows}, {dim}), "
+                    f"got {cache.shape}"
+                )
+            self.cache = cache
+            self._filled = True
+        else:
+            self.cache = np.zeros((self.cum_lens[-1], dim), dtype=dtype)
+            self._filled = False
+        self.cum_lens -= seq_lens  # make exclusive cumsum
 
 
     def fill_cache(
-        self, compute_emb_func: Callable, batch_size_callback: Callable, verbose=True
+        self,
+        compute_emb_func: Callable[[np.ndarray], np.ndarray],
+        batch_size_callback: Callable[[int], int],
+        verbose=True,
     ) -> None:
         """ Fill the cache with embeddings.
         Args:
@@ -36,20 +54,21 @@ class EmbeddingCache:
             batch_size_callback: A function that returns an appropriate batch
             size for a given sequence length.
         """
-        sorted_indices = np.argsort(-self.seq_lens)
+        L = self.seq_lens
+        sorted_indices = np.argsort(-L)
         i = 0
         last = 0
-        n = self.seq_lens.size
+        n = L.size
         # double batch size if half precision for speed
         batch_size_mul = 2 if self.cache.dtype==np.float16 else 1
         while i < n:
-            batch_size = batch_size_callback(self.seq_lens[sorted_indices[i]])
+            batch_size = batch_size_callback(int(L[sorted_indices[i]]))
             batch_size *= batch_size_mul
             batch_indices = sorted_indices[i:i+batch_size]
             embeddings = compute_emb_func(batch_indices)
             for j,k in enumerate(batch_indices):
-                start = self.cum_lens[k]
-                self.cache[start:start+self.seq_lens[k]] = embeddings[j, :self.seq_lens[k]]
+                s = self.cum_lens[k]
+                self.cache[s:s+L[k]] = embeddings[j, :L[k]]
             i += batch_size
             if verbose:
                 for k in range(1,11):
@@ -73,6 +92,7 @@ class EmbeddingCache:
 
 
     def is_filled(self) -> bool:
-        """ Return True if the fill_cache method has been called and get_embedding can be used, False otherwise.
+        """ Return True if the fill_cache method has been called and\
+            get_embedding can be used, False otherwise.
         """
         return self._filled

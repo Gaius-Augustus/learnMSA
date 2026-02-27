@@ -75,8 +75,9 @@ def test_remove_gaps() -> None:
                 data.get_encoded_seq(5),
                 [SequenceDataset._default_alphabet.index(a) for a in ref.replace('-', '')]
             )
+            data.remove_gaps = False
             np.testing.assert_equal(
-                data.get_encoded_seq(5, remove_gaps=False),
+                data.get_encoded_seq(5),
                 [SequenceDataset._default_alphabet.index(a) for a in ref]
             )
 
@@ -144,10 +145,10 @@ def test_from_sequences() -> None:
 
 def test_from_alignment() -> None:
     sequences = [("seq1", "FELIX"), ("seq2", "FE-IX")]
-    with AlignedDataset(aligned_sequences=sequences) as data:
+    with AlignedDataset(sequences=sequences) as data:
         assert data.num_seq == 2
         np.testing.assert_equal(data.get_encoded_seq(0), [13, 6, 10, 9, 20])
-        np.testing.assert_equal(data.get_encoded_seq(1), [13, 6, 9, 20])
+        np.testing.assert_equal(data.get_encoded_seq(1), [13, 6, 23, 9, 20])
         np.testing.assert_equal(data.get_column_map(0), [0, 1, 2, 3, 4])
         np.testing.assert_equal(data.get_column_map(1), [0, 1, 3, 4])
 
@@ -157,7 +158,7 @@ def test_file_output_formats() -> None:
     # write an alignment to various formats
     for fmt in formats:
         with AlignedDataset(
-            aligned_sequences=[
+            sequences=[
                 ("seq1", "FELIX"),
                 ("seq2", "FE-IX"),
                 ("seq3", "-ELI-")
@@ -169,8 +170,8 @@ def test_file_output_formats() -> None:
         with AlignedDataset("example." + fmt, fmt) as data:
             assert data.num_seq == 3
             np.testing.assert_equal(data.get_encoded_seq(0), [13, 6, 10, 9, 20])
-            np.testing.assert_equal(data.get_encoded_seq(1), [13, 6, 9, 20])
-            np.testing.assert_equal(data.get_encoded_seq(2), [6, 10, 9])
+            np.testing.assert_equal(data.get_encoded_seq(1), [13, 6, 23, 9, 20])
+            np.testing.assert_equal(data.get_encoded_seq(2), [23, 6, 10, 9, 23])
             np.testing.assert_equal(data.get_column_map(0), [0, 1, 2, 3, 4])
             np.testing.assert_equal(data.get_column_map(1), [0, 1, 3, 4])
             np.testing.assert_equal(data.get_column_map(2), [1, 2, 3])
@@ -229,17 +230,23 @@ def test_get_standardized_seq() -> None:
         # Test gap removal (default)
         assert data.get_standardized_seq(0) == "FELIX"
 
+    with SequenceDataset(sequences=sequences, remove_gaps=False) as data:
         # Test keeping gaps
-        assert data.get_standardized_seq(0, remove_gaps=False) == "FE-L-IX"
+        assert data.get_standardized_seq(0) == "FE-L-IX"
 
+    with SequenceDataset(sequences=sequences, gap_symbols=".-") as data:
         # Test custom gap symbols
-        assert data.get_standardized_seq(0, gap_symbols=".-") == "FELIX"
+        assert data.get_standardized_seq(0) == "FELIX"
 
+    with SequenceDataset(
+        sequences=sequences, ignore_symbols="*", replace_with_x=""
+    ) as data:
         # Test ignore symbols
-        assert data.get_standardized_seq(1, ignore_symbols="*") == "ABCD"
+        assert data.get_standardized_seq(1) == "ABCD"
 
+    with SequenceDataset(sequences=sequences, replace_with_x="BD") as data:
         # Test replace with X
-        assert data.get_standardized_seq(1, replace_with_x="BD") == "AX*CX"
+        assert data.get_standardized_seq(1) == "AX*CX"
 
 
 def test_crop_bounds() -> None:
@@ -303,7 +310,7 @@ def test_write_method() -> None:
 def test_aligned_dataset_properties() -> None:
     """Test AlignedDataset-specific properties."""
     sequences = [("s1", "FE-LIX"), ("s2", "FEILIX")]
-    with AlignedDataset(aligned_sequences=sequences) as data:
+    with AlignedDataset(sequences=sequences) as data:
         # Test msa_matrix property
         assert data.msa_matrix.shape == (2, 6)
 
@@ -321,8 +328,8 @@ def test_sp_score() -> None:
     # Create two identical alignments
     sequences = [("s1", "FE-LIX"), ("s2", "FEILIX")]
 
-    with AlignedDataset(aligned_sequences=sequences) as data1:
-        with AlignedDataset(aligned_sequences=sequences) as data2:
+    with AlignedDataset(sequences=sequences) as data1:
+        with AlignedDataset(sequences=sequences) as data2:
             # SP score with itself should be 1.0
             sp = data1.SP_score(data2)
             assert sp == 1.0
@@ -331,8 +338,8 @@ def test_sp_score() -> None:
     seq1 = [("s1", "FE-LIX"), ("s2", "FEILIX")]
     seq2 = [("s1", "FELIX-"), ("s2", "FEILIX")]
 
-    with AlignedDataset(aligned_sequences=seq1) as data1:
-        with AlignedDataset(aligned_sequences=seq2) as data2:
+    with AlignedDataset(sequences=seq1) as data1:
+        with AlignedDataset(sequences=seq2) as data2:
             # SP score should be less than 1.0
             sp = data1.SP_score(data2)
             assert 0.0 <= sp < 1.0
@@ -422,7 +429,7 @@ def test_file_conversion_aligned(tmp_path: Path) -> None:
     aligned = [("seq1", "FELIX"), ("seq2", "FE-IX"), ("seq3", "-ELI-")]
     formats = ["fasta", "clustal", "stockholm"]
 
-    with AlignedDataset(aligned_sequences=aligned) as data:
+    with AlignedDataset(sequences=aligned) as data:
         for fmt in formats:
             out = tmp_path / f"align.{fmt}"
             data.write(str(out), fmt)
@@ -443,10 +450,13 @@ def test_custom_alphabet() -> None:
     # Create a simple dataset with custom alphabet "AB-"
     sequences = [("seq1", "AABBA"), ("seq2", "A-BBA")]
 
-    with SequenceDataset(sequences=sequences, alphabet="AB-") as data:
+    with SequenceDataset(
+        sequences=sequences, alphabet="AB-", replace_with_x=""
+    ) as data:
         assert data.alphabet == "AB-"
+        assert data.replace_with_x == ""
         # Test encoding with custom alphabet
-        encoded = data.get_encoded_seq(0, replace_with_x="")
+        encoded = data.get_encoded_seq(0)
         # A=0, B=1, -=2
         np.testing.assert_equal(encoded, [0, 0, 1, 1, 0])
 
@@ -455,13 +465,13 @@ def test_custom_alphabet() -> None:
 
     # Test with aligned dataset
     with AlignedDataset(
-        aligned_sequences=sequences, alphabet="AB-", replace_with_x=""
+        sequences=sequences, alphabet="AB-", replace_with_x=""
     ) as data:
         assert data.alphabet == "AB-"
         assert data.alignment_len == 5
         # seq2 has a gap at position 1
         np.testing.assert_equal(
-            data.get_encoded_seq(1, replace_with_x=""), [0, 1, 1, 0]
+            data.get_encoded_seq(1), [0, 2, 1, 1, 0]
         )
         np.testing.assert_equal(data.get_column_map(1), [0, 2, 3, 4])
 

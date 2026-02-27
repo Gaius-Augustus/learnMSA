@@ -189,7 +189,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
 
         # Convert to one-hot for AncProbsLayer (now requires 4D input)
         sequences_onehot = tf.one_hot(
-            sequences_transposed,
+            tf.cast(sequences_transposed, tf.int32),
             depth=self.context.config.hmm.alphabet_size+1, # including terminal
             dtype=self.phmm_layer.dtype
         )

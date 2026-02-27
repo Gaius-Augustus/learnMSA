@@ -323,6 +323,7 @@ def test_predict(context_binary: LearnMSAContext) -> None:
             ("10", "ABA"),
         ],
         alphabet="AB-",
+        replace_with_x="",
     )
 
     # Manually set an adaptive batch size function for testing
@@ -426,6 +427,7 @@ def test_evaluate(context_binary: LearnMSAContext) -> None:
     data = SequenceDataset(
         sequences=[(str(i), "ABA") for i in range(400)],
         alphabet="AB-",
+        replace_with_x="",
     )
 
     # Evaluate on the dataset

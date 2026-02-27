@@ -232,10 +232,10 @@ def make_aligned_insertions(am, best_model, method="famsa", threads=0, verbose=T
     alignments = make_slice_msas(slices, method, threads)
 
     #merge msa
-    insertions_long = [[(x[0], AlignedDataset(aligned_sequences = alignments[f"ins_{r}_{i}"] )) if x is not None else None for i,x in enumerate(repeats)] for r,repeats in enumerate(insertions_long)]
-    left_flank_long = (left_flank_long[0],  AlignedDataset(aligned_sequences = alignments["left_flank"])) if left_flank_long is not None else None
-    right_flank_long = (right_flank_long[0],  AlignedDataset(aligned_sequences = alignments["right_flank"])) if right_flank_long is not None else None
-    unannotated_long = [(x[0], AlignedDataset(aligned_sequences = alignments[f"unannotated_{r}"])) if x is not None else None for r,x in enumerate(unannotated_long)]
+    insertions_long = [[(x[0], AlignedDataset(sequences = alignments[f"ins_{r}_{i}"] )) if x is not None else None for i,x in enumerate(repeats)] for r,repeats in enumerate(insertions_long)]
+    left_flank_long = (left_flank_long[0],  AlignedDataset(sequences = alignments["left_flank"])) if left_flank_long is not None else None
+    right_flank_long = (right_flank_long[0],  AlignedDataset(sequences = alignments["right_flank"])) if right_flank_long is not None else None
+    unannotated_long = [(x[0], AlignedDataset(sequences = alignments[f"unannotated_{r}"])) if x is not None else None for r,x in enumerate(unannotated_long)]
 
     aligned_insertions = AlignedInsertions(insertions_long, left_flank_long, right_flank_long, unannotated_long)
     return aligned_insertions

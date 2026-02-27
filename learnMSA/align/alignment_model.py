@@ -202,7 +202,7 @@ class AlignmentModel():
                 (self.data.seq_ids[self.indices[i]], msa[i])
                 for i in range(len(msa))
             ]
-            data = AlignedDataset(aligned_sequences=msa)
+            data = AlignedDataset(sequences=msa)
             data.write(filepath, format)
 
     def get_batch_alignment(

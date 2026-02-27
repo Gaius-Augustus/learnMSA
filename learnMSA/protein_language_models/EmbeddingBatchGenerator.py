@@ -11,7 +11,7 @@ from learnMSA.util.sequence_dataset import SequenceDataset
 from learnMSA.model.tf.training import BatchGenerator
 from learnMSA.protein_language_models.BilinearSymmetric import \
     make_scoring_model
-from learnMSA.protein_language_models.embedding_cache import EmbeddingCache
+from learnMSA.util.embedding_cache import EmbeddingCache
 
 if TYPE_CHECKING:
     from learnMSA.model.context import LearnMSAContext

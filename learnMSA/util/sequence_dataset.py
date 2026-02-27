@@ -8,8 +8,10 @@ import numpy as np
 from Bio import Seq, SeqIO, SeqRecord
 from Bio.File import _IndexedSeqFileDict
 
+from .dataset import Dataset
 
-class SequenceDataset:
+
+class SequenceDataset(Dataset):
     """
     Manages a set of unaligned protein sequences.
 
@@ -35,6 +37,11 @@ class SequenceDataset:
         sequences: list[tuple[str, str]] | None = None,
         indexed: bool = False,
         alphabet: str | None = None,
+        remove_gaps: bool = True,
+        gap_symbols: str = "-.",
+        replace_with_x: str = "BZJ",
+        ignore_symbols: str = "",
+        validate_alphabet: bool = True,
     ) -> None:
         """
         Args:
@@ -47,9 +54,39 @@ class SequenceDataset:
                 at once.  Otherwise regular parsing is used.
             alphabet (str): The amino acid alphabet to use for encoding sequences.
                 If None, uses the default alphabet "ARNDCQEGHILKMFPSTWYVXUO-".
+            remove_gaps (bool): If True, all gap characters provided in
+                gap_symbols are removed from the sequences. If False, all gap
+                characters are replaced with the first character in gap_symbols.
+            gap_symbols (str): String containing all characters to be treated as
+                gap characters.
+            replace_with_x (str): String containing all characters to be replaced
+                with 'X' in the sequences.
+            ignore_symbols (str): String containing all characters to be
+                ignored/removed from the sequence.
+            validate_alphabet (bool): If True, raise an error if any sequence
+                contains characters not in the specified alphabet after
+                standardization.
         """
         self.alphabet = alphabet if alphabet is not None else type(self)._default_alphabet
+        self.remove_gaps = remove_gaps
+        self.gap_symbols = gap_symbols
+        self.replace_with_x = replace_with_x
+        if replace_with_x != "":
+            assert 'X' in self.alphabet,\
+                "replace_with_x is not empty but 'X' is not in the alphabet."
+        self.ignore_symbols = ignore_symbols
+        self.validate_alphabet = validate_alphabet
         self._invalid_char_pattern = re.compile(rf"[^{re.escape(self.alphabet)}]")
+
+        self.filepath = Path()
+        self.fmt = ""
+        self.indexed = False
+        self.parsing_ok = False
+        self.record_dict: dict[str, SeqRecord.SeqRecord] | _IndexedSeqFileDict = {}
+        self.seq_ids: list[str] = []
+        self.num_seq = 0
+        self.seq_lens = np.array([])
+        self.max_len = 0
 
         if sequences is None:
             # Attempt to parse the file when no sequences are given
@@ -57,43 +94,40 @@ class SequenceDataset:
                 "filepath must be provided when sequences are None"
             if isinstance(filepath, str):
                 filepath = Path(filepath)
-            self._filepath = filepath
-            self._fmt = fmt
-            self._indexed = indexed
+            self.filepath = filepath
+            self.fmt = fmt
+            self.indexed = indexed
             try:
                 if indexed:
-                    self._record_dict = SeqIO.index(filepath, fmt)
+                    self.record_dict = SeqIO.index(filepath, fmt)
                 else:
                     with open(filepath, "rt", encoding="utf-8") as handle:
-                        self._record_dict = SeqIO.to_dict(
+                        self.record_dict = SeqIO.to_dict(
                             SeqIO.parse(handle, fmt)
                         )
-                self._parsing_ok = True
+                self.parsing_ok = True
             except ValueError as err:
-                self._parsing_ok = False
+                self.parsing_ok = False
                 # hold the error and raise it when calling validate_dataset
                 self._err = err
-            if not self._parsing_ok:
+            if not self.parsing_ok:
                 return
         else:
-            self._parsing_ok = True
-            self._filepath = Path()
-            self._fmt = ""
-            self._indexed = False
-            self._record_dict = {
+            self.parsing_ok = True
+            self.record_dict = {
                 s[0] : SeqRecord.SeqRecord(Seq.Seq(s[1])
                 if isinstance(s[1], str) else s[1], id=s[0])
                 for s in sequences
             }
         # Since Python 3.7 key order is preserved in dictionaries so this list
         # is correctly ordered
-        self._seq_ids = list(self._record_dict)
-        self._num_seq = len(self._seq_ids)
-        self._seq_lens = np.array([
+        self.seq_ids = list(self.record_dict)
+        self.num_seq = len(self.seq_ids)
+        self.seq_lens = np.array([
             sum([1 for x in str(self.get_record(i).seq) if x.isalpha()])
-            for i in range(self._num_seq)
+            for i in range(self.num_seq)
         ])
-        self._max_len = np.amax(self._seq_lens) if self._seq_lens.size > 0 else 0
+        self.max_len = np.amax(self.seq_lens) if self.seq_lens.size > 0 else 0
 
     def __len__(self) -> int:
         return self.num_seq
@@ -108,60 +142,6 @@ class SequenceDataset:
         traceback: TracebackType | None
     ) -> None:
         self.close()
-
-    @property
-    def filepath(self) -> Path:
-        """Path to the sequence file."""
-        return self._filepath
-
-    @property
-    def fmt(self) -> str:
-        """Format of the sequence file."""
-        return self._fmt
-
-    @property
-    def seq_ids(self) -> list[str]:
-        """List of sequence IDs."""
-        if not hasattr(self, "_seq_ids"):
-            return []
-        return self._seq_ids
-
-    @property
-    def num_seq(self) -> int:
-        """Total number of sequences in the dataset."""
-        if not hasattr(self, "_num_seq"):
-            return 0
-        return self._num_seq
-
-    @property
-    def seq_lens(self) -> np.ndarray:
-        """Lengths of the sequences in the dataset."""
-        if not hasattr(self, "_seq_lens"):
-            return np.array([])
-        return self._seq_lens
-
-    @property
-    def max_len(self) -> int:
-        """Maximum sequence length in the dataset."""
-        if not hasattr(self, "_max_len"):
-            return 0
-        return self._max_len
-
-    @property
-    def indexed(self) -> bool:
-        """Whether the dataset is indexed."""
-        return self._indexed
-
-    @property
-    def parsing_ok(self) -> bool:
-        """Whether the dataset was parsed successfully."""
-        return self._parsing_ok
-
-    @property
-    def record_dict(self) -> dict[str, SeqRecord.SeqRecord] | _IndexedSeqFileDict:
-        """Dictionary(-like) object that takes sequence IDs as keys and maps
-        them to SeqRecord objects."""
-        return self._record_dict
 
     def close(self) -> None:
         if self.indexed and isinstance(self.record_dict, _IndexedSeqFileDict):
@@ -179,57 +159,33 @@ class SequenceDataset:
         """ Get the alphabet without gap characters. """
         return self.alphabet[:-1]
 
-    def get_standardized_seq(
-        self,
-        i: int,
-        remove_gaps: bool = True,
-        gap_symbols: str = "-.",
-        ignore_symbols: str = "",
-        replace_with_x: str = "",
-    ):
+    def get_standardized_seq(self, i: int):
         """
         Returns a standardized sequence string for sequence i containing only
         uppercase letters from the standard amino acid alphabet and either
         standard gap character '-' or no gap characters at all.
-
-        Args:
-            i (int): Index of the sequence to process.
-            remove_gaps (bool): If True, all gap characters provided in
-                gap_symbols are removed from the sequence. If False, all gap
-                characters are replaced with the first character in gap_symbols.
-            gap_symbols (str): String containing all characters to be treated
-                as gap characters.
-            ignore_symbols (str): String containing all characters to be
-                ignored/removed from the sequence.
-            replace_with_x (str): String containing all characters to be
-                replaced with 'X' in the sequence.
         """
         seq_str = str(self.get_record(i).upper().seq)
         # replace non-standard aminoacids with X
-        for aa in replace_with_x:
+        for aa in self.replace_with_x:
             seq_str = seq_str.replace(aa, 'X')
-        if remove_gaps:
-            for s in gap_symbols:
+        if self.remove_gaps:
+            for s in self.gap_symbols:
                 seq_str = seq_str.replace(s, '')
         else:
             # unify gap symbols
-            for s in gap_symbols:
-                seq_str = seq_str.replace(s, gap_symbols[0])
+            for s in self.gap_symbols:
+                seq_str = seq_str.replace(s, self.gap_symbols[0])
         # strip other symbols
-        for s in ignore_symbols:
+        for s in self.ignore_symbols:
             seq_str = seq_str.replace(s, '')
         return seq_str
 
     def get_encoded_seq(
         self,
         i: int,
-        remove_gaps: bool = True,
-        gap_symbols: str = "-.",
-        ignore_symbols: str = "",
-        replace_with_x: str = "BZJ",
         crop_start: int | None = None,
         crop_end: int | None = None,
-        validate_alphabet: bool = True,
         dtype: type[np.integer] = np.int16,
     ) -> np.ndarray:
         """
@@ -237,23 +193,16 @@ class SequenceDataset:
 
         Args:
             i (int): Index of the sequence to process.
-            remove_gaps (bool): Passed to get_standardized_seq.
-            gap_symbols (str): Passed to get_standardized_seq.
             ignore_symbols (str): Passed to get_standardized_seq.
-            replace_with_x (str): Passed to get_standardized_seq.
             crop_start (int | None): Optional inclusive crop start index.
                 If None, defaults to 0.
             crop_end (int | None): Optional exclusive crop end index.
                 If None, defaults to sequence length.
-            validate_alphabet (bool): If True, check that the sequence contains
-                only characters from the defined alphabet.
             dtype (type): Numpy integer type to use for the encoded sequence.
         """
-        seq_str = self.get_standardized_seq(
-            i, remove_gaps, gap_symbols, ignore_symbols, replace_with_x
-        )
+        seq_str = self.get_standardized_seq(i)
         # Make sure the sequences do not contain any other symbols
-        if validate_alphabet:
+        if self.validate_alphabet:
             if bool(self._invalid_char_pattern.search(seq_str)):
                 raise ValueError(
                     "Found unknown character(s) in sequence "\
@@ -293,27 +242,27 @@ class SequenceDataset:
 
         if len(self.seq_ids) == 1 and not single_seq_ok:
             raise ValueError(
-                f"File {self._filepath} contains only a single sequence."
+                f"File {self.filepath} contains only a single sequence."
             )
 
         if len(self.seq_ids) == 0:
             raise ValueError(
-                f"Could not parse any sequences from {self._filepath}."
+                f"Could not parse any sequences from {self.filepath}."
             )
 
         if np.amin(self.seq_lens) == 0:
-            raise ValueError(f"{self._filepath} contains empty sequences.")
+            raise ValueError(f"{self.filepath} contains empty sequences.")
 
         if not empty_seq_id_ok:
             for sid in self.seq_ids:
                 if sid == '':
                     raise ValueError(
-                        f"File {self._filepath} contains an empty sequence ID, "\
+                        f"File {self.filepath} contains an empty sequence ID, "\
                         "which is not allowed."
                     )
         if len(self.seq_ids) > len(set(self.seq_ids)) and not dublicate_seq_id_ok:
             raise ValueError(
-                f"File {self._filepath} contains duplicated sequence IDs. "
+                f"File {self.filepath} contains duplicated sequence IDs. "
                 "learnMSA requires unique sequence IDs."
             )
 
@@ -337,10 +286,7 @@ class SequenceDataset:
         sequences = list(self.record_dict.values())
         for s in sequences:
             if standardize_sequences:
-                seq = self.get_standardized_seq(
-                    self.seq_ids.index(s.id or ""),
-                    remove_gaps=False,
-                )
+                seq = self.get_standardized_seq(self.seq_ids.index(s.id or ""))
                 s.seq = Seq.Seq(seq)
             else:
                 s.seq = Seq.Seq(s.seq)
@@ -357,5 +303,5 @@ class SequenceDataset:
         """
         perm = np.asarray(permutation)
         perm = perm.astype(np.int64, copy=False)
-        self._seq_ids = [self._seq_ids[i] for i in perm]
-        self._seq_lens = self._seq_lens[perm]
+        self.seq_ids = [self.seq_ids[i] for i in perm]
+        self.seq_lens = self.seq_lens[perm]

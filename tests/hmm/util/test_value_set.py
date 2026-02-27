@@ -16,7 +16,7 @@ def test_msa_to_counts() -> None:
         ("seq4", "-CACA--AA----"),
         ("seq5", "--ACAAA-AA--A"),
     ]
-    with AlignedDataset(aligned_sequences=sequences) as data:
+    with AlignedDataset(sequences=sequences) as data:
         counts_local = PHMMValueSet.from_msa(
             data, match_threshold=0.5, global_factor=0.0
         )
@@ -182,7 +182,7 @@ def test_log_normalize() -> None:
         ("seq4", "-CACA--AA----"),
         ("seq5", "--ACAAA-AA--A"),
     ]
-    with AlignedDataset(aligned_sequences=sequences) as data:
+    with AlignedDataset(sequences=sequences) as data:
         probs = PHMMValueSet.from_msa(data, global_factor=1.0).add_pseudocounts(
             unannotated=1.0, insert_transition=1.0,
         ).normalize()
@@ -235,7 +235,7 @@ def test_threshold_too_high() -> None:
         ("seq4", "-CACA--AA----"),
         ("seq5", "--ACAAA-AA--A"),
     ]
-    with AlignedDataset(aligned_sequences=sequences) as data:
+    with AlignedDataset(sequences=sequences) as data:
         with pytest.raises(AssertionError):
             counts = PHMMValueSet.from_msa(data, match_threshold=1.0)
 
@@ -249,7 +249,7 @@ def test_threshold_very_low() -> None:
         ("seq4", "-CACA--AA----"),
         ("seq5", "--ACAAA-AA--A"),
     ]
-    with AlignedDataset(aligned_sequences=sequences) as data:
+    with AlignedDataset(sequences=sequences) as data:
         counts = PHMMValueSet.from_msa(data, match_threshold=0.0)
         # all columns are match states
         assert counts.matches() == len(sequences[0][1])
@@ -264,7 +264,7 @@ def test_gapless_msa_to_counts() -> None:
         ("seq4", "ACGTACGT"),
         ("seq5", "ACGTACGT"),
     ]
-    with AlignedDataset(aligned_sequences=sequences) as data:
+    with AlignedDataset(sequences=sequences) as data:
         counts = PHMMValueSet.from_msa(data)
 
     assert counts.matches() == 8

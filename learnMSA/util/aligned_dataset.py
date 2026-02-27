@@ -13,41 +13,37 @@ class AlignedDataset(SequenceDataset):
             self,
             filepath: Path | str | None = None,
             fmt: str = "fasta",
-            aligned_sequences: list[tuple[str, str]] | None = None,
+            sequences: list[tuple[str, str]] | None = None,
             indexed: bool = False,
             single_seq_ok: bool = False,
             alphabet: str | None = None,
+            gap_symbols: str = "-.",
             replace_with_x: str = "BZJ",
+            validate_alphabet: bool = True,
     ) -> None:
-        """
-        Args:
-            filepath (Path): Path to a sequence file in any supported format.
-            fmt (str): Format of the file. Can be any format supported by
-                Biopython's SeqIO.
-            aligned_sequences (list): A list of id/sequence pairs as strings.
-                If given, filepath and fmt arguments are ignored.
-            indexed (bool): If True, avoid loading the whole file into memory
-                at once.  Otherwise regular parsing is used.
-            single_seq_ok (bool): If True, allow datasets with a single
-                sequence.
-            alphabet (str): The amino acid alphabet to use for encoding sequences.
-                If None, uses the default alphabet "ARNDCQEGHILKMFPSTWYVXUO-".
-        """
-        super().__init__(filepath, fmt, aligned_sequences, indexed, alphabet)
-        self._replace_with_x = replace_with_x
+        super().__init__(
+            filepath=filepath,
+            fmt=fmt,
+            sequences=sequences,
+            indexed=indexed,
+            alphabet=alphabet,
+            remove_gaps=False,
+            gap_symbols=gap_symbols,
+            replace_with_x=replace_with_x,
+            validate_alphabet=validate_alphabet
+        )
         self._single_seq_ok = single_seq_ok
         self.validate_dataset()
 
         # Create MSA matrix
-        self._msa_matrix = np.zeros((self.num_seq, len(self.get_record(0))), dtype=np.int16)
+        self._msa_matrix = np.zeros(
+            (self.num_seq, len(self.get_record(0))), dtype=np.int16
+        )
         for i in range(self.num_seq):
             self._msa_matrix[i,:] = self.get_encoded_seq(
                 i,
-                remove_gaps=False,
-                replace_with_x=self._replace_with_x,
                 dtype=np.int16,
             )
-
         # Compute a mapping from sequence positions to MSA-column index
         # A-B--C -> 112223
         cumsum = np.cumsum(self._msa_matrix != self.alphabet.index('-'), axis=1)
@@ -75,7 +71,7 @@ class AlignedDataset(SequenceDataset):
         ])
         if np.any(record_lens != record_lens[0]):
             raise ValueError(
-                f"File {self._filepath} contains sequences of different "\
+                f"File {self.filepath} contains sequences of different "\
                 "lengths."
             )
 

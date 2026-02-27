@@ -83,7 +83,9 @@ class BatchGenerator():
             )
         # Use a different permutation of the sequences per trained model
         if self.shuffle:
-            permutated_indices = np.stack([perm[indices] for perm in self.permutations], axis=1)
+            permutated_indices = np.stack(
+                [perm[indices] for perm in self.permutations], axis=1
+            )
         else:
             permutated_indices = np.stack([indices]*self.num_models, axis=1)
 
@@ -94,7 +96,8 @@ class BatchGenerator():
             max_len = np.max(self.data[0].seq_lens[permutated_indices])
             max_len = min(max_len, self.crop_long_seqs)
 
-            # When JIT compiling with bucketing, pad to bucket boundary for consistent shapes
+            # When JIT compiling with bucketing, pad to bucket boundary for
+            # consistent shapes
             if self.bucket_boundaries is not None:
                 # Find which bucket this batch belongs to
                 for boundary in self.bucket_boundaries:
@@ -107,13 +110,10 @@ class BatchGenerator():
         batches = [
             np.zeros(
                 (indices.shape[0], self.num_models, max_len + 1),
-                dtype=np.uint8,
+                dtype=np.uint16,
             )
             for _ in self.data
         ]
-        if return_crop_boundaries:
-            start = np.zeros((indices.shape[0], self.num_models), dtype=np.int32)
-            end = np.zeros((indices.shape[0], self.num_models), dtype=np.int32)
         for batch, alphabet_size in zip(batches, self.alphabet_sizes):
             batch += alphabet_size # Initialize with terminal symbols
 
@@ -148,30 +148,13 @@ class BatchGenerator():
                 crop_starts[i, k] = crop_start
                 crop_ends[i, k] = crop_end
 
-        if return_crop_boundaries:
-            start[:, :] = crop_starts
-            end[:, :] = crop_ends
-
         for i,perm_ind in enumerate(permutated_indices):
             for k,j in enumerate(perm_ind):
-                crop_start = int(crop_starts[i, k])
-                crop_end = int(crop_ends[i, k])
-
+                crop_start = crop_starts[i, k]
+                crop_end = crop_ends[i, k]
                 for d, dataset in enumerate(self.data):
-                    if dataset.alphabet == SequenceDataset._default_alphabet:
-                        # Replace rare amino acids with X if the amino acid
-                        # alphabet if used
-                        replace_with_x = "BZJ"
-                    else:
-                        replace_with_x = ""
-                    seq = dataset.get_encoded_seq(
-                        j,
-                        crop_start=crop_start,
-                        crop_end=crop_end,
-                        replace_with_x=replace_with_x,
-                    )
-                    seq_array = np.asarray(seq, dtype=np.uint8)
-                    batches[d][i, k, :seq_array.shape[0]] = seq_array
+                    seq = dataset.get_encoded_seq(j, crop_start, crop_end)
+                    batches[d][i, k, :seq.shape[0]] = seq
 
         if len(batches) == 1:
             batch_output: tuple[np.ndarray, ...] | np.ndarray = batches[0]
@@ -181,22 +164,22 @@ class BatchGenerator():
         if self.return_only_sequences:
             if return_crop_boundaries:
                 if isinstance(batch_output, tuple):
-                    return *batch_output, start, end
-                return batch_output, start, end
+                    return *batch_output, crop_start, crop_end
+                return batch_output, crop_start, crop_end
             else:
                 return batch_output
         else:
             if return_crop_boundaries:
                 if isinstance(batch_output, tuple):
-                    return *batch_output, permutated_indices, start, end
-                return batch_output, permutated_indices, start, end
+                    return *batch_output, permutated_indices, crop_start, crop_end
+                return batch_output, permutated_indices, crop_start, crop_end
             else:
                 if isinstance(batch_output, tuple):
                     return *batch_output, permutated_indices
                 return batch_output, permutated_indices
 
     def get_out_types(self):
-        batch_types = tuple(tf.uint8 for _ in self.data)
+        batch_types = tuple(tf.uint16 for _ in self.data)
         if self.return_only_sequences:
             return batch_types
         else:
