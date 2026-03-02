@@ -872,6 +872,11 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             return (data,)
         if len(data) == 0:
             raise ValueError(f"Model.{method_name} requires at least one dataset.")
+        if not isinstance(data[0], SequenceDataset):
+            raise ValueError(
+                f"The first dataset in the tuple passed to Model.{method_name} "
+                "must be a SequenceDataset."
+            )
         return data
 
     def compute_null_model_log_probs(

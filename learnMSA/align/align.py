@@ -14,18 +14,22 @@ from learnMSA.model.select import SelectionCriterion, select_model
 from learnMSA.model.surgery import model_surgery
 from learnMSA.model.tf.model import LearnMSAModel
 from learnMSA.model.context import LearnMSAContext
-from learnMSA.util.sequence_dataset import SequenceDataset
+from learnMSA.util.sequence_dataset import Dataset, SequenceDataset
 
 np.set_printoptions(legacy='1.21')
 
 
 def align(
-    data : SequenceDataset, config : Configuration
+    data : SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]],
+    config : Configuration,
 ) -> tuple[AlignmentModel, int]:
     """ Aligns the sequences in data according to the specified config.
 
     Args:
-        data: Dataset of sequences.
+        data: SequenceDataset or tuple of Dataset(s) with the first dataset
+                being a SequenceDataset (of amino acid sequences).
+                Whether multiple datasets can be passed and how they should be
+                ordered bepends on the configuration.
         config: Configuration that can be used to cgit ontrol training and
             decoding.
 
@@ -34,16 +38,19 @@ def align(
         - An AlignmentModel object
         - The index of the best model selected based on the model criterion
     """
+    if isinstance(data, SequenceDataset):
+        data = (data,)
+
     # If the input/output config is not set, we use the dataset path
     if config.input_output.input_file == Path():
-        config.input_output.input_file = data.filepath
+        config.input_output.input_file = data[0].filepath
 
     # Create working directory if it does not exist
     work_dir = Path(config.input_output.work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
 
     # Create a context that automatically sets up data-dependent parameters
-    context = LearnMSAContext(config, data)
+    context = LearnMSAContext(config, data[0])
 
     # Write the config to file in the working directory
     config_path = work_dir / "config.json"
@@ -86,10 +93,10 @@ def align(
 
     tf.keras.backend.clear_session()
 
-    if data.num_seq > config.training.max_seq_model_select:
+    if data[0].num_seq > config.training.max_seq_model_select:
         # Sample a random subset of sequences for model selection
         ind = np.random.choice(
-            data.num_seq,
+            data[0].num_seq,
             config.training.max_seq_model_select,
             replace=False
         )
@@ -97,7 +104,7 @@ def align(
         ind = None
     best_model = select_model(
         am.model,
-        data,
+        data[0],  # TODO: select model should take all datasets into account
         SelectionCriterion(config.training.model_criterion),
         sequence_indices=ind,
         verbose=config.input_output.verbose,
@@ -151,14 +158,15 @@ def align(
     return am, best_model
 
 def _fit_and_align(
-    data: SequenceDataset,
+    data : SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]],
     context : LearnMSAContext
 ) -> AlignmentModel:
     """ Utility method that trains a LearnMSAModel and creates an
     AlignmentModel from it.
 
     Args:
-        data: The sequence dataset to align.
+        data: SequenceDataset or tuple of Dataset(s) with the first dataset
+                being a SequenceDataset (of amino acid sequences).
         config: Configuration that can be used to control training and decoding
             (see msa_hmm.config.make_default).
         model_generator: Optional callback that generates a user defined model
@@ -177,20 +185,23 @@ def _fit_and_align(
     Returns:
         An AlignmentModel object.
     """
+    if isinstance(data, SequenceDataset):
+        data = (data,)
+
     config = context.config
     if config.input_output.verbose:
-        _dataset_messages(data)
+        _dataset_messages(data[0])
 
     # Roughly estimate the full length of a protein
     full_length_estimate = training_util.get_full_length_estimate(
-        data.seq_lens,
+        data[0].seq_lens,
         config.training.surgery_quantile,
         config.training.min_surgery_seqs
     )
 
     if config.input_output.load_model:
         # Load the alignment model from file and use it as initialization
-        am = AlignmentModel.load(config.input_output.load_model, data)
+        am = AlignmentModel.load(config.input_output.load_model, data[0])
         if config.input_output.verbose:
             print("Loaded model from file", config.input_output.load_model)
 
@@ -202,17 +213,17 @@ def _fit_and_align(
     last_iteration = config.training.max_iterations == 1
     for i in range(config.training.max_iterations):
         if callable(context.batch_size):
-            batch_size = context.batch_size(data)
+            batch_size = context.batch_size(data[0])
         else:
             batch_size = context.batch_size
         # Set the batch size to something smaller than the dataset size even
         # though or low sequence numbers it would be feasible to train on all
         # data at once
         batch_size = min(
-            batch_size, training_util.get_low_seq_num_batch_size(data.num_seq)
+            batch_size, training_util.get_low_seq_num_batch_size(data[0].num_seq)
         )
         if last_iteration:
-            train_indices = np.arange(data.num_seq)
+            train_indices = np.arange(data[0].num_seq)
             decode_indices = context.subset
         else:
             train_indices = full_length_estimate
@@ -228,7 +239,7 @@ def _fit_and_align(
             data, indices=train_indices, iteration=i, batch_size=batch_size
         )
 
-        am = AlignmentModel(data, model, decode_indices)
+        am = AlignmentModel(data[0], model, decode_indices)
 
         if config.input_output.verbose:
             print("Created alignment model successfully.")
@@ -250,7 +261,7 @@ def _fit_and_align(
 
         surgery_result = model_surgery(
             am.model,
-            data,
+            data[0],  # TODO: model surgery should take all datasets into account
             surgery_del = config.training.surgery_del,
             surgery_ins = config.training.surgery_ins,
             verbose = config.input_output.verbose,
@@ -278,12 +289,12 @@ def _fit_and_align(
 
 
 def _fit_and_align_with_logo_gif(
-    data: SequenceDataset,
+    data : SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]],
     context : LearnMSAContext
 ) -> AlignmentModel:
     from learnMSA.util.visualize import LogoPlotterCallback, make_logo_gif
     config = context.config
-    indices = np.arange(data.num_seq)
+    indices = np.arange(data[0].num_seq)
     if config.visualization.logo_gif:
         logo_dir = config.visualization.logo_gif.parent
     else:
@@ -291,7 +302,7 @@ def _fit_and_align_with_logo_gif(
     if callable(context.batch_size):
         batch_size = context.batch_size(
             context.model_lengths, # type: ignore
-            min(data.max_len, config.training.crop) # type: ignore
+            min(data[0].max_len, config.training.crop) # type: ignore
         )
     else:
         batch_size = context.batch_size
