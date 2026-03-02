@@ -9,10 +9,10 @@ from learnMSA.hmm.tf.layer import PHMMLayer
 from learnMSA.model.context import LearnMSAContext
 from learnMSA.model.tf.phmm_mixin import PHMMMixin
 from learnMSA.model.tf.training import (TerminateOnNaNWithCheckpoint,
-                                        make_default_bucket_scheme,
-                                        make_dataset)
+                                        make_dataset,
+                                        make_default_bucket_scheme)
 from learnMSA.tree.tf.anc_probs_layer import AncProbsLayer
-from learnMSA.util.sequence_dataset import SequenceDataset
+from learnMSA.util.sequence_dataset import Dataset, SequenceDataset
 
 
 class LearnMSAModel(tf.keras.Model, PHMMMixin):
@@ -268,7 +268,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
     @override
     def fit(
         self,
-        data: SequenceDataset | tuple[SequenceDataset, ...],
+        data: SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]],
         indices: np.ndarray | None = None,
         iteration: int = 0,
         batch_size: int | None = None,
@@ -280,9 +280,9 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         Fit the LearnMSA model on the specified sequences.
 
         Args:
-            data: SequenceDataset or tuple of SequenceDataset(s) containing
-                the sequences to
-                train on. When multiple datasets are provided, they are
+            data: SequenceDataset or tuple of Dataset(s) with the first dataset
+                being a SequenceDataset.
+                When multiple datasets are provided, they are
                 required to have the same order (i.e. index i in each
                 dataset corresponds to the same sequence) and the HMM must
                 use a fitting emitter for each dataset. The first dataset
@@ -303,7 +303,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         data = self._pack_datasets(data, "fit")
 
         self.phmm_layer.loglik_mode()
-        self.context.batch_gen.configure(*data, context=self.context)
+        self.context.batch_gen.configure(data, context=self.context)
 
         if batch_size is None:
             batch_size = self.get_batch_size(data[0])
@@ -444,7 +444,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
 
     def predict(
         self,
-        data: SequenceDataset | tuple[SequenceDataset, ...],
+        data: SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]],
         indices: np.ndarray | None = None,
         models: list[int] | None = None,
         bucket_boundaries: Sequence[int | float] | None = None,
@@ -458,7 +458,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         Specify a call mode before running this method, e.g. `viterbi_mode()`.
 
         Args:
-            data: SequenceDataset or tuple of SequenceDataset(s) containing
+            data: Dataset or tuple of Dataset(s) containing
                 the sequences to
                 train on. When multiple datasets are provided, they are
                 required to have the same order (i.e. index i in each
@@ -693,7 +693,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
 
     def evaluate(
         self,
-        data: SequenceDataset | tuple[SequenceDataset, ...],
+        data: SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]],
         indices: np.ndarray | None = None,
         models: list[int] | None = None,
     ) -> dict[str, np.ndarray]:
@@ -870,9 +870,9 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
 
     def _pack_datasets(
         self,
-        data: SequenceDataset | tuple[SequenceDataset, ...],
+        data: SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]],
         method_name: str,
-    ) -> tuple[SequenceDataset, ...]:
+    ) -> tuple[SequenceDataset, *tuple[Dataset, ...]]:
         if isinstance(data, SequenceDataset):
             return (data,)
         if len(data) == 0:
@@ -881,7 +881,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
 
     def compute_null_model_log_probs(
         self,
-        data: SequenceDataset,
+        data: Dataset,
         background_dist: np.ndarray | None = None,
         transition_prob: float | None = None
     ) -> np.ndarray:
@@ -896,7 +896,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             frequencies and T is the terminal state.
 
             Args:
-                data: SequenceDataset containing the sequences to evaluate.
+                data: Dataset containing the sequences to evaluate.
                 background_dist: Optional background distribution over the
                     alphabet. If None, uses the prior background distribution
                     from the emitter. Must be a flat array of size alphabet_size.
@@ -1193,7 +1193,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         return cls(context, **config_copy)
 
     def _print_train_header(
-        self, indices: np.ndarray, batch_size: int, data: SequenceDataset
+        self, indices: np.ndarray, batch_size: int, data: Dataset
     ) -> None:
         if self.context.config.input_output.verbose:
             print(

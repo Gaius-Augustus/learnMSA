@@ -16,7 +16,7 @@ def test_default_batch_gen() -> None:
         config = Configuration()
         config.training.num_model = 1
         config.training.no_sequence_weights = True
-        batch_gen.configure(data, context=LearnMSAContext(config, data))
+        batch_gen.configure(data, LearnMSAContext(config, data))
         test_batches = [[0], [1], [4], [0, 2], [0, 1, 2, 3, 4], [2, 3, 4]]
         alphabet = np.array(list(SequenceDataset._default_alphabet))
         for ind in test_batches:
@@ -38,7 +38,7 @@ def test_static_shape_batch_gen() -> None:
         config.training.num_model = 1
         config.training.no_sequence_weights = True
 
-        batch_gen.configure(data, context = LearnMSAContext(config, data))
+        batch_gen.configure(data, LearnMSAContext(config, data))
 
         # Test that all batches have the same shape
         test_batches = [[0], [1], [4], [0, 2], [0, 1, 2, 3, 4], [2, 3, 4]]
@@ -78,9 +78,7 @@ def test_multi_dataset_batch_gen_returns_multiple_batches() -> None:
         config = Configuration()
         config.training.num_model = 1
         config.training.no_sequence_weights = True
-        batch_gen.configure(
-            data_a, data_b, context=LearnMSAContext(config, data_a)
-        )
+        batch_gen.configure((data_a, data_b), LearnMSAContext(config, data_a))
 
         indices = np.array([0, 2, 4])
         s_a, s_b, ind = batch_gen(indices) # type: ignore

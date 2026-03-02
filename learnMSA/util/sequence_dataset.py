@@ -229,6 +229,16 @@ class SequenceDataset(Dataset):
         return seq[start:end]
 
 
+    def empty(
+        self,
+        shape: tuple[int, ...],
+        dtype: type[np.integer] = np.int16,
+    ) -> np.ndarray:
+        empty = np.zeros(shape, dtype=dtype)
+        empty += len(self.alphabet)-1 # Initialize with terminal symbols
+        return empty
+
+
     def validate_dataset(
             self,
             single_seq_ok: bool = False,

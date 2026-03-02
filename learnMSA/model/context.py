@@ -504,7 +504,8 @@ class LearnMSAContext:
                     # We need to convert to fasta
                     cluster_file = os.path.join(
                         self.config.input_output.work_dir,
-                        os.path.basename(self.config.input_output.input_file) + ".temp_for_clustering"
+                        os.path.basename(self.config.input_output.input_file)\
+                            + ".temp_for_clustering"
                     )
                     with SequenceDataset(
                         self.config.input_output.input_file,
@@ -518,7 +519,10 @@ class LearnMSAContext:
                     return_clusters=True
                 )
             except Exception as e:
-                raise ValueError("Error while computing sequence weights.")
+                print(f"Error while computing sequence weights: {e}")
+                raise ValueError(
+                    "Error while computing sequence weights."
+                ) from e
         else:
             sequence_weights, clusters = None, None
         return sequence_weights, clusters

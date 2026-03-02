@@ -8,7 +8,7 @@ import numpy as np
 import tensorflow as tf
 
 import learnMSA.model.training_util as training_util
-from learnMSA.util.sequence_dataset import SequenceDataset
+from learnMSA.util.sequence_dataset import Dataset
 
 if TYPE_CHECKING:
     from learnMSA.model.context import LearnMSAContext
@@ -25,7 +25,8 @@ class BatchGenerator():
         shuffle=True,
         static_shape_mode=False,
     ) -> None:
-        #generate a unique permutation of the sequence indices for each model to train
+        # generate a unique permutation of the sequence indices
+        # for each model to train
         self.return_only_sequences = return_only_sequences
         self.shuffle = shuffle
         self.static_shape_mode = static_shape_mode
@@ -34,17 +35,13 @@ class BatchGenerator():
 
     def configure(
         self,
-        *data : SequenceDataset,
+        data: Dataset | tuple[Dataset, ...],
         context: "LearnMSAContext",
     ):
-        if len(data) == 0:
-            raise ValueError(
-                "BatchGenerator.configure requires at least one dataset."
-            )
-
+        if isinstance(data, Dataset):
+            data = (data,)
         self.data = data
-        self.alphabet_size = len(data[0].alphabet)-1
-        self.alphabet_sizes = [len(dataset.alphabet)-1 for dataset in data]
+        self.expected_shapes = tuple(d.empty(()).shape for d in self.data)
         self.context = context
         self.config = context.config
         self.num_models = self.config.training.num_model
@@ -108,14 +105,12 @@ class BatchGenerator():
         max_len = int(max_len)
 
         batches = [
-            np.zeros(
+            dataset.empty(
                 (indices.shape[0], self.num_models, max_len + 1),
                 dtype=np.uint16,
             )
-            for _ in self.data
+            for dataset in self.data
         ]
-        for batch, alphabet_size in zip(batches, self.alphabet_sizes):
-            batch += alphabet_size # Initialize with terminal symbols
 
         # Compute random crop bounds once per (batch item, model) and reuse
         # them for all datasets.
@@ -278,10 +273,10 @@ def make_dataset(
             extras = list(results[num_batch_outputs:-1])
             j_out = results[-1]
 
-            for batch in batches:
-                batch.set_shape(
-                    tf.TensorShape([None, batch_generator.num_models, None])
-                )
+            for batch, exp_shape in zip(batches, batch_generator.expected_shapes):
+                batch.set_shape(tf.TensorShape(
+                    [None, batch_generator.num_models, None] + list(exp_shape)
+                ))
 
             if extras:
                 extras[0].set_shape(
@@ -341,12 +336,14 @@ def make_dataset(
             batches = list(results[:num_batch_outputs])
             extras = list(results[num_batch_outputs:])
 
-            for batch, seq_dim in zip(batches, seq_dims):
+            for batch, seq_dim, exp_shape in zip(
+                batches, seq_dims, batch_generator.expected_shapes
+            ):
                 # explicitly set output shapes or tf 2.17 will complain about
                 # unknown shapes
-                batch.set_shape(
-                    tf.TensorShape([batch_size, batch_generator.num_models, seq_dim])
-                )
+                batch.set_shape(tf.TensorShape(
+                    [batch_size, batch_generator.num_models, seq_dim] + list(exp_shape)
+                ))
 
             if extras:
                 extras[0].set_shape(
@@ -374,10 +371,12 @@ def make_dataset(
         map_func = batch_func
 
 
-    ds = ds.map(map_func,
-                # no parallel processing if using an indexed dataset
-                num_parallel_calls=None if batch_generator.data[0].indexed else tf.data.AUTOTUNE,
-                deterministic=True)
+    ds = ds.map(
+        map_func,
+        # no parallel processing if using an indexed dataset
+        num_parallel_calls=None if batch_generator.data[0].indexed else tf.data.AUTOTUNE,
+        deterministic=True
+    )
     if not batch_generator.data[0].indexed:
         ds = ds.prefetch(2) #preprocessings and training steps in parallel
     # get rid of a warning, see https://github.com/tensorflow/tensorflow/issues/42146

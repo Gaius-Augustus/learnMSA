@@ -29,6 +29,10 @@ class Dataset(ABC):
     max_len: int
     """Maximum sequence length."""
 
+    indexed: bool = False
+    """Whether the dataset will be streamed from disk without fully loading it.
+    Only supported for SequenceDataset and fasta files."""
+
     parsing_ok: bool
     """Whether parsing the source was successful."""
 
@@ -49,6 +53,16 @@ class Dataset(ABC):
         dtype: type[np.integer] = np.int16,
     ) -> np.ndarray:
         """Return sequence i encoded as a numpy integer array."""
+
+    @abstractmethod
+    def empty(
+        self,
+        shape: tuple[int, ...],
+        dtype: type[np.integer] = np.int16,
+    ) -> np.ndarray:
+        """Return a tensor of "null" values of the given shape and dtype.
+        This is useful to initialize a tensor that should contain encoded
+        sequences of different lengths."""
 
     @abstractmethod
     def write(

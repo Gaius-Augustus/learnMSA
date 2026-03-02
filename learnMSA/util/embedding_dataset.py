@@ -1,12 +1,6 @@
-import math
-import re
 from pathlib import Path
-from types import TracebackType
-from typing import Self
 
 import numpy as np
-from Bio import Seq, SeqIO, SeqRecord
-from Bio.File import _IndexedSeqFileDict
 
 from learnMSA.util.embedding_cache import EmbeddingCache
 
@@ -15,7 +9,8 @@ from .dataset import Dataset
 
 class EmbeddingDataset(Dataset):
     """
-    Manages a set of embeddings.
+    Manages a set of embeddings that are stored in a file or provided via an
+    embedding cache.
 
     Attributes:
         filepath (Path): The path to the embedding file.
@@ -83,6 +78,13 @@ class EmbeddingDataset(Dataset):
         if crop_end is not None:
             embedding = embedding[:crop_end]
         return embedding.astype(dtype)
+
+    def empty(
+        self,
+        shape: tuple[int, ...],
+        dtype: type[np.integer] = np.int16,
+    ) -> np.ndarray:
+        return np.zeros(shape + (self._embedding_cache.dim,), dtype=dtype)
 
     def write(
         self,
