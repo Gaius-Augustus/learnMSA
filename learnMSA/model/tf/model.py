@@ -101,11 +101,11 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         Forward pass of the model.
 
         Args:
-            inputs: Tuple of (sequences, indices) where:
+            inputs: Tuple of (sequences, ..., indices) where:
                    - sequences: shape (batch, num_models, seq_length)
+                   - ...: additional inputs depending on configuration
+                    (e.g., for language model)
                    - indices: shape (batch, num_models)
-                   - embeddings: shape (batch, num_models, seq_length, dim)
-                        If in language model mode.
             training: Boolean indicating training mode.
 
         Returns:
@@ -113,33 +113,30 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             - Without prior: (loglik, aggregated_loglik)
             - With prior: (loglik, aggregated_loglik, prior, aux_loss)
         """
-        first_input = inputs[0]
-        if isinstance(first_input, tf.Tensor):
-            B = first_input.shape[0]
+        if len(inputs) < 2:
+            raise ValueError(
+                "inputs must contain at least sequences and indices"
+            )
+        sequences, *adds, _indices = inputs
+
+        # Keep track of the runtime batch sizes for more verbose OOM error
+        # handling
+        if isinstance(sequences, tf.Tensor):
+            B = sequences.shape[0]
             if B is None:
-                B = tf.get_static_value(tf.shape(first_input)[0])
+                B = tf.get_static_value(tf.shape(sequences)[0])
             if B is not None:
                 self.context.last_runtime_batch_size = int(B)
-        elif isinstance(first_input, np.ndarray):
-            self.context.last_runtime_batch_size = int(first_input.shape[0])
+        elif isinstance(sequences, np.ndarray):
+            self.context.last_runtime_batch_size = int(sequences.shape[0])
 
         # Pass through encoder layers
         forward_seq = self.encode_batch(inputs, training=training)
 
-        # encode_batch now returns (batch, L, num_models, features)
-        if self.context.config.language_model.use_language_model:
-            embeddings = inputs[-1]
-            # TODO: looks wrong? remove transpose?
-            embeddings = tf.transpose(embeddings, [0, 2, 1, 3])
-        else:
-            embeddings = None
-
         padding = 1 - forward_seq[:, :, :, -1:]
         forward_seq = forward_seq[:, :, :, :-1]
 
-        output = self.phmm_layer(
-            forward_seq, embeddings=embeddings, padding=padding
-        )
+        output = self.phmm_layer(forward_seq, adds=adds, padding=padding)
 
         if self.phmm_layer.is_loglik_mode():
             output = tf.squeeze(output, axis=-1)
@@ -155,22 +152,22 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         Encodes a batch of sequences with the ancestral probabilities layer.
 
         Args:
-            inputs: Tuple of (sequences, indices) where:
+            inputs: Tuple of (sequences, ..., indices) where:
                    - sequences: shape (batch, num_models, seq_length)
+                   - ...: additional inputs depending on configuration
+                    (e.g., for language model) (not used here)
                    - indices: shape (batch, num_models)
-                   - embeddings: shape (batch, num_models, seq_length, dim)
-                        If in language model mode. (not used)
             training: Boolean indicating training mode.
 
         Returns:
             A tensor with the ancestral probabilities of the input sequences
             as inputs to the pHMM layer.
         """
-        if self.context.config.language_model.use_language_model:
-            sequences, indices, embeddings = inputs
-        else:
-            sequences, indices = inputs
-            embeddings = None
+        if len(inputs) < 2:
+            raise ValueError(
+                "inputs must contain at least sequences and indices"
+            )
+        sequences, *_adds, indices = inputs
 
         # Broadcast in the number of heads if necessary
         if self.phmm_layer.head_subset is not None:
@@ -180,8 +177,6 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         if sequences.shape[1] == 1 and n > 1:
             sequences = tf.tile(sequences, [1, n, 1])
             indices = tf.tile(indices, [1, n])
-            if embeddings is not None:
-                embeddings = tf.tile(embeddings, [1, n, 1, 1])
 
         # Pass through encoder layers
         # Transpose sequences from (batch, num_models, L) to (batch, L, num_models)

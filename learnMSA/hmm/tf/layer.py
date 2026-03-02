@@ -219,12 +219,12 @@ class PHMMLayer(tf.keras.Layer):
         self,
         x: tf.Tensor,
         padding: tf.Tensor,
-        embeddings: tf.Tensor | None = None,
+        adds: tuple[tf.Tensor, ...] | None = None,
     ) -> tf.Tensor:
-        if embeddings is None:
+        if adds is None:
             return self.hmm(x, padding, mode=self._mode)
         else:
-            return self.hmm(x, embeddings, padding, mode=self._mode)
+            return self.hmm(x, *adds, padding, mode=self._mode)
 
     def prior_scores(self) -> tf.Tensor:
         """Calculates the prior scores for all parameters in the pHMM.
