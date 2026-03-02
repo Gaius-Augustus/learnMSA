@@ -96,8 +96,9 @@ def make_scoring_model(config : common.ScoringModelConfig, dropout=0.0, trainabl
         act = tf.math.sigmoid
     else:
         act = config.activation
-    emb1 = tf.keras.layers.Input(shape=(None, common.dims[config.lm_name]))
-    emb2 = tf.keras.layers.Input(shape=(None, common.dims[config.lm_name]))
+    input_dim = config.dim if config.lm_name == "zeros" else common.dims[config.lm_name]
+    emb1 = tf.keras.layers.Input(shape=(None, input_dim))
+    emb2 = tf.keras.layers.Input(shape=(None, input_dim))
     # outputs are homology probabilities 
     output = SymmetricBilinearReduction(config.dim,
                                         dropout, 

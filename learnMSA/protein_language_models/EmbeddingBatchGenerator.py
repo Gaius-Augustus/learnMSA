@@ -36,8 +36,9 @@ class EmbeddingBatchGenerator(BatchGenerator):
     @tf.function
     def _call_lm_scoring_model(self, lm_inputs, language_model):
         emb = language_model(lm_inputs)
-        reduced_emb = self.scoring_layer._reduce(emb, training=False)
-        return reduced_emb
+        if self.scoring_layer is None:
+            return emb
+        return self.scoring_layer._reduce(emb, training=False)
 
 
     def _compute_reduced_embeddings(self, indices, language_model, encoder):
@@ -64,13 +65,18 @@ class EmbeddingBatchGenerator(BatchGenerator):
             self.scoring_model_config.lm_name,
             max_len = data.max_len+2,
             trainable=False,
-            cache_dir=self.config.language_model.plm_cache_dir
+            cache_dir=self.config.language_model.plm_cache_dir,
+            embedding_dim=self.scoring_model_config.dim,
         )
-        self.scoring_model = make_scoring_model(self.scoring_model_config, dropout=0.0, trainable=False)
-        scoring_model_path = common.get_scoring_model_path(self.scoring_model_config)
-        self.scoring_model.load_weights(os.path.dirname(__file__)+f"/../protein_language_models/"+scoring_model_path)
-        self.scoring_layer = self.scoring_model.layers[-1]
-        self.scoring_layer.trainable = False #don't forget to freeze the scoring model!
+        if self.scoring_model_config.lm_name == "zeros":
+            self.scoring_model = None
+            self.scoring_layer = None
+        else:
+            self.scoring_model = make_scoring_model(self.scoring_model_config, dropout=0.0, trainable=False)
+            scoring_model_path = common.get_scoring_model_path(self.scoring_model_config)
+            self.scoring_model.load_weights(os.path.dirname(__file__)+f"/../protein_language_models/"+scoring_model_path)
+            self.scoring_layer = self.scoring_model.layers[-1]
+            self.scoring_layer.trainable = False #don't forget to freeze the scoring model!
 
         if self.cache_embeddings:
             self.cache = EmbeddingCache(self.data.seq_lens, self.scoring_model_config.dim)

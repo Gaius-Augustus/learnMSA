@@ -24,7 +24,7 @@ def dataset() -> SequenceDataset:
 )
 def test_compute_embeddings(dataset: SequenceDataset) -> None:
     config = Configuration()
-    config.language_model.language_model = "protT5"
+    config.language_model.language_model = "zeros" # for quick testing
     config.language_model.scoring_model_dim = 32
     context = LearnMSAContext(config, dataset)
     embeddings = compute_embeddings(dataset, context)

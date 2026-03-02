@@ -125,10 +125,10 @@ class LanguageModelConfig(BaseModel):
 
     @field_validator("language_model")
     def validate_language_model(cls, v: str) -> str:
-        if not v in {"protT5", "esm2", "proteinBERT"}:
+        if not v in {"protT5", "esm2", "proteinBERT", "zeros"}:
             raise ValueError(
-                "language_model must be one of 'protT5' or 'esm2' or "\
-                "'proteinBERT'."
+                "language_model must be one of 'protT5', 'esm2', "
+                "'proteinBERT', or 'zeros'."
             )
         return v
 

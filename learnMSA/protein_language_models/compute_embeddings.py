@@ -31,23 +31,27 @@ def compute_embeddings(
         max_len = data.max_len+2,
         trainable=False,
         cache_dir=context.config.language_model.plm_cache_dir,
+        embedding_dim=context.scoring_model_config.dim,
     )
 
     # Load the scoring model and its weights.
     # The scoring model is used to reduce the embedding dimension.
     # TODO: remove scoring model config and make the whole codebase use
     # the language model config instead
-    scoring_model = make_scoring_model(
-        context.scoring_model_config, dropout=0.0, trainable=False
-    )
-    scoring_model_path = get_scoring_model_path(context.scoring_model_config)
-    scoring_model.load_weights(
-        os.path.dirname(__file__)
-        + f"/../protein_language_models/"
-        + scoring_model_path
-    )
-    scoring_layer = scoring_model.layers[-1]
-    scoring_layer.trainable = False #don't forget to freeze the scoring model!
+    if context.scoring_model_config.lm_name == "zeros":
+        scoring_layer = None
+    else:
+        scoring_model = make_scoring_model(
+            context.scoring_model_config, dropout=0.0, trainable=False
+        )
+        scoring_model_path = get_scoring_model_path(context.scoring_model_config)
+        scoring_model.load_weights(
+            os.path.dirname(__file__)
+            + f"/../protein_language_models/"
+            + scoring_model_path
+        )
+        scoring_layer = scoring_model.layers[-1]
+        scoring_layer.trainable = False #don't forget to freeze the scoring model!
 
     cache = EmbeddingCache(data.seq_lens, context.scoring_model_config.dim)
     compute_emb_func = partial(
@@ -73,8 +77,9 @@ def compute_embeddings(
 @tf.function
 def _call_lm_scoring_model(lm_inputs, language_model, scoring_layer):
     emb = language_model(lm_inputs)
-    reduced_emb = scoring_layer._reduce(emb, training=False)
-    return reduced_emb
+    if scoring_layer is None:
+        return emb
+    return scoring_layer._reduce(emb, training=False)
 
 
 def _compute_reduced_embeddings(

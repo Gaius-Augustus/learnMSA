@@ -49,7 +49,13 @@ def get_prior_path(config : ScoringModelConfig, components):
 
 
 ## Constructs and loads a language model with contextual imports.
-def get_language_model(name, max_len=512, trainable=False, cache_dir=None):
+def get_language_model(
+    name,
+    max_len=512,
+    trainable=False,
+    cache_dir=None,
+    embedding_dim=None,
+):
     if name == "proteinBERT":
         import learnMSA.protein_language_models.proteinBERT as proteinBERT
         language_model, encoder = proteinBERT.get_proteinBERT_model_and_encoder(
@@ -73,6 +79,12 @@ def get_language_model(name, max_len=512, trainable=False, cache_dir=None):
             trainable=trainable, cache_dir=cache_dir
         )
         encoder = protT5.ProtT5InputEncoder(cache_dir=cache_dir)
+    elif name == "zeros":
+        import learnMSA.protein_language_models.zeros as zeros
+        if embedding_dim is None:
+            embedding_dim = 16
+        language_model = zeros.ZerosLanguageModel(embedding_dim=embedding_dim)
+        encoder = zeros.ZerosInputEncoder()
     else:
         raise ValueError(f"Language model {name} not supported.")
     return language_model, encoder
@@ -147,5 +159,6 @@ def make_cache_dir(path, model_id):
 dims = {
     "proteinBERT" : 1562,
     "esm2" : 2560,
-    "protT5" : 1024
+    "protT5" : 1024,
+    "zeros" : 16,
 }
