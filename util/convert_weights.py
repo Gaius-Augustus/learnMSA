@@ -7,7 +7,7 @@ import numpy as np
 import tensorflow as tf
 
 import learnMSA.legacy.Priors as priors
-import learnMSA.protein_language_models.Common as common
+import learnMSA.protein_language_models.common as common
 from learnMSA.hmm.tf.util import make_dirichlet_model, make_mvn_model
 from learnMSA.protein_language_models.MvnPrior import (get_mvn_layer,
                                                        make_pdf_model)

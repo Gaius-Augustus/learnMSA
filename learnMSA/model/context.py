@@ -6,7 +6,7 @@ import numpy as np
 
 import learnMSA.model.tf.training as train
 import learnMSA.model.training_util as training_util
-import learnMSA.protein_language_models.Common as Common
+import learnMSA.protein_language_models.common as common
 import learnMSA.protein_language_models.EmbeddingBatchGenerator as EmbeddingBatchGenerator
 import learnMSA.tree.tf.initializer as initializers
 from learnMSA import Configuration
@@ -48,7 +48,7 @@ class LearnMSAContext:
     num_seq: int
     model_lengths_cb: ModelLengthsCallback
     model_lengths: np.ndarray
-    scoring_model_config: Common.ScoringModelConfig #legacy, will be removed in future
+    scoring_model_config: common.ScoringModelConfig #legacy, will be removed in future
     batch_size: int | Callable[[SequenceDataset], int]
     batch_gen: train.BatchGenerator
     last_runtime_batch_size: int | None
@@ -458,17 +458,14 @@ class LearnMSAContext:
         self.config.training.trainable_insertions = False
 
 
-    def _get_scoring_model_config(self) -> Common.ScoringModelConfig:
-        if self.config.language_model.use_language_model:
-            scoring_model_config = Common.ScoringModelConfig(
-                lm_name=self.config.language_model.language_model,
-                dim=self.config.language_model.scoring_model_dim,
-                activation=self.config.language_model.scoring_model_activation,
-                suffix=self.config.language_model.scoring_model_suffix,
-                scaled=False
-            )
-        else:
-            scoring_model_config = Common.ScoringModelConfig()
+    def _get_scoring_model_config(self) -> common.ScoringModelConfig:
+        scoring_model_config = common.ScoringModelConfig(
+            lm_name=self.config.language_model.language_model,
+            dim=self.config.language_model.scoring_model_dim,
+            activation=self.config.language_model.scoring_model_activation,
+            suffix=self.config.language_model.scoring_model_suffix,
+            scaled=False
+        )
         return scoring_model_config
 
 

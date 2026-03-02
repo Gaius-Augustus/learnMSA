@@ -3,7 +3,7 @@ import tensorflow as tf
 import learnMSA.legacy.DirichletMixture as dm
 from learnMSA.util.sequence_dataset import SequenceDataset
 #from learnMSA.protein_language_models.MultivariateNormalPrior import MultivariateNormalPrior, make_pdf_model
-from learnMSA.protein_language_models.BilinearSymmetric import make_scoring_model
+from learnMSA.protein_language_models.bilinear_symmetric import make_scoring_model
 from learnMSA.legacy.Utility import deserialize
 
 

@@ -124,6 +124,16 @@ class EmbeddingDataset(Dataset):
         """
         self._permutation = np.array(permutation)
 
+    def sample_embedding_variance(self, n_samples: int = 10000) -> np.ndarray:
+        """ Approximates the variance of embedding dimensions. """
+        if not self._embedding_cache.is_filled():
+            raise ValueError(
+                "Cannot sample embedding variance before embeddings are "
+                + "computed."
+            )
+        return np.var(self._embedding_cache.cache[:n_samples], axis=0)
+
+
     def _parse_embedding_file(self, filepath: Path | str) -> None:
         """Parse an ``.emb`` file and initialize the dataset.
 

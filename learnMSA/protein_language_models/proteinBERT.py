@@ -7,7 +7,7 @@ from proteinbert.conv_and_global_attention_model import \
 from proteinbert.existing_model_loading import DEFAULT_REMOTE_MODEL_DUMP_URL
 from proteinbert.tokenization import additional_token_to_index
 
-import learnMSA.protein_language_models.Common as common
+import learnMSA.protein_language_models.common as common
 
 
 class ProteinBERTLanguageModel(common.LanguageModel):

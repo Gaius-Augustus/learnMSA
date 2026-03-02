@@ -1,8 +1,8 @@
 ## Converts file format of priors and other saved models.
 import sys
 sys.path.insert(0, "../..")
-import Common as common
-from BilinearSymmetric import make_scoring_model
+import learnMSA.protein_language_models.common as common
+from learnMSA.protein_language_models.bilinear_symmetric import make_scoring_model
 from MvnPrior import make_pdf_model
 
 

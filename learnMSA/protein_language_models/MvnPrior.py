@@ -1,7 +1,7 @@
 import os
 import tensorflow as tf
 import numpy as np
-import learnMSA.protein_language_models.Common as Common
+import learnMSA.protein_language_models.common as common
 from learnMSA.protein_language_models.MvnMixture import MvnMixture 
 from learnMSA.legacy.Utility import DefaultDiagBijector
 
@@ -10,8 +10,8 @@ class MvnPrior(tf.keras.layers.Layer):
     """ A multivariate normal prior over embeddings from a scoring model.
     """
     def __init__(self, 
-                 scoring_model_config : Common.ScoringModelConfig,
-                 num_components=Common.PRIOR_DEFAULT_COMPONENTS, 
+                 scoring_model_config : common.ScoringModelConfig,
+                 num_components=common.PRIOR_DEFAULT_COMPONENTS, 
                  **kwargs):
         super(MvnPrior, self).__init__(**kwargs)
         self.scoring_model_config = scoring_model_config
@@ -22,7 +22,7 @@ class MvnPrior(tf.keras.layers.Layer):
         if self.built:
             return
         # load the underlying scoring model
-        self.prior_path = Common.get_prior_path(self.scoring_model_config, self.num_components)
+        self.prior_path = common.get_prior_path(self.scoring_model_config, self.num_components)
         self.prior_path = os.path.dirname(__file__)+f"/../protein_language_models/"+self.prior_path
         # load a precomputed prior
         self.pdf_model = make_pdf_model(self.scoring_model_config, 
@@ -63,7 +63,7 @@ class MvnPrior(tf.keras.layers.Layer):
 
     @classmethod
     def from_config(cls, config):
-        config["scoring_model_config"] = Common.ScoringModelConfig(**config["scoring_model_config"])
+        config["scoring_model_config"] = common.ScoringModelConfig(**config["scoring_model_config"])
         return cls(**config)
 
 
@@ -102,8 +102,8 @@ class MvnPriorLayer(tf.keras.layers.Layer):
     """ Utility class that mediates between the actual prior class and the keras model used for pretraining.
     """
     def __init__(self, 
-                 scoring_model_config : Common.ScoringModelConfig,
-                 num_components=Common.PRIOR_DEFAULT_COMPONENTS, 
+                 scoring_model_config : common.ScoringModelConfig,
+                 num_components=common.PRIOR_DEFAULT_COMPONENTS, 
                  kernel_init = tf.random_normal_initializer(stddev=0.01),
                  mixture_kernel_init = tf.random_normal_initializer(stddev=0.01),
                  diag_init_var = 1., 
@@ -173,7 +173,7 @@ class MvnPriorLayer(tf.keras.layers.Layer):
 
     @classmethod
     def from_config(cls, config):
-        config["scoring_model_config"] = Common.ScoringModelConfig(**config["scoring_model_config"])
+        config["scoring_model_config"] = common.ScoringModelConfig(**config["scoring_model_config"])
         return cls(**config)
 
 
@@ -196,8 +196,8 @@ class ZeroMaskEmbeddings(tf.keras.layers.Layer):
         return {"aggregate_result": self.aggregate_result}
 
 
-def make_pdf_model(scoring_model_config : Common.ScoringModelConfig, 
-                   num_components=Common.PRIOR_DEFAULT_COMPONENTS, 
+def make_pdf_model(scoring_model_config : common.ScoringModelConfig, 
+                   num_components=common.PRIOR_DEFAULT_COMPONENTS, 
                    trainable=True, 
                    aggregate_result=False):
     """ Utility that constructs a keras model around the prior. Can be used for pretraining and easy saving/loading.
@@ -240,11 +240,11 @@ def aggregate(self, x, mask):
     # average over batch
     return tf.reduce_mean(seg_avg)
 
-def get_expected_emb(scoring_model_config : Common.ScoringModelConfig, num_prior_components):
+def get_expected_emb(scoring_model_config : common.ScoringModelConfig, num_prior_components):
     if num_prior_components == 0:
         return np.random.normal(scale=0.02, size=scoring_model_config.dim)
     else:
-        prior_weight_path = Common.get_prior_path(scoring_model_config, num_prior_components)
+        prior_weight_path = common.get_prior_path(scoring_model_config, num_prior_components)
         if prior_weight_path not in emb_cache:
             # load the prior model
             pdf_model = make_pdf_model(scoring_model_config, num_prior_components, trainable=False)

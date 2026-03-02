@@ -6,10 +6,10 @@ from typing import TYPE_CHECKING
 import numpy as np
 import tensorflow as tf
 
-import learnMSA.protein_language_models.Common as Common
+import learnMSA.protein_language_models.common as common
 from learnMSA.util.sequence_dataset import SequenceDataset
 from learnMSA.model.tf.training import BatchGenerator
-from learnMSA.protein_language_models.BilinearSymmetric import \
+from learnMSA.protein_language_models.bilinear_symmetric import \
     make_scoring_model
 from learnMSA.util.embedding_cache import EmbeddingCache
 
@@ -24,7 +24,7 @@ class EmbeddingBatchGenerator(BatchGenerator):
         on the fly.
     """
     def __init__(self,
-                 scoring_model_config : Common.ScoringModelConfig,
+                 scoring_model_config : common.ScoringModelConfig,
                  cache_embeddings=True,
                  shuffle=True):
         super().__init__(shuffle=shuffle)
@@ -60,14 +60,14 @@ class EmbeddingBatchGenerator(BatchGenerator):
 
         # load the language model and the scoring model
         # initialize the weights correctly and make sure they are not trainable
-        language_model, encoder = Common.get_language_model(
+        language_model, encoder = common.get_language_model(
             self.scoring_model_config.lm_name,
             max_len = data.max_len+2,
             trainable=False,
             cache_dir=self.config.language_model.plm_cache_dir
         )
         self.scoring_model = make_scoring_model(self.scoring_model_config, dropout=0.0, trainable=False)
-        scoring_model_path = Common.get_scoring_model_path(self.scoring_model_config)
+        scoring_model_path = common.get_scoring_model_path(self.scoring_model_config)
         self.scoring_model.load_weights(os.path.dirname(__file__)+f"/../protein_language_models/"+scoring_model_path)
         self.scoring_layer = self.scoring_model.layers[-1]
         self.scoring_layer.trainable = False #don't forget to freeze the scoring model!

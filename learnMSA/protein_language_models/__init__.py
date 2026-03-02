@@ -1,1 +1,1 @@
-import learnMSA.protein_language_models.Common as common
+import learnMSA.protein_language_models.common as common

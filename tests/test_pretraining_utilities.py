@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 import tensorflow as tf
 
-from learnMSA.protein_language_models import TrainingUtil
+from learnMSA.protein_language_models.legacy_pretraining import TrainingUtil
 
 
 @pytest.fixture

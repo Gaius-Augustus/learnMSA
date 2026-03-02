@@ -5,16 +5,16 @@ from learnMSA.util.sequence_dataset import SequenceDataset
 from learnMSA.legacy.Emitter import ProfileHMMEmitter
 import learnMSA.legacy.Initializers as Initializers
 import learnMSA.legacy.Priors as priors
-from learnMSA.protein_language_models.BilinearSymmetric import make_scoring_model
+from learnMSA.protein_language_models.bilinear_symmetric import make_scoring_model
 from learnMSA.protein_language_models.MvnMixture import MvnMixture
 from learnMSA.protein_language_models.MvnPrior import MvnPrior, InverseGammaPrior, get_expected_emb
-import learnMSA.protein_language_models.Common as Common
+import learnMSA.protein_language_models.common as common
 from learnMSA.legacy.Utility import DefaultDiagBijector, deserialize
 
 
 
 
-def make_joint_prior(scoring_model_config : Common.ScoringModelConfig, num_prior_components,
+def make_joint_prior(scoring_model_config : common.ScoringModelConfig, num_prior_components,
                     inv_gamma_alpha, inv_gamma_beta, dtype):
     prior_list = [priors.AminoAcidPrior(dtype=dtype),
                 MvnPrior(scoring_model_config, num_prior_components, dtype=dtype),
@@ -28,10 +28,10 @@ def make_joint_prior(scoring_model_config : Common.ScoringModelConfig, num_prior
 #have a single emitter that handles both AA inputs and embeddings
 class MvnEmitter(ProfileHMMEmitter):
     def __init__(self,
-                 scoring_model_config : Common.ScoringModelConfig,
+                 scoring_model_config : common.ScoringModelConfig,
                  emission_init=None,
                  insertion_init=None,
-                 num_prior_components = Common.PRIOR_DEFAULT_COMPONENTS,
+                 num_prior_components = common.PRIOR_DEFAULT_COMPONENTS,
                  diag_init_var = 1.,
                  full_covariance = False,
                  temperature = 10.,
@@ -209,7 +209,7 @@ class MvnEmitter(ProfileHMMEmitter):
         config["emission_init"] = [deserialize(e) for e in config["emission_init"]]
         config["insertion_init"] = [deserialize(i) for i in config["insertion_init"]]
         config["prior"] = deserialize(config["prior"])
-        config["scoring_model_config"] = Common.ScoringModelConfig(**config["scoring_model_config"])
+        config["scoring_model_config"] = common.ScoringModelConfig(**config["scoring_model_config"])
         lengths = config.pop("lengths")
         emitter = cls(**config)
         emitter.set_lengths(lengths)
@@ -228,10 +228,10 @@ class AminoAcidPlusMvnEmissionInitializer(Initializers.EmissionInitializer):
     """
 
     def __init__(self,
-                 scoring_model_config : Common.ScoringModelConfig,
+                 scoring_model_config : common.ScoringModelConfig,
                  dist=None,
                  aa_dist=np.log(Initializers.background_distribution),
-                 num_prior_components=Common.PRIOR_DEFAULT_COMPONENTS,
+                 num_prior_components=common.PRIOR_DEFAULT_COMPONENTS,
                  scale_kernel_init = Initializers.RandomNormalInitializer(stddev=0.02),
                  full_covariance=False):
         self.aa_dist = aa_dist
@@ -276,7 +276,7 @@ class AminoAcidPlusMvnEmissionInitializer(Initializers.EmissionInitializer):
 
     @classmethod
     def from_config(cls, config):
-        config["scoring_model_config"] = Common.ScoringModelConfig(**config["scoring_model_config"])
+        config["scoring_model_config"] = common.ScoringModelConfig(**config["scoring_model_config"])
         config["aa_dist"] = np.array(config["aa_dist"])
         config["dist"] = np.array(config["dist"])
         expected_emb = np.array(config["expected_emb"])

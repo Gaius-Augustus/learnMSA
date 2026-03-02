@@ -51,28 +51,28 @@ def get_prior_path(config : ScoringModelConfig, components):
 ## Constructs and loads a language model with contextual imports.
 def get_language_model(name, max_len=512, trainable=False, cache_dir=None):
     if name == "proteinBERT":
-        import learnMSA.protein_language_models.ProteinBERT as ProteinBERT
-        language_model, encoder = ProteinBERT.get_proteinBERT_model_and_encoder(
+        import learnMSA.protein_language_models.proteinBERT as proteinBERT
+        language_model, encoder = proteinBERT.get_proteinBERT_model_and_encoder(
             max_len = max_len+2, trainable=trainable, cache_dir=cache_dir
         )
     elif name == "esm2":
-        import learnMSA.protein_language_models.ESM2 as ESM2
-        language_model = ESM2.ESM2LanguageModel(
+        import learnMSA.protein_language_models.esm2 as esm2
+        language_model = esm2.ESM2LanguageModel(
             trainable=trainable, cache_dir=cache_dir
         )
-        encoder = ESM2.ESM2InputEncoder(cache_dir=cache_dir)
+        encoder = esm2.ESM2InputEncoder(cache_dir=cache_dir)
     elif name == "esm2s":
-        import learnMSA.protein_language_models.ESM2 as ESM2
-        language_model = ESM2.ESM2LanguageModel(
+        import learnMSA.protein_language_models.esm2 as esm2
+        language_model = esm2.ESM2LanguageModel(
             trainable=trainable, small=True, cache_dir=cache_dir
         )
-        encoder = ESM2.ESM2InputEncoder(small=True, cache_dir=cache_dir)
+        encoder = esm2.ESM2InputEncoder(small=True, cache_dir=cache_dir)
     elif name == "protT5":
-        import learnMSA.protein_language_models.ProtT5 as ProtT5
-        language_model = ProtT5.ProtT5LanguageModel(
+        import learnMSA.protein_language_models.protT5 as protT5
+        language_model = protT5.ProtT5LanguageModel(
             trainable=trainable, cache_dir=cache_dir
         )
-        encoder = ProtT5.ProtT5InputEncoder(cache_dir=cache_dir)
+        encoder = protT5.ProtT5InputEncoder(cache_dir=cache_dir)
     else:
         raise ValueError(f"Language model {name} not supported.")
     return language_model, encoder

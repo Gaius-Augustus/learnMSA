@@ -1,6 +1,6 @@
 import numpy as np
 from learnMSA.util.aligned_dataset import AlignedDataset
-from learnMSA.protein_language_models import DataPipeline
+from learnMSA.protein_language_models.legacy_pretraining import DataPipeline
 
 
 def test_column_occupancies() -> None:

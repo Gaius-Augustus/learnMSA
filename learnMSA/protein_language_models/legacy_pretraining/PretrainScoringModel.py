@@ -10,8 +10,8 @@ args = make_scoring_model_argparser().parse_args()
 if args.gpu != "default":
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
 import json
-import learnMSA.protein_language_models.Common as common 
-import learnMSA.protein_language_models.TrainingUtil as training_util
+import learnMSA.protein_language_models.common as common 
+import learnMSA.protein_language_models.legacy_pretraining.TrainingUtil as training_util
 import tensorflow as tf
 
 

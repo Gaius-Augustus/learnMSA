@@ -3,7 +3,7 @@ import numpy as np
 import sys
 sys.path.insert(1, "../..")
 from learnMSA.util.aligned_dataset import AlignedDataset
-import learnMSA.protein_language_models.Common as Common
+import learnMSA.protein_language_models.common as common
 import pandas as pd
 import tensorflow as tf
 
@@ -202,7 +202,7 @@ def _get_maxlen(seqs):
     return max(len(s) for s in seqs)
 
 
-def _tokenize(encoder : Common.InputEncoder, seq1, seq2, labels, crop_1, crop_2):
+def _tokenize(encoder : common.InputEncoder, seq1, seq2, labels, crop_1, crop_2):
     input1 = encoder(seq1, crop_1)
     input2 = encoder(seq2, crop_2)
     #merge everything in padded tensors
@@ -212,11 +212,11 @@ def _tokenize(encoder : Common.InputEncoder, seq1, seq2, labels, crop_1, crop_2)
     return (input1, input2), batched_labels
 
 
-def _tokenize_unsupervised(encoder : Common.InputEncoder, seq, crop):
+def _tokenize_unsupervised(encoder : common.InputEncoder, seq, crop):
     return encoder(seq, crop)
 
 
-def _tokenize_column_prior(encoder : Common.InputEncoder, seq, crop, match_mask_list):
+def _tokenize_column_prior(encoder : common.InputEncoder, seq, crop, match_mask_list):
     input = encoder(seq, crop)
     # match mask is a list of sequences with different length
     # combine them in a padded tensor
@@ -254,7 +254,7 @@ def prepare_unshuffled_single(clans, fasta_dict, clan_families):
     return batch_clans, batch_families, batch_seqs, num_seqs_per_family
 
 
-def make_dataset(encoder : Common.InputEncoder, clans, batch_size, max_len, fasta_dict, clan_sizes, clan_families, shuffled=True):
+def make_dataset(encoder : common.InputEncoder, clans, batch_size, max_len, fasta_dict, clan_sizes, clan_families, shuffled=True):
     if shuffled:
         def _gen_inputs():
             while True:
@@ -279,7 +279,7 @@ def make_dataset(encoder : Common.InputEncoder, clans, batch_size, max_len, fast
         return ds, sum(num_pairs_per_family)//batch_size+1
 
 
-def make_unsupervised_dataset(encoder : Common.InputEncoder, clans, batch_size, max_len, fasta_dict, clan_sizes, clan_families):
+def make_unsupervised_dataset(encoder : common.InputEncoder, clans, batch_size, max_len, fasta_dict, clan_sizes, clan_families):
     def _gen_inputs():
         while True:
             yield _tokenize_unsupervised(encoder, *_sample_unsupervised_batch(clans, batch_size, max_len, fasta_dict, clan_sizes, clan_families))
@@ -288,7 +288,7 @@ def make_unsupervised_dataset(encoder : Common.InputEncoder, clans, batch_size, 
     return ds
 
 
-def make_column_prior_dataset(encoder : Common.InputEncoder, clans, batch_size, max_len, fasta_dict, clan_sizes, clan_families, shuffled=True):
+def make_column_prior_dataset(encoder : common.InputEncoder, clans, batch_size, max_len, fasta_dict, clan_sizes, clan_families, shuffled=True):
     if shuffled:
         def _gen_inputs():
             while True:
@@ -312,7 +312,7 @@ def make_column_prior_dataset(encoder : Common.InputEncoder, clans, batch_size, 
         return ds, sum(num_seqs_per_family)//batch_size+1
 
 
-def make_homfam_dataset(encoder : Common.InputEncoder, 
+def make_homfam_dataset(encoder : common.InputEncoder, 
                         batch_size, 
                         homfam_path, 
                         ext=".ref",

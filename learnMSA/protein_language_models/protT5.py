@@ -3,7 +3,7 @@ import re
 import tensorflow as tf
 from transformers import T5Tokenizer, TFT5EncoderModel, logging
 
-import learnMSA.protein_language_models.Common as common
+import learnMSA.protein_language_models.common as common
 
 logging.set_verbosity_error()
 

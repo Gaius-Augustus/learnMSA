@@ -1,5 +1,5 @@
 import tensorflow as tf
-import learnMSA.protein_language_models.Common as common
+import learnMSA.protein_language_models.common as common
 
 
 class SymmetricBilinearReduction(tf.keras.layers.Layer):

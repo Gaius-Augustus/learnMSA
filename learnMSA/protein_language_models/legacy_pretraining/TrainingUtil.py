@@ -2,9 +2,9 @@ import os
 import sys
 import tensorflow as tf
 import numpy as np
-import learnMSA.protein_language_models.DataPipeline as data
-import learnMSA.protein_language_models.Common as common
-from learnMSA.protein_language_models.BilinearSymmetric import make_scoring_model
+import learnMSA.protein_language_models.legacy_pretraining.DataPipeline as data
+import learnMSA.protein_language_models.common as common
+from learnMSA.protein_language_models.bilinear_symmetric import make_scoring_model
 from learnMSA.protein_language_models.MvnPrior import MvnPrior, aggregate
 
 
