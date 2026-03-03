@@ -47,7 +47,7 @@ def run_main() -> None:
     )
 
     from learnMSA.align.align import align
-    from learnMSA.legacy import SequenceDataset, plot_and_save_logo
+    from learnMSA.util import SequenceDataset, EmbeddingDataset
 
     with ExitStack() as stack:
         ## Load the amino acid dataset (mandatory)
@@ -58,45 +58,41 @@ def run_main() -> None:
                 indexed=config.training.indexed_data,
             )
         )
+        # rule out issues with the seq file early on
+        data.validate_dataset()
 
         ## Load a structural dataset (optional)
-        struct_data = None
-        if config.input_output.struct_file is not None:
-            struct_data = stack.enter_context(
-                SequenceDataset(
-                    config.input_output.struct_file,
-                    "fasta",
-                    indexed=config.training.indexed_data,
-                )
-            )
+        struct_data = util.load_struct_data(config, data, stack)
 
-        # Check if the input data is valid
-        data.validate_dataset()
-        if struct_data is not None:
-            struct_data.validate_dataset()
-            if set(struct_data.seq_ids) != set(data.seq_ids):
-                raise ValueError(
-                    "The sequence IDs in the structural dataset do not match "\
-                    "those in the input dataset."
-                )
-            perm = [struct_data.seq_ids.index(seq_id) for seq_id in data.seq_ids]
-            struct_data.reorder(perm)
+        ## Load embeddings dataset (optional)
+        emb_data = util.load_emb_data(config, data, stack)
+
+        datasets = (data, )
+
+        # Check availability of data depending on config
+        if config.language_model.use_language_model:
+            assert emb_data is not None,\
+                "Embeddings must be provided when using a language model."
+            datasets += (emb_data, )
 
         # Run a training to align the sequences
-        alignment_model, best_model = align(data, config)
+        alignment_model, best_model = align(datasets, config)
 
         if config.input_output.save_model:
             alignment_model.save(config.input_output.save_model)
         if config.input_output.scores != Path():
-            alignment_model.write_scores(config.input_output.scores, best_model)
+            alignment_model.write_scores(
+                Path(config.input_output.scores), best_model
+            )
             if config.input_output.verbose:
                 print(f"Wrote scores to {config.input_output.scores}")
-        if args.logo:
-            plot_and_save_logo(
-                alignment_model,
-                best_model,
-                args.logo,
-            )
+        # TODO: fix
+        # if args.logo:
+        #     plot_and_save_logo(
+        #         alignment_model,
+        #         best_model,
+        #         args.logo,
+       #     )
         if args.dist_out:
             raise NotImplementedError(
                 "Distribution output is not implemented in this version."
@@ -145,7 +141,6 @@ def convert_file(config : Configuration) -> None:
             f"{config.input_output.output_file} in format "\
             f"{config.input_output.format}."
         )
-
 
 if __name__ == '__main__':
     run_main()

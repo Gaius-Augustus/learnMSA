@@ -62,6 +62,9 @@ class InputOutputConfig(BaseModel):
     struct_file: PathField | None = None
     """If set, path to a fasta file containing 3Di states for each sequence."""
 
+    emb_file: PathField | None = None
+    """If set, path to a file containing embeddings for each sequence."""
+
     @field_validator("format")
     @classmethod
     def validate_format(cls, v: str) -> str:

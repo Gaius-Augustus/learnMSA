@@ -2,10 +2,14 @@ import os
 import json
 import subprocess as sp
 from argparse import ArgumentParser
+from contextlib import ExitStack
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from learnMSA import Configuration
+
+if TYPE_CHECKING:
+    from learnMSA.util import EmbeddingDataset, SequenceDataset
 
 
 DEFAULT_FALLBACK_MEMORY_MB = 4096
@@ -261,4 +265,50 @@ def apply_baseline_config_defaults(
         value = defaults[action.dest]
         if value not in (None, "", []):
             action.required = False
+
+
+def load_struct_data(
+    config: Configuration, data: "SequenceDataset", stack: ExitStack
+) -> "SequenceDataset | None":
+    if config.input_output.struct_file is not None:
+        from learnMSA.util import SequenceDataset
+        struct_data = stack.enter_context(
+            SequenceDataset(
+                config.input_output.struct_file,
+                "fasta",
+                indexed=config.training.indexed_data,
+            )
+        )
+
+        # Check if the data is valid
+        struct_data.validate_dataset()
+        if set(struct_data.seq_ids) != set(data.seq_ids):
+            raise ValueError(
+                "The sequence IDs in the structural dataset do not match "\
+                "those in the input dataset."
+            )
+        struct_perm = [
+            struct_data.seq_ids.index(seq_id) for seq_id in data.seq_ids
+        ]
+        struct_data.reorder(struct_perm)
+
+        return struct_data
+    return None
+
+def load_emb_data(
+    config: Configuration, data: "SequenceDataset", stack: ExitStack
+) -> "EmbeddingDataset | None":
+    if config.input_output.emb_file is not None:
+        from learnMSA.util import EmbeddingDataset
+        emb_data = stack.enter_context(
+            EmbeddingDataset(config.input_output.emb_file)
+        )
+        # Reorder such that the embedding dataset has the same order of
+        # sequences as the amino acid dataset
+        emb_perm = [
+            emb_data.seq_ids.index(seq_id) for seq_id in data.seq_ids
+        ]
+        emb_data.reorder(emb_perm)
+        return emb_data
+    return None
 

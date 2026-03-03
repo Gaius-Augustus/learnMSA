@@ -43,6 +43,7 @@ def args_to_config(args: Namespace) -> Configuration:
         work_dir=args.work_dir,
         convert=args.convert,
         struct_file=args.struct_file,
+        emb_file=args.emb_file,
     )
 
     # Create nested configuration objects

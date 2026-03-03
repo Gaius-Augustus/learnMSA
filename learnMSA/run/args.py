@@ -118,6 +118,13 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         default=None,
         help="Path to a fasta file containing 3Di states for each sequence."
     )
+    io_group.add_argument(
+        "--emb",
+        dest="emb_file",
+        type=str,
+        default=None,
+        help="Path to a file containing embeddings for each sequence."
+    )
 
     # Training
     train_group = parser.add_argument_group("Training")

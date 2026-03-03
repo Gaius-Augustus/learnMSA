@@ -7,6 +7,7 @@ class EmbeddingCache:
         in memory by avoiding fragmentation. The embeddings are stored in a
         single chunk of memory and can be accessed by index.
         Stores embeddings in half-precision per default.
+
     Args:
         seq_lens: An array that contains the lengths of the sequences.
         dim: The dimensionality of the embeddings returned by compute_emb_func.
@@ -48,6 +49,7 @@ class EmbeddingCache:
         verbose=True,
     ) -> None:
         """ Fill the cache with embeddings.
+
         Args:
             compute_emb_func: A function that computes the embeddings for a
             batch of sequence indices of the same dtype as the cache.

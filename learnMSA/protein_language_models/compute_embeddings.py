@@ -6,6 +6,7 @@ import numpy as np
 import tensorflow as tf
 
 from learnMSA.model.context import LearnMSAContext
+from learnMSA.protein_language_models import common
 from learnMSA.protein_language_models.bilinear_symmetric import \
     make_scoring_model
 from learnMSA.protein_language_models.common import (InputEncoder,
@@ -14,37 +15,46 @@ from learnMSA.protein_language_models.common import (InputEncoder,
                                                      get_scoring_model_path)
 from learnMSA.run.util import get_avail_memory_bytes
 from learnMSA.util import EmbeddingCache, SequenceDataset
+from learnMSA.config import LanguageModelConfig
 
 
 def compute_embeddings(
     data: SequenceDataset,
-    context: LearnMSAContext,
+    language_model_config : LanguageModelConfig,
     verbose: bool=False,
 ) -> EmbeddingCache:
     """
     Computes off-the-shelf embeddings for alignments with learnMSA.
+
+    Returns an EmbeddingCache object that can turned into an
+    EmbeddingDataset object or it can be used to retrieve the
+    embeddings for each sequence in the dataset.
     """
+    # TODO: remove the ScoringModelConfig entirely; it's only here for legacy
+    # reasons
+    scoring_model_config = _get_scoring_model_config(language_model_config)
+
     # load the language model and the scoring model
     # initialize the weights correctly and make sure they are not trainable
     language_model, encoder = get_language_model(
-        context.config.language_model.language_model,
+        language_model_config.language_model,
         max_len = data.max_len+2,
         trainable=False,
-        cache_dir=context.config.language_model.plm_cache_dir,
-        embedding_dim=context.scoring_model_config.dim,
+        cache_dir=language_model_config.plm_cache_dir,
+        embedding_dim=scoring_model_config.dim,
     )
 
     # Load the scoring model and its weights.
     # The scoring model is used to reduce the embedding dimension.
     # TODO: remove scoring model config and make the whole codebase use
     # the language model config instead
-    if context.scoring_model_config.lm_name == "zeros":
+    if language_model_config.language_model == "zeros":
         scoring_layer = None
     else:
         scoring_model = make_scoring_model(
-            context.scoring_model_config, dropout=0.0, trainable=False
+            scoring_model_config, dropout=0.0, trainable=False
         )
-        scoring_model_path = get_scoring_model_path(context.scoring_model_config)
+        scoring_model_path = get_scoring_model_path(scoring_model_config)
         scoring_model.load_weights(
             os.path.dirname(__file__)
             + f"/../protein_language_models/"
@@ -53,7 +63,7 @@ def compute_embeddings(
         scoring_layer = scoring_model.layers[-1]
         scoring_layer.trainable = False #don't forget to freeze the scoring model!
 
-    cache = EmbeddingCache(data.seq_lens, context.scoring_model_config.dim)
+    cache = EmbeddingCache(data.seq_lens, language_model_config.scoring_model_dim)
     compute_emb_func = partial(
         _compute_reduced_embeddings,
         data = data,
@@ -112,3 +122,16 @@ def get_adaptive_batch_size(
     batch_size = int(np.floor(safety_margin * mem_avail / denominator))
     # cap batch size to avoid OOM from edge cases
     return min(max(batch_size, 1), 1024)
+
+
+def _get_scoring_model_config(
+    language_model_config : LanguageModelConfig
+) -> common.ScoringModelConfig:
+    scoring_model_config = common.ScoringModelConfig(
+        lm_name=language_model_config.language_model,
+        dim=language_model_config.scoring_model_dim,
+        activation=language_model_config.scoring_model_activation,
+        suffix=language_model_config.scoring_model_suffix,
+        scaled=False
+    )
+    return scoring_model_config

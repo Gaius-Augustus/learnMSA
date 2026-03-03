@@ -6,8 +6,6 @@ import numpy as np
 
 import learnMSA.model.tf.training as train
 import learnMSA.model.training_util as training_util
-import learnMSA.protein_language_models.common as common
-import learnMSA.protein_language_models.EmbeddingBatchGenerator as EmbeddingBatchGenerator
 import learnMSA.tree.tf.initializer as initializers
 from learnMSA import Configuration
 from learnMSA.hmm.tf.prior import TFPHMMTransitionPrior
@@ -48,7 +46,6 @@ class LearnMSAContext:
     num_seq: int
     model_lengths_cb: ModelLengthsCallback
     model_lengths: np.ndarray
-    scoring_model_config: common.ScoringModelConfig #legacy, will be removed in future
     batch_size: int | Callable[[SequenceDataset], int]
     batch_gen: train.BatchGenerator
     last_runtime_batch_size: int | None
@@ -99,9 +96,6 @@ class LearnMSAContext:
                     "It will be ignored."
                 )
             self.num_seq = data.num_seq
-
-        # Needed for legacy reasons, may cleanup in the future
-        self.scoring_model_config = self._get_scoring_model_config()
 
         model_len_cb = None
 
@@ -169,7 +163,7 @@ class LearnMSAContext:
             self.config.training.max_iterations = 1
             self.config.training.epochs = [0]*3
 
-        self.batch_gen = self._get_batch_generator()
+        self.batch_gen = train.BatchGenerator()
         self.last_runtime_batch_size = None
         if data is not None:
             self.sequence_weights, self.clusters = self._get_clustering(data)
@@ -329,16 +323,17 @@ class LearnMSAContext:
                 flank_start=ins_psc,
             ).normalize().log()
 
-            if self.config.language_model.use_language_model:
-                from learnMSA.protein_language_models.MvnEmitter import \
-                    AminoAcidPlusMvnEmissionInitializer
-                dim = len(input_msa.alphabet)-1 + 2 * self.scoring_model_config.dim
-                emb_kernel = AminoAcidPlusMvnEmissionInitializer(
-                    self.scoring_model_config
-                )((1,1,1,dim)).numpy().squeeze() #type: ignore
-                emb_kernel = emb_kernel[len(input_msa.alphabet)-1:]
-            else:
-                emb_kernel = None
+            # TODO
+            # if self.config.language_model.use_language_model:
+            #     from learnMSA.protein_language_models.MvnEmitter import \
+            #         AminoAcidPlusMvnEmissionInitializer
+            #     dim = len(input_msa.alphabet)-1 + 2 * self.scoring_model_config.dim
+            #     emb_kernel = AminoAcidPlusMvnEmissionInitializer(
+            #         self.scoring_model_config
+            #     )((1,1,1,dim)).numpy().squeeze() #type: ignore
+            #     emb_kernel = emb_kernel[len(input_msa.alphabet)-1:]
+            # else:
+            #     emb_kernel = None
 
             # Apply random noise only when using multiple models
             if self.config.training.num_model > 1:
@@ -456,27 +451,6 @@ class LearnMSAContext:
         self.config.training.epochs = [10, 4, 20]
         self.config.training.cluster_seq_id = 0.5
         self.config.training.trainable_insertions = False
-
-
-    def _get_scoring_model_config(self) -> common.ScoringModelConfig:
-        scoring_model_config = common.ScoringModelConfig(
-            lm_name=self.config.language_model.language_model,
-            dim=self.config.language_model.scoring_model_dim,
-            activation=self.config.language_model.scoring_model_activation,
-            suffix=self.config.language_model.scoring_model_suffix,
-            scaled=False
-        )
-        return scoring_model_config
-
-
-    def _get_batch_generator(self) -> train.BatchGenerator:
-        if self.config.language_model.use_language_model:
-            batch_gen = EmbeddingBatchGenerator.EmbeddingBatchGenerator(
-                scoring_model_config=self.scoring_model_config,
-            )
-        else:
-            batch_gen = train.BatchGenerator()
-        return batch_gen
 
 
     def _get_clustering(
