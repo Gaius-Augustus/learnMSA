@@ -141,6 +141,7 @@ class PHMMLayer(tf.keras.Layer):
 
         self.use_language_model = plm_config != None\
             and plm_config.use_language_model
+        self.plm_config = plm_config
         if self.use_language_model:
             # Create embedding value sets
             embedding_values = [

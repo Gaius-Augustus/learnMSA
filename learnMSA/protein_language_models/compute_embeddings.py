@@ -76,7 +76,11 @@ def compute_embeddings(
         get_adaptive_batch_size, impl_factor=impl_factor
     )
 
+    if verbose:
+        print("Computing embeddings. This may take a moment...")
+
     cache.fill_cache(compute_emb_func, batch_size_callback, verbose=verbose)
+
     # once we have cached the embeddings do a cleanup to erase the LM from memory
     tf.keras.backend.clear_session()
     gc.collect()

@@ -50,7 +50,7 @@ class Dataset(ABC):
         i: int,
         crop_start: int | None = None,
         crop_end: int | None = None,
-        dtype: type[np.integer] = np.int16,
+        dtype: type[np.integer | np.floating] = np.int16,
     ) -> np.ndarray:
         """Return sequence i encoded as a numpy integer array."""
 
@@ -58,7 +58,7 @@ class Dataset(ABC):
     def empty(
         self,
         shape: tuple[int, ...],
-        dtype: type[np.integer] = np.int16,
+        dtype: type[np.integer | np.floating] = np.int16,
     ) -> np.ndarray:
         """Return a tensor of "null" values of the given shape and dtype.
         This is useful to initialize a tensor that should contain encoded

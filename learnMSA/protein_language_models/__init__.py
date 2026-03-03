@@ -1,1 +1,2 @@
 import learnMSA.protein_language_models.common as common
+from learnMSA.protein_language_models.compute_embeddings import compute_embeddings

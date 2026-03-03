@@ -28,6 +28,7 @@ class EmbeddingEmitter(TFMVNormalEmitter):
         self,
         values: Sequence[PHMMEmbeddingValueSet],
         trainable_insertions: bool = True,
+        use_full_matmul: bool = True,
         **kwargs
     ) -> None:
         """
@@ -36,11 +37,17 @@ class EmbeddingEmitter(TFMVNormalEmitter):
                 one per head, with embedding parameters.
             trainable_insertions (bool): Whether insertion emissions are
                 trainable. Defaults to True.
+            use_full_matmul (bool): Whether to compute emission scores via
+                a full matrix multiplication instead of copying insertion
+                emissions.
         """
         super().__init__(**kwargs)
 
         self._lengths = np.array([value_set.L for value_set in values])
         self.trainable_insertions = trainable_insertions
+        self.use_full_matmul = use_full_matmul
+        assert len(values) > 0, "At least one value set must be provided."
+        self._embedding_dim = values[0].match_expectations.shape[1]
 
         init_values = []
         # Initialization based on provided value sets
@@ -64,10 +71,28 @@ class EmbeddingEmitter(TFMVNormalEmitter):
 
     def build(self, input_shape: T_shapelike | None = None) -> None:
         if input_shape is None:
-            # Number of amino acids
-            # (including non-standard + X, but excluding gap)
-            s = len(SequenceDataset._default_alphabet)
-            input_shape = (None, None, s-1)
+            input_shape = (None, None, self._embedding_dim)
+        self.input_dim = input_shape[-1]  # type: ignore
+
+        # Share all insertion emissions across positions
+        # We need to provide an array with indices into the emitter's kernel
+        # values, which is flat and sorted by head, states, emissions (major
+        # to minor).
+        i_sum = 0
+        indices = []
+        for L in self._lengths: # use unrestricted lengths here
+            # Nothing is shared for match states (L per head)
+            share_match = np.arange(i_sum, i_sum + L*self.matrix_dim)
+            i_sum += L*self.matrix_dim
+            # Each head shares its insert state emissions (1 per head)
+            share_insert = np.tile(
+                share_match[-1] + 1 + np.arange(self.matrix_dim),
+                reps=L + 2
+            )
+            i_sum += self.matrix_dim
+            indices.extend([share_match, share_insert])
+        self.share = np.concatenate(indices)
+
         super().build(input_shape)
 
     @override
@@ -92,6 +117,30 @@ class EmbeddingEmitter(TFMVNormalEmitter):
 
         return matrix
 
+    def emission_scores(self, observations: T_TFTensor) -> T_TFTensor:
+        if self.use_full_matmul:
+            return super().emission_scores(observations)
+        else:
+            # Override to handle insertion state via copying instead of
+            # explicit computations
+            # Keep match states + single insertion state
+            reduced_matrix = self.matrix()[:, :self.lengths.max()+1, :]
+            if observations.ndim == 3:
+                emission_scores = tf.einsum(
+                    "btd,hqd->bthq", observations, reduced_matrix
+                )
+            else:
+                emission_scores = tf.einsum(
+                    "bthd,hqd->bthq", observations, reduced_matrix
+                )
+
+            # Mask invalid positions in shorter heads
+            emission_scores *= tf.sequence_mask(
+                self.lengths+1, dtype=emission_scores.dtype
+            )
+
+            return emission_scores
+
     @override
     def call(
         self,
@@ -100,31 +149,43 @@ class EmbeddingEmitter(TFMVNormalEmitter):
     ) -> T_TFTensor:
         # Compute the emission scores for matches + single insertion
         emission_scores = super().call(emissions, use_padding=False)
-        # emission_scores has the form
-        # [[..., head 1, L1 x match + 1 x insert + (padding)]
-        # [..., head 2, L2 x match + 1 x insert + (padding)]]
-        # Expand to the full form
-        # [[..., head 1, L1 x match + (L1+3) x insert + (padding)]
-        # [..., head 2, L2 x match + (L2+3) x insert + (padding)]]
-        B, T, H, Q = tf.unstack(tf.shape(emission_scores))
-        emission_scores = tf.reshape(emission_scores, (B, T, H*Q))
-        repeats = []
-        if self.head_subset is not None:
-            lengths = [self.lengths[h] for h in self.head_subset]
-        else:
-            lengths = self.lengths
-        ML = max(lengths)
-        for L in lengths:
-            repeats.extend([1]*L)
-            repeats.extend([L+2])  # repeat insertion
-            repeats.extend([L-1]*int(L < ML))  # repeat any padding
-            repeats.extend([1]*(ML-L-1))  # keep rest of padding
-        emission_scores = tf.repeat(emission_scores, repeats, axis=-1)
-        emission_scores = tf.reshape(emission_scores, (B, T, H, 2*Q))
+
+        if not self.use_full_matmul:
+            # emission_scores has the form
+            # [[..., head 1, L1 x match + 1 x insert + (padding)]
+            # [..., head 2, L2 x match + 1 x insert + (padding)]]
+            # Expand to the full form
+            # [[..., head 1, L1 x match + (L1+3) x insert + (padding)]
+            # [..., head 2, L2 x match + (L2+3) x insert + (padding)]]
+            B, T, H, Q = tf.unstack(tf.shape(emission_scores))
+            emission_scores = tf.reshape(emission_scores, (B, T, H*Q))
+
+            # Build gather indices for XLA compatibility (instead of tf.repeat)
+            indices = []
+            ML = self.lengths.max()
+            offset = 0
+            for L in self.lengths:
+                # Match states: copy once each
+                indices.extend(list(range(offset, offset + L)))
+                # Insertion state: repeat L+2 times
+                indices.extend([offset + L] * (L + 2))
+                offset += L + 1  # Move to next head (L matches + 1 insert)
+                # Padding states
+                if L < ML:
+                    indices.extend([offset] * (ML - L + 1))  # repeat first padding
+                    indices.extend(list(range(offset + 1, offset + ML - L)))  # rest of padding
+                    offset += ML - L
+
+            # Use tf.gather instead of tf.repeat for XLA compatibility
+            indices_tensor = tf.constant(indices, dtype=tf.int32)
+            emission_scores = tf.gather(emission_scores, indices_tensor, axis=-1)
+            emission_scores = tf.reshape(emission_scores, (B, T, H, 2*Q))
+
         if use_padding:
             emission_scores = tf.pad(
                 emission_scores,
                 [[0, 0], [0, 0], [0, 0], [0, 1]],
                 constant_values=1.0,
             )
+
         return emission_scores

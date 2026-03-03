@@ -70,7 +70,7 @@ class EmbeddingDataset(Dataset):
         i: int,
         crop_start: int | None = None,
         crop_end: int | None = None,
-        dtype: type[np.integer] = np.int16,
+        dtype: type[np.integer | np.floating] = np.float32,
     ) -> np.ndarray:
         embedding = self._embedding_cache.get_embedding(self._permutation[i])
         if crop_start is not None:
@@ -82,7 +82,7 @@ class EmbeddingDataset(Dataset):
     def empty(
         self,
         shape: tuple[int, ...],
-        dtype: type[np.integer] = np.int16,
+        dtype: type[np.integer | np.floating] = np.float32,
     ) -> np.ndarray:
         return np.zeros(shape + (self._embedding_cache.dim,), dtype=dtype)
 

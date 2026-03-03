@@ -125,6 +125,15 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         default=None,
         help="Path to a file containing embeddings for each sequence."
     )
+    io_group.add_argument(
+        "--save_emb",
+        dest="save_emb",
+        type=str,
+        default="<workdir>",
+        help="Path to save computed embeddings for each sequence. Per default, "\
+            "stores embeddings in the working directory. Set to an empty "\
+            "string to disable."
+    )
 
     # Training
     train_group = parser.add_argument_group("Training")

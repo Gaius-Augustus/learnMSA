@@ -60,6 +60,7 @@ def run_main() -> None:
         )
         # rule out issues with the seq file early on
         data.validate_dataset()
+        datasets = (data, )
 
         ## Load a structural dataset (optional)
         struct_data = util.load_struct_data(config, data, stack)
@@ -67,12 +68,31 @@ def run_main() -> None:
         ## Load embeddings dataset (optional)
         emb_data = util.load_emb_data(config, data, stack)
 
-        datasets = (data, )
-
         # Check availability of data depending on config
         if config.language_model.use_language_model:
-            assert emb_data is not None,\
-                "Embeddings must be provided when using a language model."
+            if emb_data is None:
+                from learnMSA.protein_language_models import compute_embeddings
+
+                # Compute the embeddings if not provided as a file
+                cache = compute_embeddings(
+                    data,
+                    config.language_model,
+                    verbose=config.input_output.verbose,
+                )
+                emb_data = EmbeddingDataset(
+                    embedding_cache=cache, seq_ids=data.seq_ids,
+                )
+
+                # Save the computed embeddings if a save path is provided
+                if (config.input_output.save_emb and
+                        config.input_output.save_emb != Path()):
+                    emb_data.write(config.input_output.save_emb)
+                    if config.input_output.verbose:
+                        print(
+                            f"Saved computed embeddings to " +
+                            f"{config.input_output.save_emb}"
+                        )
+
             datasets += (emb_data, )
 
         # Run a training to align the sequences

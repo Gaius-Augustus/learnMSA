@@ -1,3 +1,4 @@
+from pathlib import Path
 import sys
 from argparse import Namespace
 
@@ -44,6 +45,7 @@ def args_to_config(args: Namespace) -> Configuration:
         convert=args.convert,
         struct_file=args.struct_file,
         emb_file=args.emb_file,
+        save_emb=_get_save_emb(args),
     )
 
     # Create nested configuration objects
@@ -143,3 +145,10 @@ def args_to_config(args: Namespace) -> Configuration:
         )
 
     return config
+
+def _get_save_emb(args: Namespace) -> str:
+    """Determine the save_emb path based on command-line arguments."""
+    if args.save_emb == "<workdir>":
+        return str(Path(args.work_dir) / (args.input_file + ".emb"))
+    else:
+        return args.save_emb

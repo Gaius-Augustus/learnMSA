@@ -73,12 +73,14 @@ class EmbeddingCache:
                 self.cache[s:s+L[k]] = embeddings[j, :L[k]]
             i += batch_size
             if verbose:
-                for k in range(1,11):
+                for k in range(1,10):
                     if i/n > k/10:
                         if last < k:
                             last = k
-                            print(f"{k*10}% done.")
+                            print(f"{k*10}%")
                             break
+        if verbose:
+            print("100% done")
         self._filled = True
 
 

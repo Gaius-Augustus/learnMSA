@@ -65,6 +65,9 @@ class InputOutputConfig(BaseModel):
     emb_file: PathField | None = None
     """If set, path to a file containing embeddings for each sequence."""
 
+    save_emb: PathField | None = None
+    """If set, path to save the computed embeddings for each sequence."""
+
     @field_validator("format")
     @classmethod
     def validate_format(cls, v: str) -> str:

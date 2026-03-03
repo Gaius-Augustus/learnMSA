@@ -8,6 +8,7 @@ import numpy as np
 import tensorflow as tf
 
 import learnMSA.model.training_util as training_util
+from learnMSA.util.embedding_dataset import EmbeddingDataset
 from learnMSA.util.sequence_dataset import Dataset
 
 if TYPE_CHECKING:
@@ -72,7 +73,9 @@ class BatchGenerator():
             np.random.shuffle(p)
         self.configured = True
 
-    def __call__(self, indices, return_crop_boundaries=False):
+    def __call__(
+        self, indices: np.ndarray
+    ) -> tuple[np.ndarray, ...] | np.ndarray:
         if not self.configured:
             raise ValueError(
                 "A batch generator must be configured with the "\
@@ -104,12 +107,17 @@ class BatchGenerator():
 
         max_len = int(max_len)
 
+        # TODO: hacky, dtypes should be a property of the dataset
+        batch_dtypes = [
+            np.float32 if isinstance(dataset, EmbeddingDataset) else np.uint16
+            for dataset in self.data
+        ]
         batches = [
             dataset.empty(
                 (indices.shape[0], self.num_models, max_len + 1),
-                dtype=np.uint16,
+                dtype=cast(Any, dtype),
             )
-            for dataset in self.data
+            for dataset, dtype in zip(self.data, batch_dtypes)
         ]
 
         # Compute random crop bounds once per (batch item, model) and reuse
@@ -157,24 +165,18 @@ class BatchGenerator():
             batch_output = tuple(batches)
 
         if self.return_only_sequences:
-            if return_crop_boundaries:
-                if isinstance(batch_output, tuple):
-                    return *batch_output, crop_start, crop_end
-                return batch_output, crop_start, crop_end
-            else:
-                return batch_output
+            return batch_output
         else:
-            if return_crop_boundaries:
-                if isinstance(batch_output, tuple):
-                    return *batch_output, permutated_indices, crop_start, crop_end
-                return batch_output, permutated_indices, crop_start, crop_end
-            else:
-                if isinstance(batch_output, tuple):
-                    return *batch_output, permutated_indices
-                return batch_output, permutated_indices
+            if isinstance(batch_output, tuple):
+                return *batch_output, permutated_indices
+            return batch_output, permutated_indices
 
     def get_out_types(self):
-        batch_types = tuple(tf.uint16 for _ in self.data)
+        batch_types = tuple(
+            # TODO: quite hacky, should be a property of the dataset
+            tf.float32 if isinstance(d, EmbeddingDataset) else tf.uint16
+            for d in self.data
+        )
         if self.return_only_sequences:
             return batch_types
         else:

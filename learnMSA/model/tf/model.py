@@ -119,6 +119,9 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             )
         sequences, *adds, _indices = inputs
 
+        # TODO: refactor batch generator and make this transpose unnecessary
+        adds = [tf.keras.ops.swapaxes(add, 1, 2) for add in adds]
+
         # Keep track of the runtime batch sizes for more verbose OOM error
         # handling
         if isinstance(sequences, tf.Tensor):
@@ -384,10 +387,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
                 loglik values.
         """
         # Unstack the inputs
-        if self.context.config.language_model.use_language_model:
-            _sequences, indices, _embeddings = x
-        else:
-            _sequences, indices = x
+        _sequences, *_adds, indices = x
 
         # Apply sequence weights if provided
         if self.context.sequence_weights is not None:

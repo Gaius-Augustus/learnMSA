@@ -174,6 +174,19 @@ class TestArgsToConfig:
         assert config.language_model.inverse_gamma_beta == 1.0
         assert config.training.trainable_distances is True
 
+    def test_args_to_config_default_save_emb_uses_workdir(self):
+        """Test default save_emb path construction from work_dir and input_file."""
+        parser = parse_args("test_version")
+        args = parser.parse_args([
+            "-i", "tests/data/egf.fasta",
+            "-o", "output.a2m",
+            "--work_dir", "tmp",
+        ])
+
+        config = args_to_config(args)
+
+        assert config.input_output.save_emb == Path("tmp/tests/data/egf.fasta.emb")
+
     def test_args_to_config_with_visualization_args(self):
         """Test conversion with visualization arguments."""
         parser = parse_args("test_version")

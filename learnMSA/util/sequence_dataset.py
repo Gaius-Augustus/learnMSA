@@ -186,7 +186,7 @@ class SequenceDataset(Dataset):
         i: int,
         crop_start: int | None = None,
         crop_end: int | None = None,
-        dtype: type[np.integer] = np.int16,
+        dtype: type[np.integer | np.floating] = np.int16,
     ) -> np.ndarray:
         """
         Returns sequence i encoded as a numpy array of integers.
@@ -232,7 +232,7 @@ class SequenceDataset(Dataset):
     def empty(
         self,
         shape: tuple[int, ...],
-        dtype: type[np.integer] = np.int16,
+        dtype: type[np.integer | np.floating] = np.int16,
     ) -> np.ndarray:
         empty = np.zeros(shape, dtype=dtype)
         empty += len(self.alphabet)-1 # Initialize with terminal symbols
