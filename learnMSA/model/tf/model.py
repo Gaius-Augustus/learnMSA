@@ -504,7 +504,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
 
         # Additional setup required before running Viterbi
         # TODO: clean up later
-        self.context.batch_gen.configure(*data, context=self.context)
+        self.context.batch_gen.configure(data, context=self.context)
         # Don't use static shapes for prediction - we'll use bucketing
         self.context.batch_gen.static_shape_mode = False
         old_crop_long_seqs = self.context.batch_gen.crop_long_seqs
@@ -515,13 +515,17 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             self.context.batch_gen.num_models = len(self.phmm_layer.head_subset)
 
         if bucket_boundaries is None or bucket_batch_sizes is None:
+            if self.context.config.language_model.use_language_model:
+                impl_factor = 3.0
+            else:
+                # effectively doubles the batch size for prediction
+                # compared to training
+                impl_factor = 0.5
             bucket_boundaries, bucket_batch_sizes = make_default_bucket_scheme(
                 indices=indices,
                 batch_generator=self.context.batch_gen,
                 model_lengths=[self.phmm_layer.lengths[m] for m in _models],
-                # effectively doubles the batch size for prediction
-                # compared to training
-                batch_size_impl_factor=0.5,
+                batch_size_impl_factor=impl_factor,
             )
 
         # Create dataset and get number of steps
@@ -672,19 +676,13 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         """
         x, _ = data
 
-        # Check if we have the bucketing index
-        if isinstance(x, tuple) and len(x) == 3:
-            # Bucketed dataset: (batch, indices, j)
-            batch, indices, j = x
+        # Bucketed dataset, we have reordering index j
+        batch, *adds, indices, j = x
 
-            predictions = self((batch, indices), training=False)
+        predictions = self((batch, *adds, indices), training=False)
 
-            # Return predictions along with the index for reordering
-            return predictions, j
-        else:
-            # Regular dataset: (batch, indices)
-            predictions = self(x, training=False)
-            return predictions
+        # Return predictions along with the index for reordering
+        return predictions, j
 
     def evaluate(
         self,
@@ -720,7 +718,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
 
         # Additional setup required before running Viterbi
         # TODO: clean up later
-        self.context.batch_gen.configure(*data, context=self.context)
+        self.context.batch_gen.configure(data, context=self.context)
         # Don't use static shapes for prediction - we'll use bucketing
         self.context.batch_gen.static_shape_mode = False
         old_crop_long_seqs = self.context.batch_gen.crop_long_seqs
@@ -731,13 +729,17 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             self.context.batch_gen.num_models = len(self.phmm_layer.head_subset)
 
         # Create dataset and get number of steps
+        if self.context.config.language_model.use_language_model:
+            impl_factor = 3.0
+        else:
+            # effectively doubles the batch size for prediction
+            # compared to training
+            impl_factor = 0.5
         bucket_boundaries, bucket_batch_sizes = make_default_bucket_scheme(
             indices=indices,
             batch_generator=self.context.batch_gen,
             model_lengths=[self.phmm_layer.lengths[m] for m in _models],
-            # effectively doubles the batch size for evaluation
-            # compared to training
-            batch_size_impl_factor=0.5,
+            batch_size_impl_factor=impl_factor,
         )
 
         ds, steps = make_dataset(
@@ -811,10 +813,10 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         x, y = data
 
         # Check if we have the bucketing index and strip it
-        if isinstance(x, tuple) and len(x) == 3:
-            # Bucketed dataset: (batch, indices, j) - extract (batch, indices)
-            batch, indices, _j = x
-            x = (batch, indices)
+        #if isinstance(x, tuple) and len(x) == 3:
+        # Bucketed dataset: (batch, indices, j) - extract (batch, indices)
+        batch, *adds, indices, _j = x
+        x = (batch, *adds, indices)
 
         # Compute predictions
         y_pred = self(x, training=False)
@@ -827,7 +829,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
 
     def estimate_loglik(
         self,
-        data: SequenceDataset,
+        data: SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]],
         max_seq: int = 200000,
         reduce: bool = True,
         models: list[int] | None = None
@@ -847,7 +849,10 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             loglik: Logarithmic likelihoods. If reduce is true, the shape is
                 (num_models,), otherwise (num_sequences, num_models).
         """
-        n = data.num_seq
+        if isinstance(data, SequenceDataset):
+            n = data.num_seq
+        else:
+            n = data[0].num_seq
         if n > max_seq:
             # estimate the ll only on a subset for efficiency
             indices = np.arange(n)
@@ -981,7 +986,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
 
     def estimate_AIC(
         self,
-        data: SequenceDataset,
+        data: SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]],
         max_seq: int = 200000,
         loglik: np.ndarray | None = None
     ) -> np.ndarray:
@@ -999,10 +1004,12 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         Returns:
             aic: Array of AIC values for each model.
         """
+        if isinstance(data, SequenceDataset):
+            data = (data,)
         if loglik is None:
             loglik = self.estimate_loglik(data, max_seq, reduce=True)
         num_param = 34 * np.array(self.phmm_layer.lengths) + 25
-        aic = -2 * loglik * data.num_seq + 2 * num_param
+        aic = -2 * loglik * data[0].num_seq + 2 * num_param
         return aic
 
     def compute_consensus_score(self) -> tf.Tensor:

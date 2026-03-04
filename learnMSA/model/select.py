@@ -3,6 +3,7 @@ from enum import Enum
 import numpy as np
 
 from learnMSA.model.tf.model import LearnMSAModel
+from learnMSA.util.dataset import Dataset
 from learnMSA.util.sequence_dataset import SequenceDataset
 
 
@@ -14,7 +15,7 @@ class SelectionCriterion(Enum):
 
 def select_model(
     model: LearnMSAModel,
-    data: SequenceDataset,
+    data: SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]],
     model_criterion: SelectionCriterion,
     sequence_indices: np.ndarray|None = None,
     verbose: bool = False,
@@ -25,7 +26,8 @@ def select_model(
 
     Args:
         model (LearnMSAModel): The LearnMSAModel containing the pHMM layer.
-        data (SequenceDataset): The dataset containing the sequences.
+        data (SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]]):
+            The dataset(s) containing the sequences.
         model_criterion (SelectionCriterion): The criterion to use for model
             selection.
         sequence_indices (np.ndarray|None): The indices of the sequences to use.
@@ -35,8 +37,10 @@ def select_model(
     Returns:
         int: The index of the best model according to the selection criterion.
     """
+    if isinstance(data, SequenceDataset):
+        data = (data,)
     if sequence_indices is None:
-        sequence_indices = np.arange(data.num_seq)
+        sequence_indices = np.arange(data[0].num_seq)
     scores = get_model_scores(
         model, data, model_criterion, sequence_indices, verbose
     )
@@ -48,7 +52,7 @@ def select_model(
 
 def get_model_scores(
     model: LearnMSAModel,
-    data: SequenceDataset,
+    data: SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]],
     model_criterion: SelectionCriterion,
     sequence_indices: np.ndarray|None = None,
     verbose: bool = False,
@@ -59,7 +63,8 @@ def get_model_scores(
 
     Args:
         model (LearnMSAModel): The LearnMSAModel containing the pHMM layer.
-        data (SequenceDataset): The dataset containing the sequences.
+        data (SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]]):
+            The dataset(s) containing the sequences.
         model_criterion (SelectionCriterion): The criterion to use for model
             selection.
         sequence_indices (np.ndarray|None): The indices of the sequences to use.
@@ -69,8 +74,10 @@ def get_model_scores(
     Returns:
         np.ndarray: An array of scores for each model of shape `(H,)`.
     """
+    if isinstance(data, SequenceDataset):
+        data = (data,)
     if sequence_indices is None:
-        ind = np.arange(data.num_seq)
+        ind = np.arange(data[0].num_seq)
     else:
         ind = sequence_indices
     match model_criterion:
@@ -90,7 +97,7 @@ def get_model_scores(
 
 def select_model_posterior(
     model: LearnMSAModel,
-    data: SequenceDataset,
+    data: SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]],
     sequence_indices: np.ndarray|None = None,
     verbose: bool = False,
 ) -> np.ndarray:
@@ -110,7 +117,7 @@ def select_model_posterior(
 # using prior for now for legacy reasons
 def select_model_loglik(
     model: LearnMSAModel,
-    data: SequenceDataset,
+    data: SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]],
     sequence_indices: np.ndarray|None = None,
     use_prior: bool = True,
     verbose: bool = False,
@@ -135,7 +142,7 @@ def select_model_loglik(
 
 def select_model_AIC(
     model: LearnMSAModel,
-    data: SequenceDataset,
+    data: SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]],
     sequence_indices: np.ndarray|None = None,
     verbose: bool = False,
 ) -> np.ndarray:

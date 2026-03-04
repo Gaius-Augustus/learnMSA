@@ -61,14 +61,12 @@ class PHMMEmbeddingValueSet:
 
         # Initialize match_stddev
         if config.match_stddev is None:
-            match_stddev = np.random.normal(
-                0.0, config.variance_init_stdev, (L, embedding_dim)
-            ).astype(np.float32)
+            match_stddev = np.zeros((L, embedding_dim), dtype=np.float32)
+            match_stddev += config.variance_init_stdev
         else:
             # Get standard deviations for each match state in this head
-            default_stddev = np.random.normal(
-                0.0, config.variance_init_stdev, (embedding_dim,)
-            ).astype(np.float32)
+            default_stddev = np.zeros((embedding_dim,), dtype=np.float32)
+            default_stddev += config.variance_init_stdev
             match_stddev_list = []
             for i in range(L):
                 dist = get_emission_dist(
@@ -93,17 +91,15 @@ class PHMMEmbeddingValueSet:
 
         # Initialize insert_stddev
         if config.insert_stddev is None:
-            insert_stddev = np.random.normal(
-                0.0, config.variance_init_stdev, (embedding_dim,)
-            ).astype(np.float32)
+            insert_stddev = np.zeros((embedding_dim,), dtype=np.float32)
+            insert_stddev += config.variance_init_stdev
         else:
-            default_stddev_insert = np.random.normal(
-                0.0, config.variance_init_stdev, (embedding_dim,)
-            ).astype(np.float32)
+            default_zeros = np.zeros((embedding_dim,), dtype=np.float32)
+            default_zeros += config.variance_init_stdev
             dist = get_emission_dist(
                 config.insert_stddev,
                 head=h,
-                default=default_stddev_insert
+                default=default_ones
             )
             insert_stddev = np.array(dist, dtype=np.float32)
 

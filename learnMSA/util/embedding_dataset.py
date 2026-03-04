@@ -73,10 +73,10 @@ class EmbeddingDataset(Dataset):
         dtype: type[np.integer | np.floating] = np.float32,
     ) -> np.ndarray:
         embedding = self._embedding_cache.get_embedding(self._permutation[i])
-        if crop_start is not None:
-            embedding = embedding[crop_start:]
         if crop_end is not None:
             embedding = embedding[:crop_end]
+        if crop_start is not None:
+            embedding = embedding[crop_start:]
         return embedding.astype(dtype)
 
     def empty(

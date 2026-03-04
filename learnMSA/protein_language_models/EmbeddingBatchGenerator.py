@@ -43,7 +43,9 @@ class EmbeddingBatchGenerator(BatchGenerator):
 
     def _compute_reduced_embeddings(self, indices, language_model, encoder):
         seq_batch = [self.data.get_standardized_seq(i) for i in indices]
-        lm_inputs = encoder(seq_batch, np.repeat([[False, False]], len(seq_batch), axis=0))
+        lm_inputs = encoder(
+            seq_batch, np.repeat([[False, False]], len(seq_batch), axis=0)
+        )
         return self._call_lm_scoring_model(lm_inputs, language_model)
 
 

@@ -4,10 +4,10 @@ from typing import override
 import numpy as np
 import tensorflow as tf
 from hidten.tf.emitter.multivariate_normal import (T_shapelike, T_TFTensor,
-                                                   TFMVNormalEmitter)
+                                                   TFMVNormalEmitter, epsilon,
+                                                   mvn_log_prob)
 
 from learnMSA.hmm.util.value_set_emb import PHMMEmbeddingValueSet
-from learnMSA.util.sequence_dataset import SequenceDataset
 
 
 class EmbeddingEmitter(TFMVNormalEmitter):
@@ -28,7 +28,7 @@ class EmbeddingEmitter(TFMVNormalEmitter):
         self,
         values: Sequence[PHMMEmbeddingValueSet],
         trainable_insertions: bool = True,
-        use_full_matmul: bool = True,
+        use_full_matmul: bool = False,
         **kwargs
     ) -> None:
         """
@@ -100,8 +100,10 @@ class EmbeddingEmitter(TFMVNormalEmitter):
         matrix = super().matrix()
         if self.head_subset is not None:
             matrix = tf.gather(matrix, self.head_subset, axis=0)
-            max_len_subset = max(self.lengths[h] for h in self.head_subset)
-            matrix = matrix[:, :max_len_subset*2, :]
+            max_states_subset = max(
+                [self.hmm_config.states[h] for h in self.head_subset]
+            )
+            matrix = matrix[:, :max_states_subset, :]
 
         if not self.trainable_insertions:
             # Create mask for match states (True) vs insertion states (False)
@@ -124,15 +126,16 @@ class EmbeddingEmitter(TFMVNormalEmitter):
             # Override to handle insertion state via copying instead of
             # explicit computations
             # Keep match states + single insertion state
-            reduced_matrix = self.matrix()[:, :self.lengths.max()+1, :]
-            if observations.ndim == 3:
-                emission_scores = tf.einsum(
-                    "btd,hqd->bthq", observations, reduced_matrix
-                )
-            else:
-                emission_scores = tf.einsum(
-                    "bthd,hqd->bthq", observations, reduced_matrix
-                )
+            reduced_mean = self.mean()[:, :self.lengths.max()+1, :]
+            reduced_scale = self.scale()[:, :self.lengths.max()+1, :]
+
+            # Add Z dimension (unused, single mixture component)
+            mean = tf.expand_dims(reduced_mean, axis=2)
+            scale = tf.expand_dims(reduced_scale, axis=2)
+            log_pdf = tf.squeeze(mvn_log_prob(observations, mean, scale), axis=-1)
+
+            emission_scores = tf.exp(log_pdf / (self.config.temperature * self.input_dim))
+            emission_scores += epsilon(observations) #protect against underflow
 
             # Mask invalid positions in shorter heads
             emission_scores *= tf.sequence_mask(

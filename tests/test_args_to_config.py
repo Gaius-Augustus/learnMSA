@@ -185,7 +185,7 @@ class TestArgsToConfig:
 
         config = args_to_config(args)
 
-        assert config.input_output.save_emb == Path("tmp/tests/data/egf.fasta.emb")
+        assert config.input_output.save_emb == Path("tmp/egf.emb")
 
     def test_args_to_config_with_visualization_args(self):
         """Test conversion with visualization arguments."""

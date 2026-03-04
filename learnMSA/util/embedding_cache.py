@@ -61,11 +61,8 @@ class EmbeddingCache:
         i = 0
         last = 0
         n = L.size
-        # double batch size if half precision for speed
-        batch_size_mul = 2 if self.cache.dtype==np.float16 else 1
         while i < n:
             batch_size = batch_size_callback(int(L[sorted_indices[i]]))
-            batch_size *= batch_size_mul
             batch_indices = sorted_indices[i:i+batch_size]
             embeddings = compute_emb_func(batch_indices)
             for j,k in enumerate(batch_indices):

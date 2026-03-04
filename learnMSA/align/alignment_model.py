@@ -10,6 +10,7 @@ from learnMSA.align.align_inserts import AlignedInsertions
 from learnMSA.align.alignment_metadata import AlignmentMetaData
 from learnMSA.model.tf.model import LearnMSAModel
 from learnMSA.util.aligned_dataset import AlignedDataset, SequenceDataset
+from learnMSA.util.dataset import Dataset
 
 
 class AlignmentModel():
@@ -19,7 +20,7 @@ class AlignmentModel():
     alignments on demand (batch-wise mode possible).
     """
 
-    data: SequenceDataset
+    data: tuple[SequenceDataset, *tuple[Dataset, ...]]
     """The dataset of sequences."""
 
     model: LearnMSAModel
@@ -40,7 +41,7 @@ class AlignmentModel():
 
     def __init__(
         self,
-        data: SequenceDataset,
+        data: SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]],
         model: LearnMSAModel,
         indices: np.ndarray|None = None,
         gap_symbol: str = '-',
@@ -48,7 +49,8 @@ class AlignmentModel():
     ) -> None:
         """
         Args:
-            data: The dataset of sequences.
+            data: The dataset of sequences. Can be a SequenceDataset or a tuple
+                of datasets where the first entry is a SequenceDataset.
             model: A learnMSA model instance for decoding and scoring.
             indices: An optional array of sequence indices specifying which
                 sequences from data are included in the alignment. If None,
@@ -57,10 +59,12 @@ class AlignmentModel():
             gap_symbol_insertions: Character used to denote insertions in other
                 sequences.
         """
+        if isinstance(data, SequenceDataset):
+            data = (data,)
         self.data = data
         self.model = model
         if indices is None:
-            self.indices = np.arange(data.num_seq)
+            self.indices = np.arange(data[0].num_seq)
         else:
             self.indices = indices
         self.gap_symbol = gap_symbol
@@ -78,16 +82,16 @@ class AlignmentModel():
         """
         if a2m:
             output_alphabet = np.array((
-                list(self.data.get_alphabet_no_gap()) +
+                list(self.data[0].get_alphabet_no_gap()) +
                 [self.gap_symbol] +
-                list(self.data.get_alphabet_no_gap().lower()) +
+                list(self.data[0].get_alphabet_no_gap().lower()) +
                 [self.gap_symbol_insertions, "$"]
             ))
         else:
             output_alphabet = np.array((
-                list(self.data.get_alphabet_no_gap()) +
+                list(self.data[0].get_alphabet_no_gap()) +
                 [self.gap_symbol] +
-                list(self.data.get_alphabet_no_gap()) +
+                list(self.data[0].get_alphabet_no_gap()) +
                 [self.gap_symbol, "$"]
             ))
         return output_alphabet
@@ -185,7 +189,7 @@ class AlignmentModel():
                         batch_alignment, output_alphabet=output_alphabet
                     )
                     for s, seq_ind in zip(alignment_strings, batch_indices):
-                        seq_header = self.data.get_header(
+                        seq_header = self.data[0].get_header(
                             self.indices[seq_ind]
                         )
                         output_file.write(">"+seq_header+"\n")
@@ -199,7 +203,7 @@ class AlignmentModel():
                 model_index, add_block_sep, aligned_insertions
             )
             msa = [
-                (self.data.seq_ids[self.indices[i]], msa[i])
+                (self.data[0].seq_ids[self.indices[i]], msa[i])
                 for i in range(len(msa))
             ]
             data = AlignedDataset(sequences=msa)
@@ -232,15 +236,15 @@ class AlignmentModel():
             self._build_alignment([model_index])
         data = self.metadata[model_index]
         b = batch_indices.size
-        sequences = np.zeros((b, self.data.max_len), dtype=np.uint16)
-        sequences += (len(self.data.alphabet)-1)
+        sequences = np.zeros((b, self.data[0].max_len), dtype=np.uint16)
+        sequences += (len(self.data[0].alphabet)-1)
         for i,j in enumerate(batch_indices):
             idx = int(self.indices[j])
-            l = self.data.seq_lens[idx]
-            sequences[i, :l] = self.data.get_encoded_seq(idx)
+            l = self.data[0].seq_lens[idx]
+            sequences[i, :l] = self.data[0].get_encoded_seq(idx)
         blocks = []
         if add_block_sep:
-            sep = np.zeros((b,1), dtype=np.uint16) + 2*len(self.data.alphabet)
+            sep = np.zeros((b,1), dtype=np.uint16) + 2*len(self.data[0].alphabet)
         if not only_matches:
             left_flank_block = self.get_insertion_block(
                 sequences,
@@ -324,10 +328,10 @@ class AlignmentModel():
 
         # Compute the likelihood and bitscores for all sequences
         loglik = self.model.estimate_loglik(
-            self.data, self.data.num_seq, reduce=False, models=[model]
+            self.data, self.data[0].num_seq, reduce=False, models=[model]
         )
         # Compute the bitscore
-        log_null = self.model.compute_null_model_log_probs(self.data)
+        log_null = self.model.compute_null_model_log_probs(self.data[0])
         bitscore = loglik - log_null
 
         # Sort by bitscore in descending order
@@ -340,7 +344,7 @@ class AlignmentModel():
             )
             for idx in sorted_indices:
                 scorefile.write("\t".join([
-                    f"{self.data.seq_ids[idx]}",
+                    f"{self.data[0].seq_ids[idx]}",
                     f"{loglik[idx]}",
                     f"{bitscore[idx]}"
                 ]) + "\n")

@@ -64,52 +64,54 @@ def compute_embeddings(
         scoring_layer.trainable = False #don't forget to freeze the scoring model!
 
     cache = EmbeddingCache(data.seq_lens, language_model_config.scoring_model_dim)
+    lm_scoring_call = _make_lm_scoring_call(language_model, scoring_layer)
     compute_emb_func = partial(
         _compute_reduced_embeddings,
         data = data,
-        language_model = language_model,
         encoder = encoder,
-        scoring_layer = scoring_layer,
+        lm_scoring_call = lm_scoring_call,
     )
-    impl_factor = 50.0 # TODO: ad hoc; make pLM-dependent and fine tune
+    impl_factor = 700.0 # TODO: ad hoc; make pLM-dependent and fine tune
     batch_size_callback = partial(
         get_adaptive_batch_size, impl_factor=impl_factor
     )
 
     if verbose:
-        print("Computing embeddings. This may take a moment...")
+        print(
+            f"Computing embeddings for {len(data)} sequences." \
+            "This may take a moment...")
 
     cache.fill_cache(compute_emb_func, batch_size_callback, verbose=verbose)
 
-    # once we have cached the embeddings do a cleanup to erase the LM from memory
+    # cleanup to erase the LM from memory
     tf.keras.backend.clear_session()
     gc.collect()
 
     return cache
 
 
-@tf.function
-def _call_lm_scoring_model(lm_inputs, language_model, scoring_layer):
-    emb = language_model(lm_inputs)
-    if scoring_layer is None:
-        return emb
-    return scoring_layer._reduce(emb, training=False)
+def _make_lm_scoring_call(language_model, scoring_layer):
+    @tf.function(reduce_retracing=True)
+    def _call_lm_scoring_model(lm_inputs):
+        emb = language_model(lm_inputs)
+        if scoring_layer is None:
+            return emb
+        return scoring_layer._reduce(emb, training=False)
+
+    return _call_lm_scoring_model
 
 
 def _compute_reduced_embeddings(
     indices: np.ndarray,
     data: SequenceDataset,
-    language_model: LanguageModel,
     encoder: InputEncoder,
-    scoring_layer,
+    lm_scoring_call,
 ) -> np.ndarray:
     seq_batch = [data.get_standardized_seq(i) for i in indices]
     lm_inputs = encoder(
         seq_batch, np.repeat([[False, False]], len(seq_batch), axis=0)
     )
-    return _call_lm_scoring_model(
-        lm_inputs, language_model, scoring_layer
-    ).numpy()
+    return lm_scoring_call(lm_inputs).numpy()
 
 
 def get_adaptive_batch_size(

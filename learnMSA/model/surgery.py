@@ -8,12 +8,13 @@ from learnMSA.config.util import get_value
 from learnMSA.hmm.tf.layer import PHMMLayer
 from learnMSA.hmm.util.transition_index_set import PHMMTransitionIndexSet
 from learnMSA.model.tf.model import LearnMSAModel
+from learnMSA.util.dataset import Dataset
 from learnMSA.util.sequence_dataset import SequenceDataset
 
 
 def get_discard_or_expand_positions(
     model: LearnMSAModel,
-    data: SequenceDataset,
+    data: SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]],
     indices: np.ndarray|None = None,
     del_t: float = 0.5,
     ins_t: float = 0.5,
@@ -23,7 +24,8 @@ def get_discard_or_expand_positions(
 
     Args:
         model: A LearnMSAModel object with a PHMMLayer.
-        data: A SequenceDataset used for computing the posterior state.
+        data: A SequenceDataset or tuple of Dataset(s) used for computing the
+            posterior state.
         indices: Optional indices to select a subset of the data. If None, all
             sequences in `data` are used.
         del_t: This number is compared to the expected number of times a match
@@ -288,11 +290,8 @@ def update_kernels(
             "the PHMMLayer uses a language model."
         embedding_dim = plm_config.scoring_model_dim
         emb_expectations = np.zeros((embedding_dim,), dtype=np.float32)
-        # TODO: This should ideally use different random variances per
-        # new position
-        emb_stddev = np.random.normal(
-            0.0, plm_config.variance_init_stdev, (embedding_dim,)
-        ).astype(np.float32)
+        emb_stddev = np.zeros((embedding_dim,), dtype=np.float32)
+        emb_stddev += plm_config.variance_init_stdev
         emb_insert_value = np.concatenate(
             [emb_expectations, emb_stddev], axis=0
         )
@@ -351,8 +350,8 @@ def update_kernels(
 
     if phmm_layer.use_language_model and plm_config is not None:
         new_plm_config = plm_config.model_copy(deep=True)
-        new_plm_config.match_expectations = emb_emissions_new[:, :embedding_dim]
-        new_plm_config.match_stddev = emb_emissions_new[:, embedding_dim:]
+        new_plm_config.match_expectations = emb_emissions_new[np.newaxis, :, :embedding_dim]
+        new_plm_config.match_stddev = emb_emissions_new[np.newaxis, :, embedding_dim:]
     else:
         new_plm_config = None
 
@@ -379,7 +378,7 @@ class ModelSurgeryResult:
 
 def model_surgery(
     model: LearnMSAModel,
-    data: SequenceDataset,
+    data: SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]],
     indices: np.ndarray|None = None,
     surgery_del: float = 0.5,
     surgery_ins: float = 0.5,
@@ -391,7 +390,8 @@ def model_surgery(
 
     Args:
         model: A LearnMSAModel object with a PHMMLayer.
-        data: A SequenceDataset used for computing the posterior state.
+        data: A SequenceDataset or tuple of Dataset(s) used for computing the
+            posterior state.
         indices: Optional indices to select a subset of the data. If None, all
             sequences in `data` are used.
         surgery_del: Discards match states for which `surgery_del` is larger
@@ -507,19 +507,31 @@ def model_surgery(
     config = type(config).model_validate(config.model_dump())
 
     if plm_configs[0] is not None:
+        def concat_emb_param(param_name: str):
+            values = [getattr(c, param_name) for c in plm_configs]
+
+            # Check if all values are None
+            if all(v is None for v in values):
+                return None
+
+            arrays = [np.atleast_1d(v) for v in values]
+
+            # create zeros array and fill
+            num_heads = len(arrays)
+            max_len = max(arr.shape[1] for arr in arrays)
+            full_shape = (num_heads, max_len) + arrays[0].shape[2:]
+            result = np.zeros(full_shape, dtype=arrays[0].dtype)
+
+            for i, arr in enumerate(arrays):
+                result[i, :arr.shape[1]] = arr[0]
+
+            return result
+
         merged_plm_config = plm_configs[0].model_copy(deep=True)
-        merged_plm_config.match_expectations = np.concatenate(
-            [c.match_expectations for c in plm_configs], axis=0
+        merged_plm_config.match_expectations = concat_emb_param(
+            "match_expectations"
         )
-        merged_plm_config.match_stddev = np.concatenate(
-            [c.match_stddev for c in plm_configs], axis=0
-        )
-        merged_plm_config.insert_expectations = np.concatenate(
-            [c.insert_expectations for c in plm_configs], axis=0
-        )
-        merged_plm_config.insert_stddev = np.concatenate(
-            [c.insert_stddev for c in plm_configs], axis=0
-        )
+        merged_plm_config.match_stddev = concat_emb_param("match_stddev")
     else:
         merged_plm_config = None
 

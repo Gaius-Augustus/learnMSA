@@ -104,7 +104,7 @@ def align(
         ind = None
     best_model = select_model(
         am.model,
-        data[0],  # TODO: select model should take all datasets into account
+        data,
         SelectionCriterion(config.training.model_criterion),
         sequence_indices=ind,
         verbose=config.input_output.verbose,
@@ -239,7 +239,7 @@ def _fit_and_align(
             data, indices=train_indices, iteration=i, batch_size=batch_size
         )
 
-        am = AlignmentModel(data[0], model, decode_indices)
+        am = AlignmentModel(data, model, decode_indices)
 
         if config.input_output.verbose:
             print("Created alignment model successfully.")
@@ -261,7 +261,7 @@ def _fit_and_align(
 
         surgery_result = model_surgery(
             am.model,
-            data[0],  # TODO: model surgery should take all datasets into account
+            data,
             surgery_del = config.training.surgery_del,
             surgery_ins = config.training.surgery_ins,
             verbose = config.input_output.verbose,

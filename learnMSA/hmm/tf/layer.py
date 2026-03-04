@@ -164,7 +164,10 @@ class PHMMLayer(tf.keras.Layer):
 
             # Set the inverse gamma prior for embedding variances
             inv_gamma_prior = TFInverseGammaPrior()
-            inv_gamma_prior.share = [0, 1] * 3
+            inv_gamma_prior.share = np.tile(
+                [0, 1],
+                reps=2 * sum(lengths) + 2 * len(lengths)
+            )
             inv_gamma_prior.initializer = [
                 self.plm_config.inverse_gamma_alpha,
                 self.plm_config.inverse_gamma_beta,
@@ -175,7 +178,10 @@ class PHMMLayer(tf.keras.Layer):
             combined_prior.add_prior(inv_gamma_prior)
 
             # Add the embedding emitter
-            embedding_emitter = EmbeddingEmitter(values=embedding_values)
+            embedding_emitter = EmbeddingEmitter(
+                values=embedding_values,
+                trainable_insertions=trainable_insertions,
+            )
             self.hmm.add_emitter(embedding_emitter)
             if self.use_prior:
                 embedding_emitter.prior = combined_prior
