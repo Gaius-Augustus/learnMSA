@@ -51,7 +51,7 @@ class LanguageModelConfig(BaseModel):
     conditionally_independent: bool = True
     """Whether to use conditionally independent emissions."""
 
-    variance_init_stdev: float = 0.02
+    variance_init_stdev: float = 0.7
     """Initial standard deviation for the normal distribution."""
 
     inverse_gamma_alpha: float = 3.0

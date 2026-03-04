@@ -206,13 +206,13 @@ def make_aligned_insertions(am, best_model, method="famsa", threads=0, verbose=T
     for r in range(data.num_repeats):
         insertions_long.append([])
         for i in range(data.insertion_lens.shape[2]):
-            ins_long = find_long_insertions_and_get_sequences(am.data, data.insertion_lens[r, :, i], data.insertion_start[r, :, i])
+            ins_long = find_long_insertions_and_get_sequences(am.data[0], data.insertion_lens[r, :, i], data.insertion_start[r, :, i])
             insertions_long[-1].append(ins_long)
-    left_flank_long = find_long_insertions_and_get_sequences(am.data, data.left_flank_len, data.left_flank_start)
-    right_flank_long = find_long_insertions_and_get_sequences(am.data, data.right_flank_len, data.right_flank_start)
+    left_flank_long = find_long_insertions_and_get_sequences(am.data[0], data.left_flank_len, data.left_flank_start)
+    right_flank_long = find_long_insertions_and_get_sequences(am.data[0], data.right_flank_len, data.right_flank_start)
     unannotated_long = []
     for r in range(data.num_repeats-1):
-        unannotated_long.append(find_long_insertions_and_get_sequences(am.data, data.unannotated_segments_len[r], data.unannotated_segments_start[r]))
+        unannotated_long.append(find_long_insertions_and_get_sequences(am.data[0], data.unannotated_segments_len[r], data.unannotated_segments_start[r]))
 
     slices = {}
     if left_flank_long is not None:

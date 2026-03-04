@@ -132,10 +132,13 @@ class EmbeddingEmitter(TFMVNormalEmitter):
             # Add Z dimension (unused, single mixture component)
             mean = tf.expand_dims(reduced_mean, axis=2)
             scale = tf.expand_dims(reduced_scale, axis=2)
-            log_pdf = tf.squeeze(mvn_log_prob(observations, mean, scale), axis=-1)
+            log_pdf = tf.squeeze(
+                mvn_log_prob(observations, mean, scale), axis=-1
+            )
 
-            emission_scores = tf.exp(log_pdf / (self.config.temperature * self.input_dim))
-            emission_scores += epsilon(observations) #protect against underflow
+            emission_scores = tf.exp(
+                log_pdf / (self.config.temperature * self.input_dim)
+            )
 
             # Mask invalid positions in shorter heads
             emission_scores *= tf.sequence_mask(

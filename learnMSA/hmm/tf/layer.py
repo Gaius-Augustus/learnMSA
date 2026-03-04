@@ -143,6 +143,8 @@ class PHMMLayer(tf.keras.Layer):
             and plm_config.use_language_model
         self.plm_config = plm_config
         if self.use_language_model:
+            assert self.plm_config is not None,\
+                "plm_config must be provided if use_language_model is True"
             # Create embedding value sets
             embedding_values = [
                 PHMMEmbeddingValueSet.from_config(L, h, plm_config) # type: ignore
@@ -181,6 +183,7 @@ class PHMMLayer(tf.keras.Layer):
             embedding_emitter = EmbeddingEmitter(
                 values=embedding_values,
                 trainable_insertions=trainable_insertions,
+                temperature=self.plm_config.temperature,
             )
             self.hmm.add_emitter(embedding_emitter)
             if self.use_prior:

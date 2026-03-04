@@ -309,6 +309,11 @@ def load_emb_data(
             emb_data.seq_ids.index(seq_id) for seq_id in data.seq_ids
         ]
         emb_data.reorder(emb_perm)
+        if config.input_output.verbose:
+            print(
+                f"Loaded embeddings from {config.input_output.emb_file} for " +
+                f"{len(emb_data.seq_ids)} sequences"
+            )
         return emb_data
     return None
 
