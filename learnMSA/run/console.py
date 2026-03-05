@@ -35,6 +35,10 @@ def run_main() -> None:
     if config.input_output.verbose and parser.description:
         print(parser.description.split("\n")[0])
 
+    # Create working directory if it does not exist
+    work_dir = Path(config.input_output.work_dir)
+    work_dir.mkdir(parents=True, exist_ok=True)
+
     # When converting files, do not run the full program, but just convert
     if config.input_output.convert:
         convert_file(config)
