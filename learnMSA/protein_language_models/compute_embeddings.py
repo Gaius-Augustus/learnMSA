@@ -64,14 +64,14 @@ def compute_embeddings(
         scoring_layer.trainable = False #don't forget to freeze the scoring model!
 
     cache = EmbeddingCache(data.seq_lens, language_model_config.scoring_model_dim)
-    lm_scoring_call = _make_lm_scoring_call(language_model, scoring_layer)
+    lm_scoring_call = _make_lm_scoring_call(language_model, encoder, scoring_layer)
     compute_emb_func = partial(
         _compute_reduced_embeddings,
         data = data,
         encoder = encoder,
         lm_scoring_call = lm_scoring_call,
     )
-    impl_factor = 700.0 # TODO: ad hoc; make pLM-dependent and fine tune
+    impl_factor = 1000.0 # TODO: ad hoc; make pLM-dependent and fine tune
     batch_size_callback = partial(
         get_adaptive_batch_size, impl_factor=impl_factor
     )
@@ -90,8 +90,8 @@ def compute_embeddings(
     return cache
 
 
-def _make_lm_scoring_call(language_model, scoring_layer):
-    @tf.function(reduce_retracing=True)
+def _make_lm_scoring_call(language_model, encoder, scoring_layer):
+    @tf.function(input_signature=(encoder.get_signature(),))
     def _call_lm_scoring_model(lm_inputs):
         emb = language_model(lm_inputs)
         if scoring_layer is None:
