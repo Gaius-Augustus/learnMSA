@@ -51,7 +51,7 @@ def run_main() -> None:
     )
 
     from learnMSA.align.align import align
-    from learnMSA.util import SequenceDataset, EmbeddingDataset
+    from learnMSA.util import Dataset, SequenceDataset, EmbeddingDataset
 
     with ExitStack() as stack:
         ## Load the amino acid dataset (mandatory)
@@ -99,8 +99,13 @@ def run_main() -> None:
 
             datasets += (emb_data, )
 
+        if config.structure.use_structure:
+            assert struct_data is not None,\
+                "Structural data is required but not provided."
+            datasets += (struct_data, )
+
         # Run a training to align the sequences
-        alignment_model, best_model = align(datasets, config)
+        alignment_model, best_model = align(datasets, config) # type:ignore
 
         if config.input_output.save_model:
             alignment_model.save(config.input_output.save_model)

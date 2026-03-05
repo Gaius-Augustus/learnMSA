@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from learnMSA.config.structure import StructureConfig
 from learnMSA.util.aligned_dataset import AlignedDataset
 from learnMSA.hmm.util.transition_index_set import PHMMTransitionIndexSet
 from learnMSA.hmm.util.util import state_index_to_name
@@ -463,7 +464,24 @@ class PHMMValueSet:
             start=start
         )
 
-
+    @classmethod
+    def from_structural_config(
+        cls, L: int, h: int, config: StructureConfig
+    ) -> "PHMMValueSet":
+        s = len(config.structural_alphabet)
+        match_emissions = np.stack(
+            [config.background_distribution]*L, axis=0
+        ).astype(np.float32)
+        insert_emissions = np.asarray(
+            config.background_distribution, dtype=np.float32
+        )
+        return cls(
+            L=L,
+            match_emissions=match_emissions,
+            insert_emissions=insert_emissions,
+            transitions=np.ndarray([]), # not used
+            start=np.ndarray([]) # not used
+        )
 
     def matches(self) -> int:
         """ Returns the number of match states `n`. """

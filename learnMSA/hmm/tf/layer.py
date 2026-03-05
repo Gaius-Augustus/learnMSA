@@ -7,6 +7,7 @@ from hidten.tf.hmm import TFHMM, T_shapelike
 from hidten.tf.prior import TFCombinedPrior, TFInverseGammaPrior
 
 from learnMSA.config import LanguageModelConfig, PHMMConfig, PHMMPriorConfig
+from learnMSA.config.structure import StructureConfig
 from learnMSA.hmm.tf.embedding_emitter import EmbeddingEmitter
 from learnMSA.hmm.tf.prior import TFPHMMStartPrior, TFPHMMTransitionPrior
 from learnMSA.hmm.tf.profile_emitter import ProfileEmitter
@@ -62,6 +63,7 @@ class PHMMLayer(tf.keras.Layer):
         config : PHMMConfig,
         prior_config: PHMMPriorConfig | None = None,
         plm_config: LanguageModelConfig | None = None,
+        structural_config: StructureConfig | None = None,
         use_prior: bool = True,
         trainable_insertions: bool = True,
         **kwargs
@@ -72,6 +74,7 @@ class PHMMLayer(tf.keras.Layer):
             config: HMM configuration parameters.
             prior_config: Prior configuration parameters.
             plm_config: Protein language model configuration.
+            structural_config: Structural information configuration.
             use_prior: Whether to use priors for regularization.
             trainable_insertions: Whether insertion emissions are trainable.
         """
@@ -188,6 +191,17 @@ class PHMMLayer(tf.keras.Layer):
             self.hmm.add_emitter(embedding_emitter)
             if self.use_prior:
                 embedding_emitter.prior = combined_prior
+
+        self.structural_config = structural_config
+        if structural_config and structural_config.use_structure:
+            struct_values = [
+                PHMMValueSet.from_structural_config(L, h, structural_config)
+                for h, L in enumerate(lengths)
+            ]
+            structural_emitter = ProfileEmitter(
+                values=struct_values, trainable_insertions=trainable_insertions
+            )
+            self.hmm.add_emitter(structural_emitter)
 
         # Add the padding emitter
         self.hmm.add_emitter(TFSubsetPaddingEmitter())

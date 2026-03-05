@@ -7,6 +7,7 @@ from learnMSA.config import (AdvancedConfig, Configuration, PHMMConfig,
                              LanguageModelConfig, TrainingConfig,
                              VisualizationConfig)
 from learnMSA.config.hmm import PHMMPriorConfig
+from learnMSA.config.structure import StructureConfig
 
 
 def args_to_config(args: Namespace) -> Configuration:
@@ -120,6 +121,10 @@ def args_to_config(args: Namespace) -> Configuration:
         alpha_global_compl=args.alpha_global_compl,
     )
 
+    structure_config = StructureConfig(
+        use_structure=bool(args.struct_file),
+    )
+
     advanced_config = AdvancedConfig(
         dist_out=args.dist_out,
         initial_distance=args.initial_distance,
@@ -135,6 +140,7 @@ def args_to_config(args: Namespace) -> Configuration:
         init_msa=init_msa_config,
         language_model=language_model_config,
         visualization=visualization_config,
+        structure=structure_config,
         advanced=advanced_config,
     )
 
