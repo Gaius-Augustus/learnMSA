@@ -202,9 +202,7 @@ def get_simple_seq(data: SequenceDataset) -> np.ndarray:
         shuffle=False,
     )
     for (seq, _), _ in ds.take(1):
-        sequences = seq.numpy()[:, :, :-1]
-        # transpose to shape (b, L, num_model)
-        sequences = np.transpose(sequences, [0, 2, 1]) # TODO: fix batch gen
+        sequences = seq.numpy()[:, :-1, :]
         break
     return sequences
 

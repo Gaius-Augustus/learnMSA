@@ -128,6 +128,6 @@ def test_make_dataset_aa_plus_embedding(
     dataset,_ = make_dataset(np.array([0, 2, 3]), batch_gen, batch_size=3)
     for (s,e,i),_ in dataset:
         break
-    assert s.shape == (3, 4, 18)
-    assert e.shape == (3, 4, 18, 8)
+    assert s.shape == (3, 18, 4)
+    assert e.shape == (3, 18, 4, 8)
     assert i.shape == (3, 4)
