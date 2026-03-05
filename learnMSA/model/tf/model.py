@@ -509,7 +509,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
 
         if bucket_boundaries is None or bucket_batch_sizes is None:
             if self.context.config.language_model.use_language_model:
-                impl_factor = 3.0
+                impl_factor = 4.0
             else:
                 # effectively doubles the batch size for prediction
                 # compared to training
@@ -723,7 +723,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
 
         # Create dataset and get number of steps
         if self.context.config.language_model.use_language_model:
-            impl_factor = 3.0
+            impl_factor = 4.0
         else:
             # effectively doubles the batch size for prediction
             # compared to training
