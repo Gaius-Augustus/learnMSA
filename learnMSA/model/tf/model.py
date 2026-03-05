@@ -102,7 +102,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
 
         Args:
             inputs: Tuple of (sequences, ..., indices) where:
-                   - sequences: shape (batch, num_models, seq_length)
+                   - sequences: shape (batch, seq_length, num_models)
                    - ...: additional inputs depending on configuration
                     (e.g., for language model)
                    - indices: shape (batch, num_models)
@@ -118,9 +118,6 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
                 "inputs must contain at least sequences and indices"
             )
         sequences, *adds, _indices = inputs
-
-        # TODO: refactor batch generator and make this transpose unnecessary
-        adds = [tf.keras.ops.swapaxes(add, 1, 2) for add in adds]
 
         # Keep track of the runtime batch sizes for more verbose OOM error
         # handling
@@ -156,7 +153,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
 
         Args:
             inputs: Tuple of (sequences, ..., indices) where:
-                   - sequences: shape (batch, num_models, seq_length)
+                   - sequences: shape (batch, seq_length, num_models)
                    - ...: additional inputs depending on configuration
                     (e.g., for language model) (not used here)
                    - indices: shape (batch, num_models)
@@ -177,17 +174,13 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             n = len(self.phmm_layer.head_subset)
         else:
             n = self.phmm_layer.heads
-        if sequences.shape[1] == 1 and n > 1:
-            sequences = tf.tile(sequences, [1, n, 1])
+        if sequences.shape[2] == 1 and n > 1:
+            sequences = tf.tile(sequences, [1, 1, n])
             indices = tf.tile(indices, [1, n])
-
-        # Pass through encoder layers
-        # Transpose sequences from (batch, num_models, L) to (batch, L, num_models)
-        sequences_transposed = tf.transpose(sequences, [0, 2, 1])
 
         # Convert to one-hot for AncProbsLayer (now requires 4D input)
         sequences_onehot = tf.one_hot(
-            tf.cast(sequences_transposed, tf.int32),
+            tf.cast(sequences, tf.int32),
             depth=self.context.config.hmm.alphabet_size+1, # including terminal
             dtype=self.phmm_layer.dtype
         )
@@ -967,7 +960,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
                 # No bucket indices available, skip this batch
                 continue
 
-            x_np = x.numpy()[:, 0, :]  # (batch, seq_length)
+            x_np = x.numpy()[:, :, 0]  # (batch, seq_length)
             em = np.sum(_background_dist[x_np], axis=1)
             log_probs[batch_idx.numpy()] = em
 

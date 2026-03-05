@@ -25,7 +25,7 @@ def test_default_batch_gen() -> None:
             s, i = batch_gen(ind)
             np.testing.assert_equal(i[:, 0], ind)
             for i, (r, j) in enumerate(zip(ref, ind)):
-                assert "".join(alphabet[s[i, 0, :data.seq_lens[j]]]) == r
+                assert "".join(alphabet[s[i, :data.seq_lens[j], 0]]) == r
 
 
 def test_static_shape_batch_gen() -> None:
@@ -50,8 +50,8 @@ def test_static_shape_batch_gen() -> None:
 
             # Check shape is static
             assert s.shape[0] == len(ind)  # batch size
-            assert s.shape[1] == 1  # num_models
-            assert s.shape[2] == expected_seq_len  # static sequence length
+            assert s.shape[1] == expected_seq_len  # static sequence length
+            assert s.shape[2] == 1  # num_models
 
             # Verify indices
             np.testing.assert_equal(i[:, 0], ind)
@@ -61,11 +61,11 @@ def test_static_shape_batch_gen() -> None:
             for batch_idx, seq_idx in enumerate(ind):
                 seq_len = min(data.seq_lens[seq_idx], config.training.crop)
                 ref_seq = str(data.get_record(seq_idx).seq).upper()[:config.training.crop]
-                actual_seq = "".join(alphabet[s[batch_idx, 0, :seq_len]])
+                actual_seq = "".join(alphabet[s[batch_idx, :seq_len, 0]])
                 assert actual_seq == ref_seq
 
                 # Check padding (should be terminal symbols)
-                padding = s[batch_idx, 0, seq_len:]
+                padding = s[batch_idx, seq_len:, 0]
                 assert np.all(padding == len(alphabet) - 1), \
                     f"Expected padding to be {len(alphabet) - 1}, got {padding}"
 
@@ -85,15 +85,15 @@ def test_multi_dataset_batch_gen_returns_multiple_batches() -> None:
 
         assert s_a.shape[0] == indices.shape[0]
         assert s_b.shape[0] == indices.shape[0]
-        assert s_a.shape[1] == 1
-        assert s_b.shape[1] == 1
+        assert s_a.shape[2] == 1
+        assert s_b.shape[2] == 1
         np.testing.assert_equal(ind[:, 0], indices)
 
         alphabet = np.array(list(SequenceDataset._default_alphabet))
         for row_idx, seq_idx in enumerate(indices):
             ref = str(data_a.get_record(seq_idx).seq).upper()
             seq_len = data_a.seq_lens[seq_idx]
-            dec_a = "".join(alphabet[s_a[row_idx, 0, :seq_len]])
-            dec_b = "".join(alphabet[s_b[row_idx, 0, :seq_len]])
+            dec_a = "".join(alphabet[s_a[row_idx, :seq_len, 0]])
+            dec_b = "".join(alphabet[s_b[row_idx, :seq_len, 0]])
             assert dec_a == ref
             assert dec_b == ref

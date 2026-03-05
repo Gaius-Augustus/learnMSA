@@ -85,7 +85,7 @@ def test_create_and_call(context_amino_acid: LearnMSAContext) -> None:
     batch_size = 4
     seq_length = 15
     seqs = np.random.randint(
-        low=0, high=20, size=(batch_size, 1, seq_length), dtype=np.int32
+        low=0, high=20, size=(batch_size, seq_length, 1), dtype=np.int32
     )
     indices = np.array([22, 7, 13, 3])[..., np.newaxis]
     output = model((seqs, indices))
@@ -98,7 +98,7 @@ def test_compute_loss_amino_acid(context_amino_acid: LearnMSAContext) -> None:
     batch_size = 4
     seq_length = 15
     seqs = np.random.randint(
-        low=0, high=20, size=(batch_size, 1, seq_length), dtype=np.int32
+        low=0, high=20, size=(batch_size, seq_length, 1), dtype=np.int32
     )
     indices = np.array([22, 7, 13, 3])[..., np.newaxis]
 
@@ -140,7 +140,7 @@ def test_compute_loss_amino_acid_no_prior(
     batch_size = 4
     seq_length = 15
     seqs = np.random.randint(
-        low=0, high=20, size=(batch_size, 1, seq_length), dtype=np.int32
+        low=0, high=20, size=(batch_size, seq_length, 1), dtype=np.int32
     )
     indices = np.array([22, 7, 13, 3])[..., np.newaxis]
 
@@ -180,12 +180,8 @@ def test_compute_loss_binary(context_binary: LearnMSAContext) -> None:
         [[0, 1, 0, 2]], dtype=tf.int32
     ) # (1, T)
     seqs = tf.repeat(seqs, repeats=4, axis=0) # replicate to batch size 4
-    seqs = tf.expand_dims(seqs, axis=2)  # add head dimension
+    seqs = tf.expand_dims(seqs, axis=2)  # add head dimension → (B, T, H)
     indices = np.array([2, 7, 1, 3])[..., np.newaxis]
-
-    # TODO learnMSA currently expects shape (B, H, T, S) --- FIX LATER ---
-    # so we need to swap axes here
-    seqs = tf.keras.ops.swapaxes(seqs, 1, 2)
 
     y_pred = model((seqs, indices))
 
@@ -210,11 +206,7 @@ def test_viterbi_on_batch(context_binary: LearnMSAContext) -> None:
     seq = tf.constant(
         [[0, 1, 0, 2]], dtype=tf.int32
     ) # (1, T)
-    seq = tf.expand_dims(seq, axis=2)  # add head dimension
-
-    # TODO learnMSA currently expects shape (B, H, T, S) --- FIX LATER ---
-    # so we need to swap axes here
-    seq = tf.keras.ops.swapaxes(seq, 1, 2)
+    seq = tf.expand_dims(seq, axis=2)  # add head dimension → (B, T, H)
 
     viterbi_seq = model((seq, tf.constant([[0]]))).numpy()
 
@@ -233,11 +225,7 @@ def test_posterior_on_batch(context_binary: LearnMSAContext) -> None:
     seq = tf.constant(
         [[0, 1, 0, 2]], dtype=tf.int32
     ) # (1, T)
-    seq = tf.expand_dims(seq, axis=2)  # add head dimension
-
-    # TODO learnMSA currently expects shape (B, H, T, S) --- FIX LATER ---
-    # so we need to swap axes here
-    seq = tf.keras.ops.swapaxes(seq, 1, 2)
+    seq = tf.expand_dims(seq, axis=2)  # add head dimension → (B, T, H)
 
     posterior = model((seq, tf.constant([[0]])))
 

@@ -114,7 +114,7 @@ class BatchGenerator():
         ]
         batches = [
             dataset.empty(
-                (indices.shape[0], self.num_models, max_len + 1),
+                (indices.shape[0], max_len + 1, self.num_models),
                 dtype=cast(Any, dtype),
             )
             for dataset, dtype in zip(self.data, batch_dtypes)
@@ -157,7 +157,7 @@ class BatchGenerator():
                 crop_end = crop_ends[i, k]
                 for d, dataset in enumerate(self.data):
                     seq = dataset.get_encoded_seq(j, crop_start, crop_end)
-                    batches[d][i, k, :seq.shape[0]] = seq
+                    batches[d][i, :seq.shape[0], k] = seq
 
         if len(batches) == 1:
             batch_output: tuple[np.ndarray, ...] | np.ndarray = batches[0]
@@ -277,7 +277,7 @@ def make_dataset(
 
             for batch, exp_shape in zip(batches, batch_generator.expected_shapes):
                 batch.set_shape(tf.TensorShape(
-                    [None, batch_generator.num_models, None] + list(exp_shape)
+                    [None, None, batch_generator.num_models] + list(exp_shape)
                 ))
 
             if extras:
@@ -290,8 +290,8 @@ def make_dataset(
             if len(extras) > 1 and scoring_model_config is not None:
                 extras[1].set_shape(tf.TensorShape([
                     None,
-                    batch_generator.num_models,
                     None,
+                    batch_generator.num_models,
                     int(scoring_model_config.dim)+1
                 ]))
 
@@ -344,7 +344,7 @@ def make_dataset(
                 # explicitly set output shapes or tf 2.17 will complain about
                 # unknown shapes
                 batch.set_shape(tf.TensorShape(
-                    [batch_size, batch_generator.num_models, seq_dim] + list(exp_shape)
+                    [batch_size, seq_dim, batch_generator.num_models] + list(exp_shape)
                 ))
 
             if extras:
@@ -357,8 +357,8 @@ def make_dataset(
             if len(extras) > 1 and scoring_model_config is not None:
                 extras[1].set_shape(tf.TensorShape([
                     batch_size,
-                    batch_generator.num_models,
                     seq_dims[0],
+                    batch_generator.num_models,
                     int(scoring_model_config.dim)+1
                 ]))
 

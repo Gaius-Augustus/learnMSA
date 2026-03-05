@@ -68,7 +68,7 @@ def test_model_to_file() -> None:
 
     # Make a snapshot of parameters and likelihood before saving
     weights = [w.numpy() for w in model.trainable_weights]
-    seq = np.random.randint(20, size=(1,1,17))
+    seq = np.random.randint(20, size=(1,17,1))
     seq[:,:,-1] = len(SequenceDataset._default_alphabet)-1
     loglik = model([seq, np.array([[0]])]).numpy()
 

@@ -78,7 +78,7 @@ def compute_embeddings(
 
     if verbose:
         print(
-            f"Computing embeddings for {len(data)} sequences." \
+            f"Computing embeddings for {len(data)} sequences. " \
             "This may take a moment...")
 
     cache.fill_cache(compute_emb_func, batch_size_callback, verbose=verbose)
