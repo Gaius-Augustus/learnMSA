@@ -28,6 +28,15 @@ class PHMMValueSet:
     transitions : np.ndarray
     start : np.ndarray
 
+    @property
+    def alphabet_size(self) -> int:
+        """Inferred from the last dimension of `match_emissions`."""
+        return self.match_emissions.shape[-1]
+
+    @alphabet_size.setter
+    def alphabet_size(self, value: int) -> None:
+        """No-op: alphabet_size is always inferred from match_emissions."""
+        pass
 
     @classmethod
     def from_config(cls, L: int, h: int, config: PHMMConfig) -> "PHMMValueSet":

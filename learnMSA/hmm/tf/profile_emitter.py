@@ -43,6 +43,10 @@ class ProfileEmitter(TFCategoricalEmitter):
         """
         super().__init__(**kwargs)
 
+        if len(values) == 0:
+            raise ValueError("At least one value set must be provided.")
+
+        self.alphabet_size = values[0].alphabet_size
         self._lengths = np.array([value_set.L for value_set in values])
         self.trainable_insertions = trainable_insertions
         self.use_full_matmul = use_full_matmul
@@ -50,18 +54,20 @@ class ProfileEmitter(TFCategoricalEmitter):
         init_values = []
         # Initialization based on provided value sets
         for value_set in values:
+            assert value_set.alphabet_size == self.alphabet_size,\
+                "All value sets must have the same alphabet size."
             init_values.append(value_set.match_emissions.flatten())
             init_values.append(value_set.insert_emissions)
         self.initializer = np.concatenate(init_values)
 
     def build(self, input_shape: T_shapelike | None = None) -> None:
+        s = self.alphabet_size
         if input_shape is None:
-            # Number of amino acids (including non-standard + X,
-            # but excluding gap)
-            s = len(SequenceDataset._default_alphabet)-1
             input_shape = (None, None, s)
         else:
-            s = input_shape[-1]
+            assert input_shape[-1] == s,\
+                "Input feature dimension must match alphabet size provided"\
+                "via the ValueSets."
 
         # Share all insertion emissions across positions
         # We need to provide an array with indices into the emitter's kernel

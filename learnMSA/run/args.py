@@ -119,7 +119,7 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         help="Path to a fasta file containing 3Di states for each sequence."
     )
     io_group.add_argument(
-        "--emb",
+        "--load_emb",
         dest="emb_file",
         type=str,
         default=None,
