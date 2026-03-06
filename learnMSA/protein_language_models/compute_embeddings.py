@@ -84,6 +84,9 @@ def compute_embeddings(
     cache.fill_cache(compute_emb_func, batch_size_callback, verbose=verbose)
 
     # cleanup to erase the LM from memory
+    del language_model
+    del encoder
+    del scoring_layer
     tf.keras.backend.clear_session()
     gc.collect()
 
