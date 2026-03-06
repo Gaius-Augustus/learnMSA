@@ -1,4 +1,5 @@
 import math
+from pathlib import Path
 import time
 from typing import Any, Literal, Sequence, override
 
@@ -13,6 +14,7 @@ from learnMSA.model.tf.training import (TerminateOnNaNWithCheckpoint,
                                         make_default_bucket_scheme)
 from learnMSA.tree.tf.anc_probs_layer import AncProbsLayer
 from learnMSA.util.sequence_dataset import Dataset, SequenceDataset
+from learnMSA.util.clustering import write_sequence_weights
 
 
 class LearnMSAModel(tf.keras.Model, PHMMMixin):
@@ -1205,7 +1207,17 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
                 "Learning rate=", self.context.config.training.learning_rate
             )
             if self.context.sequence_weights is not None:
-                print("Using sequence weights ", self.context.sequence_weights, "")
+                io = self.context.config.input_output
+                input_path = Path(io.input_file)
+                if input_path.name:
+                    weight_path = Path(io.work_dir) /\
+                        input_path.with_suffix(".weights").name
+                else:
+                    weight_path = Path(io.work_dir) / "sequences.weights"
+                print("Using sequence weights and writing them to", weight_path)
+                write_sequence_weights(
+                    data, self.context.sequence_weights, str(weight_path)
+                )
             else:
                 print("Don't use sequence weights.")
             if int(self.context.batch_gen.crop_long_seqs) < math.inf:

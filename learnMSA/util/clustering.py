@@ -6,6 +6,7 @@ from shutil import which
 import numpy as np
 import pandas as pd
 
+from learnMSA.util.dataset import Dataset
 from learnMSA.util.sequence_dataset import SequenceDataset
 
 
@@ -64,3 +65,11 @@ def compute_sequence_weights(fasta_filename, directory, cluster_seq_id=0.5, retu
             return sequence_weights, clusters
         else:
             return sequence_weights
+
+# Writes an array of sequence weights to a file, one weight per line
+def write_sequence_weights(
+    data: Dataset, weights: np.ndarray, output_file: str
+) -> None:
+    with open(output_file, "w") as f:
+        for i in range(data.num_seq):
+            f.write(f"{data.get_header(i)}\t{weights[i]}\n")
