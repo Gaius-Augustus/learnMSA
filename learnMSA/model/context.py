@@ -99,11 +99,6 @@ class LearnMSAContext:
 
         model_len_cb = None
 
-        # Set up initializers
-        if self.config.init_msa.from_msa is not None:
-            model_len_cb = self._setup_init_msa()
-        self._setup_visualization()
-
         # When not included in the initializers, set up lengths from the config
         if model_len_cb is None:
             model_len_cb = self._setup_lengths()
@@ -132,6 +127,11 @@ class LearnMSAContext:
             self.model_lengths = np.array(
                 self.config.training.length_init, dtype=np.int32
             )
+
+        # Set up initializers
+        if self.config.init_msa.from_msa is not None:
+            model_len_cb = self._setup_init_msa()
+        self._setup_visualization()
 
         if data is not None:
             if self.config.training.auto_crop:
@@ -282,8 +282,7 @@ class LearnMSAContext:
             )
             aa_psc = aa_prior.matrix()[0, 0].numpy()
 
-            # Add counts for special amino acids
-            aa_psc = np.pad(aa_psc, (0, 3), constant_values=1e-2)
+            print("aa_psc", aa_psc)
 
             # Get transition pseudocounts
             transition_prior = TFPHMMTransitionPrior(
