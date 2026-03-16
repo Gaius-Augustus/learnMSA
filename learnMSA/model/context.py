@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 
 import numpy as np
 
@@ -10,7 +10,7 @@ import learnMSA.tree.tf.initializer as initializers
 from learnMSA import Configuration
 from learnMSA.hmm.tf.prior import TFPHMMTransitionPrior
 from learnMSA.hmm.tf.util import load_dirichlet
-from learnMSA.hmm.util import value_set
+from learnMSA.hmm.util.value_set import PHMMValueSet
 from learnMSA.run.util import validate_filepath
 from learnMSA.util import clustering
 
@@ -52,6 +52,7 @@ class LearnMSAContext:
     sequence_weights: np.ndarray | None
     clusters: Any
     subset: np.ndarray
+    init_msa_values: Sequence[PHMMValueSet] | None
 
     """
     Is created from a Configuration and a SequenceDataset to hold all relevant
@@ -68,8 +69,8 @@ class LearnMSAContext:
         """
         Args:
             config: Immutable configuration object with all settings.
-            dataset: SequenceDataset containing the sequences to align. Must be
-                provided when the remaining parameters are not provided.
+            data: SequenceDataset containing the sequences to align. Must be
+                provided unless num_seq is specified.
             num_seq: Number of sequences for which this context is created.
                 Must only be provided when data is None.
             sequence_weights: Array of sequence weights that can optionally be
@@ -79,6 +80,7 @@ class LearnMSAContext:
                 provided when data is None.
         """
         self.config = config
+        self.init_msa_values = None
 
         if data is None:
             assert num_seq is not None, (
@@ -118,6 +120,11 @@ class LearnMSAContext:
                 )
             model_len_cb = _default_length_callback
 
+        # Set up initializers
+        if self.config.init_msa.from_msa is not None:
+            model_len_cb, self.init_msa_values = self._setup_init_msa()
+        self._setup_visualization()
+
         self.model_lengths_cb = model_len_cb
 
         # Initialize the model lengths
@@ -127,11 +134,6 @@ class LearnMSAContext:
             self.model_lengths = np.array(
                 self.config.training.length_init, dtype=np.int32
             )
-
-        # Set up initializers
-        if self.config.init_msa.from_msa is not None:
-            model_len_cb = self._setup_init_msa()
-        self._setup_visualization()
 
         if data is not None:
             if self.config.training.auto_crop:
@@ -270,7 +272,9 @@ class LearnMSAContext:
 
         return context
 
-    def _setup_init_msa(self) -> ModelLengthsCallback:
+    def _setup_init_msa(
+        self
+    ) -> tuple[ModelLengthsCallback, Sequence[PHMMValueSet]]:
         """Set up model initializers based on configuration."""
         from_msa = self.config.init_msa.from_msa
         if self.config.init_msa.pseudocounts:
@@ -281,8 +285,6 @@ class LearnMSAContext:
                 dim = len(SequenceDataset._default_alphabet)-1
             )
             aa_psc = aa_prior.matrix()[0, 0].numpy()
-
-            print("aa_psc", aa_psc)
 
             # Get transition pseudocounts
             transition_prior = TFPHMMTransitionPrior(
@@ -303,7 +305,7 @@ class LearnMSAContext:
 
         # Load the MSA and count
         with AlignedDataset(from_msa, "fasta") as input_msa:
-            values = value_set.PHMMValueSet.from_msa(
+            values = PHMMValueSet.from_msa(
                 input_msa,
                 match_threshold=self.config.init_msa.match_threshold,
                 global_factor=self.config.init_msa.global_factor,
@@ -320,43 +322,20 @@ class LearnMSAContext:
                 unannotated=ins_psc,
                 end=1e-2,
                 flank_start=ins_psc,
-            ).normalize().log()
+            ).normalize()
 
-            # TODO
-            # if self.config.language_model.use_language_model:
-            #     from learnMSA.protein_language_models.MvnEmitter import \
-            #         AminoAcidPlusMvnEmissionInitializer
-            #     dim = len(input_msa.alphabet)-1 + 2 * self.scoring_model_config.dim
-            #     emb_kernel = AminoAcidPlusMvnEmissionInitializer(
-            #         self.scoring_model_config
-            #     )((1,1,1,dim)).numpy().squeeze() #type: ignore
-            #     emb_kernel = emb_kernel[len(input_msa.alphabet)-1:]
-            # else:
-            #     emb_kernel = None
+        n = self.config.training.num_model
+        model_lengths_cb = lambda data: \
+            np.array([values.matches()]*n)
+        if self.config.input_output.verbose:
+            print(
+                f"Initialized from MSA '{self.config.init_msa.from_msa}' with "
+                f"{values.matches()} match states."
+            )
 
-            # Apply random noise only when using multiple models
-            if self.config.training.num_model > 1:
-                random_scale=self.config.init_msa.random_scale
-            else:
-                random_scale=0.0
+        model_values = [values] * n
 
-            # TODO: needs fix, create a new PHMMConfig here from the ValueSets
-            # initializers = make_initializers_from(
-            #     values,
-            #     num_models=self.config.training.num_model,
-            #     random_scale=random_scale,
-            #     emission_kernel_extra=emb_kernel,
-            # )
-
-            model_lengths_cb = lambda data: \
-                np.array([values.matches()]*self.config.training.num_model)
-            if self.config.input_output.verbose:
-                print(
-                    f"Initialized from MSA '{self.config.init_msa.from_msa}' with "
-                    f"{values.matches()} match states."
-                )
-
-            return model_lengths_cb
+        return model_lengths_cb, model_values
 
 
     def _setup_lengths(self) -> ModelLengthsCallback | None:
@@ -370,11 +349,6 @@ class LearnMSAContext:
             ]
             # Create callback to return the specified lengths
             specified_lengths = np.array(length_init, dtype=np.int32)
-            if self.config.input_output.verbose:
-                print(
-                    "Using user-specified initial model lengths: "\
-                    f"{self.config.training.length_init}"
-                )
             return lambda data: specified_lengths
         return None
 

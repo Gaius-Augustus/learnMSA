@@ -269,6 +269,7 @@ def _fit_and_align(
 
         context.model_lengths = surgery_result.model_lengths
         context.config.hmm = surgery_result.config
+        context.init_msa_values = None # don't use init MSA after surgery
         if surgery_result.plm_config is not None:
             context.config.language_model = surgery_result.plm_config
         surgery_converged = surgery_result.surgery_converged

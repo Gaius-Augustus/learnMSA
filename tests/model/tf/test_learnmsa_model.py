@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 import tensorflow as tf
+from pathlib import Path
 
 import learnMSA.model.training_util as training_util
 import tests.hmm.ref as ref
@@ -562,3 +563,69 @@ def test_predict_posterior_reduce(context_amino_acid: LearnMSAContext) -> None:
         reduced, manual_reduced, rtol=1e-5,
         err_msg="Reduced predictions do not match manually reduced values"
     )
+
+def test_init_msa(
+    config_amino_acid_no_prior: Configuration,
+    tmp_path: "Path",
+) -> None:
+    """Initialize the model from an existing MSA."""
+
+    # Create a temporary file with the initial MSA
+    # and some match/insert columns
+    msa_file = tmp_path / "test_msa.fasta"
+    msa_file.write_text(
+        ">seq1\nACGTGG\n"
+        ">seq2\nA-GTFY\n"
+        ">seq3\nA--TF-\n"
+    )
+
+    # Update config to use the MSA file for initialization
+    config = config_amino_acid_no_prior.model_copy()
+    config.init_msa.from_msa = msa_file
+    config.init_msa.match_threshold = 0.5
+    config.training.num_model = 2
+
+    context = LearnMSAContext(
+        config=config,
+        num_seq=3,
+    )
+
+    # Note: use_noise in the HMM configuration should be set to false if not
+    # in training mode. Also pseudocounts should no be used by default.
+    # If something goes wrong check if that is true.
+
+    # Create the model from the context which should use the MSA for
+    # initialization
+    model = LearnMSAModel(context)
+    model.build()
+
+    np.testing.assert_equal(model.lengths, [5, 5])  # second column is an insert
+
+    # # Check if the HMM parameters are as expected
+    hmm = model.phmm_layer.hmm
+    A = hmm.transitioner.matrix().numpy()
+    B = hmm.emitter[0].matrix().numpy()
+
+    # Since we have very few sequences and we add very small pseudocounts
+    # to ensure non-zero counts everyvery, just test if the emission
+    # probabilities are reasonably large at the correcct positions
+    assert A[0, 0, 1] > 0.3  # M1 -> M2
+    assert A[0, 0, 2] > 0.3  # M1 -> M3 (taking implicit path via D2)
+    assert A[0, 0, 5] > 0.3  # M1 -> I1
+
+    a_ind = SequenceDataset._default_alphabet.index('A')
+    g_ind = SequenceDataset._default_alphabet.index('G')
+    t_ind = SequenceDataset._default_alphabet.index('T')
+    f_ind = SequenceDataset._default_alphabet.index('F')
+    y_ind = SequenceDataset._default_alphabet.index('Y')
+
+    assert B[0, 0, a_ind] > 0.9
+    assert B[0, 1, g_ind] > 0.9
+    assert B[0, 2, t_ind] > 0.9
+    assert B[0, 3, f_ind] > 0.6
+    assert B[0, 3, g_ind] > 0.3
+    assert B[0, 4, y_ind] > 0.4
+    assert B[0, 4, y_ind] > 0.4
+
+    assert np.allclose(A[0], A[1])
+    assert np.allclose(B[0], B[1])

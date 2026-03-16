@@ -713,7 +713,7 @@ class TestInputOutputConfig:
         assert config.input_format == "fasta"
         assert config.save_model == ""
         assert config.load_model == ""
-        assert config.verbose is True
+        assert config.verbose is False
         assert config.cuda_visible_devices == "default"
         assert config.work_dir == "tmp"
         assert config.convert is False

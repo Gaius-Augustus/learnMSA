@@ -43,7 +43,7 @@ class InputOutputConfig(BaseModel):
     """If set, the per-sequence likelihoods and bit scores will be saved to the
     specified file."""
 
-    verbose: bool = True
+    verbose: bool = False
     """If False, all output messages will be disabled."""
 
     cuda_visible_devices: str = "default"

@@ -24,6 +24,8 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
     Provides methods for training, evaluation, and prediction.
     """
 
+    phmm_layer: PHMMLayer
+
     # enable proper type checking for __new__
     # otherwise the tf type stubs package causes trouble
     def __new__(cls, *args, **kwargs) -> "LearnMSAModel":
@@ -67,12 +69,13 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             )
 
         self.phmm_layer = PHMMLayer(
-            context.model_lengths,
+            lengths = context.model_lengths,
             config = context.config.hmm,
             prior_config = context.config.hmm_prior,
             plm_config = context.config.language_model,
             use_prior = context.config.training.use_prior,
             trainable_insertions = train_cfg.trainable_insertions,
+            value_sets = context.init_msa_values,
         )
 
         # Metrics trackers
