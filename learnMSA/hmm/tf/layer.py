@@ -176,7 +176,10 @@ class PHMMLayer(tf.keras.Layer):
             # Override embedding values with prior distribution if requested
             if config.use_prior_for_emission_init:
                 embedding_values = self._override_embeddings_with_prior(
-                    embedding_values, mvn_prior
+                    embedding_values,
+                    mvn_prior,
+                    override_matches=config.match_emissions is None,
+                    override_insertions=config.insert_emissions is None,
                 )
 
             # Set the inverse gamma prior for embedding variances
@@ -304,17 +307,23 @@ class PHMMLayer(tf.keras.Layer):
     @staticmethod
     def _override_embeddings_with_prior(
         values: Sequence[PHMMEmbeddingValueSet],
-        prior
+        prior,
+        override_matches: bool,
+        override_insertions: bool,
     ) -> list[PHMMEmbeddingValueSet]:
         """Override embedding values with prior distribution.
 
         Args:
             values: The original embedding value sets.
             prior: The MVN prior for embeddings.
+            override_matches: Whether to override match state emissions.
+            override_insertions: Whether to override insertion state emissions.
 
         Returns:
             New value sets with embeddings replaced by prior distribution.
         """
+        if not override_matches and not override_insertions:
+            return list(values)
         # Get the mean from the mixture model prior
         mean_per_component = prior.mean().numpy()
         mix_coef = prior.mixture_coefficients().numpy()
@@ -324,11 +333,19 @@ class PHMMLayer(tf.keras.Layer):
 
         updated_values = []
         for value_set in values:
+            if override_matches:
+                match_expectations = np.tile(mean, (value_set.L, 1))
+            else:
+                match_expectations = value_set.match_expectations
+            if override_insertions:
+                insert_expectation = mean
+            else:
+                insert_expectation = value_set.insert_expectation
             updated_values.append(PHMMEmbeddingValueSet(
                 L=value_set.L,
-                match_expectations=np.tile(mean, (value_set.L, 1)),
+                match_expectations=match_expectations,
                 match_stddev=value_set.match_stddev,
-                insert_expectation=mean,
+                insert_expectation=insert_expectation,
                 insert_stddev=value_set.insert_stddev,
             ))
         return updated_values
