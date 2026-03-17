@@ -4,7 +4,8 @@ import numpy as np
 from learnMSA.run.util import get_batch_multiplicator, get_avail_memory_bytes
 
 DEFAULT_IMPL_FACTOR = 0.25
-MAX_BATCH_SIZE = 4096
+MAX_BATCH_SIZE = 2048
+MEMORY_DAMP = 0.8
 
 
 def get_initial_model_lengths(
@@ -80,7 +81,7 @@ def get_adaptive_batch_size(
     num_model: int,
     seq_len: int,
     impl_factor: float = 1.0,
-    safety_margin: float = 0.8,
+    safety_margin: float = 0.75,
     data_type_size: int = 4,
 ) -> int:
     """
@@ -97,7 +98,14 @@ def get_adaptive_batch_size(
         data_type_size: (int) The size of the data type in bytes
             (e.g., 4 for float32).
     """
+    # dampen the true available VRAM to avoid too aggressive scaling
+    # on large GPUS
     mem_avail = get_avail_memory_bytes()
+    REFERENCE_MEM = 20 * 1024**3
+    scale = mem_avail / REFERENCE_MEM
+    if scale > 1:
+        scale = scale ** MEMORY_DAMP
+    mem_avail = REFERENCE_MEM * scale
     denominator = float(num_model) * float(model_len) ** 2 * float(seq_len)
     denominator *= impl_factor * DEFAULT_IMPL_FACTOR * data_type_size
     if denominator <= 0.0:

@@ -59,35 +59,50 @@ class PHMMLayer(tf.keras.Layer):
 
     def __init__(
         self,
-        lengths: Sequence[int] | np.ndarray,
+        lengths: Sequence[int] | np.ndarray | None,
         config : PHMMConfig,
         prior_config: PHMMPriorConfig | None = None,
         plm_config: LanguageModelConfig | None = None,
         structural_config: StructureConfig | None = None,
         use_prior: bool = True,
         trainable_insertions: bool = True,
+        value_sets: Sequence[PHMMValueSet] | None = None,
         **kwargs
     ) -> None:
         """
         Args:
             lengths: The number of match states in each head of the pHMM.
-            config: HMM configuration parameters.
+                May be ``None`` if ``value_sets`` is provided, in which case
+                the lengths are inferred from the value sets.
+            config: HMM configuration parameters. The initial emission and
+                transition values in ``config`` are ignored when ``value_sets``
+                is provided.
             prior_config: Prior configuration parameters.
             plm_config: Protein language model configuration.
             structural_config: Structural information configuration.
             use_prior: Whether to use priors for regularization.
             trainable_insertions: Whether insertion emissions are trainable.
+            value_sets: Optional pre-built :class:`PHMMValueSet` objects, one
+                per head. When provided, ``PHMMValueSet.from_config`` is
+                skipped and ``lengths`` may be ``None``.
         """
         super().__init__(**kwargs)
-        self.lengths = np.asarray(lengths, dtype=np.int32)
         if prior_config is None:
             prior_config = PHMMPriorConfig()
         self.use_prior = use_prior
 
-        values = [
-            PHMMValueSet.from_config(L, h, config)
-            for h, L in enumerate(lengths)
-        ]
+        if value_sets is not None:
+            values = list(value_sets)
+            self.lengths = np.array([vs.L for vs in values], dtype=np.int32)
+        else:
+            assert lengths is not None, (
+                "lengths must be provided when value_sets is None"
+            )
+            self.lengths = np.asarray(lengths, dtype=np.int32)
+            values = [
+                PHMMValueSet.from_config(L, h, config)
+                for h, L in enumerate(lengths)
+            ]
 
         # Apply random noise
         if config.use_noise:
@@ -103,11 +118,11 @@ class PHMMLayer(tf.keras.Layer):
             # Share concentrations across all states
             emission_prior.share = np.tile(
                 np.arange(len(SequenceDataset._default_alphabet)-1),
-                reps=2 * sum(lengths) + 2 * len(lengths)
+                reps=2 * sum(self.lengths) + 2 * len(self.lengths)
             )
 
         # Override emission values with prior distribution if requested
-        if config.use_prior_for_emission_init:
+        if config.use_prior_for_emission_init and value_sets is None:
             assert prior_config.use_amino_acid_prior, (
                 "Cannot use prior for emission initialization if no "
                 "emission prior is set."
@@ -128,10 +143,10 @@ class PHMMLayer(tf.keras.Layer):
         )
         if self.use_prior:
             self.hmm.transitioner.prior = TFPHMMTransitionPrior(
-                lengths, prior_config
+                self.lengths, prior_config
             )
             self.hmm.transitioner.prior_start = TFPHMMStartPrior(
-                lengths, prior_config
+                self.lengths, prior_config
             )
 
         # Add the profile emitter
@@ -151,7 +166,7 @@ class PHMMLayer(tf.keras.Layer):
             # Create embedding value sets
             embedding_values = [
                 PHMMEmbeddingValueSet.from_config(L, h, plm_config) # type: ignore
-                for h, L in enumerate(lengths)
+                for h, L in enumerate(self.lengths)
             ]
 
             # Set up the MVN prior for mean embeddings
@@ -164,14 +179,17 @@ class PHMMLayer(tf.keras.Layer):
             # Override embedding values with prior distribution if requested
             if config.use_prior_for_emission_init:
                 embedding_values = self._override_embeddings_with_prior(
-                    embedding_values, mvn_prior
+                    embedding_values,
+                    mvn_prior,
+                    override_matches=config.match_emissions is None,
+                    override_insertions=config.insert_emissions is None,
                 )
 
             # Set the inverse gamma prior for embedding variances
             inv_gamma_prior = TFInverseGammaPrior()
             inv_gamma_prior.share = np.tile(
                 [0, 1],
-                reps=2 * sum(lengths) + 2 * len(lengths)
+                reps=2 * sum(self.lengths) + 2 * len(self.lengths)
             )
             inv_gamma_prior.initializer = [
                 self.plm_config.inverse_gamma_alpha,
@@ -303,17 +321,23 @@ class PHMMLayer(tf.keras.Layer):
     @staticmethod
     def _override_embeddings_with_prior(
         values: Sequence[PHMMEmbeddingValueSet],
-        prior
+        prior,
+        override_matches: bool,
+        override_insertions: bool,
     ) -> list[PHMMEmbeddingValueSet]:
         """Override embedding values with prior distribution.
 
         Args:
             values: The original embedding value sets.
             prior: The MVN prior for embeddings.
+            override_matches: Whether to override match state emissions.
+            override_insertions: Whether to override insertion state emissions.
 
         Returns:
             New value sets with embeddings replaced by prior distribution.
         """
+        if not override_matches and not override_insertions:
+            return list(values)
         # Get the mean from the mixture model prior
         mean_per_component = prior.mean().numpy()
         mix_coef = prior.mixture_coefficients().numpy()
@@ -323,11 +347,19 @@ class PHMMLayer(tf.keras.Layer):
 
         updated_values = []
         for value_set in values:
+            if override_matches:
+                match_expectations = np.tile(mean, (value_set.L, 1))
+            else:
+                match_expectations = value_set.match_expectations
+            if override_insertions:
+                insert_expectation = mean
+            else:
+                insert_expectation = value_set.insert_expectation
             updated_values.append(PHMMEmbeddingValueSet(
                 L=value_set.L,
-                match_expectations=np.tile(mean, (value_set.L, 1)),
+                match_expectations=match_expectations,
                 match_stddev=value_set.match_stddev,
-                insert_expectation=mean,
+                insert_expectation=insert_expectation,
                 insert_stddev=value_set.insert_stddev,
             ))
         return updated_values

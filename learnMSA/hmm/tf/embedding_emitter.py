@@ -126,8 +126,9 @@ class EmbeddingEmitter(TFMVNormalEmitter):
             # Override to handle insertion state via copying instead of
             # explicit computations
             # Keep match states + single insertion state
-            reduced_mean = self.mean()[:, :self.lengths.max()+1, :]
-            reduced_scale = self.scale()[:, :self.lengths.max()+1, :]
+            matrix = self.matrix()
+            reduced_mean = self.mean(matrix)[:, :self.lengths.max()+1, :]
+            reduced_scale = self.scale(matrix)[:, :self.lengths.max()+1, :]
 
             # Add Z dimension (unused, single mixture component)
             mean = tf.expand_dims(reduced_mean, axis=2)

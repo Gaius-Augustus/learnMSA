@@ -84,6 +84,9 @@ def compute_embeddings(
     cache.fill_cache(compute_emb_func, batch_size_callback, verbose=verbose)
 
     # cleanup to erase the LM from memory
+    del language_model
+    del encoder
+    del scoring_layer
     tf.keras.backend.clear_session()
     gc.collect()
 
@@ -115,7 +118,7 @@ def _compute_reduced_embeddings(
 
 
 def get_adaptive_batch_size(
-    seq_len: int, impl_factor: float = 1.0, safety_margin: float = 0.8
+    seq_len: int, impl_factor: float = 1.0, safety_margin: float = 0.75
 ) -> int:
     """
     Computes an adaptive batch size.

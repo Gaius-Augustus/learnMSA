@@ -306,8 +306,9 @@ def update_kernels(
     # Gather the current transition parameters
     # Note: The transitions not occuring here (like left_flank_loop) are
     # always reset to initial values later on.
+    # Note 2: explicit_transitioner does not have the head subset!
     A = phmm_layer.hmm.transitioner.explicit_transitioner.matrix().numpy()
-    A = A[0] # (Q, Q)
+    A = A[model_index] # (Q, Q)
     ind = PHMMTransitionIndexSet(L)
     match_to_match = A[ind.match_to_match[:, 0], ind.match_to_match[:, 1]]
     match_to_insert = A[ind.match_to_insert[:, 0], ind.match_to_insert[:, 1]]

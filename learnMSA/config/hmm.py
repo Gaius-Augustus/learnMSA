@@ -175,7 +175,7 @@ class PHMMConfig(BaseModel):
     Can optionally depend on h.
     """
 
-    p_end_unannot: float | Sequence[float] | NPArray = 5e-5
+    p_end_unannot: float | Sequence[float] | NPArray = 1e-6
     """Defines ``P(Unannotated | End; h)``.
     Can optionally depend on h.
     """

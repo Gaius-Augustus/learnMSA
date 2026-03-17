@@ -1,4 +1,5 @@
 import math
+from pathlib import Path
 import time
 from typing import Any, Literal, Sequence, override
 
@@ -13,6 +14,7 @@ from learnMSA.model.tf.training import (TerminateOnNaNWithCheckpoint,
                                         make_default_bucket_scheme)
 from learnMSA.tree.tf.anc_probs_layer import AncProbsLayer
 from learnMSA.util.sequence_dataset import Dataset, SequenceDataset
+from learnMSA.util.clustering import write_sequence_weights
 
 
 class LearnMSAModel(tf.keras.Model, PHMMMixin):
@@ -21,6 +23,8 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
     ancestoral probability encoding.
     Provides methods for training, evaluation, and prediction.
     """
+
+    phmm_layer: PHMMLayer
 
     # enable proper type checking for __new__
     # otherwise the tf type stubs package causes trouble
@@ -65,12 +69,13 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             )
 
         self.phmm_layer = PHMMLayer(
-            context.model_lengths,
+            lengths = context.model_lengths,
             config = context.config.hmm,
             prior_config = context.config.hmm_prior,
             plm_config = context.config.language_model,
             use_prior = context.config.training.use_prior,
             trainable_insertions = train_cfg.trainable_insertions,
+            value_sets = context.init_msa_values,
         )
 
         # Metrics trackers
@@ -509,7 +514,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
 
         if bucket_boundaries is None or bucket_batch_sizes is None:
             if self.context.config.language_model.use_language_model:
-                impl_factor = 3.0
+                impl_factor = 8.0
             else:
                 # effectively doubles the batch size for prediction
                 # compared to training
@@ -723,7 +728,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
 
         # Create dataset and get number of steps
         if self.context.config.language_model.use_language_model:
-            impl_factor = 3.0
+            impl_factor = 8.0
         else:
             # effectively doubles the batch size for prediction
             # compared to training
@@ -1205,7 +1210,17 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
                 "Learning rate=", self.context.config.training.learning_rate
             )
             if self.context.sequence_weights is not None:
-                print("Using sequence weights ", self.context.sequence_weights, "")
+                io = self.context.config.input_output
+                input_path = Path(io.input_file)
+                if input_path.name:
+                    weight_path = Path(io.work_dir) /\
+                        input_path.with_suffix(".weights").name
+                else:
+                    weight_path = Path(io.work_dir) / "sequences.weights"
+                print("Using sequence weights and writing them to", weight_path)
+                write_sequence_weights(
+                    data, self.context.sequence_weights, str(weight_path)
+                )
             else:
                 print("Don't use sequence weights.")
             if int(self.context.batch_gen.crop_long_seqs) < math.inf:
