@@ -118,7 +118,7 @@ def _compute_reduced_embeddings(
 
 
 def get_adaptive_batch_size(
-    seq_len: int, impl_factor: float = 1.0, safety_margin: float = 0.8
+    seq_len: int, impl_factor: float = 1.0, safety_margin: float = 0.75
 ) -> int:
     """
     Computes an adaptive batch size.

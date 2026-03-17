@@ -81,7 +81,7 @@ def get_adaptive_batch_size(
     num_model: int,
     seq_len: int,
     impl_factor: float = 1.0,
-    safety_margin: float = 0.8,
+    safety_margin: float = 0.75,
     data_type_size: int = 4,
 ) -> int:
     """
@@ -101,7 +101,7 @@ def get_adaptive_batch_size(
     # dampen the true available VRAM to avoid too aggressive scaling
     # on large GPUS
     mem_avail = get_avail_memory_bytes()
-    REFERENCE_MEM = 24 * 1024**3
+    REFERENCE_MEM = 20 * 1024**3
     scale = mem_avail / REFERENCE_MEM
     if scale > 1:
         scale = scale ** MEMORY_DAMP
