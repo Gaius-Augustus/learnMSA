@@ -14,8 +14,13 @@ class StructureConfig(BaseModel):
     use_structure: bool = False
     """Whether to use structural information."""
 
-    structural_alphabet: str = "ARNDCQEGHILKMFPSTWYVXUO"
+    structural_alphabet: str = "ARNDCQEGHILKMFPSTWYV"
     """The structural alphabet. Default: 3Di."""
 
     background_distribution: Sequence[float] | NPArray = np.ones(20) / 20
     """Default, background distribution over the structural alphabet."""
+
+    @property
+    def alphabet_size(self) -> int:
+        """The size of the alphabet."""
+        return len(self.structural_alphabet)

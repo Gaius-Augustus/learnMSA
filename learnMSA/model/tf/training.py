@@ -107,11 +107,7 @@ class BatchGenerator():
 
         max_len = int(max_len)
 
-        # TODO: hacky, dtypes should be a property of the dataset
-        batch_dtypes = [
-            np.float32 if isinstance(dataset, EmbeddingDataset) else np.uint16
-            for dataset in self.data
-        ]
+        batch_dtypes = [dataset.get_dtype() for dataset in self.data]
         batches = [
             dataset.empty(
                 (indices.shape[0], max_len + 1, self.num_models),
@@ -172,11 +168,7 @@ class BatchGenerator():
             return batch_output, permutated_indices
 
     def get_out_types(self):
-        batch_types = tuple(
-            # TODO: quite hacky, should be a property of the dataset
-            tf.float32 if isinstance(d, EmbeddingDataset) else tf.uint16
-            for d in self.data
-        )
+        batch_types = tuple(d.get_dtype() for d in self.data)
         if self.return_only_sequences:
             return batch_types
         else:

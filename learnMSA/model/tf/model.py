@@ -73,6 +73,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             config = context.config.hmm,
             prior_config = context.config.hmm_prior,
             plm_config = context.config.language_model,
+            structural_config = context.config.structure,
             use_prior = context.config.training.use_prior,
             trainable_insertions = train_cfg.trainable_insertions,
             value_sets = context.init_msa_values,
@@ -212,32 +213,25 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         Args:
             input_shape: Shape of the input data.
         """
-        batch_size = input_shapes[0][0]
-        s = self.context.config.hmm.alphabet_size
+        B = input_shapes[0][0]
+        cfg = self.context.config
+        s = cfg.hmm.alphabet_size
         n = self.phmm_layer.heads
         # AncProbsLayer now expects (batch, L, num_models) shape
-        seq_shape_batch_first = (batch_size, None, n)
-        ind_shape_batch_first = (batch_size, n)
-        if self.context.config.training.use_anc_probs:
+        seq_shape_batch_first = (B, None, n)
+        ind_shape_batch_first = (B, n)
+        if cfg.training.use_anc_probs:
             self.anc_probs_layer.build([seq_shape_batch_first, ind_shape_batch_first])
 
         # Build the pHMM layer
-        if self.context.config.language_model.use_language_model:
-            emb_dim = self.context.config.language_model.scoring_model_dim
-            self.phmm_layer.build(
-                input_shape=(
-                    (batch_size, None, n, s),
-                    (batch_size, None, n, emb_dim),
-                    (batch_size, None, n, 1),
-                )
-            )
-        else:
-            self.phmm_layer.build(
-                input_shape=(
-                    (batch_size, None, n, s),
-                    (batch_size, None, n, 1),
-                )
-            )
+        input_shape = ((B, None, n, s),)
+        if cfg.language_model.use_language_model:
+            emb_dim = cfg.language_model.scoring_model_dim
+            input_shape += ((B, None, n, emb_dim),)
+        if cfg.structure.use_structure:
+             input_shape += ((B, None, n, cfg.structure.alphabet_size),)
+        input_shape += ((B, None, n, 1),) # padding
+        self.phmm_layer.build(input_shape = input_shape)
 
     @override
     def compile(self, total_steps: int | None = None) -> None:

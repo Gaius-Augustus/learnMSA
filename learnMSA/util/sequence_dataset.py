@@ -42,6 +42,7 @@ class SequenceDataset(Dataset):
         replace_with_x: str = "BZJ",
         ignore_symbols: str = "",
         validate_alphabet: bool = True,
+        encode_as_one_hot: bool = False,
     ) -> None:
         """
         Args:
@@ -66,6 +67,8 @@ class SequenceDataset(Dataset):
             validate_alphabet (bool): If True, raise an error if any sequence
                 contains characters not in the specified alphabet after
                 standardization.
+            encode_as_one_hot (bool): If True, sequences are encoded as one-hot
+                vectors instead of integer indices.
         """
         self.alphabet = alphabet if alphabet is not None else type(self)._default_alphabet
         self.remove_gaps = remove_gaps
@@ -76,6 +79,7 @@ class SequenceDataset(Dataset):
                 "replace_with_x is not empty but 'X' is not in the alphabet."
         self.ignore_symbols = ignore_symbols
         self.validate_alphabet = validate_alphabet
+        self.encode_as_one_hot = encode_as_one_hot
         self._invalid_char_pattern = re.compile(rf"[^{re.escape(self.alphabet)}]")
 
         self.filepath = Path()
@@ -226,7 +230,16 @@ class SequenceDataset(Dataset):
                 f"crop_end {end} exceeds sequence length {seq.shape[0]}."
             )
 
-        return seq[start:end]
+        seq = seq[start:end]
+
+        if self.encode_as_one_hot:
+            one_hot = np.zeros(
+                (seq.shape[0], len(self.alphabet)), dtype=np.float32
+            )
+            one_hot[np.arange(seq.shape[0]), seq] = 1 # type: ignore
+            return one_hot
+
+        return seq
 
 
     def empty(
@@ -234,6 +247,12 @@ class SequenceDataset(Dataset):
         shape: tuple[int, ...],
         dtype: type[np.integer | np.floating] = np.int16,
     ) -> np.ndarray:
+        if self.encode_as_one_hot:
+            alphabet_size = len(self.alphabet)
+            one_hot_shape = shape + (alphabet_size,)
+            empty = np.zeros(one_hot_shape, dtype=np.float32)
+            empty[..., alphabet_size - 1] = 1  # Initialize with terminal symbol
+            return empty
         empty = np.zeros(shape, dtype=dtype)
         empty += len(self.alphabet)-1 # Initialize with terminal symbols
         return empty
@@ -315,3 +334,7 @@ class SequenceDataset(Dataset):
         perm = perm.astype(np.int64, copy=False)
         self.seq_ids = [self.seq_ids[i] for i in perm]
         self.seq_lens = self.seq_lens[perm]
+
+    def get_dtype(self) -> type[np.integer | np.floating]:
+        """Return the dtype of the encoded sequences."""
+        return np.float32 if self.encode_as_one_hot else np.int16

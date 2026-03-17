@@ -124,6 +124,10 @@ class EmbeddingDataset(Dataset):
         """
         self._permutation = np.array(permutation)
 
+    def get_dtype(self) -> type[np.integer | np.floating]:
+        """Return the dtype of the encoded sequences."""
+        return np.float32
+
     def sample_embedding_variance(self, n_samples: int = 10000) -> np.ndarray:
         """ Approximates the variance of embedding dimensions. """
         if not self._embedding_cache.is_filled():

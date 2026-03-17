@@ -214,7 +214,7 @@ class PHMMLayer(tf.keras.Layer):
         if structural_config and structural_config.use_structure:
             struct_values = [
                 PHMMValueSet.from_structural_config(L, h, structural_config)
-                for h, L in enumerate(lengths)
+                for h, L in enumerate(self.lengths)
             ]
             structural_emitter = ProfileEmitter(
                 values=struct_values, trainable_insertions=trainable_insertions

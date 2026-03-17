@@ -66,8 +66,8 @@ class ProfileEmitter(TFCategoricalEmitter):
             input_shape = (None, None, s)
         else:
             assert input_shape[-1] == s,\
-                "Input feature dimension must match alphabet size provided"\
-                "via the ValueSets."
+                "Input feature dimension must match alphabet size provided "\
+                f"via the ValueSets ({input_shape[-1]} != {s})."
 
         # Share all insertion emissions across positions
         # We need to provide an array with indices into the emitter's kernel
