@@ -329,7 +329,7 @@ class AlignmentModel():
         # Compute the likelihood and bitscores for all sequences
         loglik = self.model.estimate_loglik(
             self.data, self.data[0].num_seq, reduce=False, models=[model]
-        )
+        )[:,0]
         # Compute the bitscore
         log_null = self.model.compute_null_model_log_probs(self.data[0])
         bitscore = loglik - log_null
