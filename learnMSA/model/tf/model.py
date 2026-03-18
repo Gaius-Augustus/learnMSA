@@ -1216,7 +1216,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
                     data, self.context.sequence_weights, str(weight_path)
                 )
             else:
-                print("Don't use sequence weights.")
+                print("Don't use sequence weights")
             if int(self.context.batch_gen.crop_long_seqs) < math.inf:
                 num_cropped = np.sum(
                     data.seq_lens[indices] >\
@@ -1230,12 +1230,13 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
                         "--crop disable. To change the cropping limit to X, "\
                         "use --crop X."
                     )
-        num_gpu = len([x.name for x in tf.config.list_logical_devices() if x.device_type == 'GPU'])
-        if self.context.config.input_output.verbose:
+            if self.phmm_layer.use_language_model:
+                print("Protein language model support is enabled")
+            num_gpu = len([x.name for x in tf.config.list_logical_devices() if x.device_type == 'GPU'])
             if num_gpu == 0:
-                print("Using CPU.")
+                print("Using CPU")
             else:
-                print("Using GPU.")
+                print("Using GPU")
 
     def _print_predict_header(
         self, indices: np.ndarray,

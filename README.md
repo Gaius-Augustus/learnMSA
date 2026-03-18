@@ -94,10 +94,17 @@ conda activate learnMSA && pip install tensorflow[and-cuda]=="$(pip show tensorf
 ```
 
 
+# Using learnMSA
 
+## Getting started
 
+Get an overview of the command line options with:
+<code>learnMSA -h</code>
 
-## Using learnMSA for alignment
+Get help for a specific option with:
+<code>learnMSA help [OPTION]</code>
+
+## MSA
 
 Recommended way to align proteins **with learnMSA version >= 2.0.10**:
 

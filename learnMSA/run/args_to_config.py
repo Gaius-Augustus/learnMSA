@@ -89,7 +89,8 @@ def args_to_config(args: Namespace) -> Configuration:
     )
 
     language_model_config = LanguageModelConfig(
-        use_language_model=args.use_language_model,
+        use_language_model=args.use_language_model or args.emb_file is not None,
+        only_embeddings=args.save_emb != "<workdir>" and not args.use_language_model,
         plm_cache_dir=args.plm_cache_dir,
         language_model=args.language_model,
         scoring_model_dim=args.scoring_model_dim,

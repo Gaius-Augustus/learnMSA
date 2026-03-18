@@ -12,7 +12,9 @@ Arguments
 ``--use_language_model``
     Uses a large protein language model to generate per-token embeddings that
     guide the MSA step. It is recommended to always use this option, unless
-    computational resources are limited.
+    computational resources are limited. Embeddings can be save to a user-
+    specified file with the ``--save_emb`` option and loaded from a file with
+    the ``--load_emb`` option.
 
 
 ``--plm_cache_dir`` *PLM_CACHE_DIR*
