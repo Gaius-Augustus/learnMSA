@@ -15,6 +15,10 @@ class LanguageModelConfig(BaseModel):
     """Uses a large protein lanague model to generate per-token
     embeddings that guide the MSA step."""
 
+    only_embeddings: bool = False
+    """Only compute and save the embeddings without running the full alignment.
+    """
+
     plm_cache_dir: str | None = None
     """Directory where the protein language model is stored."""
 

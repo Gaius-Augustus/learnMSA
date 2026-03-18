@@ -72,8 +72,9 @@ def run_main() -> None:
         ## Load embeddings dataset (optional)
         emb_data = util.load_emb_data(config, data, stack)
 
-        # Check availability of data depending on config
-        if config.language_model.use_language_model:
+        # Compute embeddings if required and not provided as a file
+        if (config.language_model.use_language_model
+                or config.language_model.only_embeddings):
             if emb_data is None:
                 from learnMSA.protein_language_models import compute_embeddings
 
@@ -88,14 +89,22 @@ def run_main() -> None:
                 )
 
                 # Save the computed embeddings if a save path is provided
-                if (config.input_output.save_emb and
-                        config.input_output.save_emb != Path()):
+                if (config.input_output.save_emb
+                        and config.input_output.save_emb != Path()):
                     emb_data.write(config.input_output.save_emb)
                     if config.input_output.verbose:
                         print(
                             f"Saved computed embeddings to " +
                             f"{config.input_output.save_emb}"
                         )
+                    if config.language_model.only_embeddings:
+                        if config.input_output.verbose:
+                            print(
+                                "Found --save-emb argument but not "
+                                "--use-language-model. Exiting now without "
+                                "running the full alignment."
+                            )
+                        return
 
             datasets += (emb_data, )
 
