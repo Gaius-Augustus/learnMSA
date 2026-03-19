@@ -507,17 +507,11 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             self.context.batch_gen.num_models = len(self.phmm_layer.head_subset)
 
         if bucket_boundaries is None or bucket_batch_sizes is None:
-            if self.context.config.language_model.use_language_model:
-                impl_factor = 8.0
-            else:
-                # effectively doubles the batch size for prediction
-                # compared to training
-                impl_factor = 0.5
             bucket_boundaries, bucket_batch_sizes = make_default_bucket_scheme(
                 indices=indices,
                 batch_generator=self.context.batch_gen,
                 model_lengths=[self.phmm_layer.lengths[m] for m in _models],
-                batch_size_impl_factor=impl_factor,
+                batch_size_impl_factor=self.context._get_impl_factor(True),
             )
 
         # Create dataset and get number of steps
@@ -721,17 +715,11 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             self.context.batch_gen.num_models = len(self.phmm_layer.head_subset)
 
         # Create dataset and get number of steps
-        if self.context.config.language_model.use_language_model:
-            impl_factor = 8.0
-        else:
-            # effectively doubles the batch size for prediction
-            # compared to training
-            impl_factor = 0.5
         bucket_boundaries, bucket_batch_sizes = make_default_bucket_scheme(
             indices=indices,
             batch_generator=self.context.batch_gen,
             model_lengths=[self.phmm_layer.lengths[m] for m in _models],
-            batch_size_impl_factor=impl_factor,
+            batch_size_impl_factor=self.context._get_impl_factor(True),
         )
 
         ds, steps = make_dataset(
