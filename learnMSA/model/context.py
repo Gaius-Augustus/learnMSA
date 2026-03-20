@@ -288,7 +288,7 @@ class LearnMSAContext:
 
             # Get transition pseudocounts
             transition_prior = TFPHMMTransitionPrior(
-                self.model_lengths, self.config.hmm_prior
+                [5], self.config.hmm_prior
             )
             match_psc = transition_prior.match_prior.matrix()[0,0].numpy()
             ins_psc = transition_prior.insert_prior.matrix()[0,0].numpy()
