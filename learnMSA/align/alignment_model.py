@@ -3,6 +3,7 @@ import shutil
 import warnings
 from pathlib import Path
 
+from learnMSA.hmm.util.transition_index_set import PHMMTransitionIndexSet
 import numpy as np
 import tensorflow as tf
 
@@ -685,100 +686,86 @@ class AlignmentModel():
 
         assert len(models) == 1, "Not implemented for multiple models."
 
-        # TODO
-        print("WARNING: Fixing faulty Viterbi sequences is currently not supported. SKIPPING.")
-        self.fixed_viterbi_seqs = np.array([], dtype=np.int32)
-        return state_seqs_max_lik
-
         # state_seqs_max_lik has shape (num_model, num_seq, L)
-        faulty_sequences = find_faulty_sequences(
+        faulty_sequences, C_forbidden_mask = find_faulty_sequences(
             state_seqs_max_lik,
             self.model.context.model_lengths[models[0]],
-            self.data.seq_lens[self.indices]
+            self.data[0].seq_lens[self.indices]
         )
         self.fixed_viterbi_seqs = faulty_sequences
-        if faulty_sequences.size > 0:
-            # repeat Viterbi with a masking that prevents certain transitions
-            # that can cause problems
-            fixed_state_seqs = self.model.decode(
-                self.data,
-                faulty_sequences,
-                self.batch_size,
-                models,
-                non_homogeneous_mask_func,
-            )
-            if state_seqs_max_lik.shape[-1] < fixed_state_seqs.shape[-1]:
-                state_seqs_max_like = np.pad(
-                    state_seqs_max_lik,
-                    ((0,0),(0,0),(0,fixed_state_seqs.shape[-1]-state_seqs_max_lik.shape[-1])),
-                    constant_values=2*self.model.context.model_lengths[0]+2
-                )
-            state_seqs_max_lik[0,faulty_sequences,:fixed_state_seqs.shape[-1]] = fixed_state_seqs[0]
+        # if faulty_sequences.size > 0:
+            # # repeat Viterbi with a masking that prevents certain transitions
+            # # that can cause problems
+            # fixed_state_seqs = self.model.decode(
+            #     self.data,
+            #     faulty_sequences,
+            #     self.batch_size,
+            #     models,
+            #     non_homogeneous_mask_func,
+            # )
+            # if state_seqs_max_lik.shape[-1] < fixed_state_seqs.shape[-1]:
+            #     state_seqs_max_like = np.pad(
+            #         state_seqs_max_lik,
+            #         ((0,0),(0,0),(0,fixed_state_seqs.shape[-1]-state_seqs_max_lik.shape[-1])),
+            #         constant_values=2*self.model.context.model_lengths[0]+2
+            #     )
+            # state_seqs_max_lik[0,faulty_sequences,:fixed_state_seqs.shape[-1]] = fixed_state_seqs[0]
         return state_seqs_max_lik
-
-
-@tf.function
-def non_homogeneous_mask_func(i, seq_lens, hmm_cell):
-    """ Let S = S_1 … S_L be the sequence and M_1 … M_Z the match states.
-    In a Viterbi path pi = pi_1 … pi_L prevent transitions such that either
-    a) (pi_{i-1}, pi_i) = (M_j, E) and L-i <= Z-j or
-    b) (pi_{i-1}, pi_i) = (S, M_j) and i <= j.
-
-    Returns:
-        A mask of shape (num_models, batch_size, num_states, num_states)
-        indicating allowed transitions.
-    """
-    k = hmm_cell.num_models
-    q = tf.cast(hmm_cell.max_num_states, tf.int32)
-    template = tf.ones((1,q,q), dtype=hmm_cell.dtype)
-    model_masks = []
-    for k,length in enumerate(hmm_cell.length):
-        length = tf.cast(length, tf.int32)
-        C = 2 * length
-        states_left = one_hot_set([C], q, hmm_cell.dtype)
-        states_right = one_hot_set([C], q, hmm_cell.dtype)
-        allowed_CL_transitions = 1 - one_hot_set(tf.range(i+1, tf.maximum(i+1, length + 1)), q, hmm_cell.dtype)
-        number_of_forbidden_match_states = tf.maximum(0, length - seq_lens[k] + i)
-        #always allow transitions out of the last match state
-        number_of_forbidden_match_states = tf.minimum(length-1, number_of_forbidden_match_states)
-        length_mask = 1-tf.cast(tf.sequence_mask(number_of_forbidden_match_states, maxlen=q-1), hmm_cell.dtype)
-        allowed_CR_transitions = tf.concat([tf.ones_like(length_mask[:,:1]), length_mask], axis=1)
-        mask_left = states_left[...,tf.newaxis] * allowed_CL_transitions[tf.newaxis] # type: ignore
-        mask_left += template * (1 - states_left[:,tf.newaxis])
-        mask_right = states_right[tf.newaxis] * allowed_CR_transitions[...,tf.newaxis] # type: ignore
-        mask_right += template * (1 - states_right[tf.newaxis])
-        mask = mask_left * mask_right
-        model_masks.append(mask)
-    return tf.stack(model_masks, axis=0)
-
-
-@tf.function
-def one_hot_set(indices, d, dtype):
-    # Returns a vector in {0,1}}^d with a 1 at positions i in indices and 0
-    # elsewhere
-    return tf.reduce_sum(tf.one_hot(indices, d, dtype=dtype), axis=0)
 
 
 def find_faulty_sequences(
-    state_seqs_max_lik, model_length, seq_lens, limit=32000
+    state_seqs: np.ndarray,
+    model_length: int,
+    seq_lens: np.ndarray,
+    limit: int=32000,
 ):
-    if state_seqs_max_lik.shape[1] > limit:
+    """
+    Returns the indices of sequences for which the decoding needs to
+    be rerun with time-dependent restrictions on the allowed transitions.
+    A state sequence is considered faulty if at any point in time t
+    the unannoted state C is entered while there are enough match states
+    to align the sequence as a single-profile hit or treat it as a right flank
+    insertion. The reasoning is that such a multi hit is very likely a
+    false positive that does not fit well to the rest of the state sequences.
+
+    Args:
+        state_seqs_max_lik: A tensor with state sequences.
+            Shape: (N, T, 1)
+
+    Returns:
+        faulty_sequences: A vector of sequence indices for which the
+            decoding needs to be rerun with time-dependent restrictions on the
+            allowed transitions.
+
+        C_forbidden_mask: A boolean mask of shape (num_faulty, T, 1) indicating
+            for each time step whether the transition into the unannotated
+            state C is forbidden (True) or allowed (False).
+    """
+    T = state_seqs.shape[1]
+    if T > limit:
+        # Don't filter very long sequences.
         return np.array([], dtype=np.int32)
     else:
-        # Returns an array of sequences indices for that Viterbi should be
-        # rerun with restrictions
-        C = 2 * model_length
-        C_state = state_seqs_max_lik == C
-        prev_C_state = np.roll(C_state, 1, axis=2)
-        prev_C_state[:,:,0] = False
+        # Is the C state entered?
+        C = PHMMTransitionIndexSet(model_length, folded=True).unannotated[0,0]
+        C_state = state_seqs == C
+        prev_C_state = np.roll(C_state, 1, axis=1)
+        prev_C_state[:,0,:] = False
         C_state_starts = C_state & ~prev_C_state
-        previous_state = np.roll(state_seqs_max_lik, 1, axis=2).astype(np.int32)
-        previous_state[:,:,0] = -1
-        previous_is_match = (previous_state > 0) & (previous_state < model_length+1)
-        #there are enough match states to align without repeat
-        remaining_matches = model_length - previous_state
-        remaining_residues = seq_lens[np.newaxis,:,np.newaxis] - np.arange(state_seqs_max_lik.shape[-1])[np.newaxis,np.newaxis,:]
+
+        # Is the previous state a match state?
+        prev = np.roll(state_seqs, 1, axis=1).astype(np.int32)
+        prev[:,0,:] = -1
+        previous_is_match = (prev >= 0) & (prev < model_length)
+
+        # Are there enough match states to align without a multi hit?
+        remaining_matches = model_length - prev - 1 # >= 0 only at match states
+        remaining_residues = (seq_lens[:, np.newaxis, np.newaxis]
+            - np.arange(T)[np.newaxis, :, np.newaxis])
         enough_matches = remaining_matches >= remaining_residues
-        faulty_sequences = np.any(C_state_starts & previous_is_match & enough_matches, axis=-1)
-        faulty_sequences = np.argwhere(faulty_sequences[0])[:,0]
-        return faulty_sequences
+
+        C_forbidden_mask = previous_is_match & enough_matches
+
+        faulty_sequences = np.any(C_state_starts & C_forbidden_mask, axis=1)
+        faulty_sequences = np.argwhere(faulty_sequences[:,0])[:,0]
+        return faulty_sequences, C_forbidden_mask[faulty_sequences]

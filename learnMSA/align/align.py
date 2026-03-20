@@ -147,7 +147,7 @@ def align(
             max_show_seqs = 5
             print(f"Fixed {am.fixed_viterbi_seqs.size} Viterbi sequences:")
             print("\n".join([
-                am.data.seq_ids[i]
+                am.data[0].seq_ids[i]
                 for i in am.fixed_viterbi_seqs[:max_show_seqs]
             ]))
             if am.fixed_viterbi_seqs.size > max_show_seqs:
