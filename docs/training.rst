@@ -159,6 +159,16 @@ differ slighly in their initialization, length (number of match states) and
     This can be useful, for example, in phylogenetic downstream analyses where only
     conserved columns are of interest.
 
+``--no_noise``
+    With this flag learnMSA will not perturb the initial HMM parameters with
+    Dirichlet noise.
+
+``noise_concentration`` *NOISE_CONCENTRATION*
+    Concentration parameter for the Dirichlet noise applied to the initial HMM
+    parameters.
+
+    Default: 100.0
+
 
 Practical tips and example commands
 -----------------------------------

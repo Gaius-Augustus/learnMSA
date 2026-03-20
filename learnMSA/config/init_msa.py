@@ -22,11 +22,6 @@ class InitMSAConfig(BaseModel):
     counts flanks as deletions, while a local alignment counts them as
     jumps into the profile using only a single edge."""
 
-    random_scale: float = 1e-3
-    """When initializing from an MSA, the initial parameters are
-    slightly perturbed by random noise. This parameter controls the
-    scale of the noise."""
-
     pseudocounts: bool = False
     """If set, pseudocounts inferred from Dirichlet priors will be
     added on state transition and emissions counted in the MSA
@@ -36,10 +31,4 @@ class InitMSAConfig(BaseModel):
     def validate_quantiles(cls, v: float, info) -> float:
         if not 0 <= v <= 1:
             raise ValueError(f"{info.field_name} must be in the range [0, 1].")
-        return v
-
-    @field_validator("random_scale")
-    def validate_positive_floats(cls, v: float, info) -> float:
-        if v <= 0:
-            raise ValueError(f"{info.field_name} must be greater than 0.")
         return v

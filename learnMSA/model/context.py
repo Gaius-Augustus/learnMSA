@@ -335,6 +335,12 @@ class LearnMSAContext:
 
         model_values = [values] * n
 
+        if self.config.training.use_noise and self.config.input_output.verbose:
+            print(
+                "Perturbing initial HMM parameters with Dirichlet noise."
+                " To disable this, use the --no_noise flag."
+            )
+
         return model_lengths_cb, model_values
 
 

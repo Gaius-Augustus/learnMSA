@@ -228,7 +228,6 @@ class TestInitMSAConfig:
         assert config.from_msa is None
         assert config.match_threshold == 0.5
         assert config.global_factor == 0.1
-        assert config.random_scale == 1e-3
         assert config.pseudocounts is False
 
     def test_init_msa_config_with_path(self):
@@ -242,12 +241,10 @@ class TestInitMSAConfig:
         config = InitMSAConfig(
             match_threshold=0.7,
             global_factor=0.5,
-            random_scale=0.01,
             pseudocounts=True
         )
         assert config.match_threshold == 0.7
         assert config.global_factor == 0.5
-        assert config.random_scale == 0.01
         assert config.pseudocounts is True
 
     def test_init_msa_validation(self):
@@ -280,20 +277,6 @@ class TestInitMSAConfig:
         ):
             InitMSAConfig(global_factor=1.1)
 
-        # Valid random_scale values
-        for val in [0.001, 1.0, 100.0]:
-            InitMSAConfig(random_scale=val)
-
-        # Invalid random_scale values
-        with pytest.raises(
-            ValidationError, match="random_scale must be greater than 0"
-        ):
-            InitMSAConfig(random_scale=0)
-        with pytest.raises(
-            ValidationError, match="random_scale must be greater than 0"
-        ):
-            InitMSAConfig(random_scale=-0.001)
-
     def test_init_msa_serialization(self):
         """Test InitMSAConfig serialization and deserialization."""
         from pathlib import Path
@@ -309,7 +292,6 @@ class TestInitMSAConfig:
         assert config_dict["from_msa"] == Path("/path/to/file.fasta")
         assert config_dict["match_threshold"] == 0.6
         assert config_dict["global_factor"] == 0.2
-        assert config_dict["random_scale"] == 1e-3
         assert config_dict["pseudocounts"] is False
 
         # Deserialization
@@ -317,7 +299,6 @@ class TestInitMSAConfig:
             "from_msa": "/path/to/file.fasta",
             "match_threshold": 0.8,
             "global_factor": 0.3,
-            "random_scale": 0.05,
             "pseudocounts": True
         }
         config2 = InitMSAConfig(**config_dict2)
@@ -325,7 +306,6 @@ class TestInitMSAConfig:
         assert str(config2.from_msa) == "/path/to/file.fasta"
         assert config2.match_threshold == 0.8
         assert config2.global_factor == 0.3
-        assert config2.random_scale == 0.05
         assert config2.pseudocounts is True
 
     def test_init_msa_in_configuration(self):

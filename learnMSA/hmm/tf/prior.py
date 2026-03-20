@@ -4,7 +4,7 @@ from typing import Sequence, override
 import numpy as np
 import tensorflow as tf
 from hidten.tf.prior.dirichlet import T_TFTensor, TFDirichletPrior, TFPrior
-from hidten.tf.util import epsilon
+from hidten.tf.util import epsilon, safe_log
 
 from learnMSA.config.hmm import PHMMPriorConfig
 from learnMSA.hmm.tf.util import load_dirichlet
@@ -183,14 +183,14 @@ class TFPHMMTransitionPrior(TFPrior):
             # Compute flank prior (without start distribution terms)
             a = self.prior_config.alpha_flank
             a_c = self.prior_config.alpha_flank_compl
-            flank = (a - 1) * tf.math.log(unannotated_loop)
-            flank += (a - 1) * tf.math.log(right_flank_loop)
-            flank += (a - 1) * tf.math.log(left_flank_loop)
-            flank += (a - 1) * tf.math.log(end_to_right_flank)
-            flank += (a_c - 1) * tf.math.log(unannotated_exit)
-            flank += (a_c - 1) * tf.math.log(right_flank_exit)
-            flank += (a_c - 1) * tf.math.log(left_flank_exit)
-            flank += (a_c - 1) * tf.math.log(end_to_unannotated + end_to_terminal)
+            flank = (a - 1) * safe_log(unannotated_loop)
+            flank += (a - 1) * safe_log(right_flank_loop)
+            flank += (a - 1) * safe_log(left_flank_loop)
+            flank += (a - 1) * safe_log(end_to_right_flank)
+            flank += (a_c - 1) * safe_log(unannotated_exit)
+            flank += (a_c - 1) * safe_log(right_flank_exit)
+            flank += (a_c - 1) * safe_log(left_flank_exit)
+            flank += (a_c - 1) * safe_log(end_to_unannotated + end_to_terminal)
 
             scores.append(flank)
 
@@ -226,10 +226,10 @@ class TFPHMMTransitionPrior(TFPrior):
             # Compute hit prior
             a = self.prior_config.alpha_single
             a_c = self.prior_config.alpha_single_compl
-            hit = (a - 1) * tf.math.log(
+            hit = (a - 1) * safe_log(
                 end_to_right_flank + end_to_terminal
             )
-            hit += (a_c - 1) * tf.math.log(end_to_unannotated)
+            hit += (a_c - 1) * safe_log(end_to_unannotated)
 
             scores.append(hit)
 
@@ -270,8 +270,8 @@ class TFPHMMTransitionPrior(TFPrior):
             # Keep only upper triangular part (including diagonal)
             enex = tf.linalg.band_part(enex, 0, -1)
 
-            log_enex = tf.math.log(tf.maximum(e, 1.0 - enex))
-            log_enex_compl = tf.math.log(tf.maximum(e, enex))
+            log_enex = safe_log(tf.maximum(e, 1.0 - enex))
+            log_enex_compl = safe_log(tf.maximum(e, enex))
 
             # Compute global prior (exclude the [0, -1] element)
             glob = (self.prior_config.alpha_global - 1) * (
@@ -389,8 +389,8 @@ class TFPHMMStartPrior(TFPrior):
             # Compute start prior using the same alpha parameters as flank prior
             a = self.prior_config.alpha_flank
             a_c = self.prior_config.alpha_flank_compl
-            score = (a - 1) * tf.math.log(flank_init_prob)
-            score += (a_c - 1) * tf.math.log(1.0 - flank_init_prob)
+            score = (a - 1) * safe_log(flank_init_prob)
+            score += (a_c - 1) * safe_log(1.0 - flank_init_prob)
 
             scores.append(score)
 
