@@ -486,3 +486,12 @@ def test_reorder() -> None:
         assert str(data.get_record(1).seq) == "AAAA"
         assert str(data.get_record(2).seq) == "BBB"
         np.testing.assert_equal(data.seq_lens, [2, 4, 3])
+
+def test_profile() -> None:
+    sequences = [("s1", "AAAAA"), ("s2", "ARED"), ("s3", "EEDD")]
+    with SequenceDataset(sequences=sequences) as data:
+        profile = data.get_profile()
+        # Check that the profile has the correct counts for the first sequence
+        np.testing.assert_almost_equal(
+            profile * 13, [6, 1, 0, 3, 0, 0, 3] + [0] * 17
+        )
