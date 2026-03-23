@@ -184,6 +184,14 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         help=("Concentration parameter for the Dirichlet noise used during " +
             "training. (default: %(default)s)")
     )
+    train_group.add_argument(
+        "--no_aa",
+        dest="no_aa",
+        action="store_true",
+        help="Do not use amino acid emissions in the model." \
+        "This requires an alternative data source like structure information." \
+        "Default: use amino acid emissions."
+    )
 
     class EpochsAction(argparse.Action):
         def __call__(

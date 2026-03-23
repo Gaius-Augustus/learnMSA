@@ -51,7 +51,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         train_cfg = context.config.training
 
         # Create the ancestor probabilities layer
-        if train_cfg.use_anc_probs:
+        if train_cfg.use_anc_probs and not train_cfg.no_aa:
             self.anc_probs_layer = AncProbsLayer(
                 train_cfg.num_model,
                 context.num_seq,

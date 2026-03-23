@@ -67,6 +67,7 @@ class PHMMLayer(tf.keras.Layer):
         use_prior: bool = True,
         trainable_insertions: bool = True,
         value_sets: Sequence[PHMMValueSet] | None = None,
+        no_aa: bool = False,
         **kwargs
     ) -> None:
         """
@@ -85,6 +86,7 @@ class PHMMLayer(tf.keras.Layer):
             value_sets: Optional pre-built :class:`PHMMValueSet` objects, one
                 per head. When provided, ``PHMMValueSet.from_config`` is
                 skipped and ``lengths`` may be ``None``.
+            no_aa: Whether to use amino acid emissions in the model.
         """
         super().__init__(**kwargs)
         if prior_config is None:
@@ -149,13 +151,14 @@ class PHMMLayer(tf.keras.Layer):
                 self.lengths, prior_config
             )
 
-        # Add the profile emitter
-        profile_emitter = ProfileEmitter(
-            values=values, trainable_insertions=trainable_insertions
-        )
-        self.hmm.add_emitter(profile_emitter)
-        if self.use_prior and prior_config.use_amino_acid_prior:
-            profile_emitter.prior = emission_prior
+        if not no_aa:
+            # Add the profile emitter
+            profile_emitter = ProfileEmitter(
+                values=values, trainable_insertions=trainable_insertions
+            )
+            self.hmm.add_emitter(profile_emitter)
+            if self.use_prior and prior_config.use_amino_acid_prior:
+                profile_emitter.prior = emission_prior
 
         self.use_language_model = plm_config != None\
             and plm_config.use_language_model

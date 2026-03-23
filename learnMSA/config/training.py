@@ -132,6 +132,11 @@ class TrainingConfig(BaseModel):
     """Whether to add Dirichlet noise during HMM initialization. Override the
     corresponding HMM config parameter for training."""
 
+    no_aa: bool = False
+    """Whether to use amino acid emissions in the model. This requires an
+    alternative data source like structure information. Default: use amino acid
+    emissions."""
+
 
     @field_validator("learning_rate")
     def validate_learning_rate(cls, v: float) -> float:

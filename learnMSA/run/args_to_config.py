@@ -79,6 +79,7 @@ def args_to_config(args: Namespace) -> Configuration:
         transposed=False,
         only_matches=args.only_matches,
         use_noise=not args.no_noise,
+        no_aa=args.no_aa,
     )
 
     init_msa_config = InitMSAConfig(
