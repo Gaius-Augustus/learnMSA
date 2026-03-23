@@ -29,6 +29,13 @@ class StructureConfig(BaseModel):
     """Default, background distribution over the structural alphabet based on
     (AF2 SwissProt). Source: hmmer3di repository."""
 
+    prior_name: str = "pfam_35_3Di"
+    """Specifies the path to weights for a Dirichlet prior over the
+    structural alphabet."""
+
+    prior_components: int = 9
+    """The number of mixture components for the Dirichlet prior."""
+
     @property
     def alphabet_size(self) -> int:
         """The size of the alphabet."""

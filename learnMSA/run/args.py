@@ -467,6 +467,24 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         help=argparse.SUPPRESS
     )
 
+    struct_group = parser.add_argument_group("Structural information")
+    struct_group.add_argument(
+        "--struct_prior_name",
+        dest="struct_prior_name",
+        type=str,
+        default="pfam_35_3Di",
+        help="Name of a weights file for the structural Dirichlet prior. "\
+        "Use empty string for no prior (default: %(default)s)"
+    )
+    struct_group.add_argument(
+        "--struct_prior_components",
+        dest="struct_prior_components",
+        type=int,
+        default=9,
+        help="The number of mixture components for the structural Dirichlet "\
+        "prior. (default: %(default)s)"
+    )
+
     vis_group = parser.add_argument_group("Visualization")
     vis_group.add_argument(
         "--logo",

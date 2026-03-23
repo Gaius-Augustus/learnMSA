@@ -221,6 +221,15 @@ class PHMMLayer(tf.keras.Layer):
             )
             self.hmm.add_emitter(structural_emitter)
 
+            # If specified, load and add a Dirichlet prior
+            if structural_config.prior_name:
+                struct_prior = load_dirichlet(
+                    structural_config.prior_name+".weights",
+                    dim=structural_config.alphabet_size,
+                    components=structural_config.prior_components,
+                )
+                structural_emitter.prior = struct_prior
+
         # Add the padding emitter
         self.hmm.add_emitter(TFSubsetPaddingEmitter())
 

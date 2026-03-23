@@ -126,6 +126,8 @@ def args_to_config(args: Namespace) -> Configuration:
 
     structure_config = StructureConfig(
         use_structure=bool(args.struct_file),
+        prior_name=args.struct_prior_name,
+        prior_components=args.struct_prior_components,
     )
 
     advanced_config = AdvancedConfig(
