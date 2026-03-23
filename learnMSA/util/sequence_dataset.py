@@ -241,6 +241,18 @@ class SequenceDataset(Dataset):
 
         return seq
 
+    def get_profile(self) -> np.ndarray:
+        """
+        Get the profile of the dataset, i.e. a 2D array of shape
+        (alphabet_size,) with the relative frequencies of each symbol in the
+        alphabet across the whole dataset.
+        """
+        profile = np.zeros((len(self.alphabet,)), dtype=np.float32)
+        for i in range(self.num_seq):
+            seq = self.get_encoded_seq(i)
+            profile += np.bincount(seq, minlength=profile.shape[0])
+        profile /= np.sum(profile)
+        return profile
 
     def empty(
         self,
