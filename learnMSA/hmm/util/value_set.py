@@ -597,7 +597,7 @@ class PHMMValueSet:
 
         return self
 
-    def normalize(self, log_zero_value=-1e8) -> "PHMMValueSet":
+    def normalize(self) -> "PHMMValueSet":
         """
         Normalizes the counts in the given HMMValueSet to probabilities
         in-place and returns a reference to the modified object.

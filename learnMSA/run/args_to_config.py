@@ -78,13 +78,13 @@ def args_to_config(args: Namespace) -> Configuration:
         equilibrium_sample=args.trainable_rate_matrices,
         transposed=False,
         only_matches=args.only_matches,
+        use_noise=not args.no_noise,
     )
 
     init_msa_config = InitMSAConfig(
         from_msa=args.from_msa,
         match_threshold=args.match_threshold,
         global_factor=args.global_factor,
-        random_scale=args.random_scale,
         pseudocounts=args.pseudocounts,
     )
 
@@ -111,7 +111,9 @@ def args_to_config(args: Namespace) -> Configuration:
         logo_gif=args.logo_gif,
     )
 
-    hmm_config = PHMMConfig()
+    hmm_config = PHMMConfig(
+        noise_concentration=args.noise_concentration,
+    )
 
     hmm_prior_config = PHMMPriorConfig(
         alpha_flank=args.alpha_flank,

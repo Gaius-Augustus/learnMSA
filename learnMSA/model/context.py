@@ -288,7 +288,7 @@ class LearnMSAContext:
 
             # Get transition pseudocounts
             transition_prior = TFPHMMTransitionPrior(
-                self.model_lengths, self.config.hmm_prior
+                [5], self.config.hmm_prior
             )
             match_psc = transition_prior.match_prior.matrix()[0,0].numpy()
             ins_psc = transition_prior.insert_prior.matrix()[0,0].numpy()
@@ -334,6 +334,12 @@ class LearnMSAContext:
             )
 
         model_values = [values] * n
+
+        if self.config.training.use_noise and self.config.input_output.verbose:
+            print(
+                "Perturbing initial HMM parameters with Dirichlet noise."
+                " To disable this, use the --no_noise flag."
+            )
 
         return model_lengths_cb, model_values
 
