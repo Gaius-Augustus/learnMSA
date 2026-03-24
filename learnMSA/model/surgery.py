@@ -274,22 +274,25 @@ def update_kernels(
     i = 0
 
     # Amino acids
-    aa_emissions = phmm_layer.hmm.emitter[i].matrix().numpy()
-    assert aa_emissions.shape[0] == 1,\
-        "Head subset is not working properly for the amino acid emitter."
-    aa_emissions = aa_emissions[0, :L, :]
-    aa_insert_value = np.array(config.background_distribution)
-    aa_emissions_new = apply_mods(
-        aa_emissions,
-        pos_expand=pos_expand,
-        expansion_lens=expansion_lens,
-        pos_discard=pos_discard,
-        insert_value=aa_insert_value,
-    )
+    if not phmm_layer.no_aa:
+        aa_emissions = phmm_layer.hmm.emitter[i].matrix().numpy()
+        assert aa_emissions.shape[0] == 1,\
+            "Head subset is not working properly for the amino acid emitter."
+        aa_emissions = aa_emissions[0, :L, :]
+        aa_insert_value = np.array(config.background_distribution)
+        aa_emissions_new = apply_mods(
+            aa_emissions,
+            pos_expand=pos_expand,
+            expansion_lens=expansion_lens,
+            pos_discard=pos_discard,
+            insert_value=aa_insert_value,
+        )
+        i += 1
+    else:
+        aa_emissions_new = None
 
     # pLM embeddings
     if phmm_layer.use_language_model:
-        i += 1
         emb_emissions = phmm_layer.hmm.emitter[i].matrix().numpy()
         assert emb_emissions.shape[0] == 1,\
             "Head subset is not working properly for the embedding emitter."
@@ -311,10 +314,12 @@ def update_kernels(
             pos_discard=pos_discard,
             insert_value=emb_insert_value,
         )
+        i += 1
+    else:
+        emb_emissions_new = None
 
     # Structural information
     if phmm_layer.use_structure:
-        i += 1
         struct_emissions = phmm_layer.hmm.emitter[i].matrix().numpy()
         assert struct_emissions.shape[0] == 1,\
             "Head subset is not working properly for the structural emitter."
@@ -329,6 +334,7 @@ def update_kernels(
             pos_discard=pos_discard,
             insert_value=struct_insert_value,
         )
+        i += 1
 
     # Gather the current transition parameters
     # Note: The transitions not occuring here (like left_flank_loop) are
@@ -368,7 +374,8 @@ def update_kernels(
     )
 
     new_config = config.model_copy(deep=True)
-    new_config.match_emissions=aa_emissions_new[np.newaxis]
+    if aa_emissions_new is not None:
+        new_config.match_emissions=aa_emissions_new[np.newaxis]
     new_config.p_match_match=match_to_match[np.newaxis]
     new_config.p_match_insert=match_to_insert[np.newaxis]
     new_config.p_insert_insert=insert_to_insert[np.newaxis]
@@ -392,8 +399,21 @@ def update_kernels(
     # Reset
     phmm_layer.head_subset = head_subset_backup
 
+    if aa_emissions_new is not None:
+        L_new = aa_emissions_new.shape[0]
+    elif emb_emissions_new is not None:
+        L_new = emb_emissions_new.shape[0]
+    elif struct_emissions_new is not None:
+        L_new = struct_emissions_new.shape[0]
+    else:
+        raise ValueError(
+            "No emissions were found. Make sure either no_aa is False "\
+            "or the PHMMLayer is using a language model or structural "\
+            "information."
+            )
+
     return UpdateKernelResult(
-        length=aa_emissions_new.shape[0],
+        length=L_new,
         config=new_config,
         plm_config=new_plm_config,
         structural_config=new_structural_config,

@@ -92,6 +92,7 @@ class PHMMLayer(tf.keras.Layer):
         if prior_config is None:
             prior_config = PHMMPriorConfig()
         self.use_prior = use_prior
+        self.no_aa = no_aa
 
         if value_sets is not None:
             values = list(value_sets)
@@ -115,12 +116,8 @@ class PHMMLayer(tf.keras.Layer):
             # Set up the Dirichlet prior for emissions
             emission_prior = load_dirichlet(
                 "amino_acid_dirichlet.weights",
-                dim = len(SequenceDataset._default_alphabet)-1
-            )
-            # Share concentrations across all states
-            emission_prior.share = np.tile(
-                np.arange(len(SequenceDataset._default_alphabet)-1),
-                reps=2 * sum(self.lengths) + 2 * len(self.lengths)
+                dim = len(SequenceDataset._default_alphabet)-1,
+                states = self.states,
             )
 
         # Override emission values with prior distribution if requested
@@ -177,6 +174,7 @@ class PHMMLayer(tf.keras.Layer):
                 self.plm_config.id_string() + ".weights",
                 dim=self.plm_config.scoring_model_dim,
                 components=self.plm_config.embedding_prior_components,
+                states=self.states,
             )
 
             # Override embedding values with prior distribution if requested
@@ -231,6 +229,7 @@ class PHMMLayer(tf.keras.Layer):
                     structural_config.prior_name+".weights",
                     dim=structural_config.alphabet_size,
                     components=structural_config.prior_components,
+                    states=self.states,
                 )
                 structural_emitter.prior = struct_prior
         else:
@@ -278,10 +277,11 @@ class PHMMLayer(tf.keras.Layer):
         padding: tf.Tensor,
         adds: tuple[tf.Tensor, ...] | None = None,
     ) -> tf.Tensor:
-        if adds is None:
-            return self.hmm(x, padding, mode=self._mode)
-        else:
-            return self.hmm(x, *adds, padding, mode=self._mode)
+        args = () if self.no_aa else (x,)
+        if adds is not None:
+            args += tuple(adds)
+        args += (padding,)
+        return self.hmm(*args, mode=self._mode)
 
     def prior_scores(self) -> tf.Tensor:
         """Calculates the prior scores for all parameters in the pHMM.
@@ -310,7 +310,7 @@ class PHMMLayer(tf.keras.Layer):
         Returns:
             New value sets with emissions replaced by prior distribution.
         """
-        prior_dist = prior.matrix().numpy().flatten()
+        prior_dist = prior.matrix().numpy()[0, 0]
         prior_dist = prior_dist / np.sum(prior_dist)
         updated_values = []
         if not override_matches and not override_insertions:
@@ -354,11 +354,10 @@ class PHMMLayer(tf.keras.Layer):
         if not override_matches and not override_insertions:
             return list(values)
         # Get the mean from the mixture model prior
-        mean_per_component = prior.mean().numpy()
-        mix_coef = prior.mixture_coefficients().numpy()
+        mean_per_component = prior.mean().numpy()[0, 0]
+        mix_coef = prior.mixture_coefficients().numpy()[0, 0]
         mix_coef = np.expand_dims(mix_coef, axis=-1)
-        mean = np.sum(mean_per_component * mix_coef, axis=2)
-        mean = np.squeeze(mean, axis=(0, 1))
+        mean = np.sum(mean_per_component * mix_coef, axis=0)
 
         updated_values = []
         for value_set in values:

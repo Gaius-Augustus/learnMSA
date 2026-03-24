@@ -77,6 +77,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             use_prior = context.config.training.use_prior,
             trainable_insertions = train_cfg.trainable_insertions,
             value_sets = context.init_msa_values,
+            no_aa = train_cfg.no_aa,
         )
 
         # Metrics trackers
@@ -192,6 +193,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         )
 
         if self.context.config.training.use_anc_probs\
+                and not self.context.config.training.no_aa\
                 and self.encode_hmm_inputs:
             # AncProbsLayer accepts (batch, L, num_models, 20) and returns
             # (batch, L, num_models, num_matrices*20)
@@ -220,11 +222,16 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         # AncProbsLayer now expects (batch, L, num_models) shape
         seq_shape_batch_first = (B, None, n)
         ind_shape_batch_first = (B, n)
-        if cfg.training.use_anc_probs:
-            self.anc_probs_layer.build([seq_shape_batch_first, ind_shape_batch_first])
+        if hasattr(self, "anc_probs_layer"):
+            self.anc_probs_layer.build(
+                [seq_shape_batch_first, ind_shape_batch_first]
+            )
 
         # Build the pHMM layer
-        input_shape = ((B, None, n, s),)
+        if cfg.training.no_aa:
+            input_shape = ()
+        else:
+            input_shape = ((B, None, n, s),)
         if cfg.language_model.use_language_model:
             emb_dim = cfg.language_model.scoring_model_dim
             input_shape += ((B, None, n, emb_dim),)
@@ -486,7 +493,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         # restrict to specified models
         # TODO: revert head_subset later?
         self.phmm_layer.head_subset = models
-        if self.context.config.training.use_anc_probs:
+        if hasattr(self, "anc_probs_layer"):
             self.anc_probs_layer.head_subset = models
 
         if models is None:
@@ -694,7 +701,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         # restrict to specified models
         # TODO: revert head_subset later?
         self.phmm_layer.head_subset = models
-        if self.context.config.training.use_anc_probs:
+        if hasattr(self, "anc_probs_layer"):
             self.anc_probs_layer.head_subset = models
 
         if models is None:
