@@ -36,6 +36,31 @@ class StructureConfig(BaseModel):
     prior_components: int = 9
     """The number of mixture components for the Dirichlet prior."""
 
+    match_emissions: (Sequence[float] | Sequence[Sequence[float]] |
+                      Sequence[Sequence[Sequence[float]]] |
+                      NPArray | None) = None
+    """Defines the emission distribution ``P(structural token | Match i; h)``.
+    Can be:
+    - None: Use background_distribution for all match states (default).
+    - Sequence[float] of length alphabet_size: Same distribution for all
+      match states in all heads.
+    - Sequence[Sequence[float]] of shape (num_heads, alphabet_size):
+      Head-specific distributions, same for all match states within a head.
+    - Sequence[Sequence[Sequence[float]]] of shape (num_heads, length[h],
+      alphabet_size): Fully specified match state emissions for each position
+      in each head.
+    """
+
+    insert_emissions: (Sequence[float] | Sequence[Sequence[float]] |
+                       NPArray | None) = None
+    """Defines the emission distribution ``P(structural token | Insert; h)``.
+    Can be:
+    - None: Use background_distribution for all heads (default).
+    - Sequence[float] of length alphabet_size: Same distribution for all heads.
+    - Sequence[Sequence[float]] of shape (num_heads, alphabet_size):
+      Head-specific insertion distributions.
+    """
+
     @property
     def alphabet_size(self) -> int:
         """The size of the alphabet."""

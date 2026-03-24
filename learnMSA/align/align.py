@@ -272,6 +272,8 @@ def _fit_and_align(
         context.init_msa_values = None # don't use init MSA after surgery
         if surgery_result.plm_config is not None:
             context.config.language_model = surgery_result.plm_config
+        if surgery_result.structural_config is not None:
+            context.config.structure = surgery_result.structural_config
         surgery_converged = surgery_result.surgery_converged
 
         if config.input_output.verbose:

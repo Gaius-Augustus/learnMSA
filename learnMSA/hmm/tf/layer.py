@@ -215,6 +215,7 @@ class PHMMLayer(tf.keras.Layer):
 
         self.structural_config = structural_config
         if structural_config and structural_config.use_structure:
+            self.use_structure = True
             struct_values = [
                 PHMMValueSet.from_structural_config(L, h, structural_config)
                 for h, L in enumerate(self.lengths)
@@ -232,6 +233,8 @@ class PHMMLayer(tf.keras.Layer):
                     components=structural_config.prior_components,
                 )
                 structural_emitter.prior = struct_prior
+        else:
+            self.use_structure = False
 
         # Add the padding emitter
         self.hmm.add_emitter(TFSubsetPaddingEmitter())

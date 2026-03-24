@@ -469,12 +469,32 @@ class PHMMValueSet:
         cls, L: int, h: int, config: StructureConfig
     ) -> "PHMMValueSet":
         s = len(config.structural_alphabet)
-        match_emissions = np.stack(
-            [config.background_distribution]*L, axis=0
-        ).astype(np.float32)
-        insert_emissions = np.asarray(
-            config.background_distribution, dtype=np.float32
-        )
+        if config.match_emissions is None:
+            match_emissions = np.stack(
+                [config.background_distribution]*L, axis=0
+            ).astype(np.float32)
+        else:
+            match_emissions_list = []
+            for i in range(L):
+                dist = get_emission_dist(
+                    config.match_emissions,
+                    head=h,
+                    index=i,
+                    default=config.background_distribution
+                )
+                match_emissions_list.append(np.array(dist, dtype=np.float32))
+            match_emissions = np.stack(match_emissions_list, axis=0)
+        if config.insert_emissions is None:
+            insert_emissions = np.asarray(
+                config.background_distribution, dtype=np.float32
+            )
+        else:
+            dist = get_emission_dist(
+                config.insert_emissions,
+                head=h,
+                default=config.background_distribution
+            )
+            insert_emissions = np.array(dist, dtype=np.float32)
         return cls(
             L=L,
             match_emissions=match_emissions,
