@@ -36,6 +36,10 @@ class StructureConfig(BaseModel):
     prior_components: int = 9
     """The number of mixture components for the Dirichlet prior."""
 
+    reset_after_surgery: bool = False
+    """Whether to reset the structural information emission parameters after
+    model surgery. default: False."""
+
     match_emissions: (Sequence[float] | Sequence[Sequence[float]] |
                       Sequence[Sequence[Sequence[float]]] |
                       NPArray | None) = None

@@ -492,6 +492,13 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         help="The number of mixture components for the structural Dirichlet "\
         "prior. (default: %(default)s)"
     )
+    struct_group.add_argument(
+        "--struct_reset_after_surgery",
+        dest="struct_reset_after_surgery",
+        action="store_true",
+        help="Whether to reset the structural information emission parameters "\
+        "after model surgery. default: False."
+    )
 
     vis_group = parser.add_argument_group("Visualization")
     vis_group.add_argument(

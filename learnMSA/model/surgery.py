@@ -319,7 +319,9 @@ def update_kernels(
         emb_emissions_new = None
 
     # Structural information
-    if phmm_layer.use_structure:
+    if phmm_layer.use_structure\
+            and structural_config is not None\
+            and not structural_config.reset_after_surgery:
         struct_emissions = phmm_layer.hmm.emitter[i].matrix().numpy()
         assert struct_emissions.shape[0] == 1,\
             "Head subset is not working properly for the structural emitter."
@@ -335,6 +337,8 @@ def update_kernels(
             insert_value=struct_insert_value,
         )
         i += 1
+    else:
+        struct_emissions_new = None
 
     # Gather the current transition parameters
     # Note: The transitions not occuring here (like left_flank_loop) are
@@ -390,7 +394,9 @@ def update_kernels(
     else:
         new_plm_config = None
 
-    if phmm_layer.use_structure and structural_config is not None:
+    if phmm_layer.use_structure\
+            and structural_config is not None\
+            and not structural_config.reset_after_surgery:
         new_structural_config = structural_config.model_copy(deep=True)
         new_structural_config.match_emissions = struct_emissions_new[np.newaxis]
     else:
