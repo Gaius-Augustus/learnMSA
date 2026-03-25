@@ -402,10 +402,10 @@ class LearnMSAContext:
         # used. The factor need to be especially high for inference, because
         # the batch size limit for inference is larger than for training.
         if self.config.language_model.use_language_model:
-            impl_factor += 7.5 if inference else 1.5
+            impl_factor += 7.5 if inference else 2.0
 
         if self.config.structure.use_structure:
-            impl_factor += 0.25 if inference else 0.5
+            impl_factor += 0.35 if inference else 0.7
 
         return impl_factor
 

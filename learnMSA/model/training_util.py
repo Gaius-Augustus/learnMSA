@@ -5,7 +5,7 @@ from learnMSA.run.util import get_batch_multiplicator, get_avail_memory_bytes
 
 DEFAULT_IMPL_FACTOR = 0.25
 MAX_BATCH_SIZE = 2048
-MEMORY_DAMP = 0.8
+MEMORY_DAMP = 0.75
 
 
 def get_initial_model_lengths(
@@ -106,7 +106,9 @@ def get_adaptive_batch_size(
     if scale > 1:
         scale = scale ** MEMORY_DAMP
     mem_avail = REFERENCE_MEM * scale
-    denominator = float(num_model) * float(model_len) ** 2 * float(seq_len)
+    # large model numbers can cause OOM if not damped
+    num_model_factor = num_model if num_model <= 4 else num_model ** 1.1
+    denominator = num_model_factor * float(model_len) ** 2 * float(seq_len)
     denominator *= impl_factor * DEFAULT_IMPL_FACTOR * data_type_size
     if denominator <= 0.0:
         return 1
