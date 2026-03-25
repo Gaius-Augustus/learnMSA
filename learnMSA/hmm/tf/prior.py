@@ -248,7 +248,7 @@ class TFPHMMTransitionPrior(TFPrior):
                 head.
         """
         scores = []
-        e = epsilon(transition_matrix)
+        e = self.prior_config.epsilon
 
         for h in range(len(self.lengths)):
             L = self.lengths[h]

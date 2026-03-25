@@ -340,6 +340,19 @@ def update_kernels(
     else:
         struct_emissions_new = None
 
+    if aa_emissions_new is not None:
+        L_new = aa_emissions_new.shape[0]
+    elif emb_emissions_new is not None:
+        L_new = emb_emissions_new.shape[0]
+    elif struct_emissions_new is not None:
+        L_new = struct_emissions_new.shape[0]
+    else:
+        raise ValueError(
+            "No emissions were found. Make sure either no_aa is False "\
+            "or the PHMMLayer is using a language model or structural "\
+            "information."
+            )
+
     # Gather the current transition parameters
     # Note: The transitions not occuring here (like left_flank_loop) are
     # always reset to initial values later on.
@@ -349,17 +362,18 @@ def update_kernels(
     ind = PHMMTransitionIndexSet(L)
     match_to_match = A[ind.match_to_match[:, 0], ind.match_to_match[:, 1]]
     match_to_insert = A[ind.match_to_insert[:, 0], ind.match_to_insert[:, 1]]
+    match_to_delete = A[ind.match_to_delete[:, 0], ind.match_to_delete[:, 1]]
     insert_to_insert = A[ind.insert_to_insert[:, 0], ind.insert_to_insert[:, 1]]
     delete_to_delete = A[ind.delete_to_delete[:, 0], ind.delete_to_delete[:, 1]]
 
     # Preserve Begin -> {M1, D1}, but reset entry probabilities uniformly
     # according to the remaining probability mass
-    begin_match = A[ind.begin_to_match[0, 0], 0]
+    begin_match = A[ind.begin_to_match[:, 0], ind.begin_to_match[:, 1]]
     begin_delete = A[ind.begin_to_delete[0,0], ind.begin_to_delete[0,1]]
+    match_end = A[ind.match_to_end[:, 0], ind.match_to_end[:, 1]]
 
     h = model_index
     args = extend_mods(pos_expand, expansion_lens, pos_discard, L)
-
     match_to_match = apply_mods(
         match_to_match, *args,
         insert_value = get_value(config.p_match_match, h, 0),
@@ -376,16 +390,52 @@ def update_kernels(
         delete_to_delete, *args,
         insert_value = get_value(config.p_delete_delete, h, 0),
     )
+    match_to_delete = apply_mods(
+        match_to_delete, *args,
+        insert_value = get_value(config.p_match_delete, h, 0),
+    )
+
+    if 0 in pos_discard or 0 in pos_expand:
+        # Reset if we modified the first match state
+        begin_match_1 = get_value(config.p_begin_match, h, 0)
+        begin_delete = get_value(config.p_begin_delete, h, 0)
+    else:
+        begin_match_1 = begin_match[0]
+    if L_new > 1:
+        begin_to_match_insert = (1 - begin_match_1 - begin_delete) / (L_new-1)
+    else:
+        begin_to_match_insert = 0.0
+
+    begin_match = apply_mods(
+        begin_match, pos_expand, expansion_lens, pos_discard,
+        insert_value = begin_to_match_insert,
+    )
+    begin_match[0] = begin_match_1
+
+    if L in pos_expand:
+        # avoid moving p last_match -> end = 1.0 into the model
+        match_end[-1] = begin_to_match_insert
+    match_end = apply_mods(
+        match_end, pos_expand, expansion_lens, pos_discard,
+        insert_value = begin_to_match_insert,
+    )
+
+    # re-normalize begin probabilities
+    begin_match[1:] /= begin_match[1:].sum() / (1 - begin_match[0] - begin_delete)
 
     new_config = config.model_copy(deep=True)
     if aa_emissions_new is not None:
         new_config.match_emissions=aa_emissions_new[np.newaxis]
     new_config.p_match_match=match_to_match[np.newaxis]
     new_config.p_match_insert=match_to_insert[np.newaxis]
+    new_config.p_match_delete=match_to_delete[np.newaxis]
     new_config.p_insert_insert=insert_to_insert[np.newaxis]
     new_config.p_delete_delete=delete_to_delete[np.newaxis]
-    new_config.p_begin_match = begin_match
+    new_config.p_begin_match = begin_match if isinstance(begin_match, float) else begin_match[np.newaxis]
     new_config.p_begin_delete = begin_delete
+    new_config.p_match_end = match_end[np.newaxis]
+
+    print("new_config", new_config)
 
     if phmm_layer.use_language_model and plm_config is not None:
         new_plm_config = plm_config.model_copy(deep=True)
@@ -404,19 +454,6 @@ def update_kernels(
 
     # Reset
     phmm_layer.head_subset = head_subset_backup
-
-    if aa_emissions_new is not None:
-        L_new = aa_emissions_new.shape[0]
-    elif emb_emissions_new is not None:
-        L_new = emb_emissions_new.shape[0]
-    elif struct_emissions_new is not None:
-        L_new = struct_emissions_new.shape[0]
-    else:
-        raise ValueError(
-            "No emissions were found. Make sure either no_aa is False "\
-            "or the PHMMLayer is using a language model or structural "\
-            "information."
-            )
 
     return UpdateKernelResult(
         length=L_new,
@@ -558,6 +595,7 @@ def model_surgery(
     config.p_begin_match = concat_param("p_begin_match")
     config.p_match_match = concat_param("p_match_match")
     config.p_match_insert = concat_param("p_match_insert")
+    config.p_match_delete = concat_param("p_match_delete")
     config.p_match_end = concat_param("p_match_end")
     config.p_insert_insert = concat_param("p_insert_insert")
     config.p_delete_delete = concat_param("p_delete_delete")

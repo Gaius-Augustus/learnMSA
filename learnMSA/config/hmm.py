@@ -137,9 +137,10 @@ class PHMMConfig(BaseModel):
         NPArray | None = None
     """Defines ``P(End | Match i; h)``.
     Can optionally depend on i and h.
-    Per default it is determined automatically such that ``exit[0] = 1/(L-1)`` and
-    ``exit[i] = entry[i]`` for i > 0 and the other outgoing transitions from
-    match i are rescaled accordingly.
+    Per default it is determined automatically such that
+    ``exit[i] = (1-p)/(L-1)`` for all match states i, where
+    p = begin_match_1 + begin_delete_1.
+    The other outgoing transitions from match i are rescaled accordingly.
     """
 
     p_insert_insert: float | Sequence[float] | Sequence[Sequence[float]] | \

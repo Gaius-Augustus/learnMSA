@@ -77,7 +77,7 @@ class PHMMValueSet:
                 isinstance(config.p_begin_match[h], (Sequence, np.ndarray)):
             p_begin_match_head = config.p_begin_match[h]
             assert isinstance(p_begin_match_head, (Sequence, np.ndarray))  # Type guard
-            p_begin_match_inner = p_begin_match_head[1:]
+            p_begin_match_inner = p_begin_match_head[1:L]
             p_sum_prob_begin_match = sum(p_begin_match_head)
             assert p_sum_prob_begin_match <= 1, (
                 f"Sum of p_begin_match is {p_sum_prob_begin_match}, which is > 1"
@@ -101,19 +101,9 @@ class PHMMValueSet:
             p_begin_delete
 
         # Handle p_match_end: compute automatic values if None
-        if config.p_match_end is None:
+        if config.p_match_end is None and L > 1:
             p_match_end_values = np.zeros(L - 1, dtype=np.float32)
-            if L > 1:
-                p_match_end_values[0] = max((1 - bm1), 1e-10) / (L - 1)
-            # For i > 0: exit[i] = entry[i]
-            if isinstance(p_begin_match_inner, (Sequence, np.ndarray)):
-                # Use explicit entry probabilities
-                for i in range(1, L - 1):
-                    p_match_end_values[i] = p_begin_match_inner[i - 1]
-            else:
-                # Use uniform entry probability
-                for i in range(1, L - 1):
-                    p_match_end_values[i] = p_begin_match_inner
+            p_match_end_values[:] = p_begin_match_inner
 
         for i in range(L - 1):
             # Begin to match i+1
