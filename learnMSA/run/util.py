@@ -277,6 +277,9 @@ def load_struct_data(
                 config.input_output.struct_file,
                 "fasta",
                 indexed=config.training.indexed_data,
+                alphabet=config.structure.structural_alphabet,
+                replace_with_x="",
+                encode_as_one_hot=True,
             )
         )
 

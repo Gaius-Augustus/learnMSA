@@ -256,22 +256,35 @@ def test_update_kernels(model_single_head: LearnMSAModel) -> None:
 
     # Begin to first match transition must have been preserved
     # other entry transitions should be reset uniformly
+    old = 0.1058824
+    new = 0.0470588
     np.testing.assert_almost_equal(
         transitions_new[ind.begin_to_match[:,0], ind.begin_to_match[:,1]],
-        [0.35] + [0.6 / (result.length - 1)] * (result.length - 1)
+        [0.35] + [old, new, new, old, new, old, new, new, new]
     )
     # Same for match to end transitions
+    old = 0.3
+    new = 0.0666667
+    ref_match_to_end = np.array(
+        [old, old, new, new, old, new, old, new, new, 1]
+    )
     np.testing.assert_almost_equal(
         transitions_new[ind.match_to_end[:,0], ind.match_to_end[:,1]],
-        [0.2] * (result.length-1) + [1.0]
+        ref_match_to_end
     )
     np.testing.assert_almost_equal(
         transitions_new[ind.match_to_match[:,0], ind.match_to_match[:,1]],
-        [.3] + [.1] * 8
+        np.concat([
+            np.array([.3]),
+            np.array([.1] * 8) * (1 - ref_match_to_end[1:-1]) / 0.8
+        ])
     )
     np.testing.assert_almost_equal(
         transitions_new[ind.match_to_insert[:,0], ind.match_to_insert[:,1]],
-        [.3] + [.5] * 8
+        np.concat([
+            np.array([.3]),
+            np.array([.5] * 8) * (1 - ref_match_to_end[1:-1]) / 0.8
+        ])
     )
     np.testing.assert_almost_equal(
         transitions_new[ind.insert_to_insert[:,0], ind.insert_to_insert[:,1]],

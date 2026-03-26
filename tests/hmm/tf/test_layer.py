@@ -734,12 +734,22 @@ def test_prior_values() -> None:
 
     # Compute gradients with the new implementation
     assert layer.hmm.emitter[0].prior is not None
+
+    # Test if parameter sharing works
+    matrix = layer.hmm.emitter[0].prior.matrix()
+    for i in range(1, 4):
+        np.testing.assert_equal(
+            matrix[0, i].numpy(),
+            matrix[0, 0].numpy(),
+        )
+
     with tf.GradientTape() as tape:
         tape.watch(p)
         prior_score = layer.hmm.emitter[0].prior(p) # type: ignore
     grads = tape.gradient(prior_score, p)
     assert isinstance(grads, tf.Tensor)
-    np.testing.assert_allclose(grads, expected_grads, atol=1e-6, rtol=1e-6)
+    # Multiply expected gradients by 10 to account because we have 10 states
+    np.testing.assert_allclose(grads, 10 * expected_grads, atol=1e-6, rtol=1e-6)
 
 
 

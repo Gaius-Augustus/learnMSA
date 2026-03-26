@@ -51,7 +51,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         train_cfg = context.config.training
 
         # Create the ancestor probabilities layer
-        if train_cfg.use_anc_probs:
+        if train_cfg.use_anc_probs and not train_cfg.no_aa:
             self.anc_probs_layer = AncProbsLayer(
                 train_cfg.num_model,
                 context.num_seq,
@@ -73,9 +73,11 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             config = context.config.hmm,
             prior_config = context.config.hmm_prior,
             plm_config = context.config.language_model,
+            structural_config = context.config.structure,
             use_prior = context.config.training.use_prior,
             trainable_insertions = train_cfg.trainable_insertions,
             value_sets = context.init_msa_values,
+            no_aa = train_cfg.no_aa,
         )
 
         # Metrics trackers
@@ -191,6 +193,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         )
 
         if self.context.config.training.use_anc_probs\
+                and not self.context.config.training.no_aa\
                 and self.encode_hmm_inputs:
             # AncProbsLayer accepts (batch, L, num_models, 20) and returns
             # (batch, L, num_models, num_matrices*20)
@@ -212,32 +215,30 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         Args:
             input_shape: Shape of the input data.
         """
-        batch_size = input_shapes[0][0]
-        s = self.context.config.hmm.alphabet_size
+        B = input_shapes[0][0]
+        cfg = self.context.config
+        s = cfg.hmm.alphabet_size
         n = self.phmm_layer.heads
         # AncProbsLayer now expects (batch, L, num_models) shape
-        seq_shape_batch_first = (batch_size, None, n)
-        ind_shape_batch_first = (batch_size, n)
-        if self.context.config.training.use_anc_probs:
-            self.anc_probs_layer.build([seq_shape_batch_first, ind_shape_batch_first])
+        seq_shape_batch_first = (B, None, n)
+        ind_shape_batch_first = (B, n)
+        if hasattr(self, "anc_probs_layer"):
+            self.anc_probs_layer.build(
+                [seq_shape_batch_first, ind_shape_batch_first]
+            )
 
         # Build the pHMM layer
-        if self.context.config.language_model.use_language_model:
-            emb_dim = self.context.config.language_model.scoring_model_dim
-            self.phmm_layer.build(
-                input_shape=(
-                    (batch_size, None, n, s),
-                    (batch_size, None, n, emb_dim),
-                    (batch_size, None, n, 1),
-                )
-            )
+        if cfg.training.no_aa:
+            input_shape = ()
         else:
-            self.phmm_layer.build(
-                input_shape=(
-                    (batch_size, None, n, s),
-                    (batch_size, None, n, 1),
-                )
-            )
+            input_shape = ((B, None, n, s),)
+        if cfg.language_model.use_language_model:
+            emb_dim = cfg.language_model.scoring_model_dim
+            input_shape += ((B, None, n, emb_dim),)
+        if cfg.structure.use_structure:
+             input_shape += ((B, None, n, cfg.structure.alphabet_size),)
+        input_shape += ((B, None, n, 1),) # padding
+        self.phmm_layer.build(input_shape = input_shape)
 
     @override
     def compile(self, total_steps: int | None = None) -> None:
@@ -492,7 +493,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         # restrict to specified models
         # TODO: revert head_subset later?
         self.phmm_layer.head_subset = models
-        if self.context.config.training.use_anc_probs:
+        if hasattr(self, "anc_probs_layer"):
             self.anc_probs_layer.head_subset = models
 
         if models is None:
@@ -513,17 +514,11 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             self.context.batch_gen.num_models = len(self.phmm_layer.head_subset)
 
         if bucket_boundaries is None or bucket_batch_sizes is None:
-            if self.context.config.language_model.use_language_model:
-                impl_factor = 8.0
-            else:
-                # effectively doubles the batch size for prediction
-                # compared to training
-                impl_factor = 0.5
             bucket_boundaries, bucket_batch_sizes = make_default_bucket_scheme(
                 indices=indices,
                 batch_generator=self.context.batch_gen,
                 model_lengths=[self.phmm_layer.lengths[m] for m in _models],
-                batch_size_impl_factor=impl_factor,
+                batch_size_impl_factor=self.context._get_impl_factor(True),
             )
 
         # Create dataset and get number of steps
@@ -706,7 +701,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         # restrict to specified models
         # TODO: revert head_subset later?
         self.phmm_layer.head_subset = models
-        if self.context.config.training.use_anc_probs:
+        if hasattr(self, "anc_probs_layer"):
             self.anc_probs_layer.head_subset = models
 
         if models is None:
@@ -727,17 +722,11 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             self.context.batch_gen.num_models = len(self.phmm_layer.head_subset)
 
         # Create dataset and get number of steps
-        if self.context.config.language_model.use_language_model:
-            impl_factor = 8.0
-        else:
-            # effectively doubles the batch size for prediction
-            # compared to training
-            impl_factor = 0.5
         bucket_boundaries, bucket_batch_sizes = make_default_bucket_scheme(
             indices=indices,
             batch_generator=self.context.batch_gen,
             model_lengths=[self.phmm_layer.lengths[m] for m in _models],
-            batch_size_impl_factor=impl_factor,
+            batch_size_impl_factor=self.context._get_impl_factor(True),
         )
 
         ds, steps = make_dataset(

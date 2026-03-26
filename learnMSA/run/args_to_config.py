@@ -7,6 +7,7 @@ from learnMSA.config import (AdvancedConfig, Configuration, PHMMConfig,
                              LanguageModelConfig, TrainingConfig,
                              VisualizationConfig)
 from learnMSA.config.hmm import PHMMPriorConfig
+from learnMSA.config.structure import StructureConfig
 
 
 def args_to_config(args: Namespace) -> Configuration:
@@ -77,13 +78,14 @@ def args_to_config(args: Namespace) -> Configuration:
         equilibrium_sample=args.trainable_rate_matrices,
         transposed=False,
         only_matches=args.only_matches,
+        use_noise=not args.no_noise,
+        no_aa=args.no_aa,
     )
 
     init_msa_config = InitMSAConfig(
         from_msa=args.from_msa,
         match_threshold=args.match_threshold,
         global_factor=args.global_factor,
-        random_scale=args.random_scale,
         pseudocounts=args.pseudocounts,
     )
 
@@ -110,7 +112,9 @@ def args_to_config(args: Namespace) -> Configuration:
         logo_gif=args.logo_gif,
     )
 
-    hmm_config = PHMMConfig()
+    hmm_config = PHMMConfig(
+        noise_concentration=args.noise_concentration,
+    )
 
     hmm_prior_config = PHMMPriorConfig(
         alpha_flank=args.alpha_flank,
@@ -119,6 +123,13 @@ def args_to_config(args: Namespace) -> Configuration:
         alpha_flank_compl=args.alpha_flank_compl,
         alpha_single_compl=args.alpha_single_compl,
         alpha_global_compl=args.alpha_global_compl,
+    )
+
+    structure_config = StructureConfig(
+        use_structure=bool(args.struct_file),
+        prior_name=args.struct_prior_name,
+        prior_components=args.struct_prior_components,
+        reset_after_surgery=args.struct_reset_after_surgery,
     )
 
     advanced_config = AdvancedConfig(
@@ -136,6 +147,7 @@ def args_to_config(args: Namespace) -> Configuration:
         init_msa=init_msa_config,
         language_model=language_model_config,
         visualization=visualization_config,
+        structure=structure_config,
         advanced=advanced_config,
     )
 

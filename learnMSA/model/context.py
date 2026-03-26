@@ -288,7 +288,7 @@ class LearnMSAContext:
 
             # Get transition pseudocounts
             transition_prior = TFPHMMTransitionPrior(
-                self.model_lengths, self.config.hmm_prior
+                [5], self.config.hmm_prior
             )
             match_psc = transition_prior.match_prior.matrix()[0,0].numpy()
             ins_psc = transition_prior.insert_prior.matrix()[0,0].numpy()
@@ -335,6 +335,12 @@ class LearnMSAContext:
 
         model_values = [values] * n
 
+        if self.config.training.use_noise and self.config.input_output.verbose:
+            print(
+                "Perturbing initial HMM parameters with Dirichlet noise."
+                " To disable this, use the --no_noise flag."
+            )
+
         return model_lengths_cb, model_values
 
 
@@ -363,11 +369,10 @@ class LearnMSAContext:
         if self.config.training.tokens_per_batch > 0:
             def _batch_size_cb_with_tokens(data: SequenceDataset):
                 seq_len = min(data.max_len, int(self.config.training.crop)) + 1
-                impl_factor = 2.5 if use_language_model else 1.0
                 return training_util.tokens_per_batch_to_batch_size(
                     tokens_per_batch=self.config.training.tokens_per_batch,
                     seq_len=seq_len,
-                    impl_factor=impl_factor,
+                    impl_factor=self._get_impl_factor(),
                 )
             return _batch_size_cb_with_tokens
 
@@ -378,14 +383,31 @@ class LearnMSAContext:
             #if there is at least one GPU, check its memory
             def _batch_size_cb(data: SequenceDataset):
                 seq_len = min(data.max_len, int(self.config.training.crop)) + 1
-                impl_factor = 2.5 if use_language_model else 1.0
                 return training_util.get_adaptive_batch_size(
                     model_len=self.model_lengths.max(),
                     num_model=self.config.training.num_model,
                     seq_len=seq_len,
-                    impl_factor=impl_factor,
+                    impl_factor=self._get_impl_factor(),
                 )
             return _batch_size_cb
+
+    def _get_impl_factor(self, inference: bool = False) -> float:
+        """Get implementation factor for batch size scaling based on model
+        type."""
+        # Base implementation factor is smaller for inference, because we
+        # don't need gradient (roughly halfes the memory usage).
+        impl_factor = 0.5 if inference else 1.0
+
+        # Increase the implementation factor (smaller batches) when pLMs are
+        # used. The factor need to be especially high for inference, because
+        # the batch size limit for inference is larger than for training.
+        if self.config.language_model.use_language_model:
+            impl_factor += 7.5 if inference else 2.0
+
+        if self.config.structure.use_structure:
+            impl_factor += 0.35 if inference else 0.7
+
+        return impl_factor
 
     def _setup_visualization(self) -> None:
         """Set up visualization file paths based on configuration."""

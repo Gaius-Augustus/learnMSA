@@ -169,6 +169,29 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         help="Learning rate for gradient descent. "\
             "(default: %(default)s)"
     )
+    train_group.add_argument(
+        "--no_noise",
+        dest="no_noise",
+        action="store_true",
+        help="Do not perturb the initial HMM parameters with Dirichlet noise." \
+        " Default: use noise."
+    )
+    train_group.add_argument(
+        "--noise_concentration",
+        dest="noise_concentration",
+        type=float,
+        default=100.0,
+        help=("Concentration parameter for the Dirichlet noise used during " +
+            "training. (default: %(default)s)")
+    )
+    train_group.add_argument(
+        "--no_aa",
+        dest="no_aa",
+        action="store_true",
+        help="Do not use amino acid emissions in the model." \
+        "This requires an alternative data source like structure information." \
+        "Default: use amino acid emissions."
+    )
 
     class EpochsAction(argparse.Action):
         def __call__(
@@ -351,15 +374,6 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         "(default: %(default)s)"
     )
     init_msa_group.add_argument(
-        "--random_scale",
-        dest="random_scale",
-        type=float,
-        default=1e-3,
-        help="When initializing from an MSA, the initial parameters are " \
-            "slightly perturbed by random noise. This parameter controls the " \
-            "scale of the noise. (default: %(default)s)"
-    )
-    init_msa_group.add_argument(
         "--pseudocounts",
         dest="pseudocounts",
         action="store_true",
@@ -459,6 +473,31 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         type=int,
         default=32,
         help=argparse.SUPPRESS
+    )
+
+    struct_group = parser.add_argument_group("Structural information")
+    struct_group.add_argument(
+        "--struct_prior_name",
+        dest="struct_prior_name",
+        type=str,
+        default="pfam_35_3Di",
+        help="Name of a weights file for the structural Dirichlet prior. "\
+        "Use empty string for no prior (default: %(default)s)"
+    )
+    struct_group.add_argument(
+        "--struct_prior_components",
+        dest="struct_prior_components",
+        type=int,
+        default=9,
+        help="The number of mixture components for the structural Dirichlet "\
+        "prior. (default: %(default)s)"
+    )
+    struct_group.add_argument(
+        "--struct_reset_after_surgery",
+        dest="struct_reset_after_surgery",
+        action="store_true",
+        help="Whether to reset the structural information emission parameters "\
+        "after model surgery. default: False."
     )
 
     vis_group = parser.add_argument_group("Visualization")

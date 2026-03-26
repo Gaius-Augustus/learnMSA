@@ -42,6 +42,8 @@ class TestArgsToConfig:
         assert config.language_model.use_language_model is False
         assert config.visualization.logo == ""
         assert config.hmm_prior.alpha_flank == 7000
+        assert config.training.use_noise is True
+        assert config.hmm.noise_concentration == 100.0
 
     def test_args_to_config_with_training_args(self):
         """Test conversion with training-related arguments."""
@@ -72,6 +74,7 @@ class TestArgsToConfig:
             "--silent",
             "--only_matches",
             "--scores", "scores.tsv",
+            "--no_noise",
         ])
 
         config = args_to_config(args)
@@ -98,6 +101,7 @@ class TestArgsToConfig:
         assert config.training.no_sequence_weights is True
         assert config.training.skip_training is True
         assert config.training.only_matches is True
+        assert config.training.use_noise is False
         assert config.input_output.verbose is False
         assert config.input_output.scores == Path("scores.tsv")
 
@@ -122,7 +126,6 @@ class TestArgsToConfig:
             "--from_msa", "/path/to/msa.fasta",
             "--match_threshold", "0.7",
             "--global_factor", "0.5",
-            "--random_scale", "0.01",
             "--pseudocounts",
         ])
 
@@ -131,7 +134,6 @@ class TestArgsToConfig:
         assert config.init_msa.from_msa == Path("/path/to/msa.fasta")
         assert config.init_msa.match_threshold == 0.7
         assert config.init_msa.global_factor == 0.5
-        assert config.init_msa.random_scale == 0.01
         assert config.init_msa.pseudocounts is True
 
     def test_args_to_config_with_language_model_args(self):
@@ -173,6 +175,24 @@ class TestArgsToConfig:
         assert config.language_model.inverse_gamma_alpha == 2.0
         assert config.language_model.inverse_gamma_beta == 1.0
         assert config.training.trainable_distances is True
+
+    def test_args_to_config_with_structure_args(self):
+        """Test conversion with structure-related arguments."""
+        parser = parse_args("test_version")
+        args = parser.parse_args([
+            "-i", "input.fasta",
+            "-o", "output.a2m",
+            "--struct", "3di.fasta",
+            "--struct_prior_name", "custom_struct_prior",
+            "--struct_prior_components", "16",
+        ])
+
+        config = args_to_config(args)
+
+        assert config.input_output.struct_file == Path("3di.fasta")
+        assert config.structure.use_structure is True
+        assert config.structure.prior_name == "custom_struct_prior"
+        assert config.structure.prior_components == 16
 
     def test_args_to_config_default_save_emb_uses_workdir(self):
         """Test default save_emb path construction from work_dir and input_file."""
@@ -329,6 +349,7 @@ class TestArgsToConfig:
         assert config.language_model.use_L2 is True
         assert config.training.trainable_distances is False
         assert config.training.trainable_rate_matrices is True
+        assert config.training.use_noise is True
 
     def test_args_to_config_short_options(self):
         """Test conversion using short option names."""
@@ -697,4 +718,54 @@ class TestArgsToConfig:
 
         assert config.input_output is not None
         assert config.input_output.convert is False
+
+    def test_no_noise_flag(self):
+        """Test: --no_noise disables Dirichlet noise perturbation."""
+        parser = parse_args("test_version")
+        args = parser.parse_args([
+            "-i", "input.fasta",
+            "-o", "output.a2m",
+            "--no_noise",
+        ])
+
+        config = args_to_config(args)
+
+        assert config.training.use_noise is False
+
+    def test_use_noise_default(self):
+        """Test: use_noise defaults to True (noise is on by default)."""
+        parser = parse_args("test_version")
+        args = parser.parse_args([
+            "-i", "input.fasta",
+            "-o", "output.a2m",
+        ])
+
+        config = args_to_config(args)
+
+        assert config.training.use_noise is True
+
+    def test_noise_concentration(self):
+        """Test: --noise_concentration sets the Dirichlet concentration parameter."""
+        parser = parse_args("test_version")
+        args = parser.parse_args([
+            "-i", "input.fasta",
+            "-o", "output.a2m",
+            "--noise_concentration", "50.0",
+        ])
+
+        config = args_to_config(args)
+
+        assert config.hmm.noise_concentration == 50.0
+
+    def test_noise_concentration_default(self):
+        """Test: noise_concentration defaults to 100.0."""
+        parser = parse_args("test_version")
+        args = parser.parse_args([
+            "-i", "input.fasta",
+            "-o", "output.a2m",
+        ])
+
+        config = args_to_config(args)
+
+        assert config.hmm.noise_concentration == 100.0
 

@@ -44,7 +44,7 @@ def simple_config() -> Configuration:
     config.hmm.p_unannot_unannot = 0.5
     config.hmm.p_left_left = 0.5
     config.hmm.p_right_right = 0.4
-    config.hmm.p_begin_match = 0.8
+    config.hmm.p_begin_match = 0.6
     config.hmm.p_begin_delete = 0.2
 
     return config

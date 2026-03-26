@@ -9,6 +9,7 @@ from .language_model import LanguageModelConfig
 from .training import TrainingConfig
 from .visualization import VisualizationConfig
 from .hmm import PHMMConfig, PHMMPriorConfig
+from .structure import StructureConfig
 
 
 class Configuration(BaseModel):
@@ -40,6 +41,9 @@ class Configuration(BaseModel):
 
     visualization: VisualizationConfig = VisualizationConfig()
     """Visualization parameters."""
+
+    structure: StructureConfig = StructureConfig()
+    """Protein structure-related parameters."""
 
     advanced: AdvancedConfig = AdvancedConfig()
     """Advanced/Development parameters."""
