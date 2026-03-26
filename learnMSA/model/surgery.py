@@ -302,10 +302,10 @@ def update_kernels(
             "the PHMMLayer uses a language model."
         embedding_dim = plm_config.scoring_model_dim
         emb_expectations = np.zeros((embedding_dim,), dtype=np.float32)
-        emb_stddev = np.zeros((embedding_dim,), dtype=np.float32)
-        emb_stddev += plm_config.variance_init_stdev
+        emb_var = np.zeros((embedding_dim,), dtype=np.float32)
+        emb_var += plm_config.variance_init
         emb_insert_value = np.concatenate(
-            [emb_expectations, emb_stddev], axis=0
+            [emb_expectations, emb_var], axis=0
         )
         emb_emissions_new = apply_mods(
             emb_emissions,
@@ -435,12 +435,10 @@ def update_kernels(
     new_config.p_begin_delete = begin_delete
     new_config.p_match_end = match_end[np.newaxis]
 
-    print("new_config", new_config)
-
     if phmm_layer.use_language_model and plm_config is not None:
         new_plm_config = plm_config.model_copy(deep=True)
         new_plm_config.match_expectations = emb_emissions_new[np.newaxis, :, :embedding_dim]
-        new_plm_config.match_stddev = emb_emissions_new[np.newaxis, :, embedding_dim:]
+        new_plm_config.match_variance = emb_emissions_new[np.newaxis, :, embedding_dim:]
     else:
         new_plm_config = None
 
@@ -636,7 +634,7 @@ def model_surgery(
         merged_plm_config.match_expectations = concat_emb_param(
             "match_expectations"
         )
-        merged_plm_config.match_stddev = concat_emb_param("match_stddev")
+        merged_plm_config.match_variance = concat_emb_param("match_variance")
     else:
         merged_plm_config = None
 

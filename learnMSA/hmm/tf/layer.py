@@ -372,8 +372,8 @@ class PHMMLayer(tf.keras.Layer):
             updated_values.append(PHMMEmbeddingValueSet(
                 L=value_set.L,
                 match_expectations=match_expectations,
-                match_stddev=value_set.match_stddev,
+                match_variance=value_set.match_variance,
                 insert_expectation=insert_expectation,
-                insert_stddev=value_set.insert_stddev,
+                insert_variance=value_set.insert_variance,
             ))
         return updated_values
