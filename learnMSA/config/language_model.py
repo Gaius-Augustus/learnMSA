@@ -55,8 +55,8 @@ class LanguageModelConfig(BaseModel):
     conditionally_independent: bool = True
     """Whether to use conditionally independent emissions."""
 
-    variance_init_stdev: float = 0.7
-    """Initial standard deviation for the normal distribution."""
+    variance_init: float = 1.0
+    """Initial variance for the normal distribution."""
 
     inverse_gamma_alpha: float = 3.0
     """Alpha parameter for the inverse gamma prior on variances."""
@@ -79,10 +79,10 @@ class LanguageModelConfig(BaseModel):
         Fully specified match state expectations for each position in each head.
     """
 
-    match_stddev: (Sequence[float] | Sequence[Sequence[float]] |
-                   Sequence[Sequence[Sequence[float]]] |
-                   NPArray | None) = None
-    """Optional initialization for match state standard deviations.
+    match_variance: (Sequence[float] | Sequence[Sequence[float]] |
+                     Sequence[Sequence[Sequence[float]]] |
+                     NPArray | None) = None
+    """Optional initialization for match state variances.
     Can be:
     - None: Initialize with random normal values (default).
     - Sequence[float] of length scoring_model_dim: Same for all match states
@@ -104,14 +104,14 @@ class LanguageModelConfig(BaseModel):
         Head-specific insert expectations.
     """
 
-    insert_stddev: (Sequence[float] | Sequence[Sequence[float]] |
+    insert_variance: (Sequence[float] | Sequence[Sequence[float]] |
                     NPArray | None) = None
-    """Optional initialization for insert state standard deviations.
+    """Optional initialization for insert state variances.
     Can be:
     - None: Initialize with random normal values (default).
     - Sequence[float] of length scoring_model_dim: Same for all heads.
     - Sequence[Sequence[float]] of shape `(num_heads, scoring_model_dim)`:
-        Head-specific insert standard deviations.
+        Head-specific insert variances.
     """
 
 

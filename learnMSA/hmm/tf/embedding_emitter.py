@@ -53,11 +53,11 @@ class EmbeddingEmitter(TFMVNormalEmitter):
         # Initialization based on provided value sets
         for value_set in values:
             match_values = np.concatenate(
-                [value_set.match_expectations, value_set.match_stddev],
+                [value_set.match_expectations, value_set.match_variance],
                 axis=-1,
             )
             insert_values = np.concatenate(
-                [value_set.insert_expectation, value_set.insert_stddev],
+                [value_set.insert_expectation, value_set.insert_variance],
                 axis=-1,
             )
             init_values.append(match_values.flatten())
@@ -128,13 +128,15 @@ class EmbeddingEmitter(TFMVNormalEmitter):
             # Keep match states + single insertion state
             matrix = self.matrix()
             reduced_mean = self.mean(matrix)[:, :self.lengths.max()+1, :]
-            reduced_scale = self.scale(matrix)[:, :self.lengths.max()+1, :]
+            reduced_sqrt_variance = self.sqrt_variance(
+                matrix
+            )[:, :self.lengths.max()+1, :]
 
             # Add Z dimension (unused, single mixture component)
             mean = tf.expand_dims(reduced_mean, axis=2)
-            scale = tf.expand_dims(reduced_scale, axis=2)
+            sqrt_variance = tf.expand_dims(reduced_sqrt_variance, axis=2)
             log_pdf = tf.squeeze(
-                mvn_log_prob(observations, mean, scale), axis=-1
+                mvn_log_prob(observations, mean, sqrt_variance), axis=-1
             )
 
             emission_scores = tf.exp(
