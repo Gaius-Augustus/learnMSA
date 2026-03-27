@@ -1263,3 +1263,111 @@ def test_posterior_state_probabilities() -> None:
 
         # Verify probabilities sum to 1
         np.testing.assert_almost_equal(np.sum(p, -1), 1., decimal=4)
+
+
+def test_get_transition_delta_none(layer: PHMMLayer) -> None:
+    """Test that get_transition_delta returns None when loop_mask is None."""
+    assert layer.get_transition_delta(None) is None
+
+
+def test_get_transition_delta_shape(layer: PHMMLayer) -> None:
+    """Test that get_transition_delta returns the correct shape matching
+    the transitioner kernel."""
+    B, T_minus_1, H = 2, 5, layer.heads
+    loop_mask = tf.ones((B, T_minus_1, H), dtype=tf.float32)
+    delta = layer.get_transition_delta(loop_mask)
+
+    assert delta is not None
+
+    # The last dimension must match the explicit transitioner kernel size
+    kernel_size = layer.hmm.transitioner.explicit_transitioner.kernel.shape[0]
+    assert delta.shape == (B, T_minus_1, kernel_size)
+
+
+def test_get_transition_delta_values(layer: PHMMLayer) -> None:
+    """Test that get_transition_delta places the penalty at the correct
+    E->C kernel positions and zeros everywhere else."""
+    from learnMSA.hmm.util.transition_index_set import PHMMTransitionIndexSet
+
+    B, T_minus_1, H = 1, 1, layer.heads
+    # All heads masked at every position
+    loop_mask = tf.ones((B, T_minus_1, H), dtype=tf.float32)
+    delta_val = -1e6
+    delta = layer.get_transition_delta(loop_mask, delta=delta_val)
+    assert delta is not None
+    delta_np = delta.numpy().flatten()
+
+    # Compute expected penalty positions
+    expected_indices = []
+    offset = 0
+    for L in layer.lengths:
+        idx = PHMMTransitionIndexSet(L, folded=False)
+        kernel_size = idx.as_array().shape[0]
+        kernel_index = idx.get_row_offset("end")[0]
+        expected_indices.append(offset + kernel_index)
+        offset += kernel_size
+
+    for i, val in enumerate(delta_np):
+        if i in expected_indices:
+            np.testing.assert_almost_equal(val, delta_val)
+        else:
+            np.testing.assert_almost_equal(val, 0.0)
+
+
+def test_get_transition_delta_masking(layer: PHMMLayer) -> None:
+    """Test that the mask correctly zeroes out the delta for unmasked heads."""
+    B, T_minus_1, H = 1, 3, layer.heads
+    # Only mask head 0, not head 1
+    mask_np = np.zeros((B, T_minus_1, H), dtype=np.float32)
+    mask_np[:, :, 0] = 1.0
+    loop_mask = tf.constant(mask_np)
+
+    delta = layer.get_transition_delta(loop_mask)
+    assert delta is not None
+    delta_np = delta.numpy()
+
+    from learnMSA.hmm.util.transition_index_set import PHMMTransitionIndexSet
+
+    # Head 1's kernel region should be all zeros
+    head0_kernel_size = PHMMTransitionIndexSet(
+        layer.lengths[0], folded=False
+    ).as_array().shape[0]
+    head1_region = delta_np[:, :, head0_kernel_size:]
+    np.testing.assert_equal(head1_region, 0.0)
+
+    # Head 0's E->C position should have the penalty
+    idx0 = PHMMTransitionIndexSet(layer.lengths[0], folded=False)
+    ec_index = idx0.get_row_offset("end")[0]
+    np.testing.assert_almost_equal(
+        delta_np[0, :, ec_index], -1e6
+    )
+
+
+def test_get_transition_delta_head_subset(layer: PHMMLayer) -> None:
+    """Test that get_transition_delta pads zeros for inactive heads when
+    head_subset is set, matching the full kernel size."""
+    from learnMSA.hmm.util.transition_index_set import PHMMTransitionIndexSet
+
+    kernel_size = layer.hmm.transitioner.explicit_transitioner.kernel.shape[0]
+
+    # Use only head 0
+    layer.head_subset = [0]
+    B, T_minus_1 = 2, 5
+    loop_mask = tf.ones((B, T_minus_1, 1), dtype=tf.float32)
+    delta = layer.get_transition_delta(loop_mask)
+    assert delta is not None
+    assert delta.shape == (B, T_minus_1, kernel_size)
+
+    delta_np = delta.numpy()
+
+    # Head 0's E->C position should have the penalty
+    idx0 = PHMMTransitionIndexSet(layer.lengths[0], folded=False)
+    ec_index = idx0.get_row_offset("end")[0]
+    np.testing.assert_almost_equal(delta_np[0, 0, ec_index], -1e6)
+
+    # Head 1's region should be all zeros
+    head0_kernel_size = idx0.as_array().shape[0]
+    np.testing.assert_equal(delta_np[:, :, head0_kernel_size:], 0.0)
+
+    # Restore
+    layer.head_subset = None

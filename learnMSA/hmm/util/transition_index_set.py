@@ -457,3 +457,16 @@ class PHMMTransitionIndexSet:
         M = np.ones((n, n), dtype=dtype)
         M[self._buffer[:, 0], self._buffer[:, 1]] = 0.
         return M
+
+    def get_row_offset(self, name: str) -> tuple[int, int]:
+        """
+        Returns the start and end row indices in the buffer for the given
+        property name.
+        """
+        if name not in self._row_offsets:
+            raise AttributeError(
+                f"'{type(self).__name__}' object has no attribute '{name}'. "
+                "This attribute is only available in "
+                f"{'unfolded' if self._folded else 'folded'} mode."
+            )
+        return self._row_offsets[name]

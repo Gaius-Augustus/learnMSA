@@ -227,11 +227,25 @@ class PHMMTransitioner(TFTransitioner):
 
         self._A = self._build_folded_matrix(folded_transition_probs)
 
-        H, Q, _ = tf.unstack(tf.shape(self._A))
+        if transition_delta is not None:
+            # Batched: (*batch, H, Q, Q) -> (H, *batch, Q, Q)
+            self._A = tf.transpose(
+                self._A,
+                [2, 0, 1, 3, 4],
+            )
 
-        # Compute a starting distribution depending on the mode
+        H = tf.shape(self._A)[0]
+        Q = tf.shape(self._A)[-1]
+
+        # Compute a starting distribution depending on the mode.
         if TransitionMode.REVERSE in mode:
-            start_dist = tf.ones(shape=(H, Q), dtype=self._A.dtype)
+            start_dist = tf.ones(
+                shape=tf.stack([H, Q]), dtype=self._A.dtype
+            )
+        elif transition_delta is not None:
+            # Batched start probs carry unwanted batch dims; recompute
+            # unbatched since start dist only applies at t=0.
+            start_dist = self.start_dist()
         else:
             start_dist = self._build_folded_start_dist(folded_start_probs)
 
@@ -240,7 +254,7 @@ class PHMMTransitioner(TFTransitioner):
 
         if TransitionMode.LOG_SUM_EXP in mode or TransitionMode.MAX in mode:
             self._A_log = safe_log(self._A)
-            self._A_log_T = tf.transpose(self._A_log, [0, 2, 1])
+            self._A_log_T = tf.keras.ops.moveaxis(self._A_log, -2, -1)
 
         return start_dist
 
@@ -257,17 +271,21 @@ class PHMMTransitioner(TFTransitioner):
             share=None,
         ))
         if self.head_subset is not None:
-            matrix = tf.gather(matrix, self.head_subset, axis=0)
+            matrix = tf.gather(matrix, self.head_subset, axis=-3)
             max_states_subset = max(
                 [self.hmm_config.states[h] for h in self.head_subset]
             )
-            terminal_state_in = matrix[:, :max_states_subset, -1:]
-            terminal_state_out = tf.one_hot(
-                [[max_states_subset]], depth=max_states_subset+1
+            terminal_state_in = matrix[..., :max_states_subset, -1:]
+            one_hot = tf.one_hot(
+                [max_states_subset], depth=max_states_subset+1
             )
-            matrix = matrix[:, :max_states_subset, :max_states_subset]
-            matrix = tf.concat([matrix, terminal_state_in], axis=2)
-            matrix = tf.concat([matrix, terminal_state_out], axis=1)
+            target_shape = tf.concat(
+                [tf.shape(matrix)[:-2], [1, max_states_subset + 1]], 0
+            )
+            terminal_state_out = tf.broadcast_to(one_hot, target_shape)
+            matrix = matrix[..., :max_states_subset, :max_states_subset]
+            matrix = tf.concat([matrix, terminal_state_in], axis=-1)
+            matrix = tf.concat([matrix, terminal_state_out], axis=-2)
         return matrix
 
     def _build_folded_start_dist(
@@ -283,13 +301,13 @@ class PHMMTransitioner(TFTransitioner):
             share=None,
         ))
         if self.head_subset is not None:
-            start_dist = tf.gather(start_dist, self.head_subset, axis=0)
+            start_dist = tf.gather(start_dist, self.head_subset, axis=-2)
             max_states_subset = max(
                 [self.hmm_config.states[h] for h in self.head_subset]
             )
-            terminal_state = start_dist[:, -1:]
-            start_dist = start_dist[:, :max_states_subset]
-            start_dist = tf.concat([start_dist, terminal_state], axis=1)
+            terminal_state = start_dist[..., -1:]
+            start_dist = start_dist[..., :max_states_subset]
+            start_dist = tf.concat([start_dist, terminal_state], axis=-1)
         return start_dist
 
     @override
@@ -320,6 +338,10 @@ class PHMMTransitioner(TFTransitioner):
     ) -> tuple[T_TFTensor, T_TFTensor]:
         """Compute folded transition and start log-probabilities in one pass.
 
+        Supports optional leading batch dimensions.  When
+        ``log_explicit_matrix`` has shape ``(*batch, H, Q, Q)``, the
+        returned tensors have shape ``(*batch, K)``.
+
         Returns:
             Tuple of flat tensors (transition_probs, start_probs), each ordered
             according to self.allow and self.allow_start respectively.
@@ -332,26 +354,41 @@ class PHMMTransitioner(TFTransitioner):
 
         for h, L in enumerate(self.lengths):
             idx = PHMMTransitionIndexSet(L, folded=False)
-            log_mat = log_explicit_matrix[h]
+            log_mat = log_explicit_matrix[..., h, :, :]
             M_skip = self._compute_match_skip_matrix(h, log_mat=log_mat)
 
             def get(indices):
                 gather_indices = np.array(indices, copy=True)
                 gather_indices[gather_indices < 0] += max_states
-                return tf.gather_nd(log_mat, gather_indices)
+                flat_idx = (
+                    gather_indices[:, 0] * max_states + gather_indices[:, 1]
+                )
+                flat_mat = tf.reshape(
+                    log_mat,
+                    tf.concat([tf.shape(log_mat)[:-2], [-1]], 0),
+                )
+                return tf.gather(flat_mat, flat_idx, axis=-1)
 
             BM = get(idx.begin_to_match)
             ME = get(idx.match_to_end)
             E = get(idx.end)
 
             log_z = log_zero(log_mat)
+
+            m_skip_row0 = M_skip[..., 0, :-1]
+            z_prefix = tf.fill(
+                tf.concat([tf.shape(m_skip_row0)[:-1], [1]], 0), log_z
+            )
             entry_add = logsumexp(
-                BM,
-                tf.pad(M_skip[0, :-1], [[1, 0]], constant_values=log_z)
+                BM, tf.concat([z_prefix, m_skip_row0], axis=-1)
+            )
+
+            m_skip_col_last = M_skip[..., 1:, -1]
+            z_suffix = tf.fill(
+                tf.concat([tf.shape(m_skip_col_last)[:-1], [1]], 0), log_z
             )
             exit_add = logsumexp(
-                ME,
-                tf.pad(M_skip[1:, -1], [[0, 1]], constant_values=log_z)
+                ME, tf.concat([m_skip_col_last, z_suffix], axis=-1)
             )
 
             # Folded transition probabilities
@@ -362,52 +399,52 @@ class PHMMTransitioner(TFTransitioner):
             folded_transition_probs.extend([MM, MI, II, IM])
 
             for i in range(1, L - 1):
-                folded_transition_probs.append(M_skip[i, i:-1])
+                folded_transition_probs.append(M_skip[..., i, i:-1])
 
-            MU = exit_add + E[0]
-            MR = exit_add + E[1]
-            MT = exit_add + E[2]
+            MU = exit_add + E[..., 0:1]
+            MR = exit_add + E[..., 1:2]
+            MT = exit_add + E[..., 2:3]
             folded_transition_probs.extend([MU, MR, MT])
 
             LF = get(idx.left_flank)
-            folded_transition_probs.append(LF[:1])
-            folded_transition_probs.append(LF[1:2] + entry_add)
+            folded_transition_probs.append(LF[..., :1])
+            folded_transition_probs.append(LF[..., 1:2] + entry_add)
 
-            LFE = LF[1:2] + M_skip[0, -1]
-            folded_transition_probs.append(LFE + E[0])
-            folded_transition_probs.append(LFE + E[1])
-            folded_transition_probs.append(LFE + E[2])
+            LFE = LF[..., 1:2] + M_skip[..., 0:1, -1]
+            folded_transition_probs.append(LFE + E[..., 0:1])
+            folded_transition_probs.append(LFE + E[..., 1:2])
+            folded_transition_probs.append(LFE + E[..., 2:3])
 
             p_right_flank = get(idx.right_flank)
             folded_transition_probs.extend([
-                tf.expand_dims(p_right_flank[0], 0),
-                tf.expand_dims(p_right_flank[1], 0),
+                p_right_flank[..., 0:1],
+                p_right_flank[..., 1:2],
             ])
 
             U = get(idx.unannotated)
-            UE = U[1] + M_skip[0, -1]
-            UU = logsumexp(U[0], UE + E[0])
-            folded_transition_probs.append(tf.expand_dims(UU, 0))
-            folded_transition_probs.append(U[1] + entry_add)
-            folded_transition_probs.append(tf.expand_dims(UE + E[1], 0))
-            folded_transition_probs.append(tf.expand_dims(UE + E[2], 0))
+            UE = U[..., 1:2] + M_skip[..., 0:1, -1]
+            UU = logsumexp(U[..., 0:1], UE + E[..., 0:1])
+            folded_transition_probs.append(UU)
+            folded_transition_probs.append(U[..., 1:2] + entry_add)
+            folded_transition_probs.append(UE + E[..., 1:2])
+            folded_transition_probs.append(UE + E[..., 2:3])
 
             folded_transition_probs.append(get(idx.terminal))
 
             # Folded start probabilities
             start_left = explicit_start[h, 3*L - 1]
             start_begin = explicit_start[h, 3*L]
-            BE = start_begin + M_skip[0, -1]
+            BE = start_begin + M_skip[..., 0:1, -1]
 
             folded_start_probs.append(start_begin + entry_add)
-            folded_start_probs.append(tf.expand_dims(start_left, 0))
-            folded_start_probs.append(tf.expand_dims(BE + E[0], 0))
-            folded_start_probs.append(tf.expand_dims(BE + E[1], 0))
-            folded_start_probs.append(tf.expand_dims(BE + E[2], 0))
+            folded_start_probs.append(start_left + tf.zeros_like(BE))
+            folded_start_probs.append(BE + E[..., 0:1])
+            folded_start_probs.append(BE + E[..., 1:2])
+            folded_start_probs.append(BE + E[..., 2:3])
 
         return (
-            tf.concat(folded_transition_probs, axis=0),
-            tf.concat(folded_start_probs, axis=0),
+            tf.concat(folded_transition_probs, axis=-1),
+            tf.concat(folded_start_probs, axis=-1),
         )
 
     def _compute_match_skip_matrix(
@@ -419,44 +456,65 @@ class PHMMTransitioner(TFTransitioner):
         Utility method that computes the `L x L` match skip transition matrix
         for head `h` with `match_skip(i,j) = P(Mj+2 | Mi)`.
         With `M0 := Begin` and `ML+1 := End`.
+
+        Supports optional leading batch dimensions in ``log_mat``.
+        When ``log_mat`` has shape ``(*batch, Q, Q)``, the result has shape
+        ``(*batch, L, L)``.
         """
         L = self.lengths[h]
         if log_mat is None:
             log_mat = safe_log(self.explicit_transitioner.matrix())[h]
+        max_states = PHMMTransitionIndexSet.num_states_unfolded(
+            max(self.lengths)
+        )
 
         # Create index sets for explicit and folded models
         idx = PHMMTransitionIndexSet(L, folded=False)
 
-        # Helper to extract log prob from matrix
+        # Helper to extract log prob from matrix.
+        # Flattens the last two dims so tf.gather works with any
+        # number of leading batch dimensions.
         def get(indices):
-            return tf.gather_nd(log_mat, indices)
+            gather_indices = np.array(indices, copy=True)
+            gather_indices[gather_indices < 0] += max_states
+            flat_idx = gather_indices[:, 0] * max_states + gather_indices[:, 1]
+            flat_mat = tf.reshape(
+                log_mat,
+                tf.concat([tf.shape(log_mat)[:-2], [-1]], 0),
+            )
+            return tf.gather(flat_mat, flat_idx, axis=-1)
 
         # Get transition log probabilities
-        MD = get(idx.match_to_delete)  # Shape: (L-1,)
-        DD = get(idx.delete_to_delete)  # Shape: (L-1,)
-        DM = get(idx.delete_to_match)  # Shape: (L-1,)
+        MD = get(idx.match_to_delete)  # Shape: (*batch, L-1)
+        DD = get(idx.delete_to_delete)  # Shape: (*batch, L-1)
+        DM = get(idx.delete_to_match)  # Shape: (*batch, L-1)
 
         # Concatenate B -> D1 and DL -> E transitions
-        begin_to_delete = get(idx.begin_to_delete)  # Shape: scalar
-        delete_to_end = get(idx.delete_to_end)  # Shape: scalar
+        begin_to_delete = get(idx.begin_to_delete)  # Shape: (*batch, 1)
+        delete_to_end = get(idx.delete_to_end)  # Shape: (*batch, 1)
 
-        MD = tf.concat([begin_to_delete, MD], axis=0)  # Shape: (L,)
-        DM = tf.concat([DM, delete_to_end], axis=0)    # Shape: (L,)
+        MD = tf.concat([begin_to_delete, MD], axis=-1)  # Shape: (*batch, L)
+        DM = tf.concat([DM, delete_to_end], axis=-1)    # Shape: (*batch, L)
 
         # Compute cumulative sum of delete-to-delete transitions
         # Prepend 0 for the first delete state D_0
-        # Shape: (L,)
-        DD_cumsum = tf.pad(tf.cumsum(DD), [[1, 0]], constant_values=0.0)
+        # Shape: (*batch, L)
+        DD_cumsum = tf.concat(
+            [tf.zeros_like(DD[..., :1]), tf.cumsum(DD, axis=-1)],
+            axis=-1,
+        )
 
         # Compute the difference matrix for cumulative sums
-        # Shape: (L, L)
-        DD_diff = tf.expand_dims(DD_cumsum, 0) - tf.expand_dims(DD_cumsum, 1)
+        # Shape: (*batch, L, L)
+        DD_diff = (
+            tf.expand_dims(DD_cumsum, -2) - tf.expand_dims(DD_cumsum, -1)
+        )
 
         # Build M_skip matrix
-        MD_expanded = tf.expand_dims(MD, -1)  # Shape: (L, 1)
-        DM_expanded = tf.expand_dims(DM, 0)  # Shape: (1, L)
+        MD_expanded = tf.expand_dims(MD, -1)   # Shape: (*batch, L, 1)
+        DM_expanded = tf.expand_dims(DM, -2)   # Shape: (*batch, 1, L)
 
-        M_skip = MD_expanded + DD_diff + DM_expanded  # Shape: (L, L)
+        M_skip = MD_expanded + DD_diff + DM_expanded  # Shape: (*batch, L, L)
         return M_skip
 
     def _make_explicit_transitioner(

@@ -182,6 +182,7 @@ def make_dataset(
     bucket_by_seq_length:bool = False,
     bucket_boundaries: Sequence[int] = [],
     bucket_batch_sizes: Sequence[int] = [],
+    additional_data: np.ndarray | None = None,
 ) -> tuple[tf.data.Dataset, int]:
     """
     Creates a dataset for training and inference.
@@ -196,6 +197,9 @@ def make_dataset(
         model_lengths: List of model lengths for adaptive batching.
         bucket_boundaries: Sequence length boundaries for bucketing.
         bucket_batch_sizes: Batch sizes for each bucket.
+        additional_data: Optional numpy array of shape (len(indices), ...).
+            If provided, the corresponding rows are included as the last
+            element of each batch tuple.
 
     Returns:
         A tuple of (dataset, steps) where steps is the number of steps needed
@@ -225,7 +229,11 @@ def make_dataset(
         ds_ind =  tf.data.Dataset.from_tensor_slices(
             np.arange(indices.size)
         )
-        ds = tf.data.Dataset.zip((ds, ds_len, ds_ind))
+        if additional_data is not None:
+            ds_add = tf.data.Dataset.from_tensor_slices(additional_data)
+            ds = tf.data.Dataset.zip((ds, ds_len, ds_ind, ds_add))
+        else:
+            ds = tf.data.Dataset.zip((ds, ds_len, ds_ind))
         _bucket_boundaries = list(bucket_boundaries)
         bucket_batch_sizes = list(bucket_batch_sizes)
 
@@ -241,7 +249,7 @@ def make_dataset(
         )
 
         ds = ds.bucket_by_sequence_length(
-            element_length_func=cast(Any, lambda i, L, j: L),
+            element_length_func=cast(Any, lambda *args: args[1]),
             bucket_boundaries=_bucket_boundaries,
             bucket_batch_sizes=bucket_batch_sizes,
             # when jit-compiling, make sure compilation only happens once
@@ -256,7 +264,7 @@ def make_dataset(
         def func(i, j):
             return *_to_tuple(batch_generator(i)), j
 
-        def _bucket_batch_func(i,_,j):
+        def _bucket_batch_func(i, _, j, *extra_ds):
             results = tf.numpy_function(
                 func=func, inp=[i,j], Tout=batch_func_out_types
             )
@@ -288,7 +296,7 @@ def make_dataset(
                 ]))
 
             j_out.set_shape(tf.TensorShape([None]))
-            return tuple(batches + extras + [j_out])
+            return tuple(batches + extras + [j_out] + list(extra_ds))
 
         map_func = _bucket_batch_func
     else:
@@ -303,6 +311,9 @@ def make_dataset(
                 np.arange(indices.size)
             )
             ds = tf.data.Dataset.zip((ds, ds_arange))
+        if additional_data is not None:
+            ds_add = tf.data.Dataset.from_tensor_slices(additional_data)
+            ds = tf.data.Dataset.zip((ds, ds_add))
         if shuffle:
             ds = ds.shuffle(indices.size, reshuffle_each_iteration=True)
             ds = ds.repeat()
@@ -358,6 +369,9 @@ def make_dataset(
         if bucket_by_seq_length:
             def batch_func(i,j):
                 return *_batch_func(i), j
+        elif additional_data is not None:
+            def batch_func(i, add_batch):
+                return *_batch_func(i), add_batch
         else:
             def batch_func(i):
                 return _batch_func(i)

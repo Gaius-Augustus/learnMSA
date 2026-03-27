@@ -2,6 +2,7 @@ import os
 
 import numpy as np
 import pytest
+import tensorflow as tf
 
 from learnMSA import Configuration
 from learnMSA.model.tf import training
@@ -97,3 +98,83 @@ def test_multi_dataset_batch_gen_returns_multiple_batches() -> None:
             dec_b = "".join(alphabet[s_b[row_idx, :seq_len, 0]])
             assert dec_a == ref
             assert dec_b == ref
+
+
+def test_make_dataset() -> None:
+    """Test that make_dataset returns a usable dataset with correct step count."""
+    filename = os.path.dirname(__file__) + "/../tests/data/felix_insert_delete.fa"
+    with SequenceDataset(filename) as data:
+        batch_gen = training.BatchGenerator(shuffle=False)
+        config = Configuration()
+        config.training.num_model = 1
+        config.training.no_sequence_weights = True
+        batch_gen.configure(data, LearnMSAContext(config, data))
+
+        indices = np.arange(data.num_seq)
+        batch_size = 2
+
+        ds, steps = training.make_dataset(
+            indices=indices,
+            batch_generator=batch_gen,
+            batch_size=batch_size,
+            shuffle=False,
+        )
+
+        # Non-shuffled step count should be ceil(num_seq / batch_size)
+        expected_steps = int(np.ceil(data.num_seq / batch_size))
+        assert steps == expected_steps
+
+        # Iterate one batch and check shapes
+        for batch_x, _batch_y in ds.take(1):
+            sequences = batch_x[0]
+            perm_indices = batch_x[1]
+            assert sequences.shape[0] == batch_size
+            assert sequences.shape[2] == 1  # num_models
+            assert perm_indices.shape[0] == batch_size
+            assert perm_indices.shape[1] == 1  # num_models
+
+
+def test_make_dataset_with_additional_data() -> None:
+    """Test that make_dataset forwards additional_data alongside batches."""
+    filename = os.path.dirname(__file__) + "/../tests/data/felix_insert_delete.fa"
+    with SequenceDataset(filename) as data:
+        batch_gen = training.BatchGenerator(shuffle=False)
+        config = Configuration()
+        config.training.num_model = 1
+        config.training.no_sequence_weights = True
+        batch_gen.configure(data, LearnMSAContext(config, data))
+
+        indices = np.arange(data.num_seq)
+        batch_size = 2
+        # Create per-sequence additional data with extra dimensions
+        add_data = np.random.default_rng(42).random(
+            (data.num_seq, 3, 2), dtype=np.float32
+        )
+
+        ds, steps = training.make_dataset(
+            indices=indices,
+            batch_generator=batch_gen,
+            batch_size=batch_size,
+            shuffle=False,
+            additional_data=add_data,
+        )
+
+        expected_steps = int(np.ceil(data.num_seq / batch_size))
+        assert steps == expected_steps
+
+        # Iterate one batch and verify the additional data is present
+        for batch_x, _batch_y in ds.take(1):
+            # With additional_data the tuple is (sequences, perm_indices, add_batch)
+            sequences = batch_x[0]
+            perm_indices = batch_x[1]
+            add_batch = batch_x[2]
+            assert sequences.shape[0] == batch_size
+            assert sequences.shape[2] == 1
+            assert perm_indices.shape[0] == batch_size
+            assert add_batch.shape[0] == batch_size
+            assert add_batch.shape[1:] == (3, 2)
+            # First batch should contain indices 0 and 1
+            np.testing.assert_allclose(
+                add_batch.numpy(), add_data[:batch_size]
+            )
+

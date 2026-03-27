@@ -16,6 +16,7 @@ from learnMSA.hmm.tf.padding_emitter import TFSubsetPaddingEmitter
 from learnMSA.hmm.tf.util import load_dirichlet, load_mvn
 from learnMSA.hmm.util.value_set import PHMMValueSet
 from learnMSA.hmm.util.value_set_emb import PHMMEmbeddingValueSet
+from learnMSA.hmm.util.transition_index_set import PHMMTransitionIndexSet
 from learnMSA.util.sequence_dataset import SequenceDataset
 
 
@@ -160,11 +161,12 @@ class PHMMLayer(tf.keras.Layer):
         self.use_language_model = plm_config != None\
             and plm_config.use_language_model
         self.plm_config = plm_config
+        self.emb_mean = None
         if self.use_language_model:
             assert self.plm_config is not None,\
                 "plm_config must be provided if use_language_model is True"
             # Create embedding value sets
-            embedding_values = [
+            emb_values = [
                 PHMMEmbeddingValueSet.from_config(L, h, plm_config) # type: ignore
                 for h, L in enumerate(self.lengths)
             ]
@@ -179,12 +181,13 @@ class PHMMLayer(tf.keras.Layer):
 
             # Override embedding values with prior distribution if requested
             if config.use_prior_for_emission_init:
-                embedding_values = self._override_embeddings_with_prior(
-                    embedding_values,
+                emb_values, emb_mean = self._override_embeddings_with_prior(
+                    emb_values,
                     mvn_prior,
                     override_matches=config.match_emissions is None,
                     override_insertions=config.insert_emissions is None,
                 )
+                self.emb_mean = emb_mean
 
             # Set the inverse gamma prior for embedding variances
             inv_gamma_prior = TFInverseGammaPrior()
@@ -203,7 +206,7 @@ class PHMMLayer(tf.keras.Layer):
 
             # Add the embedding emitter
             embedding_emitter = EmbeddingEmitter(
-                values=embedding_values,
+                values=emb_values,
                 trainable_insertions=trainable_insertions,
                 temperature=self.plm_config.temperature,
             )
@@ -276,12 +279,17 @@ class PHMMLayer(tf.keras.Layer):
         x: tf.Tensor,
         padding: tf.Tensor,
         adds: tuple[tf.Tensor, ...] | None = None,
+        loop_mask: tf.Tensor | None = None,
     ) -> tf.Tensor:
         args = () if self.no_aa else (x,)
         if adds is not None:
             args += tuple(adds)
         args += (padding,)
-        return self.hmm(*args, mode=self._mode)
+        return self.hmm(
+            *args,
+            transition_delta=self.get_transition_delta(loop_mask),
+            mode=self._mode,
+        )
 
     def prior_scores(self) -> tf.Tensor:
         """Calculates the prior scores for all parameters in the pHMM.
@@ -291,6 +299,64 @@ class PHMMLayer(tf.keras.Layer):
                 number of heads in the pHMM.
         """
         return self.hmm.prior_scores()
+
+    def get_transition_delta(
+        self, loop_mask: tf.Tensor | None, delta: float = -1e6
+    ) -> tf.Tensor | None:
+        """Converts a loop mask to a transition delta that can be passed to
+        the HMM. The loop mask is a binary tensor of shape (B, T-1, H) where 1
+        indicates that the transition into the unannotated state C is
+        disallowed for the given sequence position and head. The transition
+        delta is a tensor of shape (B, T-1, K) where K is the kernel size of
+        the transitioner, that can be added to the transitioner kernel to
+        disallow those transitions.
+        """
+        if loop_mask is None:
+            return None
+        if self.head_subset is not None:
+            heads = self.head_subset
+        else:
+            heads = range(self.heads)
+        # Compute kernel sizes for ALL heads (to match the full kernel)
+        all_kernel_sizes = []
+        for h in range(self.heads):
+            idx = PHMMTransitionIndexSet(self.lengths[h], folded=False)
+            all_kernel_sizes.append(idx.as_array().shape[0])
+        total_kernel = sum(all_kernel_sizes)
+        # Find the E -> C kernel index for each active head (global offset)
+        disallowed_transitions = []
+        for h in heads:
+            global_offset = sum(all_kernel_sizes[:h])
+            idx = PHMMTransitionIndexSet(self.lengths[h], folded=False)
+            kernel_index = idx.get_row_offset("end")[0]
+            disallowed_transitions.append(global_offset + kernel_index)
+        default_values = tf.zeros((total_kernel,), self.dtype)
+        indices = tf.constant([[i] for i in disallowed_transitions])
+        updates = tf.fill([len(disallowed_transitions)], delta)
+        disallow_values = tf.tensor_scatter_nd_update(
+            default_values, indices, updates
+        )
+        # loop_mask: (B, T-1, H_subset) -> (B, T-1, K_total)
+        # Expand per active head, pad zeros for inactive heads
+        subset_kernel_sizes = [all_kernel_sizes[h] for h in heads]
+        exp_mask = tf.repeat(loop_mask, subset_kernel_sizes, axis=-1)
+        if self.head_subset is not None:
+            # Insert zero-padding for inactive heads
+            parts = []
+            mask_offset = 0
+            for h in range(self.heads):
+                ks = all_kernel_sizes[h]
+                if h in self.head_subset:
+                    parts.append(exp_mask[..., mask_offset:mask_offset + ks])
+                    mask_offset += ks
+                else:
+                    batch_shape = tf.shape(exp_mask)[:-1]
+                    zero_shape = tf.concat([batch_shape, [ks]], axis=0)
+                    parts.append(tf.zeros(zero_shape, dtype=exp_mask.dtype))
+            exp_mask = tf.concat(parts, axis=-1)
+        # (B, T-1, K_total): zeros where mask is 0, delta at E->C where mask is 1
+        transition_delta = exp_mask * disallow_values
+        return transition_delta
 
     @staticmethod
     def _override_emissions_with_prior(
@@ -339,7 +405,7 @@ class PHMMLayer(tf.keras.Layer):
         prior,
         override_matches: bool,
         override_insertions: bool,
-    ) -> list[PHMMEmbeddingValueSet]:
+    ) -> tuple[list[PHMMEmbeddingValueSet], np.ndarray]:
         """Override embedding values with prior distribution.
 
         Args:
@@ -352,7 +418,8 @@ class PHMMLayer(tf.keras.Layer):
             New value sets with embeddings replaced by prior distribution.
         """
         if not override_matches and not override_insertions:
-            return list(values)
+            Z = np.zeros((prior.mean().shape[-1],), dtype=prior.dtype)
+            return list(values), Z
         # Get the mean from the mixture model prior
         mean_per_component = prior.mean().numpy()[0, 0]
         mix_coef = prior.mixture_coefficients().numpy()[0, 0]
@@ -376,4 +443,4 @@ class PHMMLayer(tf.keras.Layer):
                 insert_expectation=insert_expectation,
                 insert_variance=value_set.insert_variance,
             ))
-        return updated_values
+        return updated_values, mean

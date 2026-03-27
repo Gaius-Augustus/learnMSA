@@ -102,6 +102,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
     def call(
         self,
         inputs: tuple[tf.Tensor | np.ndarray, ...],
+        loop_mask: tf.Tensor | None = None,
         training: bool|None=None,
     ) -> tuple[tf.Tensor, ...]:
         """
@@ -113,6 +114,10 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
                    - ...: additional inputs depending on configuration
                     (e.g., for language model)
                    - indices: shape (batch, num_models)
+            loop_mask: Binary masks of shape (batch, seq_length, num_models)
+                indicating with 1 that for a given sequence position and model,
+                the transition into the unannotated state C is disallowed.
+                If None, that transition is always allowed.
             training: Boolean indicating training mode.
 
         Returns:
@@ -125,6 +130,9 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
                 "inputs must contain at least sequences and indices"
             )
         sequences, *adds, _indices = inputs
+
+        if loop_mask is not None:
+            loop_mask = tf.cast(loop_mask, dtype=self.phmm_layer.dtype)
 
         # Keep track of the runtime batch sizes for more verbose OOM error
         # handling
@@ -143,7 +151,12 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         padding = 1 - forward_seq[:, :, :, -1:]
         forward_seq = forward_seq[:, :, :, :-1]
 
-        output = self.phmm_layer(forward_seq, adds=adds, padding=padding)
+        output = self.phmm_layer(
+            forward_seq,
+            adds=adds,
+            padding=padding,
+            loop_mask=loop_mask,
+        )
 
         if self.phmm_layer.is_loglik_mode():
             output = tf.squeeze(output, axis=-1)
@@ -441,6 +454,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         data: SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]],
         indices: np.ndarray | None = None,
         models: list[int] | None = None,
+        loop_mask: np.ndarray | None = None,
         bucket_boundaries: Sequence[int | float] | None = None,
         bucket_batch_sizes: Sequence[int] | None = None,
         reduce: bool = False,
@@ -463,6 +477,11 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
                 consistent across datasets.
             indices: Array of sequence indices to predict on
             models: List of model indices to use for prediction
+            loop_mask: Binary masks of shape
+                (len(indices), seq_length, num_models)
+                indicating with 1 that for a given sequence position and model,
+                the transition into the unannotated state C is disallowed.
+                If None, that transition is always allowed.
             bucket_boundaries: Sequence length boundaries for bucketing. If None,
                 uses default boundaries [200, 520, 700, 850, 1200, 2000, 4000, inf].
             bucket_batch_sizes: Batch sizes for each bucket. If None, uses the
@@ -514,11 +533,12 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             self.context.batch_gen.num_models = len(self.phmm_layer.head_subset)
 
         if bucket_boundaries is None or bucket_batch_sizes is None:
+            c = 1 if loop_mask is None else 100
             bucket_boundaries, bucket_batch_sizes = make_default_bucket_scheme(
                 indices=indices,
                 batch_generator=self.context.batch_gen,
                 model_lengths=[self.phmm_layer.lengths[m] for m in _models],
-                batch_size_impl_factor=self.context._get_impl_factor(True),
+                batch_size_impl_factor=self.context._get_impl_factor(True) * c,
             )
 
         # Create dataset and get number of steps
@@ -529,6 +549,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             bucket_by_seq_length=True,
             bucket_boundaries=bucket_boundaries,
             bucket_batch_sizes=bucket_batch_sizes,
+            additional_data=loop_mask,
         )
 
         self._print_predict_header(
@@ -548,8 +569,12 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             H = len(_models)
             accumulated_posteriors = np.zeros((H, Q), dtype=np.float32)
 
+            _includes_loop_mask = loop_mask is not None
+
             def reduce_batch(batch_data):
-                y = self.predict_step(batch_data)
+                y = self.predict_step(
+                    batch_data, _includes_loop_mask
+                )
                 # Drop indices if present (bucketing)
                 y = y[0] if isinstance(y, tuple) else y
                 # Sum over sequence positions (axis 1) and batch (axis 0)
@@ -575,8 +600,12 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         all_predictions = []
         all_indices = []
 
+        _includes_loop_mask = loop_mask is not None
+
         def predict_batch(batch_data):
-            return self.predict_step(batch_data)
+            return self.predict_step(
+                batch_data, _includes_loop_mask
+            )
 
         if self.use_jit_compile(steps):
             predict_batch = tf.function(predict_batch, jit_compile=True)
@@ -653,15 +682,19 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         return decoded_array
 
     @override
-    def predict_step(self, data : Any) -> Any:
+    def predict_step(
+        self, data : Any, includes_loop_mask: bool = False,
+    ) -> Any:
         """
         Custom prediction step that handles the optional index for bucketed
         datasets.
 
         Args:
-            data: Either ((batch, indices), y) for regular datasets
-                or ((batch, indices, j), y) for bucketed datasets where j is the
+            data: Either (x = (batch, indices), y) for regular datasets
+                or (x = (batch, indices, j), y) for bucketed datasets where j is the
                 original sequence index.
+            includes_loop_mask: If True, a loop_mask is included in the data
+                tuple x as the last element.
 
         Returns:
             If bucketed: (predictions, j) to allow reordering
@@ -670,9 +703,17 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         x, _ = data
 
         # Bucketed dataset, we have reordering index j
-        batch, *adds, indices, j = x
+        if includes_loop_mask:
+            batch, *adds, indices, j, loop_mask = x
+            # slice loop mask to match the actual sequence length
+            loop_mask = loop_mask[:, :batch.shape[1]-1, :]
+        else:
+            batch, *adds, indices, j = x
+            loop_mask = None
 
-        predictions = self((batch, *adds, indices), training=False)
+        predictions = self(
+            (batch, *adds, indices), loop_mask=loop_mask, training=False # type: ignore
+        )
 
         # Return predictions along with the index for reordering
         return predictions, j

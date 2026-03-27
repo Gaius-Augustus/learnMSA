@@ -669,48 +669,53 @@ class AlignmentModel():
         assert len(models) == 1, "Not implemented for multiple models."
 
         self.model.viterbi_mode()
-        state_seqs_max_lik = self.model.predict(
+        decoded_states = self.model.predict(
             self.data, indices=self.indices, models=models
         ) # (B, T, H)
 
-        state_seqs_max_lik = self._clean_up_viterbi_seqs(
-            state_seqs_max_lik, models
+        decoded_states = self._clean_up_viterbi_seqs(
+            decoded_states, models
         )
         for i,j in enumerate(models):
             model_len = self.model.context.model_lengths[j]
-            s = state_seqs_max_lik[:,:,i]
+            s = decoded_states[:,:,i]
             decoded_data = AlignmentModel.decode(model_len, s)
             self.metadata[j] = AlignmentMetaData(*decoded_data)
 
-    def _clean_up_viterbi_seqs(self, state_seqs_max_lik, models):
+    def _clean_up_viterbi_seqs(self, decoded_states, models):
 
         assert len(models) == 1, "Not implemented for multiple models."
 
-        # state_seqs_max_lik has shape (num_model, num_seq, L)
-        faulty_sequences, C_forbidden_mask = find_faulty_sequences(
-            state_seqs_max_lik,
+        # decoded_states has shape (num_model, num_seq, L)
+        faulty, loop_mask = find_faulty_sequences(
+            decoded_states,
             self.model.context.model_lengths[models[0]],
             self.data[0].seq_lens[self.indices]
         )
-        self.fixed_viterbi_seqs = faulty_sequences
-        # if faulty_sequences.size > 0:
-            # # repeat Viterbi with a masking that prevents certain transitions
-            # # that can cause problems
-            # fixed_state_seqs = self.model.decode(
-            #     self.data,
-            #     faulty_sequences,
-            #     self.batch_size,
-            #     models,
-            #     non_homogeneous_mask_func,
-            # )
-            # if state_seqs_max_lik.shape[-1] < fixed_state_seqs.shape[-1]:
-            #     state_seqs_max_like = np.pad(
-            #         state_seqs_max_lik,
-            #         ((0,0),(0,0),(0,fixed_state_seqs.shape[-1]-state_seqs_max_lik.shape[-1])),
-            #         constant_values=2*self.model.context.model_lengths[0]+2
-            #     )
-            # state_seqs_max_lik[0,faulty_sequences,:fixed_state_seqs.shape[-1]] = fixed_state_seqs[0]
-        return state_seqs_max_lik
+        self.fixed_viterbi_seqs = faulty
+        if faulty.size > 0:
+            # repeat Viterbi and disallow the transition into the unannotated
+            # state C at certain time steps
+            fixed_states = self.model.predict(
+                self.data,
+                indices=faulty,
+                models=models,
+                loop_mask=loop_mask,
+            ) # (B, T, H)
+
+            if decoded_states.shape[-1] < fixed_states.shape[-1]:
+                decoded_states = np.pad(
+                    decoded_states,
+                    (
+                        (0,0),
+                        (0,0),
+                        (0,fixed_states.shape[-1]-decoded_states.shape[-1])
+                    ),
+                    constant_values=2*self.model.context.model_lengths[0]+2
+                )
+            decoded_states[faulty, :fixed_states.shape[1], 0] = fixed_states[:,:,0]
+
+        return decoded_states
 
 
 def find_faulty_sequences(
@@ -737,7 +742,7 @@ def find_faulty_sequences(
             decoding needs to be rerun with time-dependent restrictions on the
             allowed transitions.
 
-        C_forbidden_mask: A boolean mask of shape (num_faulty, T, 1) indicating
+        loop_mask: A boolean mask of shape (num_faulty, T-1, 1) indicating
             for each time step whether the transition into the unannotated
             state C is forbidden (True) or allowed (False).
     """
@@ -764,8 +769,14 @@ def find_faulty_sequences(
             - np.arange(T)[np.newaxis, :, np.newaxis])
         enough_matches = remaining_matches >= remaining_residues
 
-        C_forbidden_mask = previous_is_match & enough_matches
+        loop_mask = previous_is_match & enough_matches
 
-        faulty_sequences = np.any(C_state_starts & C_forbidden_mask, axis=1)
+        faulty_sequences = np.any(C_state_starts & loop_mask, axis=1)
         faulty_sequences = np.argwhere(faulty_sequences[:,0])[:,0]
-        return faulty_sequences, C_forbidden_mask[faulty_sequences]
+
+        # Only keep relevant masks
+        loop_mask = loop_mask[faulty_sequences]
+        # slice the first element off to go from T -> T -1
+        loop_mask = loop_mask[:,1:,:]
+
+        return faulty_sequences, loop_mask
