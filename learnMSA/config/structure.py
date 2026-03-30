@@ -36,6 +36,9 @@ class StructureConfig(BaseModel):
     prior_components: int = 9
     """The number of mixture components for the Dirichlet prior."""
 
+    prior_temperature: float = 0.1
+    """Scaling factor for the prior log-likelihood."""
+
     reset_after_surgery: bool = False
     """Whether to reset the structural information emission parameters after
     model surgery. default: False."""

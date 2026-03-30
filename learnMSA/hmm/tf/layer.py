@@ -234,6 +234,7 @@ class PHMMLayer(tf.keras.Layer):
                     components=structural_config.prior_components,
                     states=self.states,
                 )
+                struct_prior.temperature = structural_config.prior_temperature
                 structural_emitter.prior = struct_prior
         else:
             self.use_structure = False
