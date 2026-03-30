@@ -39,6 +39,9 @@ class StructureConfig(BaseModel):
     prior_temperature: float = 1.0
     """Scaling factor for the prior log-likelihood."""
 
+    prior_responsible: bool = False
+    """Whether to use the EM-style M-step objective for the prior scores."""
+
     reset_after_surgery: bool = False
     """Whether to reset the structural information emission parameters after
     model surgery. default: False."""

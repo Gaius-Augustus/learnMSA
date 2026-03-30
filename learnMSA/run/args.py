@@ -500,6 +500,13 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         help="The temperature for the structural Dirichlet prior. (default: %(default)s)"
     )
     struct_group.add_argument(
+        "--struct_prior_responsible",
+        dest="struct_prior_responsible",
+        action="store_true",
+        help="Whether to use the EM-style M-step objective for the structural "\
+        "Dirichlet prior scores."
+    )
+    struct_group.add_argument(
         "--struct_reset_after_surgery",
         dest="struct_reset_after_surgery",
         action="store_true",

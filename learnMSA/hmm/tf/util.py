@@ -24,6 +24,7 @@ def make_dirichlet_model(
     dim: int | None = None,
     components: int = 1,
     states: Sequence[int] = [1],
+    responsible: bool = False,
 ) -> tf.keras.Model:
     """Create a keras model with a TFDirichletPrior layer for the amino acid
     prior. If an initializer is provided, it is used to initialize the prior
@@ -43,7 +44,7 @@ def make_dirichlet_model(
         raise ValueError(
             "dim must be provided for multi-component Dirichlet priors."
         )
-    prior = TFDirichletPrior(components=components)
+    prior = TFDirichletPrior(components=components, responsible=responsible)
     prior.hmm_config = HidtenHMMConfig(states=states)
 
     n_param = components * n_dim + components if components > 1 else n_dim
@@ -61,7 +62,10 @@ def make_dirichlet_model(
     return make_model(n_dim, prior)
 
 def load_dirichlet(
-    name: str, dim: int, components: int = 1, states: Sequence[int] = [1]
+    name: str, dim: int,
+    components: int = 1,
+    states: Sequence[int] = [1],
+    responsible: bool = False
 ) -> TFDirichletPrior:
     """Load weights from a resource file into the given model.
 
@@ -70,9 +74,13 @@ def load_dirichlet(
         dim (int): The dimension of the Dirichlet prior.
         components (int): The number of mixture components.
         states (Sequence[int]): The number of states in each head.
+        responsible (bool): See ``TFDirichletPrior.responsible``.
     """
     model = make_dirichlet_model(
-        dim = dim, components = components, states = states
+        dim = dim,
+        components = components,
+        states = states,
+        responsible = responsible,
     )
     resource = resources.files("learnMSA.hmm.weights") / f"{name}.h5"
     model.load_weights(str(resource))

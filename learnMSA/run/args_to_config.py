@@ -130,6 +130,7 @@ def args_to_config(args: Namespace) -> Configuration:
         prior_name=args.struct_prior_name,
         prior_components=args.struct_prior_components,
         prior_temperature=args.struct_prior_temperature,
+        prior_responsible=args.struct_prior_responsible,
         reset_after_surgery=args.struct_reset_after_surgery,
     )
 

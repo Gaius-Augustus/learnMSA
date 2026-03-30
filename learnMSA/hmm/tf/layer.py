@@ -232,6 +232,7 @@ class PHMMLayer(tf.keras.Layer):
                     dim=structural_config.alphabet_size,
                     components=structural_config.prior_components,
                     states=self.states,
+                    responsible=structural_config.prior_responsible,
                 )
                 struct_prior.temperature = structural_config.prior_temperature
                 structural_emitter.prior = struct_prior
