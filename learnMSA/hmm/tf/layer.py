@@ -160,11 +160,12 @@ class PHMMLayer(tf.keras.Layer):
         self.use_language_model = plm_config != None\
             and plm_config.use_language_model
         self.plm_config = plm_config
+        self.emb_mean = None
         if self.use_language_model:
             assert self.plm_config is not None,\
                 "plm_config must be provided if use_language_model is True"
             # Create embedding value sets
-            embedding_values = [
+            emb_values = [
                 PHMMEmbeddingValueSet.from_config(L, h, plm_config) # type: ignore
                 for h, L in enumerate(self.lengths)
             ]
@@ -179,12 +180,13 @@ class PHMMLayer(tf.keras.Layer):
 
             # Override embedding values with prior distribution if requested
             if config.use_prior_for_emission_init:
-                embedding_values = self._override_embeddings_with_prior(
-                    embedding_values,
+                emb_values, emb_mean = self._override_embeddings_with_prior(
+                    emb_values,
                     mvn_prior,
                     override_matches=config.match_emissions is None,
                     override_insertions=config.insert_emissions is None,
                 )
+                self.emb_mean = emb_mean
 
             # Set the inverse gamma prior for embedding variances
             inv_gamma_prior = TFInverseGammaPrior()
@@ -203,7 +205,7 @@ class PHMMLayer(tf.keras.Layer):
 
             # Add the embedding emitter
             embedding_emitter = EmbeddingEmitter(
-                values=embedding_values,
+                values=emb_values,
                 trainable_insertions=trainable_insertions,
                 temperature=self.plm_config.temperature,
             )
@@ -340,7 +342,7 @@ class PHMMLayer(tf.keras.Layer):
         prior,
         override_matches: bool,
         override_insertions: bool,
-    ) -> list[PHMMEmbeddingValueSet]:
+    ) -> tuple[list[PHMMEmbeddingValueSet], np.ndarray]:
         """Override embedding values with prior distribution.
 
         Args:
@@ -353,7 +355,8 @@ class PHMMLayer(tf.keras.Layer):
             New value sets with embeddings replaced by prior distribution.
         """
         if not override_matches and not override_insertions:
-            return list(values)
+            Z = np.zeros((prior.mean().shape[-1],), dtype=prior.dtype)
+            return list(values), Z
         # Get the mean from the mixture model prior
         mean_per_component = prior.mean().numpy()[0, 0]
         mix_coef = prior.mixture_coefficients().numpy()[0, 0]
@@ -377,4 +380,4 @@ class PHMMLayer(tf.keras.Layer):
                 insert_expectation=insert_expectation,
                 insert_variance=value_set.insert_variance,
             ))
-        return updated_values
+        return updated_values, mean
