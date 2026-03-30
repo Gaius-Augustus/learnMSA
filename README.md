@@ -59,10 +59,11 @@ pip install learnMSA
 3. Additional installs for sequence weights (recommended!):
    
 ```
-conda install -c bioconda mmseqs2
+conda install -c conda-forge -c bioconda "python=3.12.*" mmseqs2
 ```
 
 You may have to set up [Bioconda channels](https://bioconda.github.io/).
+We pin the currently installed python executable to prevent installing newer mmseqs2 versions that would remove or alter.
 
 4. Additional installs for language model support (recommended!):
    
