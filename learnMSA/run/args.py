@@ -493,6 +493,13 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         "prior. (default: %(default)s)"
     )
     struct_group.add_argument(
+        "--struct_prior_temperature",
+        dest="struct_prior_temperature",
+        type=float,
+        default=1.0,
+        help="The temperature for the structural Dirichlet prior. (default: %(default)s)"
+    )
+    struct_group.add_argument(
         "--struct_reset_after_surgery",
         dest="struct_reset_after_surgery",
         action="store_true",

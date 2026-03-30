@@ -129,6 +129,7 @@ def args_to_config(args: Namespace) -> Configuration:
         use_structure=bool(args.struct_file),
         prior_name=args.struct_prior_name,
         prior_components=args.struct_prior_components,
+        prior_temperature=args.struct_prior_temperature,
         reset_after_surgery=args.struct_reset_after_surgery,
     )
 
