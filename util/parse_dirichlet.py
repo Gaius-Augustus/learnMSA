@@ -45,6 +45,63 @@ def parse_dirichlet(path: str):
     return mixture_weights, concentrations
 
 
+def reduce_dirichlet(
+    mixture_weights: np.ndarray,
+    concentrations: np.ndarray,
+) -> np.ndarray:
+    """Approximate a mixture of Dirichlets with a single Dirichlet.
+
+    Args:
+        mixture_weights: Mixture weights of shape (C,).
+        concentrations: Concentration parameters of shape (C, D).
+
+    Returns:
+        np.ndarray: Concentration parameters of the approximating Dirichlet (D,).
+    """
+    # Normalize mixture weights (just in case)
+    w = mixture_weights / np.sum(mixture_weights)  # (C,)
+
+    # Total concentration per component: alpha_0^(k)
+    alpha0 = np.sum(concentrations, axis=1)  # (C,)
+
+    # Component means: E_k[x] = alpha / alpha0
+    means_k = concentrations / alpha0[:, None]  # (C, D)
+
+    # Mixture mean: mu
+    mu = np.sum(w[:, None] * means_k, axis=0)  # (D,)
+
+    # Component variances
+    # Var_k[x_i] = (alpha_i * (alpha0 - alpha_i)) / (alpha0^2 * (alpha0 + 1))
+    var_k = (
+        concentrations * (alpha0[:, None] - concentrations)
+        / (alpha0[:, None] ** 2 * (alpha0[:, None] + 1))
+    )  # (C, D)
+
+    # Law of total variance:
+    # Var[x_i] = E_k[Var_k] + Var_k[E_k]
+    mean_diff_sq = (means_k - mu) ** 2  # (C, D)
+    var = np.sum(w[:, None] * (var_k + mean_diff_sq), axis=0)  # (D,)
+
+    # Estimate total concentration s per dimension:
+    # Var[x_i] = mu_i (1 - mu_i) / (s + 1)
+    # => s_i = mu_i (1 - mu_i) / var_i - 1
+    eps = 1e-12
+    s_i = mu * (1 - mu) / (var + eps) - 1.0
+
+    # Filter invalid / unstable entries
+    valid = np.isfinite(s_i) & (s_i > 0)
+    if not np.any(valid):
+        # Fallback: just use mean with small concentration
+        s = 1.0
+    else:
+        s = np.mean(s_i[valid])
+
+    # Final Dirichlet parameters
+    alpha = mu * s
+
+    return alpha
+
+
 WEIGHTS_PATH = "learnMSA/hmm/weights/"
 
 
@@ -114,7 +171,15 @@ def main():
              "If provided, builds and saves a TFDirichletPrior model to "
              f"{WEIGHTS_PATH}<name>.weights.h5",
     )
+    parser.add_argument(
+        "--single",
+        action="store_true",
+        help="Reduce the mixture to a single Dirichlet before saving.",
+    )
     args = parser.parse_args()
+
+    if args.single and not args.name:
+        parser.error("--single requires --name to save the result")
 
     weights, concentrations = parse_dirichlet(args.input)
 
@@ -126,7 +191,13 @@ def main():
     print(concentrations)
 
     if args.name:
-        build_dirichlet_model(args.name, weights, concentrations)
+        if args.single:
+            alpha = reduce_dirichlet(weights, concentrations)
+            print(f"\nReduced to single Dirichlet: shape={alpha.shape}")
+            print(alpha)
+            build_dirichlet_model(args.name, np.array([1.0]), alpha[np.newaxis, :])
+        else:
+            build_dirichlet_model(args.name, weights, concentrations)
 
 
 if __name__ == "__main__":

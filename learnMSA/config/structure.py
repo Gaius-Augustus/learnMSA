@@ -29,11 +29,11 @@ class StructureConfig(BaseModel):
     """Default, background distribution over the structural alphabet based on
     (AF2 SwissProt). Source: hmmer3di repository."""
 
-    prior_name: str = "pfam_35_3Di"
+    prior_name: str = "pfam_35_3Di_1"
     """Specifies the path to weights for a Dirichlet prior over the
     structural alphabet."""
 
-    prior_components: int = 9
+    prior_components: int = 1
     """The number of mixture components for the Dirichlet prior."""
 
     prior_temperature: float = 1.0

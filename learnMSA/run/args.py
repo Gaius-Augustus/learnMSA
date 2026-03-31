@@ -480,7 +480,7 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         "--struct_prior_name",
         dest="struct_prior_name",
         type=str,
-        default="pfam_35_3Di",
+        default="pfam_35_3Di_1",
         help="Name of a weights file for the structural Dirichlet prior. "\
         "Use empty string for no prior (default: %(default)s)"
     )
@@ -488,7 +488,7 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         "--struct_prior_components",
         dest="struct_prior_components",
         type=int,
-        default=9,
+        default=1,
         help="The number of mixture components for the structural Dirichlet "\
         "prior. (default: %(default)s)"
     )
