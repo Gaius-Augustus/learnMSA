@@ -100,26 +100,8 @@ class TrainingConfig(BaseModel):
     use_anc_probs: bool = True
     """Whether to use ancestral state probabilities."""
 
-    trainable_rate_matrices: bool = False
-    """Whether rate matrices are trainable."""
-
     trainable_distances: bool = True
     """Whether distances are trainable."""
-
-    num_rate_matrices: int = 1
-    """Number of rate matrices to use."""
-
-    matrix_rate_l2: float = 0.0
-    """L2 regularization strength for rate matrices."""
-
-    shared_rate_matrix: bool = False
-    """Whether to share rate matrices."""
-
-    equilibrium_sample: bool = False
-    """Whether to use equilibrium sampling."""
-
-    transposed: bool = False
-    """Whether to use transposed rate matrices."""
 
     only_matches: bool = False
     """Omit all insertions in the output and write only those amino
@@ -192,7 +174,6 @@ class TrainingConfig(BaseModel):
         "auto_crop_scale",
         "min_surgery_seqs",
         "dirichlet_mix_comp_count",
-        "num_rate_matrices",
     )
     def validate_positive_floats(cls, v: float | int, info) -> float | int:
         if v <= 0:

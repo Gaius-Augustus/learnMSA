@@ -624,11 +624,5 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         default=0.05,
         help=argparse.SUPPRESS
     )
-    parser.add_argument(
-        "--trainable_rate_matrices",
-        dest="trainable_rate_matrices",
-        action="store_true",
-        help=argparse.SUPPRESS
-    )
 
     return parser

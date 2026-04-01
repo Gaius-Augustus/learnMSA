@@ -99,11 +99,7 @@ class LearnMSAContext:
                 )
             self.num_seq = data.num_seq
 
-        model_len_cb = None
-
-        # When not included in the initializers, set up lengths from the config
-        if model_len_cb is None:
-            model_len_cb = self._setup_lengths()
+        model_len_cb = self._setup_lengths()
 
         # If still not set, use default length callback
         if model_len_cb is None:

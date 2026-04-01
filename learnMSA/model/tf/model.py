@@ -50,21 +50,16 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         self.context = context
         train_cfg = context.config.training
 
-        # Create the ancestor probabilities layer
+        # Create the ancestral probabilities layer
         if train_cfg.use_anc_probs and not train_cfg.no_aa:
             self.anc_probs_layer = AncProbsLayer(
-                train_cfg.num_model,
-                context.num_seq,
-                train_cfg.num_rate_matrices,
+                heads=train_cfg.num_model,
+                rates=context.num_seq,
+                input_tracks=1,
                 equilibrium_init=context.encoder_initializer[2],
                 rate_init=context.encoder_initializer[0],
                 exchangeability_init=context.encoder_initializer[1],
-                trainable_rate_matrices=train_cfg.trainable_rate_matrices,
                 trainable_distances=train_cfg.trainable_distances,
-                matrix_rate_l2=train_cfg.matrix_rate_l2,
-                shared_matrix=train_cfg.shared_rate_matrix,
-                equilibrium_sample=train_cfg.equilibrium_sample,
-                transposed=train_cfg.transposed,
                 clusters=context.clusters
             )
 

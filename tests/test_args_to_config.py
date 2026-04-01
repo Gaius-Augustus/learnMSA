@@ -239,7 +239,6 @@ class TestArgsToConfig:
             "--inverse_gamma_beta", "1.0",
             "--frozen_distances",
             "--initial_distance", "0.1",
-            "--trainable_rate_matrices",
         ])
 
         config = args_to_config(args)
@@ -254,7 +253,6 @@ class TestArgsToConfig:
         assert config.language_model.inverse_gamma_alpha == 2.0
         assert config.language_model.inverse_gamma_beta == 1.0
         assert config.advanced.initial_distance == 0.1
-        assert config.training.trainable_rate_matrices is True
         assert config.training.trainable_distances is False
 
     def test_args_to_config_num_model_from_length_init(self):
@@ -334,7 +332,6 @@ class TestArgsToConfig:
             "--use_language_model",
             "--use_L2",
             "--frozen_distances",
-            "--trainable_rate_matrices",
         ])
 
         config = args_to_config(args)
@@ -348,7 +345,6 @@ class TestArgsToConfig:
         assert config.language_model.use_language_model is True
         assert config.language_model.use_L2 is True
         assert config.training.trainable_distances is False
-        assert config.training.trainable_rate_matrices is True
         assert config.training.use_noise is True
 
     def test_args_to_config_short_options(self):
