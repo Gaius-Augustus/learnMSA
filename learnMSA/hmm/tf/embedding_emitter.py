@@ -96,8 +96,8 @@ class EmbeddingEmitter(TFMVNormalEmitter):
         super().build(input_shape)
 
     @override
-    def matrix(self) -> T_TFTensor:
-        matrix = super().matrix()
+    def matrix(self, sqrt_variance: bool = False) -> T_TFTensor:
+        matrix = super().matrix(sqrt_variance)
         if self.head_subset is not None:
             matrix = tf.gather(matrix, self.head_subset, axis=0)
             max_states_subset = max(
@@ -126,7 +126,7 @@ class EmbeddingEmitter(TFMVNormalEmitter):
             # Override to handle insertion state via copying instead of
             # explicit computations
             # Keep match states + single insertion state
-            matrix = self.matrix()
+            matrix = self.matrix(sqrt_variance=True)
             reduced_mean = self.mean(matrix)[:, :self.lengths.max()+1, :]
             reduced_sqrt_variance = self.sqrt_variance(
                 matrix
