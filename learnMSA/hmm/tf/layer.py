@@ -354,14 +354,14 @@ class PHMMLayer(tf.keras.Layer):
         Returns:
             New value sets with embeddings replaced by prior distribution.
         """
-        if not override_matches and not override_insertions:
-            Z = np.zeros((prior.mean().shape[-1],), dtype=prior.dtype)
-            return list(values), Z
         # Get the mean from the mixture model prior
         mean_per_component = prior.mean().numpy()[0, 0]
         mix_coef = prior.mixture_coefficients().numpy()[0, 0]
         mix_coef = np.expand_dims(mix_coef, axis=-1)
         mean = np.sum(mean_per_component * mix_coef, axis=0)
+
+        if not override_matches and not override_insertions:
+            return list(values), mean
 
         updated_values = []
         for value_set in values:
