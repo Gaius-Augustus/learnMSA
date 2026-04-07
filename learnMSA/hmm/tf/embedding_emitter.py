@@ -65,7 +65,7 @@ class EmbeddingEmitter(TFMVNormalEmitter):
 
         # The initializer is a flat array that is ordered as follows:
         # For each head (major) and state (minor) it contains
-        # component means, components standard deviations, mix coefficients
+        # component means, components variances, mix coefficients
         # (in this order, omitting coefficients for single component).
         self.initializer = np.concatenate(init_values)
 
