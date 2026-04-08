@@ -1,4 +1,5 @@
 import imageio
+import warnings
 import logomaker
 import networkx as nx
 import numpy as np
@@ -61,7 +62,7 @@ def plot_transition_graph(
     except AttributeError:
         A_np = np.array(A[head])
 
-    Q = A_np.shape[0]
+    Q = transitioner.states[head]
     if state_labels is not None:
         labels = state_labels
     else:
@@ -148,7 +149,10 @@ def plot_emissions(
     inset_offset: tuple[float, float] = (0.1, 0.05),
     inset_column: int = 0,
     alphabet: str = "ARNDCQEGHILKMFPSTWYVXUO",
-    background: np.ndarray | None = None,
+    color_scheme: str = "skylign_protein",
+    state_labels: list[str] | str | None = None,
+    title_font_size: int = 32,
+    states: list[int] | np.ndarray | None = None,
 ):
     """Plots small inset bar charts at each node showing the emission
     distribution for a given head and emitter.
@@ -177,9 +181,18 @@ def plot_emissions(
             ``inset_offset``, where margin is 10 % of the inset width.
         alphabet: The alphabet used to create logo plots for categorical
             emitters. Ignored for non-categorical emitters.
-        background: Background distribution of shape (A,) used to compute
-            information content for categorical emitters. Must be provided
-            when the emitter is categorical.
+        color_scheme: Logomaker color scheme for categorical emitters
+            (default: ``'skylign_protein'``). Any scheme accepted by
+            :func:`logomaker.Logo` can be used (e.g.
+            ``'chemistry'``, ``'NajafabadiEtAl2017'``).
+        state_labels: Optional list of state name strings or a single string.
+            When provided, each inset receives a title matching the label of
+            the corresponding node. If *None*, the node index is used as the title.
+        title_font_size: Font size for the inset titles (default: 5).
+        states: Optional list or array of state indices to plot. When *None*
+            (default), emission insets are drawn for every state in ``pos``.
+            When provided, only states whose index appears in ``states`` are
+            plotted.
 
     Returns:
         The matplotlib Figure.
@@ -195,12 +208,13 @@ def plot_emissions(
     dx, dy = inset_offset
     dx = dx + col_shift
 
+    active_pos = {
+        node: xy for node, xy in pos.items()
+        if states is None or node in states
+    }
+
     # Find out the type of emitter to determine the type of plot
     if isinstance(hmm.emitter[emitter_index], TFCategoricalEmitter):
-        if background is None:
-            raise ValueError(
-                "background must be provided for categorical emitters"
-            )
         emitter = hmm.emitter[emitter_index]
         # B has shape (H, Q, A)
         B = emitter.matrix()
@@ -211,16 +225,10 @@ def plot_emissions(
 
         A = B_np.shape[2]
         chars = list(alphabet[:A])
-        bg = np.asarray(background)
 
-        for node, (x, y) in pos.items():
+        for node, (x, y) in active_pos.items():
             probs = B_np[head, node, :]  # shape (A,)
-            # Information content relative to background
-            with np.errstate(divide='ignore', invalid='ignore'):
-                ic = np.sum(np.where(probs > 0, probs * np.log2(probs / bg), 0.0))
-            heights = ic * probs  # each character's contribution to IC
-
-            df = pd.DataFrame([heights], columns=chars)
+            df = pd.DataFrame([probs], columns=chars)
 
             axins = inset_axes(
                 ax,
@@ -231,7 +239,16 @@ def plot_emissions(
                 loc="center",
                 borderpad=0,
             )
-            logomaker.Logo(df, ax=axins, color_scheme='skylign_protein', vpad=0.1, width=0.8)
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", message=".*not in color_dict.*", category=UserWarning)
+                logomaker.Logo(df, ax=axins, color_scheme=color_scheme, vpad=0.1, width=0.8)
+            if isinstance(state_labels, list):
+                title = state_labels[node]
+            elif isinstance(state_labels, str):
+                title = state_labels
+            else:
+                title = str(node)
+            axins.set_title(title, fontsize=title_font_size, pad=1)
             axins.set_xticks([])
             axins.set_yticks([])
             axins.patch.set_alpha(0.7)
@@ -248,7 +265,7 @@ def plot_emissions(
         D = M_np.shape[2] // 2
         colors = plt.cm.tab10.colors
 
-        for node, (x, y) in pos.items():
+        for node, (x, y) in active_pos.items():
             means = M_np[head, node, :D]      # shape (D,)
             variances = M_np[head, node, D:]  # shape (D,)
             stds = np.sqrt(variances)
@@ -278,6 +295,11 @@ def plot_emissions(
             axins.set_xticks([float(f"{m:.2g}") for m in means])
             axins.set_yticks([0, round(y_max, 2)])
             axins.tick_params(labelsize=4, pad=1)
+            axins.set_title(
+                state_labels[node] if state_labels is not None else str(node),
+                fontsize=title_font_size,
+                pad=1,
+            )
             axins.patch.set_alpha(0.7)
     else:
         # Unknown emitter, keep sample plots for testing
@@ -287,7 +309,7 @@ def plot_emissions(
             i: rng.dirichlet(np.ones(4)) for i in range(2)
         }
 
-        for node, (x, y) in pos.items():
+        for node, (x, y) in active_pos.items():
             axins = inset_axes(
                 ax,
                 width="100%",
@@ -297,10 +319,15 @@ def plot_emissions(
                 loc="center",
                 borderpad=0,
             )
-            data = emission_data[node]
+            data = emission_data[node % 2]
             axins.bar(range(len(data)), data, color="steelblue", width=0.8)
             axins.set_xlim(-0.5, len(data) - 0.5)
             axins.set_ylim(0, 1)
+            axins.set_title(
+                state_labels[node] if state_labels is not None else str(node),
+                fontsize=title_font_size,
+                pad=1,
+            )
             axins.set_xticks([])
             axins.set_yticks([])
             axins.patch.set_alpha(0.7)
@@ -310,7 +337,11 @@ def plot_emissions(
     fig.sca(ax)
     return fig
 
-def phmm_layout(L: int, spacing: float = 1.5) -> tuple[dict, list[str]]:
+def phmm_layout(
+    L: int,
+    h_spacing: float = 1.5,
+    v_spacing: float = 1.5,
+) -> tuple[dict, list[str]]:
     """Compute node positions and labels for an explicit (unfolded) profile HMM
     with ``L`` match states.
 
@@ -326,17 +357,18 @@ def phmm_layout(L: int, spacing: float = 1.5) -> tuple[dict, list[str]]:
     * ``3L+3``         : R  (right flank)
     * ``3L+4``         : T  (terminal)
 
-    Layout rows (y values are multiples of ``spacing``):
+    Layout rows (y values are multiples of ``v_spacing``):
 
-    * Very top  (y=3s) : C, centered over the match row
-    * Top       (y=2s) : M1…ML
-    * Middle    (y=s)  : I1…IL-1 (between adjacent match states); B, L to the
-                         left; E, R, T to the right
-    * Bottom    (y=0)  : D1…DL
+    * Very top  (y=3*vs) : C, centered over the match row
+    * Top       (y=2*vs) : M1…ML
+    * Middle    (y=vs)   : I1…IL-1 (between adjacent match states); B, L to
+                           the left; E, R, T to the right
+    * Bottom    (y=0)    : D1…DL
 
     Args:
         L: Number of match states.
-        spacing: Base spacing between adjacent states.
+        h_spacing: Horizontal spacing between adjacent states (default: 1.5).
+        v_spacing: Vertical spacing between rows (default: 1.5).
 
     Returns:
         Tuple ``(pos, labels)`` where ``pos`` is a dict mapping node index to
@@ -351,25 +383,25 @@ def phmm_layout(L: int, spacing: float = 1.5) -> tuple[dict, list[str]]:
     pos: dict[int, tuple[float, float]] = {}
     # Match states M1..ML: top row
     for i in range(L):
-        pos[i] = ((i + 1) * spacing, 2 * spacing)
+        pos[i] = ((i + 1) * h_spacing, 2 * v_spacing)
     # Insert states I1..IL-1: middle row, between adjacent match states
     for i in range(L - 1):
-        pos[L + i] = ((i + 1.5) * spacing, spacing)
+        pos[L + i] = ((i + 1.5) * h_spacing, v_spacing)
     # Delete states D1..DL: bottom row, aligned with match states
     for i in range(L):
-        pos[2 * L - 1 + i] = ((i + 1) * spacing, 0)
+        pos[2 * L - 1 + i] = ((i + 1) * h_spacing, 0)
     # Left-flank (L)
-    pos[3 * L - 1] = (-spacing, 1.5 * spacing)
+    pos[3 * L - 1] = (-h_spacing, 1.5 * v_spacing)
     # Begin (B): closest to the match row
-    pos[3 * L] = (0, 1.5 * spacing)
+    pos[3 * L] = (0, 1.5 * v_spacing)
     # End (E)
-    pos[3 * L + 1] = ((L + 1) * spacing, 1.5 * spacing)
+    pos[3 * L + 1] = ((L + 1) * h_spacing, 1.5 * v_spacing)
     # Unannotated/C: very top, centered over match row
-    pos[3 * L + 2] = ((L + 1) * spacing / 2, 3 * spacing)
+    pos[3 * L + 2] = ((L + 1) * h_spacing / 2, 3 * v_spacing)
     # Right-flank (R): index 3L+3
-    pos[3 * L + 3] = ((L + 2) * spacing, 1.5 * spacing)
+    pos[3 * L + 3] = ((L + 2) * h_spacing, 1.5 * v_spacing)
     # Terminal (T): last state
-    pos[T_idx] = ((L + 3) * spacing, 1.5 * spacing)
+    pos[T_idx] = ((L + 3) * h_spacing, 1.5 * v_spacing)
 
     labels: list[str] = [''] * max_states
     for i in range(L):
@@ -391,7 +423,8 @@ def phmm_layout(L: int, spacing: float = 1.5) -> tuple[dict, list[str]]:
 def plot_phmm(
     hmm: HMM,
     head: int = 0,
-    spacing: float = 1.5,
+    h_spacing: float = 1.5,
+    v_spacing: float = 1.5,
     ax=None,
     threshold: float = 1e-3,
     edge_label_fmt: str = "{:.2f}",
@@ -418,7 +451,8 @@ def plot_phmm(
     Args:
         hmm: The HMM to visualize.
         head: Index of the HMM head to visualize (default: 0).
-        spacing: Base spacing between adjacent states (default: 1.5).
+        h_spacing: Horizontal spacing between adjacent states (default: 1.5).
+        v_spacing: Vertical spacing between rows (default: 1.5).
         ax: A matplotlib Axes to draw on. If None, a new figure is created.
         threshold: Edges with probability below this value are omitted.
         edge_label_fmt: Format string for edge probability labels.
@@ -447,7 +481,7 @@ def plot_phmm(
     explicit = transitioner.explicit_transitioner
     L = transitioner.lengths[head]
 
-    pos, labels = phmm_layout(L, spacing=spacing)
+    pos, labels = phmm_layout(L, h_spacing=h_spacing, v_spacing=v_spacing)
     T_idx = max(pos.keys())  # terminal state index
 
     # ---- Build explicit transition matrix ----
@@ -468,8 +502,8 @@ def plot_phmm(
 
     # ---- Create axes ----
     if ax is None:
-        fig_w = max(8, (L + 5) * spacing * 1.1)
-        fig_h = max(5, 4 * spacing)
+        fig_w = max(8, (L + 5) * h_spacing * 1.1)
+        fig_h = max(5, 4 * v_spacing)
         fig, ax = plt.subplots(figsize=(fig_w, fig_h))
     else:
         fig = ax.get_figure()
