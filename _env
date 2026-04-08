@@ -1,0 +1,141 @@
+[1mdiff --git a/learnMSA/align/alignment_model.py b/learnMSA/align/alignment_model.py[m
+[1mindex 1c44d64..60d54f3 100644[m
+[1m--- a/learnMSA/align/alignment_model.py[m
+[1m+++ b/learnMSA/align/alignment_model.py[m
+[36m@@ -672,6 +672,8 @@[m [mclass AlignmentModel():[m
+             self.data, indices=self.indices, models=models[m
+         ) # (B, T, H)[m
+ [m
+[32m+[m[32m        tf.print("state_seqs_max_lik", state_seqs_max_lik[-5:], summarize=-1)[m
+[32m+[m
+         state_seqs_max_lik = self._clean_up_viterbi_seqs([m
+             state_seqs_max_lik, models[m
+         )[m
+[1mdiff --git a/learnMSA/config/hmm.py b/learnMSA/config/hmm.py[m
+[1mindex 8aea0dd..c5b6e80 100644[m
+[1m--- a/learnMSA/config/hmm.py[m
+[1m+++ b/learnMSA/config/hmm.py[m
+[36m@@ -137,9 +137,10 @@[m [mclass PHMMConfig(BaseModel):[m
+         NPArray | None = None[m
+     """Defines ``P(End | Match i; h)``.[m
+     Can optionally depend on i and h.[m
+[31m-    Per default it is determined automatically such that ``exit[0] = 1/(L-1)`` and[m
+[31m-    ``exit[i] = entry[i]`` for i > 0 and the other outgoing transitions from[m
+[31m-    match i are rescaled accordingly.[m
+[32m+[m[32m    Per default it is determined automatically such that[m
+[32m+[m[32m    ``exit[i] = (1-p)/(L-1)`` for all match states i, where[m
+[32m+[m[32m    p = begin_match_1 + begin_delete_1.[m
+[32m+[m[32m    The other outgoing transitions from match i are rescaled accordingly.[m
+     """[m
+ [m
+     p_insert_insert: float | Sequence[float] | Sequence[Sequence[float]] | \[m
+[36m@@ -175,7 +176,7 @@[m [mclass PHMMConfig(BaseModel):[m
+     Can optionally depend on h.[m
+     """[m
+ [m
+[31m-    p_end_unannot: float | Sequence[float] | NPArray = 1e-6[m
+[32m+[m[32m    p_end_unannot: float | Sequence[float] | NPArray = 5e-5[m
+     """Defines ``P(Unannotated | End; h)``.[m
+     Can optionally depend on h.[m
+     """[m
+[1mdiff --git a/learnMSA/hmm/tf/prior.py b/learnMSA/hmm/tf/prior.py[m
+[1mindex 4f49f91..4a837e2 100644[m
+[1m--- a/learnMSA/hmm/tf/prior.py[m
+[1m+++ b/learnMSA/hmm/tf/prior.py[m
+[36m@@ -248,7 +248,7 @@[m [mclass TFPHMMTransitionPrior(TFPrior):[m
+                 head.[m
+         """[m
+         scores = [][m
+[31m-        e = epsilon(transition_matrix)[m
+[32m+[m[32m        e = self.prior_config.epsilon[m
+ [m
+         for h in range(len(self.lengths)):[m
+             L = self.lengths[h][m
+[1mdiff --git a/learnMSA/hmm/util/value_set.py b/learnMSA/hmm/util/value_set.py[m
+[1mindex c24b35d..86fd6b9 100644[m
+[1m--- a/learnMSA/hmm/util/value_set.py[m
+[1m+++ b/learnMSA/hmm/util/value_set.py[m
+[36m@@ -101,19 +101,9 @@[m [mclass PHMMValueSet:[m
+             p_begin_delete[m
+ [m
+         # Handle p_match_end: compute automatic values if None[m
+[31m-        if config.p_match_end is None:[m
+[32m+[m[32m        if config.p_match_end is None and L > 1:[m
+             p_match_end_values = np.zeros(L - 1, dtype=np.float32)[m
+[31m-            if L > 1:[m
+[31m-                p_match_end_values[0] = max((1 - bm1), 1e-10) / (L - 1)[m
+[31m-            # For i > 0: exit[i] = entry[i][m
+[31m-            if isinstance(p_begin_match_inner, (Sequence, np.ndarray)):[m
+[31m-                # Use explicit entry probabilities[m
+[31m-                for i in range(1, L - 1):[m
+[31m-                    p_match_end_values[i] = p_begin_match_inner[i - 1][m
+[31m-            else:[m
+[31m-                # Use uniform entry probability[m
+[31m-                for i in range(1, L - 1):[m
+[31m-                    p_match_end_values[i] = p_begin_match_inner[m
+[32m+[m[32m            p_match_end_values[:] = p_begin_match_inner[m
+ [m
+         for i in range(L - 1):[m
+             # Begin to match i+1[m
+[1mdiff --git a/learnMSA/model/surgery.py b/learnMSA/model/surgery.py[m
+[1mindex edfd0f4..6923292 100644[m
+[1m--- a/learnMSA/model/surgery.py[m
+[1m+++ b/learnMSA/model/surgery.py[m
+[36m@@ -354,16 +354,46 @@[m [mdef update_kernels([m
+ [m
+     # Preserve Begin -> {M1, D1}, but reset entry probabilities uniformly[m
+     # according to the remaining probability mass[m
+[31m-    begin_match = A[ind.begin_to_match[0, 0], 0][m
+[32m+[m[32m    begin_match = A[ind.begin_to_match[:, 0], ind.begin_to_match[:, 1]][m
+     begin_delete = A[ind.begin_to_delete[0,0], ind.begin_to_delete[0,1]][m
+[32m+[m[32m    match_end = A[ind.match_to_end[:, 0], ind.match_to_end[:, 1]][m
+ [m
+     h = model_index[m
+     args = extend_mods(pos_expand, expansion_lens, pos_discard, L)[m
+ [m
+[32m+[m[32m    if 0 in pos_discard or 0 in pos_expand:[m
+[32m+[m[32m        # Reset if we modified the first match state[m
+[32m+[m[32m        begin_match_1 = get_value(config.p_begin_match, h, 0)[m
+[32m+[m[32m    else:[m
+[32m+[m[32m        begin_match_1 = begin_match[0][m
+[32m+[m[32m    if L > 1:[m
+[32m+[m[32m        begin_to_match_insert = (1 - begin_match_1 - begin_delete) / (L-1)[m
+[32m+[m[32m    else:[m
+[32m+[m[32m        begin_to_match_insert = 0.0[m
+[32m+[m
+[32m+[m[32m    begin_match = apply_mods([m
+[32m+[m[32m        begin_match, *args,[m
+[32m+[m[32m        insert_value = begin_to_match_insert,[m
+[32m+[m[32m    )[m
+[32m+[m[32m    begin_match[0] = begin_match_1[m
+[32m+[m
+[32m+[m[32m    # re-normalize begin probabilities[m
+[32m+[m[32m    sum_begin = begin_match.sum() + begin_delete[m
+[32m+[m[32m    if sum_begin > 0:[m
+[32m+[m[32m        begin_match /= sum_begin[m
+[32m+[m[32m        begin_delete /= sum_begin[m
+[32m+[m[32m    else:[m
+[32m+[m[32m        begin_match = 0.5[m
+[32m+[m[32m        begin_delete = 0.38[m
+[32m+[m
+     match_to_match = apply_mods([m
+         match_to_match, *args,[m
+         insert_value = get_value(config.p_match_match, h, 0),[m
+     )[m
+[32m+[m[32m    match_end = apply_mods([m
+[32m+[m[32m        match_end, *args,[m
+[32m+[m[32m        insert_value = get_value(config.p_match_match, h, 0),[m
+[32m+[m[32m    )[m
+     match_to_insert = apply_mods([m
+         match_to_insert, *args,[m
+         insert_value = get_value(config.p_match_insert, h, 0),[m
+[36m@@ -386,6 +416,9 @@[m [mdef update_kernels([m
+     new_config.p_delete_delete=delete_to_delete[np.newaxis][m
+     new_config.p_begin_match = begin_match[m
+     new_config.p_begin_delete = begin_delete[m
+[32m+[m[32m    new_config.p_match_end = match_end[np.newaxis][m
+[32m+[m[32m    # new_config.p_end_unannot = A[ind.end[0, 0], ind.end[0, 1]][m
+[32m+[m[32m    # print("new_config.p_end_unannot", new_config.p_end_unannot)[m
+ [m
+     if phmm_layer.use_language_model and plm_config is not None:[m
+         new_plm_config = plm_config.model_copy(deep=True)[m

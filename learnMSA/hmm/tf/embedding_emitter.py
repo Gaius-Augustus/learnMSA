@@ -53,11 +53,11 @@ class EmbeddingEmitter(TFMVNormalEmitter):
         # Initialization based on provided value sets
         for value_set in values:
             match_values = np.concatenate(
-                [value_set.match_expectations, value_set.match_stddev],
+                [value_set.match_expectations, value_set.match_variance],
                 axis=-1,
             )
             insert_values = np.concatenate(
-                [value_set.insert_expectation, value_set.insert_stddev],
+                [value_set.insert_expectation, value_set.insert_variance],
                 axis=-1,
             )
             init_values.append(match_values.flatten())
@@ -65,7 +65,7 @@ class EmbeddingEmitter(TFMVNormalEmitter):
 
         # The initializer is a flat array that is ordered as follows:
         # For each head (major) and state (minor) it contains
-        # component means, components standard deviations, mix coefficients
+        # component means, components variances, mix coefficients
         # (in this order, omitting coefficients for single component).
         self.initializer = np.concatenate(init_values)
 
@@ -96,8 +96,8 @@ class EmbeddingEmitter(TFMVNormalEmitter):
         super().build(input_shape)
 
     @override
-    def matrix(self) -> T_TFTensor:
-        matrix = super().matrix()
+    def matrix(self, sqrt_variance: bool = False) -> T_TFTensor:
+        matrix = super().matrix(sqrt_variance)
         if self.head_subset is not None:
             matrix = tf.gather(matrix, self.head_subset, axis=0)
             max_states_subset = max(
@@ -126,15 +126,17 @@ class EmbeddingEmitter(TFMVNormalEmitter):
             # Override to handle insertion state via copying instead of
             # explicit computations
             # Keep match states + single insertion state
-            matrix = self.matrix()
+            matrix = self.matrix(sqrt_variance=True)
             reduced_mean = self.mean(matrix)[:, :self.lengths.max()+1, :]
-            reduced_scale = self.scale(matrix)[:, :self.lengths.max()+1, :]
+            reduced_sqrt_variance = self.sqrt_variance(
+                matrix
+            )[:, :self.lengths.max()+1, :]
 
             # Add Z dimension (unused, single mixture component)
             mean = tf.expand_dims(reduced_mean, axis=2)
-            scale = tf.expand_dims(reduced_scale, axis=2)
+            sqrt_variance = tf.expand_dims(reduced_sqrt_variance, axis=2)
             log_pdf = tf.squeeze(
-                mvn_log_prob(observations, mean, scale), axis=-1
+                mvn_log_prob(observations, mean, sqrt_variance), axis=-1
             )
 
             emission_scores = tf.exp(

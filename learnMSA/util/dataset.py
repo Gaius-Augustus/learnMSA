@@ -88,6 +88,10 @@ class Dataset(ABC):
     def reorder(self, permutation: list[int] | np.ndarray) -> None:
         """Reorder sequences in-place using a permutation of sequence indices."""
 
+    @abstractmethod
+    def get_dtype(self) -> type[np.integer | np.floating]:
+        """Return the dtype of the encoded sequences."""
+
     def __enter__(self) -> Self:
         """Enter context manager and return the dataset."""
         return self

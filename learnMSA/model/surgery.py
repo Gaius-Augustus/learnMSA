@@ -4,6 +4,7 @@ import numpy as np
 
 from learnMSA.config.hmm import PHMMConfig
 from learnMSA.config.language_model import LanguageModelConfig
+from learnMSA.config.structure import StructureConfig
 from learnMSA.config.util import get_value
 from learnMSA.hmm.tf.layer import PHMMLayer
 from learnMSA.hmm.util.transition_index_set import PHMMTransitionIndexSet
@@ -218,6 +219,9 @@ class UpdateKernelResult:
     plm_config: LanguageModelConfig | None = None
     """The updated LanguageModelConfig with modified parameters, if
     the PHMMLayer was using embeddings."""
+    structural_config: StructureConfig | None = None
+    """The updated StructureConfig with modified parameters, if
+    the PHMMLayer was using structural information."""
 
 def update_kernels(
     phmm_layer: PHMMLayer,
@@ -227,6 +231,7 @@ def update_kernels(
     pos_discard: np.ndarray,
     config: PHMMConfig,
     plm_config: LanguageModelConfig | None = None,
+    structural_config: StructureConfig | None = None,
 ) -> UpdateKernelResult:
     """
     Apply expansions and discards to emission and transition kernels.
@@ -254,6 +259,8 @@ def update_kernels(
             values.
         plm_config (LanguageModelConfig | None): The protein language model
             configuration.
+        structural_config (StructureConfig | None): The structural information
+            configuration.
 
     Returns:
         PHMMConfig: A new configuration with modified parameters that can be
@@ -264,36 +271,44 @@ def update_kernels(
     L = phmm_layer.lengths[model_index]
 
     # Gather the current emission parameters
-    aa_emissions = phmm_layer.hmm.emitter[0].matrix().numpy() # (1, Q, S)
-    if phmm_layer.use_language_model:
-        emb_emissions = phmm_layer.hmm.emitter[1].matrix().numpy()  # (1, Q, 2D)
+    i = 0
 
-    # Slice to the model of interest and to only match states
-    aa_emissions = aa_emissions[0, :L, :]  # (L, S)
-    if phmm_layer.use_language_model:
-        emb_emissions = emb_emissions[0, :L, :]  # (L, 2D)
+    # Amino acids
+    if not phmm_layer.no_aa:
+        aa_emissions = phmm_layer.hmm.emitter[i].matrix().numpy()
+        assert aa_emissions.shape[0] == 1,\
+            "Head subset is not working properly for the amino acid emitter."
+        aa_emissions = aa_emissions[0, :L, :]
+        aa_insert_value = np.array(config.background_distribution)
+        aa_emissions_new = apply_mods(
+            aa_emissions,
+            pos_expand=pos_expand,
+            expansion_lens=expansion_lens,
+            pos_discard=pos_discard,
+            insert_value=aa_insert_value,
+        )
+        i += 1
+    else:
+        aa_emissions_new = None
 
-    # Apply modifications to the amino acid emission parameters
-    aa_insert_value = np.array(config.background_distribution)
-    aa_emissions_new = apply_mods(
-        aa_emissions,
-        pos_expand=pos_expand,
-        expansion_lens=expansion_lens,
-        pos_discard=pos_discard,
-        insert_value=aa_insert_value,
-    )
-
-    # Apply modifications to the embedding emission parameters
+    # pLM embeddings
     if phmm_layer.use_language_model:
+        emb_emissions = phmm_layer.hmm.emitter[i].matrix().numpy()
+        assert emb_emissions.shape[0] == 1,\
+            "Head subset is not working properly for the embedding emitter."
+        emb_emissions = emb_emissions[0, :L, :]
         assert plm_config is not None,\
             "plm_config must be provided to update_kernels if"\
             "the PHMMLayer uses a language model."
         embedding_dim = plm_config.scoring_model_dim
-        emb_expectations = np.zeros((embedding_dim,), dtype=np.float32)
-        emb_stddev = np.zeros((embedding_dim,), dtype=np.float32)
-        emb_stddev += plm_config.variance_init_stdev
+        if hasattr(phmm_layer, "emb_mean"):
+            emb_expectations = phmm_layer.emb_mean
+        else:
+            emb_expectations = np.zeros((embedding_dim,), dtype=np.float32)
+        emb_var = np.zeros((embedding_dim,), dtype=np.float32)
+        emb_var += plm_config.variance_init
         emb_insert_value = np.concatenate(
-            [emb_expectations, emb_stddev], axis=0
+            [emb_expectations, emb_var], axis=0
         )
         emb_emissions_new = apply_mods(
             emb_emissions,
@@ -302,6 +317,44 @@ def update_kernels(
             pos_discard=pos_discard,
             insert_value=emb_insert_value,
         )
+        i += 1
+    else:
+        emb_emissions_new = None
+
+    # Structural information
+    if phmm_layer.use_structure\
+            and structural_config is not None\
+            and not structural_config.reset_after_surgery:
+        struct_emissions = phmm_layer.hmm.emitter[i].matrix().numpy()
+        assert struct_emissions.shape[0] == 1,\
+            "Head subset is not working properly for the structural emitter."
+        struct_emissions = struct_emissions[0, :L, :]
+        struct_insert_value = np.array(
+            structural_config.background_distribution # type: ignore
+        )
+        struct_emissions_new = apply_mods(
+            struct_emissions,
+            pos_expand=pos_expand,
+            expansion_lens=expansion_lens,
+            pos_discard=pos_discard,
+            insert_value=struct_insert_value,
+        )
+        i += 1
+    else:
+        struct_emissions_new = None
+
+    if aa_emissions_new is not None:
+        L_new = aa_emissions_new.shape[0]
+    elif emb_emissions_new is not None:
+        L_new = emb_emissions_new.shape[0]
+    elif struct_emissions_new is not None:
+        L_new = struct_emissions_new.shape[0]
+    else:
+        raise ValueError(
+            "No emissions were found. Make sure either no_aa is False "\
+            "or the PHMMLayer is using a language model or structural "\
+            "information."
+            )
 
     # Gather the current transition parameters
     # Note: The transitions not occuring here (like left_flank_loop) are
@@ -312,17 +365,18 @@ def update_kernels(
     ind = PHMMTransitionIndexSet(L)
     match_to_match = A[ind.match_to_match[:, 0], ind.match_to_match[:, 1]]
     match_to_insert = A[ind.match_to_insert[:, 0], ind.match_to_insert[:, 1]]
+    match_to_delete = A[ind.match_to_delete[:, 0], ind.match_to_delete[:, 1]]
     insert_to_insert = A[ind.insert_to_insert[:, 0], ind.insert_to_insert[:, 1]]
     delete_to_delete = A[ind.delete_to_delete[:, 0], ind.delete_to_delete[:, 1]]
 
     # Preserve Begin -> {M1, D1}, but reset entry probabilities uniformly
     # according to the remaining probability mass
-    begin_match = A[ind.begin_to_match[0, 0], 0]
+    begin_match = A[ind.begin_to_match[:, 0], ind.begin_to_match[:, 1]]
     begin_delete = A[ind.begin_to_delete[0,0], ind.begin_to_delete[0,1]]
+    match_end = A[ind.match_to_end[:, 0], ind.match_to_end[:, 1]]
 
     h = model_index
     args = extend_mods(pos_expand, expansion_lens, pos_discard, L)
-
     match_to_match = apply_mods(
         match_to_match, *args,
         insert_value = get_value(config.p_match_match, h, 0),
@@ -339,30 +393,74 @@ def update_kernels(
         delete_to_delete, *args,
         insert_value = get_value(config.p_delete_delete, h, 0),
     )
+    match_to_delete = apply_mods(
+        match_to_delete, *args,
+        insert_value = get_value(config.p_match_delete, h, 0),
+    )
+
+    if 0 in pos_discard or 0 in pos_expand:
+        # Reset if we modified the first match state
+        begin_match_1 = get_value(config.p_begin_match, h, 0)
+        begin_delete = get_value(config.p_begin_delete, h, 0)
+    else:
+        begin_match_1 = begin_match[0]
+    if L_new > 1:
+        begin_to_match_insert = (1 - begin_match_1 - begin_delete) / (L_new-1)
+    else:
+        begin_to_match_insert = 0.0
+
+    begin_match = apply_mods(
+        begin_match, pos_expand, expansion_lens, pos_discard,
+        insert_value = begin_to_match_insert,
+    )
+    begin_match[0] = begin_match_1
+
+    if L in pos_expand:
+        # avoid moving p last_match -> end = 1.0 into the model
+        match_end[-1] = begin_to_match_insert
+    match_end = apply_mods(
+        match_end, pos_expand, expansion_lens, pos_discard,
+        insert_value = begin_to_match_insert,
+    )
+
+    # re-normalize begin probabilities
+    begin_match[1:] /= begin_match[1:].sum() / (1 - begin_match[0] - begin_delete)
 
     new_config = config.model_copy(deep=True)
-    new_config.match_emissions=aa_emissions_new[np.newaxis]
+    if aa_emissions_new is not None:
+        new_config.match_emissions=aa_emissions_new[np.newaxis]
     new_config.p_match_match=match_to_match[np.newaxis]
     new_config.p_match_insert=match_to_insert[np.newaxis]
+    new_config.p_match_delete=match_to_delete[np.newaxis]
     new_config.p_insert_insert=insert_to_insert[np.newaxis]
     new_config.p_delete_delete=delete_to_delete[np.newaxis]
-    new_config.p_begin_match = begin_match
+    new_config.p_begin_match = begin_match if isinstance(begin_match, float) else begin_match[np.newaxis]
     new_config.p_begin_delete = begin_delete
+    new_config.p_match_end = match_end[np.newaxis]
 
     if phmm_layer.use_language_model and plm_config is not None:
         new_plm_config = plm_config.model_copy(deep=True)
         new_plm_config.match_expectations = emb_emissions_new[np.newaxis, :, :embedding_dim]
-        new_plm_config.match_stddev = emb_emissions_new[np.newaxis, :, embedding_dim:]
+        new_plm_config.match_variance = emb_emissions_new[np.newaxis, :, embedding_dim:]
     else:
         new_plm_config = None
+
+    if phmm_layer.use_structure\
+            and structural_config is not None\
+            and not structural_config.reset_after_surgery:
+        new_structural_config = structural_config.model_copy(deep=True)
+        new_structural_config.match_emissions = struct_emissions_new[np.newaxis]
+    else:
+        new_structural_config = None
 
     # Reset
     phmm_layer.head_subset = head_subset_backup
 
     return UpdateKernelResult(
-        length=aa_emissions_new.shape[0],
+        length=L_new,
         config=new_config,
-        plm_config=new_plm_config
+        plm_config=new_plm_config,
+        structural_config=new_structural_config,
     )
 
 @dataclass
@@ -376,6 +474,9 @@ class ModelSurgeryResult:
     plm_config: LanguageModelConfig | None = None
     """The updated LanguageModelConfig with modified parameters, if
     the PHMMLayer was using embeddings."""
+    structural_config: StructureConfig | None = None
+    """The updated StructureConfig with modified parameters, if
+    the PHMMLayer was using structural information."""
 
 def model_surgery(
     model: LearnMSAModel,
@@ -423,6 +524,7 @@ def model_surgery(
     model_lengths = []
     configs = []
     plm_configs = []
+    structural_configs = []
     for i,k in enumerate(range(model.heads)):
         surgery_converged &= pos_expand[k].size == 0 and pos_discard[k].size == 0
 
@@ -445,6 +547,7 @@ def model_surgery(
             pos_discard[k],
             model.context.config.hmm,
             model.context.config.language_model,
+            model.context.config.structure,
         )
 
         model_lengths.append(result.length)
@@ -456,6 +559,7 @@ def model_surgery(
 
         configs.append(result.config)
         plm_configs.append(result.plm_config)
+        structural_configs.append(result.structural_config)
 
     # Merge configurations that contain parameters per head to a single config
     def concat_param(param_name: str):
@@ -492,6 +596,7 @@ def model_surgery(
     config.p_begin_match = concat_param("p_begin_match")
     config.p_match_match = concat_param("p_match_match")
     config.p_match_insert = concat_param("p_match_insert")
+    config.p_match_delete = concat_param("p_match_delete")
     config.p_match_end = concat_param("p_match_end")
     config.p_insert_insert = concat_param("p_insert_insert")
     config.p_delete_delete = concat_param("p_delete_delete")
@@ -532,13 +637,42 @@ def model_surgery(
         merged_plm_config.match_expectations = concat_emb_param(
             "match_expectations"
         )
-        merged_plm_config.match_stddev = concat_emb_param("match_stddev")
+        merged_plm_config.match_variance = concat_emb_param("match_variance")
     else:
         merged_plm_config = None
+
+    if structural_configs[0] is not None:
+        def concat_struct_param(param_name: str):
+            values = [getattr(c, param_name) for c in structural_configs]
+
+            # Check if all values are None
+            if all(v is None for v in values):
+                return None
+
+            arrays = [np.atleast_1d(v) for v in values]
+
+            # create zeros array and fill
+            num_heads = len(arrays)
+            max_len = max(arr.shape[1] for arr in arrays)
+            full_shape = (num_heads, max_len) + arrays[0].shape[2:]
+            result = np.zeros(full_shape, dtype=arrays[0].dtype)
+
+            for i, arr in enumerate(arrays):
+                result[i, :arr.shape[1]] = arr[0]
+
+            return result
+
+        merged_structural_config = structural_configs[0].model_copy(deep=True)
+        merged_structural_config.match_emissions = concat_struct_param(
+            "match_emissions"
+        )
+    else:
+        merged_structural_config = None
 
     return ModelSurgeryResult(
         model_lengths=np.array(model_lengths, dtype=np.int32),
         surgery_converged=surgery_converged,
         config=config,
         plm_config=merged_plm_config,
+        structural_config=merged_structural_config,
     )

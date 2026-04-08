@@ -7,6 +7,7 @@ from hidten.tf.hmm import TFHMM, T_shapelike
 from hidten.tf.prior import TFCombinedPrior, TFInverseGammaPrior
 
 from learnMSA.config import LanguageModelConfig, PHMMConfig, PHMMPriorConfig
+from learnMSA.config.structure import StructureConfig
 from learnMSA.hmm.tf.embedding_emitter import EmbeddingEmitter
 from learnMSA.hmm.tf.prior import TFPHMMStartPrior, TFPHMMTransitionPrior
 from learnMSA.hmm.tf.profile_emitter import ProfileEmitter
@@ -62,9 +63,11 @@ class PHMMLayer(tf.keras.Layer):
         config : PHMMConfig,
         prior_config: PHMMPriorConfig | None = None,
         plm_config: LanguageModelConfig | None = None,
+        structural_config: StructureConfig | None = None,
         use_prior: bool = True,
         trainable_insertions: bool = True,
         value_sets: Sequence[PHMMValueSet] | None = None,
+        no_aa: bool = False,
         **kwargs
     ) -> None:
         """
@@ -77,16 +80,19 @@ class PHMMLayer(tf.keras.Layer):
                 is provided.
             prior_config: Prior configuration parameters.
             plm_config: Protein language model configuration.
+            structural_config: Structural information configuration.
             use_prior: Whether to use priors for regularization.
             trainable_insertions: Whether insertion emissions are trainable.
             value_sets: Optional pre-built :class:`PHMMValueSet` objects, one
                 per head. When provided, ``PHMMValueSet.from_config`` is
                 skipped and ``lengths`` may be ``None``.
+            no_aa: Whether to use amino acid emissions in the model.
         """
         super().__init__(**kwargs)
         if prior_config is None:
             prior_config = PHMMPriorConfig()
         self.use_prior = use_prior
+        self.no_aa = no_aa
 
         if value_sets is not None:
             values = list(value_sets)
@@ -110,12 +116,8 @@ class PHMMLayer(tf.keras.Layer):
             # Set up the Dirichlet prior for emissions
             emission_prior = load_dirichlet(
                 "amino_acid_dirichlet.weights",
-                dim = len(SequenceDataset._default_alphabet)-1
-            )
-            # Share concentrations across all states
-            emission_prior.share = np.tile(
-                np.arange(len(SequenceDataset._default_alphabet)-1),
-                reps=2 * sum(self.lengths) + 2 * len(self.lengths)
+                dim = len(SequenceDataset._default_alphabet)-1,
+                states = self.states,
             )
 
         # Override emission values with prior distribution if requested
@@ -146,22 +148,24 @@ class PHMMLayer(tf.keras.Layer):
                 self.lengths, prior_config
             )
 
-        # Add the profile emitter
-        profile_emitter = ProfileEmitter(
-            values=values, trainable_insertions=trainable_insertions
-        )
-        self.hmm.add_emitter(profile_emitter)
-        if self.use_prior and prior_config.use_amino_acid_prior:
-            profile_emitter.prior = emission_prior
+        if not no_aa:
+            # Add the profile emitter
+            profile_emitter = ProfileEmitter(
+                values=values, trainable_insertions=trainable_insertions
+            )
+            self.hmm.add_emitter(profile_emitter)
+            if self.use_prior and prior_config.use_amino_acid_prior:
+                profile_emitter.prior = emission_prior
 
         self.use_language_model = plm_config != None\
             and plm_config.use_language_model
         self.plm_config = plm_config
+        self.emb_mean = None
         if self.use_language_model:
             assert self.plm_config is not None,\
                 "plm_config must be provided if use_language_model is True"
             # Create embedding value sets
-            embedding_values = [
+            emb_values = [
                 PHMMEmbeddingValueSet.from_config(L, h, plm_config) # type: ignore
                 for h, L in enumerate(self.lengths)
             ]
@@ -171,16 +175,18 @@ class PHMMLayer(tf.keras.Layer):
                 self.plm_config.id_string() + ".weights",
                 dim=self.plm_config.scoring_model_dim,
                 components=self.plm_config.embedding_prior_components,
+                states=self.states,
             )
 
             # Override embedding values with prior distribution if requested
             if config.use_prior_for_emission_init:
-                embedding_values = self._override_embeddings_with_prior(
-                    embedding_values,
+                emb_values, emb_mean = self._override_embeddings_with_prior(
+                    emb_values,
                     mvn_prior,
                     override_matches=config.match_emissions is None,
                     override_insertions=config.insert_emissions is None,
                 )
+                self.emb_mean = emb_mean
 
             # Set the inverse gamma prior for embedding variances
             inv_gamma_prior = TFInverseGammaPrior()
@@ -199,13 +205,38 @@ class PHMMLayer(tf.keras.Layer):
 
             # Add the embedding emitter
             embedding_emitter = EmbeddingEmitter(
-                values=embedding_values,
+                values=emb_values,
                 trainable_insertions=trainable_insertions,
                 temperature=self.plm_config.temperature,
             )
             self.hmm.add_emitter(embedding_emitter)
             if self.use_prior:
                 embedding_emitter.prior = combined_prior
+
+        self.structural_config = structural_config
+        if structural_config and structural_config.use_structure:
+            self.use_structure = True
+            struct_values = [
+                PHMMValueSet.from_structural_config(L, h, structural_config)
+                for h, L in enumerate(self.lengths)
+            ]
+            structural_emitter = ProfileEmitter(
+                values=struct_values, trainable_insertions=trainable_insertions
+            )
+            self.hmm.add_emitter(structural_emitter)
+
+            # If specified, load and add a Dirichlet prior
+            if structural_config.prior_name:
+                struct_prior = load_dirichlet(
+                    structural_config.prior_name+".weights",
+                    dim=structural_config.alphabet_size,
+                    components=structural_config.prior_components,
+                    states=self.states,
+                )
+                struct_prior.temperature = structural_config.prior_temperature
+                structural_emitter.prior = struct_prior
+        else:
+            self.use_structure = False
 
         # Add the padding emitter
         self.hmm.add_emitter(TFSubsetPaddingEmitter())
@@ -249,10 +280,11 @@ class PHMMLayer(tf.keras.Layer):
         padding: tf.Tensor,
         adds: tuple[tf.Tensor, ...] | None = None,
     ) -> tf.Tensor:
-        if adds is None:
-            return self.hmm(x, padding, mode=self._mode)
-        else:
-            return self.hmm(x, *adds, padding, mode=self._mode)
+        args = () if self.no_aa else (x,)
+        if adds is not None:
+            args += tuple(adds)
+        args += (padding,)
+        return self.hmm(*args, mode=self._mode)
 
     def prior_scores(self) -> tf.Tensor:
         """Calculates the prior scores for all parameters in the pHMM.
@@ -281,7 +313,7 @@ class PHMMLayer(tf.keras.Layer):
         Returns:
             New value sets with emissions replaced by prior distribution.
         """
-        prior_dist = prior.matrix().numpy().flatten()
+        prior_dist = prior.matrix().numpy()[0, 0]
         prior_dist = prior_dist / np.sum(prior_dist)
         updated_values = []
         if not override_matches and not override_insertions:
@@ -310,7 +342,7 @@ class PHMMLayer(tf.keras.Layer):
         prior,
         override_matches: bool,
         override_insertions: bool,
-    ) -> list[PHMMEmbeddingValueSet]:
+    ) -> tuple[list[PHMMEmbeddingValueSet], np.ndarray]:
         """Override embedding values with prior distribution.
 
         Args:
@@ -322,14 +354,14 @@ class PHMMLayer(tf.keras.Layer):
         Returns:
             New value sets with embeddings replaced by prior distribution.
         """
-        if not override_matches and not override_insertions:
-            return list(values)
         # Get the mean from the mixture model prior
-        mean_per_component = prior.mean().numpy()
-        mix_coef = prior.mixture_coefficients().numpy()
+        mean_per_component = prior.mean().numpy()[0, 0]
+        mix_coef = prior.mixture_coefficients().numpy()[0, 0]
         mix_coef = np.expand_dims(mix_coef, axis=-1)
-        mean = np.sum(mean_per_component * mix_coef, axis=2)
-        mean = np.squeeze(mean, axis=(0, 1))
+        mean = np.sum(mean_per_component * mix_coef, axis=0)
+
+        if not override_matches and not override_insertions:
+            return list(values), mean
 
         updated_values = []
         for value_set in values:
@@ -344,8 +376,8 @@ class PHMMLayer(tf.keras.Layer):
             updated_values.append(PHMMEmbeddingValueSet(
                 L=value_set.L,
                 match_expectations=match_expectations,
-                match_stddev=value_set.match_stddev,
+                match_variance=value_set.match_variance,
                 insert_expectation=insert_expectation,
-                insert_stddev=value_set.insert_stddev,
+                insert_variance=value_set.insert_variance,
             ))
-        return updated_values
+        return updated_values, mean

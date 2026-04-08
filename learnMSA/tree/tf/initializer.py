@@ -1,10 +1,10 @@
 import numpy as np
 import tensorflow as tf
 
-from learnMSA.tree.util import LG_paml, parse_paml
 from learnMSA.tree.tf.util import inverse_softplus
 from learnMSA.util.sequence_dataset import SequenceDataset
 
+from evoten.substitution_models import LG
 
 class ConstantInitializer(tf.keras.initializers.Constant):
 
@@ -27,15 +27,20 @@ class ConstantInitializer(tf.keras.initializers.Constant):
         return cls(np.array(config["value"]))
 
 
-R, p = parse_paml(LG_paml, SequenceDataset._default_alphabet[:-1])
-exchangeability_init = inverse_softplus(R + 1e-32).numpy()
+def make_default_anc_probs_init(
+    num_models: int
+) -> list[tf.keras.initializers.Initializer]:
+    R, p = LG(SequenceDataset._default_alphabet[:20])# (D, D), (D,)
+    exchangeability_init = inverse_softplus(R + 1e-32).numpy()
 
-
-def make_default_anc_probs_init(num_models):
+    # Stack to (H, D, D), (H, D)
     exchangeability_stack = np.stack([exchangeability_init]*num_models, axis=0)
     log_p_stack = np.stack([np.log(p)]*num_models, axis=0)
-    exchangeability_stack = np.expand_dims(exchangeability_stack, axis=1) #"k" in AncProbLayer
-    log_p_stack = np.expand_dims(log_p_stack, axis=1) #"k" in AncProbLayer
+
+    # Expand to (H, 1, D, D), (H, 1, D) for broadcasting in the layer
+    exchangeability_stack = np.expand_dims(exchangeability_stack, axis=1)
+    log_p_stack = np.expand_dims(log_p_stack, axis=1)
+
     return [ConstantInitializer(-3),
             ConstantInitializer(exchangeability_stack),
             ConstantInitializer(log_p_stack)]

@@ -184,6 +184,14 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         help=("Concentration parameter for the Dirichlet noise used during " +
             "training. (default: %(default)s)")
     )
+    train_group.add_argument(
+        "--no_aa",
+        dest="no_aa",
+        action="store_true",
+        help="Do not use amino acid emissions in the model." \
+        "This requires an alternative data source like structure information." \
+        "Default: use amino acid emissions."
+    )
 
     class EpochsAction(argparse.Action):
         def __call__(
@@ -467,6 +475,38 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         help=argparse.SUPPRESS
     )
 
+    struct_group = parser.add_argument_group("Structural information")
+    struct_group.add_argument(
+        "--struct_prior_name",
+        dest="struct_prior_name",
+        type=str,
+        default="pfam_35_3Di_1",
+        help="Name of a weights file for the structural Dirichlet prior. "\
+        "Use empty string for no prior (default: %(default)s)"
+    )
+    struct_group.add_argument(
+        "--struct_prior_components",
+        dest="struct_prior_components",
+        type=int,
+        default=1,
+        help="The number of mixture components for the structural Dirichlet "\
+        "prior. (default: %(default)s)"
+    )
+    struct_group.add_argument(
+        "--struct_prior_temperature",
+        dest="struct_prior_temperature",
+        type=float,
+        default=1.0,
+        help="The temperature for the structural Dirichlet prior. (default: %(default)s)"
+    )
+    struct_group.add_argument(
+        "--struct_reset_after_surgery",
+        dest="struct_reset_after_surgery",
+        action="store_true",
+        help="Whether to reset the structural information emission parameters "\
+        "after model surgery. default: False."
+    )
+
     vis_group = parser.add_argument_group("Visualization")
     vis_group.add_argument(
         "--logo",
@@ -582,12 +622,6 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         dest="initial_distance",
         type=float,
         default=0.05,
-        help=argparse.SUPPRESS
-    )
-    parser.add_argument(
-        "--trainable_rate_matrices",
-        dest="trainable_rate_matrices",
-        action="store_true",
         help=argparse.SUPPRESS
     )
 

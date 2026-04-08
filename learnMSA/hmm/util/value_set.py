@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from learnMSA.config.structure import StructureConfig
 from learnMSA.util.aligned_dataset import AlignedDataset
 from learnMSA.hmm.util.transition_index_set import PHMMTransitionIndexSet
 from learnMSA.hmm.util.util import state_index_to_name
@@ -76,7 +77,7 @@ class PHMMValueSet:
                 isinstance(config.p_begin_match[h], (Sequence, np.ndarray)):
             p_begin_match_head = config.p_begin_match[h]
             assert isinstance(p_begin_match_head, (Sequence, np.ndarray))  # Type guard
-            p_begin_match_inner = p_begin_match_head[1:]
+            p_begin_match_inner = p_begin_match_head[1:L]
             p_sum_prob_begin_match = sum(p_begin_match_head)
             assert p_sum_prob_begin_match <= 1, (
                 f"Sum of p_begin_match is {p_sum_prob_begin_match}, which is > 1"
@@ -100,19 +101,9 @@ class PHMMValueSet:
             p_begin_delete
 
         # Handle p_match_end: compute automatic values if None
-        if config.p_match_end is None:
+        if config.p_match_end is None and L > 1:
             p_match_end_values = np.zeros(L - 1, dtype=np.float32)
-            if L > 1:
-                p_match_end_values[0] = max((1 - bm1), 1e-10) / (L - 1)
-            # For i > 0: exit[i] = entry[i]
-            if isinstance(p_begin_match_inner, (Sequence, np.ndarray)):
-                # Use explicit entry probabilities
-                for i in range(1, L - 1):
-                    p_match_end_values[i] = p_begin_match_inner[i - 1]
-            else:
-                # Use uniform entry probability
-                for i in range(1, L - 1):
-                    p_match_end_values[i] = p_begin_match_inner
+            p_match_end_values[:] = p_begin_match_inner
 
         for i in range(L - 1):
             # Begin to match i+1
@@ -463,7 +454,44 @@ class PHMMValueSet:
             start=start
         )
 
-
+    @classmethod
+    def from_structural_config(
+        cls, L: int, h: int, config: StructureConfig
+    ) -> "PHMMValueSet":
+        s = len(config.structural_alphabet)
+        if config.match_emissions is None:
+            match_emissions = np.stack(
+                [config.background_distribution]*L, axis=0
+            ).astype(np.float32)
+        else:
+            match_emissions_list = []
+            for i in range(L):
+                dist = get_emission_dist(
+                    config.match_emissions,
+                    head=h,
+                    index=i,
+                    default=config.background_distribution
+                )
+                match_emissions_list.append(np.array(dist, dtype=np.float32))
+            match_emissions = np.stack(match_emissions_list, axis=0)
+        if config.insert_emissions is None:
+            insert_emissions = np.asarray(
+                config.background_distribution, dtype=np.float32
+            )
+        else:
+            dist = get_emission_dist(
+                config.insert_emissions,
+                head=h,
+                default=config.background_distribution
+            )
+            insert_emissions = np.array(dist, dtype=np.float32)
+        return cls(
+            L=L,
+            match_emissions=match_emissions,
+            insert_emissions=insert_emissions,
+            transitions=np.ndarray([]), # not used
+            start=np.ndarray([]) # not used
+        )
 
     def matches(self) -> int:
         """ Returns the number of match states `n`. """

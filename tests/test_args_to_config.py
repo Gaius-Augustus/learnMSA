@@ -176,6 +176,24 @@ class TestArgsToConfig:
         assert config.language_model.inverse_gamma_beta == 1.0
         assert config.training.trainable_distances is True
 
+    def test_args_to_config_with_structure_args(self):
+        """Test conversion with structure-related arguments."""
+        parser = parse_args("test_version")
+        args = parser.parse_args([
+            "-i", "input.fasta",
+            "-o", "output.a2m",
+            "--struct", "3di.fasta",
+            "--struct_prior_name", "custom_struct_prior",
+            "--struct_prior_components", "16",
+        ])
+
+        config = args_to_config(args)
+
+        assert config.input_output.struct_file == Path("3di.fasta")
+        assert config.structure.use_structure is True
+        assert config.structure.prior_name == "custom_struct_prior"
+        assert config.structure.prior_components == 16
+
     def test_args_to_config_default_save_emb_uses_workdir(self):
         """Test default save_emb path construction from work_dir and input_file."""
         parser = parse_args("test_version")
@@ -221,7 +239,6 @@ class TestArgsToConfig:
             "--inverse_gamma_beta", "1.0",
             "--frozen_distances",
             "--initial_distance", "0.1",
-            "--trainable_rate_matrices",
         ])
 
         config = args_to_config(args)
@@ -236,7 +253,6 @@ class TestArgsToConfig:
         assert config.language_model.inverse_gamma_alpha == 2.0
         assert config.language_model.inverse_gamma_beta == 1.0
         assert config.advanced.initial_distance == 0.1
-        assert config.training.trainable_rate_matrices is True
         assert config.training.trainable_distances is False
 
     def test_args_to_config_num_model_from_length_init(self):
@@ -316,7 +332,6 @@ class TestArgsToConfig:
             "--use_language_model",
             "--use_L2",
             "--frozen_distances",
-            "--trainable_rate_matrices",
         ])
 
         config = args_to_config(args)
@@ -330,7 +345,6 @@ class TestArgsToConfig:
         assert config.language_model.use_language_model is True
         assert config.language_model.use_L2 is True
         assert config.training.trainable_distances is False
-        assert config.training.trainable_rate_matrices is True
         assert config.training.use_noise is True
 
     def test_args_to_config_short_options(self):

@@ -100,26 +100,8 @@ class TrainingConfig(BaseModel):
     use_anc_probs: bool = True
     """Whether to use ancestral state probabilities."""
 
-    trainable_rate_matrices: bool = False
-    """Whether rate matrices are trainable."""
-
     trainable_distances: bool = True
     """Whether distances are trainable."""
-
-    num_rate_matrices: int = 1
-    """Number of rate matrices to use."""
-
-    matrix_rate_l2: float = 0.0
-    """L2 regularization strength for rate matrices."""
-
-    shared_rate_matrix: bool = False
-    """Whether to share rate matrices."""
-
-    equilibrium_sample: bool = False
-    """Whether to use equilibrium sampling."""
-
-    transposed: bool = False
-    """Whether to use transposed rate matrices."""
 
     only_matches: bool = False
     """Omit all insertions in the output and write only those amino
@@ -131,6 +113,11 @@ class TrainingConfig(BaseModel):
     use_noise: bool = True
     """Whether to add Dirichlet noise during HMM initialization. Override the
     corresponding HMM config parameter for training."""
+
+    no_aa: bool = False
+    """Whether to use amino acid emissions in the model. This requires an
+    alternative data source like structure information. Default: use amino acid
+    emissions."""
 
 
     @field_validator("learning_rate")
@@ -187,7 +174,6 @@ class TrainingConfig(BaseModel):
         "auto_crop_scale",
         "min_surgery_seqs",
         "dirichlet_mix_comp_count",
-        "num_rate_matrices",
     )
     def validate_positive_floats(cls, v: float | int, info) -> float | int:
         if v <= 0:
