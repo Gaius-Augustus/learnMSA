@@ -159,6 +159,10 @@ class SequenceDataset(Dataset):
         """ Get the header/description for sequence i. """
         return self.get_record(i).description
 
+    def index(self, seq_id: str) -> int:
+        """ Get the index of the sequence with the given sequence ID. """
+        return self.seq_ids.index(seq_id)
+
     def get_alphabet_no_gap(self) -> str:
         """ Get the alphabet without gap characters. """
         return self.alphabet[:-1]
