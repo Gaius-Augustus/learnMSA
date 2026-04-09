@@ -267,7 +267,7 @@ def plot_emissions(
             M_np = np.array(M)
 
         D = M_np.shape[2] // 2
-        colors = plt.cm.tab10.colors
+        colors = plt.cm.tab10.colors # type: ignore
 
         for node, (x, y) in active_pos.items():
             means = M_np[head, node, :D]      # shape (D,)
@@ -349,7 +349,7 @@ def plot_emissions(
 
     # Restore the main axes as the active axes so subsequent calls to
     # plt.gca() return the graph axes, not the last-created inset.
-    fig.sca(ax)
+    plt.sca(ax)
     return fig
 
 def phmm_layout(

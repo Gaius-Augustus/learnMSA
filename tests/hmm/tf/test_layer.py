@@ -751,64 +751,6 @@ def test_prior_values() -> None:
     # Multiply expected gradients by 10 to account because we have 10 states
     np.testing.assert_allclose(grads, 10 * expected_grads, atol=1e-6, rtol=1e-6)
 
-
-
-    # TEMPORARY, only to get refererence values for transition priors
-
-    # Test the transitioners priors
-    # Get the legacy density values
-    from learnMSA.legacy.Transitioner import ProfileHMMTransitioner
-
-    transitioner = ProfileHMMTransitioner()
-    transitioner.set_lengths(lengths)
-    transitioner.build()
-
-    # transition_probs = transitioner.make_probs()
-    # for k,v in transition_probs[0].items():
-    #     transition_probs[0][k] = v.numpy().tolist()
-    #     if len(transition_probs[0][k]) > 1:
-    #         # wrap for first head
-    #         transition_probs[0][k] = [transition_probs[0][k]]
-    #     print(k, transition_probs[0][k])
-
-    # from learnMSA.hmm.value_set import PHMMValueSet
-    # from learnMSA.config.hmm import HMMConfig
-
-    # # Convert flank_init_prob to scalar to avoid deprecation warning
-    # flank_init_prob = transitioner.make_flank_init_prob()
-    # if hasattr(flank_init_prob, 'numpy'):
-    #     flank_init_prob = float(flank_init_prob.numpy())
-    # elif isinstance(flank_init_prob, np.ndarray):
-    #     flank_init_prob = float(flank_init_prob)
-
-    # transfer_config = HMMConfig(
-    #     p_begin_match = transition_probs[0]["begin_to_match"],
-    #     p_match_end = transition_probs[0]["match_to_end"],
-    #     p_match_match = transition_probs[0]["match_to_match"],
-    #     p_match_insert = transition_probs[0]["match_to_insert"],
-    #     p_insert_insert = transition_probs[0]["insert_to_insert"],
-    #     p_delete_delete = transition_probs[0]["delete_to_delete"],
-    #     p_begin_delete = transition_probs[0]["match_to_delete"][0],
-    #     p_left_left = transition_probs[0]["left_flank_loop"],
-    #     p_right_right = transition_probs[0]["right_flank_loop"],
-    #     p_unannot_unannot = transition_probs[0]["unannotated_segment_loop"],
-    #     p_end_unannot = transition_probs[0]["end_to_unannotated_segment"],
-    #     p_end_right = transition_probs[0]["end_to_right_flank"],
-    #     p_start_left_flank = flank_init_prob
-    # )
-
-    # value_set = PHMMValueSet.from_config(4, 0, transfer_config)
-    # A = value_set.transitions
-    # A = tf.constant(A)[None]  # (1, Q, Q)
-
-    # print("A", A[0])
-
-    legacy_priors = transitioner.get_prior_log_densities()
-    for k,v in legacy_priors.items():
-        print(f"Legacy prior {k} = {v}")
-
-    # TEMPORARY ENDS
-
     A = [[
         [0.0000000e+00, 6.3772297e-01, 0.0000000e+00, 0.0000000e+00, 8.6306415e-02,
         0.0000000e+00, 0.0000000e+00, 0.0000000e+00, 9.5895998e-02, 0.0000000e+00,
