@@ -153,6 +153,8 @@ def plot_emissions(
     state_labels: list[str] | str | None = None,
     title_font_size: int = 32,
     states: list[int] | np.ndarray | None = None,
+    normal_linewidth: float = 2.0,
+    normal_alpha: float = 0.5,
 ):
     """Plots small inset bar charts at each node showing the emission
     distribution for a given head and emitter.
@@ -193,6 +195,8 @@ def plot_emissions(
             (default), emission insets are drawn for every state in ``pos``.
             When provided, only states whose index appears in ``states`` are
             plotted.
+        normal_linewidth: Line width for normal distribution plots.
+        normal_alpha: Alpha for normal distribution plots.
 
     Returns:
         The matplotlib Figure.
@@ -277,6 +281,8 @@ def plot_emissions(
 
             # Compute all curves to set a consistent y-limit
             all_ys = [norm.pdf(xs, loc=means[d], scale=stds[d]) for d in range(D)]
+            x_min = min(x_min, min(means[d] - 3 * stds[d] for d in range(D)))
+            x_max = max(x_max, max(means[d] + 3 * stds[d] for d in range(D)))
             y_max = max(ys.max() for ys in all_ys)
 
             axins = inset_axes(
@@ -289,14 +295,23 @@ def plot_emissions(
                 borderpad=0,
             )
             for d in range(D):
-                axins.plot(xs, all_ys[d], color=colors[d % len(colors)], linewidth=1.0)
+                axins.plot(
+                    xs, all_ys[d], color=colors[d % len(colors)],
+                    linewidth=normal_linewidth, alpha=normal_alpha
+                )
             axins.set_xlim(x_min, x_max)
             axins.set_ylim(0, y_max * 1.05)
-            axins.set_xticks([float(f"{m:.2g}") for m in means])
+            axins.set_xticks([x_min, 0, x_max])
             axins.set_yticks([0, round(y_max, 2)])
             axins.tick_params(labelsize=4, pad=1)
+            if isinstance(state_labels, list):
+                title = state_labels[node]
+            elif isinstance(state_labels, str):
+                title = state_labels
+            else:
+                title = str(node)
             axins.set_title(
-                state_labels[node] if state_labels is not None else str(node),
+                title,
                 fontsize=title_font_size,
                 pad=1,
             )
@@ -383,25 +398,25 @@ def phmm_layout(
     pos: dict[int, tuple[float, float]] = {}
     # Match states M1..ML: top row
     for i in range(L):
-        pos[i] = ((i + 1) * h_spacing, 2 * v_spacing)
+        pos[i] = ((i + 1) * h_spacing, 1.5 * v_spacing)
     # Insert states I1..IL-1: middle row, between adjacent match states
     for i in range(L - 1):
-        pos[L + i] = ((i + 1.5) * h_spacing, v_spacing)
+        pos[L + i] = ((i + 1.5) * h_spacing, 0.5*v_spacing)
     # Delete states D1..DL: bottom row, aligned with match states
     for i in range(L):
         pos[2 * L - 1 + i] = ((i + 1) * h_spacing, 0)
     # Left-flank (L)
-    pos[3 * L - 1] = (-h_spacing, 1.5 * v_spacing)
+    pos[3 * L - 1] = (-h_spacing, v_spacing)
     # Begin (B): closest to the match row
-    pos[3 * L] = (0, 1.5 * v_spacing)
+    pos[3 * L] = (0, v_spacing)
     # End (E)
-    pos[3 * L + 1] = ((L + 1) * h_spacing, 1.5 * v_spacing)
+    pos[3 * L + 1] = ((L + 1) * h_spacing, v_spacing)
     # Unannotated/C: very top, centered over match row
-    pos[3 * L + 2] = ((L + 1) * h_spacing / 2, 3 * v_spacing)
+    pos[3 * L + 2] = ((L + 1) * h_spacing / 2, 2.5 * v_spacing)
     # Right-flank (R): index 3L+3
-    pos[3 * L + 3] = ((L + 2) * h_spacing, 1.5 * v_spacing)
+    pos[3 * L + 3] = ((L + 2) * h_spacing, v_spacing)
     # Terminal (T): last state
-    pos[T_idx] = ((L + 3) * h_spacing, 1.5 * v_spacing)
+    pos[T_idx] = ((L + 3) * h_spacing, v_spacing)
 
     labels: list[str] = [''] * max_states
     for i in range(L):
