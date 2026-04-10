@@ -40,7 +40,7 @@ class TestArgsToConfig:
         assert config.training.auto_crop is True
         assert config.init_msa.from_msa is None
         assert config.language_model.use_language_model is False
-        assert config.visualization.logo == ""
+        assert config.visualization.plot == ""
         assert config.hmm_prior.alpha_flank == 7000
         assert config.training.use_noise is True
         assert config.hmm.noise_concentration == 100.0
@@ -219,7 +219,7 @@ class TestArgsToConfig:
 
         config = args_to_config(args)
 
-        assert config.visualization.logo == "output/logo.pdf"
+        assert config.visualization.plot == "output/logo.pdf"
         assert config.visualization.logo_gif == "output/logo.gif"
 
     def test_args_to_config_with_advanced_args(self):
@@ -314,7 +314,7 @@ class TestArgsToConfig:
         assert config.init_msa.from_msa == Path("/data/input.fasta")
         assert config.language_model.use_language_model is True
         assert config.language_model.language_model == "proteinBERT"
-        assert config.visualization.logo == "logo.pdf"
+        assert config.visualization.plot == "logo.pdf"
         assert config.hmm_prior.alpha_flank == 6000
 
     def test_args_to_config_with_all_boolean_flags(self):
@@ -525,7 +525,7 @@ class TestArgsToConfig:
 
         config = args_to_config(args)
 
-        assert config.visualization.logo == "output/logo.pdf"
+        assert config.visualization.plot == "output/logo.pdf"
 
     def test_visualization_logo_gif(self):
         """Test: Generate animated sequence logo."""

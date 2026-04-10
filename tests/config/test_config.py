@@ -328,58 +328,58 @@ class TestVisualizationConfig:
     def test_visualization_config_defaults(self):
         """Test VisualizationConfig default values."""
         config = VisualizationConfig()
-        assert config.logo == ""
+        assert config.plot == ""
         assert config.logo_gif == ""
 
     def test_visualization_config_values(self):
         """Test VisualizationConfig with various combinations."""
         # Both set
         config1 = VisualizationConfig(
-            logo="output/logo.pdf",
+            plot="output/logo.pdf",
             logo_gif="output/logo_animation.gif"
         )
-        assert config1.logo == "output/logo.pdf"
+        assert config1.plot == "output/logo.pdf"
         assert config1.logo_gif == "output/logo_animation.gif"
 
-        # Only logo set
-        config2 = VisualizationConfig(logo="results/sequence_logo.pdf")
-        assert config2.logo == "results/sequence_logo.pdf"
+        # Only plot set
+        config2 = VisualizationConfig(plot="results/sequence_logo.pdf")
+        assert config2.plot == "results/sequence_logo.pdf"
         assert config2.logo_gif == ""
 
         # Only logo_gif set
         config3 = VisualizationConfig(logo_gif="results/animation.gif")
-        assert config3.logo == ""
+        assert config3.plot == ""
         assert config3.logo_gif == "results/animation.gif"
 
     def test_visualization_serialization(self):
         """Test VisualizationConfig serialization and deserialization."""
         # Serialization
-        config = VisualizationConfig(logo="logo.pdf", logo_gif="logo.gif")
+        config = VisualizationConfig(plot="logo.pdf", logo_gif="logo.gif")
         config_dict = config.model_dump()
-        assert config_dict["logo"] == "logo.pdf"
+        assert config_dict["plot"] == "logo.pdf"
         assert config_dict["logo_gif"] == "logo.gif"
 
         # Deserialization
-        config2 = VisualizationConfig(**{"logo": "path/to/logo.pdf", "logo_gif": "path/to/animation.gif"})
-        assert config2.logo == "path/to/logo.pdf"
+        config2 = VisualizationConfig(**{"plot": "path/to/logo.pdf", "logo_gif": "path/to/animation.gif"})
+        assert config2.plot == "path/to/logo.pdf"
         assert config2.logo_gif == "path/to/animation.gif"
 
     def test_visualization_in_configuration(self):
         """Test VisualizationConfig as part of Configuration."""
         config = Configuration(
             visualization=VisualizationConfig(
-                logo="output/final_logo.pdf",
+                plot="output/final_logo.pdf",
                 logo_gif="output/training_animation.gif"
             )
         )
 
-        assert config.visualization.logo == "output/final_logo.pdf"
+        assert config.visualization.plot == "output/final_logo.pdf"
         assert config.visualization.logo_gif == "output/training_animation.gif"
 
     def test_visualization_empty_strings_valid(self):
         """Test that empty strings are valid (default behavior)."""
-        config = VisualizationConfig(logo="", logo_gif="")
-        assert config.logo == ""
+        config = VisualizationConfig(plot="", logo_gif="")
+        assert config.plot == ""
         assert config.logo_gif == ""
 
 

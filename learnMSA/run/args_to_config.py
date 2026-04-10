@@ -105,8 +105,8 @@ def args_to_config(args: Namespace) -> Configuration:
     )
 
     visualization_config = VisualizationConfig(
-        logo=args.logo,
-        logo_gif=args.logo_gif,
+        plot=args.plot,
+        logo_gif=args.logo_gif or "",
     )
 
     hmm_config = PHMMConfig(

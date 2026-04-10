@@ -509,11 +509,19 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
 
     vis_group = parser.add_argument_group("Visualization")
     vis_group.add_argument(
-        "--logo",
-        dest="logo",
+        "--plot",
+        dest="plot",
         type=str,
         default="",
-        help="Produces a pdf of the learned sequence logo."
+        help="Produces a pdf of the learned HMM."
+    )
+    vis_group.add_argument(
+        "--plot_head",
+        dest="plot_head",
+        type=int,
+        default=-1,
+        help="The HMM head to plot. If not set, the best model based on "\
+            "the model selection criterion will be plotted."
     )
     vis_group.add_argument(
         "--logo_gif",
@@ -545,6 +553,13 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         type=str,
         default="tmp",
         help="Deprecated: Use --work_dir instead."
+    )
+    deprecated_group.add_argument(
+        "--logo",
+        dest="plot",
+        default="",
+        type=str,
+        help="Deprecated: Use --plot instead."
     )
 
 

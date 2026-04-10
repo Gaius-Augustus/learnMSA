@@ -407,11 +407,11 @@ class LearnMSAContext:
 
     def _setup_visualization(self) -> None:
         """Set up visualization file paths based on configuration."""
-        if self.config.visualization.logo:
-            self.logo_path = validate_filepath(
-                self.config.visualization.logo, ".pdf"
+        if self.config.visualization.plot:
+            self.plot_path = validate_filepath(
+                self.config.visualization.plot, ".pdf"
             )
-            os.makedirs(self.logo_path.parent, exist_ok=True)
+            os.makedirs(self.plot_path.parent, exist_ok=True)
         if self.config.visualization.logo_gif:
             self.logo_gif_path = validate_filepath(
                 self.config.visualization.logo_gif, ".gif"

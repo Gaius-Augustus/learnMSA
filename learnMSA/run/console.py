@@ -51,7 +51,7 @@ def run_main() -> None:
     )
 
     from learnMSA.align.align import align
-    from learnMSA.util import Dataset, SequenceDataset, EmbeddingDataset
+    from learnMSA.util import SequenceDataset, EmbeddingDataset
 
     with ExitStack() as stack:
         ## Load the amino acid dataset (mandatory)
@@ -124,13 +124,19 @@ def run_main() -> None:
             )
             if config.input_output.verbose:
                 print(f"Wrote scores to {config.input_output.scores}")
-        # TODO: fix
-        # if args.logo:
-        #     plot_and_save_logo(
-        #         alignment_model,
-        #         best_model,
-        #         args.logo,
-       #     )
+
+        if config.visualization.plot:
+            from learnMSA.util.visualize import plot_phmm
+
+            if config.visualization.plot_head == -1:
+                head = best_model # type: ignore
+            else:
+                head = config.visualization.plot_head
+            fig = plot_phmm(alignment_model.model.phmm_layer, head)
+            fig.savefig(config.visualization.plot, bbox_inches="tight") # type: ignore
+            if config.input_output.verbose:
+                print(f"Saved HMM plot to {config.visualization.plot}")
+
         if args.dist_out:
             raise NotImplementedError(
                 "Distribution output is not implemented in this version."

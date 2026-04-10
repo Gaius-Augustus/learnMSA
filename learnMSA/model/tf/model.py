@@ -486,7 +486,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         start_time = time.perf_counter()
 
         # restrict to specified models
-        # TODO: revert head_subset later?
+        prev_head_subset = self.phmm_layer.head_subset
         self.phmm_layer.head_subset = models
         if hasattr(self, "anc_probs_layer"):
             self.anc_probs_layer.head_subset = models
@@ -630,6 +630,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
 
         # Reset
         self.context.batch_gen.crop_long_seqs = old_crop_long_seqs
+        self.phmm_layer.head_subset = prev_head_subset
 
         # Replace -1 padding
         if self.phmm_layer.is_posterior_mode():

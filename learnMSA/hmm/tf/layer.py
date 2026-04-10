@@ -107,6 +107,8 @@ class PHMMLayer(tf.keras.Layer):
                 for h, L in enumerate(lengths)
             ]
 
+        self.config = config
+
         # Apply random noise
         if config.use_noise:
             for value_set in values:
