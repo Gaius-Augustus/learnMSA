@@ -5,6 +5,7 @@ import numpy as np
 from learnMSA.config.hmm import PHMMConfig
 from learnMSA.config.language_model import LanguageModelConfig
 from learnMSA.config.structure import StructureConfig
+from learnMSA.config.training import TrainingConfig
 from learnMSA.config.util import get_value
 from learnMSA.hmm.tf.layer import PHMMLayer
 from learnMSA.hmm.util.transition_index_set import PHMMTransitionIndexSet
@@ -230,6 +231,7 @@ def update_kernels(
     expansion_lens: np.ndarray,
     pos_discard: np.ndarray,
     config: PHMMConfig,
+    training_config: TrainingConfig,
     plm_config: LanguageModelConfig | None = None,
     structural_config: StructureConfig | None = None,
 ) -> UpdateKernelResult:
@@ -257,6 +259,8 @@ def update_kernels(
             where `M` must be less than the number of match states..
         config (PHMMConfig): The configuration containing the initialization
             values.
+        training_config (TrainingConfig): The training configuration containing
+            parameters that control the behavior of the model during training.
         plm_config (LanguageModelConfig | None): The protein language model
             configuration.
         structural_config (StructureConfig | None): The structural information
@@ -274,7 +278,8 @@ def update_kernels(
     i = 0
 
     # Amino acids
-    if not phmm_layer.no_aa:
+    if not phmm_layer.no_aa\
+            and not training_config.reset_emissions_after_surgery:
         aa_emissions = phmm_layer.hmm.emitter[i].matrix().numpy()
         assert aa_emissions.shape[0] == 1,\
             "Head subset is not working properly for the amino acid emitter."
@@ -287,8 +292,9 @@ def update_kernels(
             pos_discard=pos_discard,
             insert_value=aa_insert_value,
         )
+    if not phmm_layer.no_aa:
         i += 1
-    else:
+    if phmm_layer.no_aa or training_config.reset_emissions_after_surgery:
         aa_emissions_new = None
 
     # pLM embeddings
@@ -307,9 +313,7 @@ def update_kernels(
             emb_expectations = np.zeros((embedding_dim,), dtype=np.float32)
         emb_var = np.zeros((embedding_dim,), dtype=np.float32)
         emb_var += plm_config.variance_init
-        emb_insert_value = np.concatenate(
-            [emb_expectations, emb_var], axis=0
-        )
+        emb_insert_value = np.concatenate([emb_expectations, emb_var], axis=0) # type: ignore
         emb_emissions_new = apply_mods(
             emb_emissions,
             pos_expand=pos_expand,
@@ -343,102 +347,94 @@ def update_kernels(
     else:
         struct_emissions_new = None
 
-    if aa_emissions_new is not None:
-        L_new = aa_emissions_new.shape[0]
-    elif emb_emissions_new is not None:
-        L_new = emb_emissions_new.shape[0]
-    elif struct_emissions_new is not None:
-        L_new = struct_emissions_new.shape[0]
-    else:
-        raise ValueError(
-            "No emissions were found. Make sure either no_aa is False "\
-            "or the PHMMLayer is using a language model or structural "\
-            "information."
-            )
+    L_new = L - pos_discard.size + int(expansion_lens.sum())
 
-    # Gather the current transition parameters
-    # Note: The transitions not occuring here (like left_flank_loop) are
-    # always reset to initial values later on.
-    # Note 2: explicit_transitioner does not have the head subset!
-    A = phmm_layer.hmm.transitioner.explicit_transitioner.matrix().numpy()
-    A = A[model_index] # (Q, Q)
-    ind = PHMMTransitionIndexSet(L)
-    match_to_match = A[ind.match_to_match[:, 0], ind.match_to_match[:, 1]]
-    match_to_insert = A[ind.match_to_insert[:, 0], ind.match_to_insert[:, 1]]
-    match_to_delete = A[ind.match_to_delete[:, 0], ind.match_to_delete[:, 1]]
-    insert_to_insert = A[ind.insert_to_insert[:, 0], ind.insert_to_insert[:, 1]]
-    delete_to_delete = A[ind.delete_to_delete[:, 0], ind.delete_to_delete[:, 1]]
+    if not training_config.reset_transitions_after_surgery:
+        # Gather the current transition parameters
+        # Note: The transitions not occuring here (like left_flank_loop) are
+        # always reset to initial values later on.
+        # Note 2: explicit_transitioner does not have the head subset!
+        A = phmm_layer.hmm.transitioner.explicit_transitioner.matrix().numpy()
+        A = A[model_index] # (Q, Q)
+        ind = PHMMTransitionIndexSet(L)
+        match_to_match = A[ind.match_to_match[:, 0], ind.match_to_match[:, 1]]
+        match_to_insert = A[ind.match_to_insert[:, 0], ind.match_to_insert[:, 1]]
+        match_to_delete = A[ind.match_to_delete[:, 0], ind.match_to_delete[:, 1]]
+        insert_to_insert = A[ind.insert_to_insert[:, 0], ind.insert_to_insert[:, 1]]
+        delete_to_delete = A[ind.delete_to_delete[:, 0], ind.delete_to_delete[:, 1]]
 
-    # Preserve Begin -> {M1, D1}, but reset entry probabilities uniformly
-    # according to the remaining probability mass
-    begin_match = A[ind.begin_to_match[:, 0], ind.begin_to_match[:, 1]]
-    begin_delete = A[ind.begin_to_delete[0,0], ind.begin_to_delete[0,1]]
-    match_end = A[ind.match_to_end[:, 0], ind.match_to_end[:, 1]]
+        # Preserve Begin -> {M1, D1}, but reset entry probabilities uniformly
+        # according to the remaining probability mass
+        begin_match = A[ind.begin_to_match[:, 0], ind.begin_to_match[:, 1]]
+        begin_delete = A[ind.begin_to_delete[0,0], ind.begin_to_delete[0,1]]
+        match_end = A[ind.match_to_end[:, 0], ind.match_to_end[:, 1]]
 
-    h = model_index
-    args = extend_mods(pos_expand, expansion_lens, pos_discard, L)
-    match_to_match = apply_mods(
-        match_to_match, *args,
-        insert_value = get_value(config.p_match_match, h, 0),
-    )
-    match_to_insert = apply_mods(
-        match_to_insert, *args,
-        insert_value = get_value(config.p_match_insert, h, 0),
-    )
-    insert_to_insert = apply_mods(
-        insert_to_insert, *args,
-        insert_value = get_value(config.p_insert_insert, h, 0),
-    )
-    delete_to_delete = apply_mods(
-        delete_to_delete, *args,
-        insert_value = get_value(config.p_delete_delete, h, 0),
-    )
-    match_to_delete = apply_mods(
-        match_to_delete, *args,
-        insert_value = get_value(config.p_match_delete, h, 0),
-    )
+        h = model_index
+        args = extend_mods(pos_expand, expansion_lens, pos_discard, L)
+        match_to_match = apply_mods(
+            match_to_match, *args,
+            insert_value = get_value(config.p_match_match, h, 0),
+        )
+        match_to_insert = apply_mods(
+            match_to_insert, *args,
+            insert_value = get_value(config.p_match_insert, h, 0),
+        )
+        insert_to_insert = apply_mods(
+            insert_to_insert, *args,
+            insert_value = get_value(config.p_insert_insert, h, 0),
+        )
+        delete_to_delete = apply_mods(
+            delete_to_delete, *args,
+            insert_value = get_value(config.p_delete_delete, h, 0),
+        )
+        match_to_delete = apply_mods(
+            match_to_delete, *args,
+            insert_value = get_value(config.p_match_delete, h, 0),
+        )
 
-    if 0 in pos_discard or 0 in pos_expand:
-        # Reset if we modified the first match state
-        begin_match_1 = get_value(config.p_begin_match, h, 0)
-        begin_delete = get_value(config.p_begin_delete, h, 0)
-    else:
-        begin_match_1 = begin_match[0]
-    if L_new > 1:
-        begin_to_match_insert = (1 - begin_match_1 - begin_delete) / (L_new-1)
-    else:
-        begin_to_match_insert = 0.0
+        if 0 in pos_discard or 0 in pos_expand:
+            # Reset if we modified the first match state
+            begin_match_1 = get_value(config.p_begin_match, h, 0)
+            begin_delete = get_value(config.p_begin_delete, h, 0)
+        else:
+            begin_match_1 = begin_match[0]
+        if L_new > 1:
+            begin_to_match_insert = (1 - begin_match_1 - begin_delete) / (L_new-1)
+        else:
+            begin_to_match_insert = 0.0
 
-    begin_match = apply_mods(
-        begin_match, pos_expand, expansion_lens, pos_discard,
-        insert_value = begin_to_match_insert,
-    )
-    begin_match[0] = begin_match_1
+        begin_match = apply_mods(
+            begin_match, pos_expand, expansion_lens, pos_discard,
+            insert_value = begin_to_match_insert,
+        )
+        begin_match[0] = begin_match_1
 
-    if L in pos_expand:
-        # avoid moving p last_match -> end = 1.0 into the model
-        match_end[-1] = begin_to_match_insert
-    match_end = apply_mods(
-        match_end, pos_expand, expansion_lens, pos_discard,
-        insert_value = begin_to_match_insert,
-    )
+        if L in pos_expand:
+            # avoid moving p last_match -> end = 1.0 into the model
+            match_end[-1] = begin_to_match_insert
+        match_end = apply_mods(
+            match_end, pos_expand, expansion_lens, pos_discard,
+            insert_value = begin_to_match_insert,
+        )
 
-    # re-normalize begin probabilities
-    begin_match[1:] /= begin_match[1:].sum() / (1 - begin_match[0] - begin_delete)
+        # re-normalize begin probabilities
+        begin_match[1:] /= begin_match[1:].sum() / (1 - begin_match[0] - begin_delete)
 
     new_config = config.model_copy(deep=True)
     if aa_emissions_new is not None:
         new_config.match_emissions=aa_emissions_new[np.newaxis]
-    new_config.p_match_match=match_to_match[np.newaxis]
-    new_config.p_match_insert=match_to_insert[np.newaxis]
-    new_config.p_match_delete=match_to_delete[np.newaxis]
-    new_config.p_insert_insert=insert_to_insert[np.newaxis]
-    new_config.p_delete_delete=delete_to_delete[np.newaxis]
-    new_config.p_begin_match = begin_match if isinstance(begin_match, float) else begin_match[np.newaxis]
-    new_config.p_begin_delete = begin_delete
-    new_config.p_match_end = match_end[np.newaxis]
+    if not training_config.reset_transitions_after_surgery:
+        new_config.p_match_match=match_to_match[np.newaxis]
+        new_config.p_match_insert=match_to_insert[np.newaxis]
+        new_config.p_match_delete=match_to_delete[np.newaxis]
+        new_config.p_insert_insert=insert_to_insert[np.newaxis]
+        new_config.p_delete_delete=delete_to_delete[np.newaxis]
+        new_config.p_begin_match = begin_match if isinstance(begin_match, float) else begin_match[np.newaxis]
+        new_config.p_begin_delete = begin_delete
+        new_config.p_match_end = match_end[np.newaxis]
 
     if phmm_layer.use_language_model and plm_config is not None:
+        assert emb_emissions_new is not None
         new_plm_config = plm_config.model_copy(deep=True)
         new_plm_config.match_expectations = emb_emissions_new[np.newaxis, :, :embedding_dim]
         new_plm_config.match_variance = emb_emissions_new[np.newaxis, :, embedding_dim:]
@@ -448,6 +444,7 @@ def update_kernels(
     if phmm_layer.use_structure\
             and structural_config is not None\
             and not structural_config.reset_after_surgery:
+        assert struct_emissions_new is not None
         new_structural_config = structural_config.model_copy(deep=True)
         new_structural_config.match_emissions = struct_emissions_new[np.newaxis]
     else:
@@ -546,6 +543,7 @@ def model_surgery(
             expansion_lens[k],
             pos_discard[k],
             model.context.config.hmm,
+            model.context.config.training,
             model.context.config.language_model,
             model.context.config.structure,
         )
@@ -607,7 +605,7 @@ def model_surgery(
     config.p_end_unannot = concat_param("p_end_unannot")
     config.p_end_right = concat_param("p_end_right")
     config.p_start_left_flank = concat_param("p_start_left_flank")
-    config.use_noise = False
+    config.use_noise = model.context.config.training.reset_transitions_after_surgery
 
     # validate the config again
     config = type(config).model_validate(config.model_dump())

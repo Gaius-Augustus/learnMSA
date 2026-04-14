@@ -645,5 +645,17 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         action="store_true",
         help=argparse.SUPPRESS
     )
+    parser.add_argument(
+        "--reset_emissions_after_surgery",
+        dest="reset_emissions_after_surgery",
+        action="store_true",
+        help=argparse.SUPPRESS
+    )
+    parser.add_argument(
+        "--reset_transitions_after_surgery",
+        dest="reset_transitions_after_surgery",
+        action="store_true",
+        help=argparse.SUPPRESS
+    )
 
     return parser

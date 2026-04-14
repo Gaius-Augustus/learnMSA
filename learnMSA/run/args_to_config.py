@@ -78,6 +78,8 @@ def args_to_config(args: Namespace) -> Configuration:
         use_noise=not args.no_noise,
         no_aa=args.no_aa,
         pre_training_checkpoint=args.pre_training_checkpoint,
+        reset_emissions_after_surgery=args.reset_emissions_after_surgery,
+        reset_transitions_after_surgery=args.reset_transitions_after_surgery,
     )
 
     init_msa_config = InitMSAConfig(

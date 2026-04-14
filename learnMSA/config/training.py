@@ -123,6 +123,12 @@ class TrainingConfig(BaseModel):
     alternative data source like structure information. Default: use amino acid
     emissions."""
 
+    reset_emissions_after_surgery: bool = False
+    """Whether to reset the emission probabilities after surgery."""
+
+    reset_transitions_after_surgery: bool = False
+    """Whether to reset the transition probabilities after surgery."""
+
 
     @field_validator("learning_rate")
     def validate_learning_rate(cls, v: float) -> float:

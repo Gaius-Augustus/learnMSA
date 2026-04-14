@@ -37,6 +37,8 @@ class TrainingConfig(BaseModel):
     pre_training_checkpoint: bool
     use_noise: bool
     no_aa: bool
+    reset_emissions_after_surgery: bool
+    reset_transitions_after_surgery: bool
 
     def __init__(
         self,
@@ -73,6 +75,8 @@ class TrainingConfig(BaseModel):
         pre_training_checkpoint: bool = False,
         use_noise: bool = True,
         no_aa: bool = False,
+        reset_emissions_after_surgery: bool = False,
+        reset_transitions_after_surgery: bool = False,
         **kwargs: Any,
     ) -> None: ...
 

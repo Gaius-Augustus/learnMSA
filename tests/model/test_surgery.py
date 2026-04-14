@@ -230,6 +230,7 @@ def test_update_kernels(model_single_head: LearnMSAModel) -> None:
         expansion_lens,
         pos_discard,
         config,
+        model_single_head.context.config.training,
     )
 
     # Create a new HMM layer from the config
