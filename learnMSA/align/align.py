@@ -234,6 +234,8 @@ def _fit_and_align(
         model = LearnMSAModel(context)
         model.build(((batch_size,),))
 
+        _pre_training_checkpoint(config, model, data, train_indices, i)
+
         # Run training
         model.fit(
             data, indices=train_indices, iteration=i, batch_size=batch_size
@@ -340,7 +342,11 @@ def _fit_and_align_with_logo_gif(
     return am
 
 
-def _dataset_messages(data : SequenceDataset, seq_count_heuristic_gap_check=100, seq_count_warning_threshold=100):
+def _dataset_messages(
+    data : SequenceDataset,
+    seq_count_heuristic_gap_check=100,
+    seq_count_warning_threshold=100,
+):
     # a quick heuristic check of the first sequences to see if they contain gaps
     warned = False
     for i in range(min(data.num_seq, seq_count_heuristic_gap_check)):
@@ -350,4 +356,29 @@ def _dataset_messages(data : SequenceDataset, seq_count_heuristic_gap_check=100,
                 print(f"Warning: The sequences in {data.filepath} seem to be already aligned. learnMSA will ignore any gap character.")
                 warned = True
     if data.num_seq < seq_count_warning_threshold:
-        print(f"Warning: You are aligning {data.num_seq} sequences, although learnMSA is designed for large scale alignments. We recommend to have a sufficiently deep training dataset of at least {seq_count_warning_threshold} sequences for accurate results.")
+        print(
+            f"Warning: You are aligning {data.num_seq} sequences, although " +
+            "learnMSA is designed for large scale alignments. We recommend " +
+            "to have a sufficiently deep training dataset of at least " +
+            f"{seq_count_warning_threshold} sequences for accurate results."
+        )
+
+def _pre_training_checkpoint(
+    config: Configuration,
+    model: LearnMSAModel,
+    data: SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]],
+    indices: np.ndarray,
+    iteration: int,
+) -> None:
+    if not config.training.pre_training_checkpoint:
+        return
+    alignment_model = AlignmentModel(data, model, indices)
+    checkpoint_path = (
+        Path(model.context.config.input_output.work_dir) /
+        f"pre_training_checkpoint_iter_{iteration}.model"
+    )
+    alignment_model.save(checkpoint_path)
+    if config.input_output.verbose:
+        print(
+            f"Saved pre-training checkpoint to {checkpoint_path}."
+        )

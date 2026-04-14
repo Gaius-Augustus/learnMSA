@@ -110,6 +110,10 @@ class TrainingConfig(BaseModel):
     surgery_checkpoints: bool = True
     """Whether to save model checkpoints after each model surgery run."""
 
+    pre_training_checkpoint: bool = False
+    """Creates a checkpoint before each training phase. Useful to analyze
+    initial model and effects of model surgery."""
+
     use_noise: bool = True
     """Whether to add Dirichlet noise during HMM initialization. Override the
     corresponding HMM config parameter for training."""

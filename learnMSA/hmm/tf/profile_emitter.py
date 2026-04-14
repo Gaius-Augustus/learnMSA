@@ -56,6 +56,10 @@ class ProfileEmitter(TFCategoricalEmitter):
         for value_set in values:
             assert value_set.alphabet_size == self.alphabet_size,\
                 "All value sets must have the same alphabet size."
+            assert value_set.match_emissions.shape ==\
+                (value_set.L, self.alphabet_size),\
+                "Match emissions for each value set must have shape "\
+                f"(L, alphabet_size), but got {value_set.match_emissions.shape}."
             init_values.append(value_set.match_emissions.flatten())
             init_values.append(value_set.insert_emissions)
         self.initializer = np.concatenate(init_values)

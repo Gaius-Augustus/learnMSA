@@ -34,6 +34,7 @@ class TrainingConfig(BaseModel):
     trainable_distances: bool
     only_matches: bool
     surgery_checkpoints: bool
+    pre_training_checkpoint: bool
     use_noise: bool
     no_aa: bool
 
@@ -69,6 +70,7 @@ class TrainingConfig(BaseModel):
         trainable_distances: bool = True,
         only_matches: bool = False,
         surgery_checkpoints: bool = True,
+        pre_training_checkpoint: bool = False,
         use_noise: bool = True,
         no_aa: bool = False,
         **kwargs: Any,

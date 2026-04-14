@@ -222,6 +222,7 @@ def plot_phmm(
             "Structural config must be provided if use_structure is True"
         fig=plot_emissions(
             layer.hmm.emitter[emitter_index],
+            head=head,
             pos=pos,
             state_labels="3Di",
             inset_column=emitter_index,

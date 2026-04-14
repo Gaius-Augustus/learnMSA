@@ -77,6 +77,7 @@ def args_to_config(args: Namespace) -> Configuration:
         only_matches=args.only_matches,
         use_noise=not args.no_noise,
         no_aa=args.no_aa,
+        pre_training_checkpoint=args.pre_training_checkpoint,
     )
 
     init_msa_config = InitMSAConfig(

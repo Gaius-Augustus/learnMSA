@@ -639,5 +639,11 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         default=0.05,
         help=argparse.SUPPRESS
     )
+    parser.add_argument(
+        "--pre_training_checkpoint",
+        dest="pre_training_checkpoint",
+        action="store_true",
+        help=argparse.SUPPRESS
+    )
 
     return parser

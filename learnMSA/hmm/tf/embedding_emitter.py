@@ -56,10 +56,16 @@ class EmbeddingEmitter(TFMVNormalEmitter):
                 [value_set.match_expectations, value_set.match_variance],
                 axis=-1,
             )
+            assert match_values.shape == (value_set.L, self._embedding_dim * 2),\
+                "Match values for each value set must have shape "\
+                f"(L, embedding_dim * 2), but got {match_values.shape}."
             insert_values = np.concatenate(
                 [value_set.insert_expectation, value_set.insert_variance],
                 axis=-1,
             )
+            assert insert_values.shape == (self._embedding_dim * 2,),\
+                "Insert values for each value set must have shape "\
+                f"(embedding_dim * 2,), but got {insert_values.shape}."
             init_values.append(match_values.flatten())
             init_values.append(insert_values.flatten())
 
