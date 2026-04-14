@@ -1,6 +1,8 @@
 import imageio
+import numpy as np
 from hidten.visualize import Figure, SubFigure, plot_emissions, plot_transition_graph
 from matplotlib import pyplot as plt
+from matplotlib.gridspec import GridSpec, GridSpecFromSubplotSpec
 
 from learnMSA.util import SequenceDataset
 from learnMSA.hmm.tf.layer import PHMMLayer
@@ -89,6 +91,152 @@ def phmm_layout(
     return pos, labels
 
 
+def _render_emitter_fast(
+    emitter,
+    head: int,
+    L: int,
+    ax_match,
+    ax_ins,
+    alphabet: str = "ARNDCQEGHILKMFPSTWYVXUO",
+    color_scheme: str = "skylign_protein",
+    label: str = "",
+) -> None:
+    """Draw a full-length match-state profile logo and a single insert
+    representative logo side by side using direct draw calls.
+
+    Args:
+        emitter: The emitter whose matrix is rendered.
+        head: Emitter head index.
+        L: Number of match states. Match states are indices 0…L-1; the
+            representative insert state is index *L*.
+        ax_match: Axes for the full-length match profile.
+        ax_ins: Axes for the single insert-representative logo.
+        alphabet: Alphabet string used for categorical emitters.
+        color_scheme: Logomaker color scheme for categorical emitters.
+        label: Y-axis label placed on *ax_match*.
+    """
+    import warnings
+    import pandas as pd
+    import logomaker
+
+    mro_names = {c.__name__ for c in type(emitter).__mro__}
+
+    M = emitter.matrix()
+    try:
+        M_np = M.numpy()
+    except AttributeError:
+        M_np = np.array(M)
+
+    if "TFCategoricalEmitter" in mro_names:
+        A = M_np.shape[2]
+        chars = list(alphabet[:A])
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", message=".*not in color_dict.*", category=UserWarning
+            )
+            # Full match profile — one logomaker call for all L positions
+            df_match = pd.DataFrame(M_np[head, :L, :], columns=chars)
+            logomaker.Logo(
+                df_match, ax=ax_match,
+                color_scheme=color_scheme, vpad=0.1, width=0.8,
+            )
+            # Insert representative (state L)
+            df_ins = pd.DataFrame(M_np[head, L : L + 1, :], columns=chars)
+            logomaker.Logo(
+                df_ins, ax=ax_ins,
+                color_scheme=color_scheme, vpad=0.1, width=0.8,
+            )
+        ax_match.set_ylabel(label, fontsize=8)
+        ax_ins.set_title("ins.", fontsize=8)
+        for ax in (ax_match, ax_ins):
+            ax.set_xticks([])
+            ax.set_yticks([])
+
+    elif "TFMVNormalEmitter" in mro_names:
+        D = M_np.shape[2] // 2
+        colors = plt.cm.tab10.colors  # type: ignore
+        # Match: heatmap of per-dimension means across L states
+        means_match = M_np[head, :L, :D]  # (L, D)
+        ax_match.imshow(
+            means_match.T, aspect="auto", cmap="RdBu_r",
+            interpolation="nearest",
+        )
+        ax_match.set_ylabel(label, fontsize=8)
+        ax_match.set_xticks([])
+        ax_match.set_yticks([])
+        # Insert representative: means as a bar chart
+        ins_means = M_np[head, L, :D]
+        ax_ins.bar(
+            range(D), ins_means,
+            color=[colors[d % len(colors)] for d in range(D)],
+        )
+        ax_ins.set_title("ins.", fontsize=8)
+        ax_ins.set_xticks([])
+        ax_ins.set_yticks([])
+
+
+def _plot_phmm_emissions(
+    layer: PHMMLayer,
+    head: int,
+    pos: dict,
+    ax,
+    inset_offset: tuple[float, float],
+    title_font_size: int,
+    states: list[int],
+    inset_size: float = 0.25,
+) -> None:
+    """Call :func:`plot_emissions` for every active emitter in *layer*."""
+    emitter_index = 0
+    if not layer.no_aa:
+        plot_emissions(
+            layer.hmm.emitter[emitter_index],
+            head=head,
+            pos=pos,
+            state_labels="AA",
+            inset_column=emitter_index,
+            alphabet=SequenceDataset._default_alphabet,
+            ax=ax,
+            inset_offset=inset_offset,
+            title_font_size=title_font_size,
+            states=states,
+            inset_size=inset_size,
+        )
+        emitter_index += 1
+    if layer.use_language_model:
+        plot_emissions(
+            layer.hmm.emitter[emitter_index],
+            head=head,
+            pos=pos,
+            state_labels="emb",
+            inset_column=emitter_index,
+            ax=ax,
+            inset_offset=inset_offset,
+            title_font_size=title_font_size,
+            states=states,
+            inset_size=inset_size,
+            normal_linewidth=3,
+            normal_alpha=0.5,
+        )
+        emitter_index += 1
+    if layer.use_structure:
+        assert layer.structural_config is not None, \
+            "Structural config must be provided if use_structure is True"
+        plot_emissions(
+            layer.hmm.emitter[emitter_index],
+            head=head,
+            pos=pos,
+            state_labels="3Di",
+            inset_column=emitter_index,
+            alphabet=layer.structural_config.structural_alphabet,
+            ax=ax,
+            inset_offset=inset_offset,
+            title_font_size=title_font_size,
+            states=states,
+            inset_size=inset_size,
+            color_scheme="NajafabadiEtAl2017",
+        )
+
+
 def plot_phmm(
     layer: PHMMLayer,
     head: int = 0,
@@ -107,6 +255,7 @@ def plot_phmm(
     arrows_style: str = "-|>",
     title_font_size: int = 32,
     inset_offset: tuple[float, float] = (0, 0.05),
+    fast_mode: bool = False,
 ) -> Figure | SubFigure | None:
     """Plots the state transition graph of a profile HMM using the explicit
     (unfolded) transition matrix with a structured layout:
@@ -138,10 +287,19 @@ def plot_phmm(
             self-loop edges.
         arrows_style: Matplotlib arrow style string.
         title_font_size: Font size for the plot title.
+        fast_mode: If *True*, use a two-panel vertical layout suited for
+            large models (hundreds of states). The **top panel** contains one
+            row per active emitter; each row shows the full match-state profile
+            as a single sequence logo spanning all *L* positions (one
+            ``logomaker.Logo`` call) plus a single-position insert
+            representative logo next to it. The **bottom panel** shows the
+            full transition graph via :func:`plot_transition_graph` with no
+            emission insets. Figure width is capped at 400 px-per-inch so the
+            output remains renderable for large *L*. Requires ``ax=None``
+            (default: ``False``).
 
     Returns:
-        Tuple ``(fig, pos)`` where ``pos`` is the node-position dict used for
-        drawing (can be passed to :func:`plot_emissions`).
+        The matplotlib Figure.
     """
     from learnMSA.hmm.tf.transitioner import PHMMTransitioner
 
@@ -161,81 +319,128 @@ def plot_phmm(
         L, h_spacing=effective_h_spacing, v_spacing=effective_v_spacing
     )
 
-    if ax is None:
-        fig, ax = plt.subplots(figsize=(L * 4, 50))
-
-    L = transitioner.lengths[head]
-    fig, _ = plot_transition_graph(
-        explicit,
-        head=head,
-        pos=pos,
-        state_labels=labels,
-        self_loop_connectionstyle=self_loop_connectionstyle,
-        node_size=node_size,
-        font_size=font_size,
-        edge_font_size=edge_font_size,
-        arrows_style=arrows_style,
-        edge_label_fmt=edge_label_fmt,
-        threshold=threshold,
-        ax=ax,
-        label_pos=label_pos,
-        connectionstyle=connectionstyle,
-        title=f"Profile HMM (head {head})" if title is None else title,
-    )
-    ax = fig.gca()
-
-    emitter_index = 0
-
-    if not layer.no_aa:
-        fig=plot_emissions(
-            layer.hmm.emitter[emitter_index],
-            head=head,
-            pos=pos,
-            state_labels="AA",
-            inset_column=emitter_index,
-            alphabet=SequenceDataset._default_alphabet,
-            ax=ax,
-            inset_offset=inset_offset,
-            title_font_size=title_font_size,
-            states=list(range(L+1)),
-        )
-        emitter_index += 1
-
-    if layer.use_language_model:
-        fig=plot_emissions(
-            layer.hmm.emitter[emitter_index],
-            head=head,
-            pos=pos,
-            state_labels="emb",
-            inset_column=emitter_index,
-            ax=ax,
-            inset_offset=inset_offset,
-            title_font_size=title_font_size,
-            states=list(range(L+1)),
-            normal_linewidth=3,
-            normal_alpha=0.5,
-        )
-        emitter_index += 1
-
-    if layer.use_structure:
-        assert layer.structural_config is not None,\
-            "Structural config must be provided if use_structure is True"
-        fig=plot_emissions(
-            layer.hmm.emitter[emitter_index],
-            head=head,
-            pos=pos,
-            state_labels="3Di",
-            inset_column=emitter_index,
-            alphabet=layer.structural_config.structural_alphabet,
-            ax=ax,
-            inset_offset=inset_offset,
-            title_font_size=title_font_size,
-            states=list(range(L+1)),
-            color_scheme="NajafabadiEtAl2017",
-        )
-
     ys = [y for _, y in pos.values()]
     y_pad = (max(ys) - min(ys)) * 0.15 + effective_v_spacing * 0.5
+
+    _plot_title = f"Profile HMM (head {head})" if title is None else title
+
+    def _draw_transition_graph(
+        target_ax,
+        _node_size: int = node_size,
+        _font_size: int = font_size,
+        _edge_font_size: int = edge_font_size,
+    ) -> None:
+        plot_transition_graph(
+            explicit,
+            head=head,
+            pos=pos,
+            state_labels=labels,
+            self_loop_connectionstyle=self_loop_connectionstyle,
+            node_size=_node_size,
+            font_size=_font_size,
+            edge_font_size=_edge_font_size,
+            arrows_style=arrows_style,
+            edge_label_fmt=edge_label_fmt,
+            threshold=threshold,
+            label_pos=label_pos,
+            connectionstyle=connectionstyle,
+            title=_plot_title,
+            ax=target_ax,
+        )
+
+    if fast_mode:
+        if ax is not None:
+            raise ValueError("fast_mode=True requires ax=None.")
+
+        n_active = sum([not layer.no_aa, layer.use_language_model, layer.use_structure])
+        logo_row_h = 3   # inches per emitter row in the logo panel
+
+        xs = [x for x, _ in pos.values()]
+        x_data_range = max(xs) - min(xs) if len(xs) > 1 else 1.0
+        y_display_range = max(ys) - min(ys) + 2 * y_pad
+        fig_w = min(L * 0.5 + 4, 400)
+
+        # Graph height matched to data aspect ratio, scaled 3× vertically so
+        # row-to-row spacing is comfortable relative to node diameter.
+        graph_h = max(4, min(fig_w * y_display_range / x_data_range * 3.0, 30))
+
+        fig = plt.figure(figsize=(fig_w, n_active * logo_row_h + graph_h))
+        outer_gs = GridSpec(
+            2, 1, figure=fig,
+            height_ratios=[n_active * logo_row_h, graph_h],
+            hspace=0.02,
+        )
+
+        # ── Top panel: one logo row per active emitter ──────────────────────
+        top_gs = GridSpecFromSubplotSpec(
+            n_active, 2, subplot_spec=outer_gs[0],
+            width_ratios=[L, 1], wspace=0.02,
+        )
+
+        emitter_row = 0
+        if not layer.no_aa:
+            ax_m = fig.add_subplot(top_gs[emitter_row, 0])
+            ax_i = fig.add_subplot(top_gs[emitter_row, 1])
+            _render_emitter_fast(
+                layer.hmm.emitter[emitter_row], head, L,
+                ax_m, ax_i,
+                alphabet=SequenceDataset._default_alphabet,
+                color_scheme="skylign_protein",
+                label="AA",
+            )
+            emitter_row += 1
+
+        if layer.use_language_model:
+            ax_m = fig.add_subplot(top_gs[emitter_row, 0])
+            ax_i = fig.add_subplot(top_gs[emitter_row, 1])
+            _render_emitter_fast(
+                layer.hmm.emitter[emitter_row], head, L,
+                ax_m, ax_i,
+                label="emb",
+            )
+            emitter_row += 1
+
+        if layer.use_structure:
+            assert layer.structural_config is not None, \
+                "Structural config must be provided if use_structure is True"
+            ax_m = fig.add_subplot(top_gs[emitter_row, 0])
+            ax_i = fig.add_subplot(top_gs[emitter_row, 1])
+            _render_emitter_fast(
+                layer.hmm.emitter[emitter_row], head, L,
+                ax_m, ax_i,
+                alphabet=layer.structural_config.structural_alphabet,
+                color_scheme="NajafabadiEtAl2017",
+                label="3Di",
+            )
+
+        # ── Bottom panel: transition graph, no emission insets ───────────────
+        # Node diameter target: 50% of horizontal display spacing.
+        # node_size is in pt²; diameter = 2·√(s/π), so s = π/4 · d² = π/4 · (0.5·sp)² ≈ 0.196·sp²
+        spacing_pt = fig_w * 72.0 / (x_data_range / effective_h_spacing + 1)
+        fast_node_size = max(50, int(0.196 * spacing_pt ** 2))
+        fast_font_size = max(4, int((fast_node_size / 3.14159) ** 0.5 * 0.55))
+        fast_edge_font_size = max(3, int(fast_font_size * 0.75))
+
+        ax_graph = fig.add_subplot(outer_gs[1])
+        _draw_transition_graph(
+            ax_graph,
+            _node_size=fast_node_size,
+            _font_size=fast_font_size,
+            _edge_font_size=fast_edge_font_size,
+        )
+        ax_graph.set_ylim(min(ys) - y_pad, max(ys) + y_pad)
+
+        return fig
+
+    # Default single-panel layout
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(L * 4, 50))
+    _draw_transition_graph(ax)
+    ax = fig.gca()
+    _plot_phmm_emissions(
+        layer, head, pos, ax, inset_offset, title_font_size,
+        states=list(range(L + 1)),
+    )
     ax.set_ylim(min(ys) - y_pad, max(ys) + y_pad)
 
     return fig
