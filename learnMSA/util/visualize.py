@@ -91,152 +91,6 @@ def phmm_layout(
     return pos, labels
 
 
-def _render_emitter_fast(
-    emitter,
-    head: int,
-    L: int,
-    ax_match,
-    ax_ins,
-    alphabet: str = "ARNDCQEGHILKMFPSTWYVXUO",
-    color_scheme: str = "skylign_protein",
-    label: str = "",
-) -> None:
-    """Draw a full-length match-state profile logo and a single insert
-    representative logo side by side using direct draw calls.
-
-    Args:
-        emitter: The emitter whose matrix is rendered.
-        head: Emitter head index.
-        L: Number of match states. Match states are indices 0…L-1; the
-            representative insert state is index *L*.
-        ax_match: Axes for the full-length match profile.
-        ax_ins: Axes for the single insert-representative logo.
-        alphabet: Alphabet string used for categorical emitters.
-        color_scheme: Logomaker color scheme for categorical emitters.
-        label: Y-axis label placed on *ax_match*.
-    """
-    import warnings
-    import pandas as pd
-    import logomaker
-
-    mro_names = {c.__name__ for c in type(emitter).__mro__}
-
-    M = emitter.matrix()
-    try:
-        M_np = M.numpy()
-    except AttributeError:
-        M_np = np.array(M)
-
-    if "TFCategoricalEmitter" in mro_names:
-        A = M_np.shape[2]
-        chars = list(alphabet[:A])
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore", message=".*not in color_dict.*", category=UserWarning
-            )
-            # Full match profile — one logomaker call for all L positions
-            df_match = pd.DataFrame(M_np[head, :L, :], columns=chars)
-            logomaker.Logo(
-                df_match, ax=ax_match,
-                color_scheme=color_scheme, vpad=0.1, width=0.8,
-            )
-            # Insert representative (state L)
-            df_ins = pd.DataFrame(M_np[head, L : L + 1, :], columns=chars)
-            logomaker.Logo(
-                df_ins, ax=ax_ins,
-                color_scheme=color_scheme, vpad=0.1, width=0.8,
-            )
-        ax_match.set_ylabel(label, fontsize=8)
-        ax_ins.set_title("ins.", fontsize=8)
-        for ax in (ax_match, ax_ins):
-            ax.set_xticks([])
-            ax.set_yticks([])
-
-    elif "TFMVNormalEmitter" in mro_names:
-        D = M_np.shape[2] // 2
-        colors = plt.cm.tab10.colors  # type: ignore
-        # Match: heatmap of per-dimension means across L states
-        means_match = M_np[head, :L, :D]  # (L, D)
-        ax_match.imshow(
-            means_match.T, aspect="auto", cmap="RdBu_r",
-            interpolation="nearest",
-        )
-        ax_match.set_ylabel(label, fontsize=8)
-        ax_match.set_xticks([])
-        ax_match.set_yticks([])
-        # Insert representative: means as a bar chart
-        ins_means = M_np[head, L, :D]
-        ax_ins.bar(
-            range(D), ins_means,
-            color=[colors[d % len(colors)] for d in range(D)],
-        )
-        ax_ins.set_title("ins.", fontsize=8)
-        ax_ins.set_xticks([])
-        ax_ins.set_yticks([])
-
-
-def _plot_phmm_emissions(
-    layer: PHMMLayer,
-    head: int,
-    pos: dict,
-    ax,
-    inset_offset: tuple[float, float],
-    title_font_size: int,
-    states: list[int],
-    inset_size: float = 0.25,
-) -> None:
-    """Call :func:`plot_emissions` for every active emitter in *layer*."""
-    emitter_index = 0
-    if not layer.no_aa:
-        plot_emissions(
-            layer.hmm.emitter[emitter_index],
-            head=head,
-            pos=pos,
-            state_labels="AA",
-            inset_column=emitter_index,
-            alphabet=SequenceDataset._default_alphabet,
-            ax=ax,
-            inset_offset=inset_offset,
-            title_font_size=title_font_size,
-            states=states,
-            inset_size=inset_size,
-        )
-        emitter_index += 1
-    if layer.use_language_model:
-        plot_emissions(
-            layer.hmm.emitter[emitter_index],
-            head=head,
-            pos=pos,
-            state_labels="emb",
-            inset_column=emitter_index,
-            ax=ax,
-            inset_offset=inset_offset,
-            title_font_size=title_font_size,
-            states=states,
-            inset_size=inset_size,
-            normal_linewidth=3,
-            normal_alpha=0.5,
-        )
-        emitter_index += 1
-    if layer.use_structure:
-        assert layer.structural_config is not None, \
-            "Structural config must be provided if use_structure is True"
-        plot_emissions(
-            layer.hmm.emitter[emitter_index],
-            head=head,
-            pos=pos,
-            state_labels="3Di",
-            inset_column=emitter_index,
-            alphabet=layer.structural_config.structural_alphabet,
-            ax=ax,
-            inset_offset=inset_offset,
-            title_font_size=title_font_size,
-            states=states,
-            inset_size=inset_size,
-            color_scheme="NajafabadiEtAl2017",
-        )
-
-
 def plot_phmm(
     layer: PHMMLayer,
     head: int = 0,
@@ -256,6 +110,7 @@ def plot_phmm(
     title_font_size: int = 32,
     inset_offset: tuple[float, float] = (0, 0.05),
     fast_mode: bool = False,
+    all_state_emissions: bool = False,
 ) -> Figure | SubFigure | None:
     """Plots the state transition graph of a profile HMM using the explicit
     (unfolded) transition matrix with a structured layout:
@@ -297,6 +152,9 @@ def plot_phmm(
             emission insets. Figure width is capped at 400 px-per-inch so the
             output remains renderable for large *L*. Requires ``ax=None``
             (default: ``False``).
+        all_state_emissions: If *True*, show emission insets for all states.
+            If *False* (default), only show insets for match states and the
+            insert representative.
 
     Returns:
         The matplotlib Figure.
@@ -439,13 +297,160 @@ def plot_phmm(
     ax = fig.gca()
     _plot_phmm_emissions(
         layer, head, pos, ax, inset_offset, title_font_size,
-        states=list(range(L + 1)),
+        states=list(range(2*L-1)) if all_state_emissions else list(range(L+1)),
     )
     ax.set_ylim(min(ys) - y_pad, max(ys) + y_pad)
 
     return fig
 
 
+def _render_emitter_fast(
+    emitter,
+    head: int,
+    L: int,
+    ax_match,
+    ax_ins,
+    alphabet: str = "ARNDCQEGHILKMFPSTWYVXUO",
+    color_scheme: str = "skylign_protein",
+    label: str = "",
+) -> None:
+    """Draw a full-length match-state profile logo and a single insert
+    representative logo side by side using direct draw calls.
+
+    Args:
+        emitter: The emitter whose matrix is rendered.
+        head: Emitter head index.
+        L: Number of match states. Match states are indices 0…L-1; the
+            representative insert state is index *L*.
+        ax_match: Axes for the full-length match profile.
+        ax_ins: Axes for the single insert-representative logo.
+        alphabet: Alphabet string used for categorical emitters.
+        color_scheme: Logomaker color scheme for categorical emitters.
+        label: Y-axis label placed on *ax_match*.
+    """
+    import warnings
+    import pandas as pd
+    import logomaker
+
+    mro_names = {c.__name__ for c in type(emitter).__mro__}
+
+    M = emitter.matrix()
+    try:
+        M_np = M.numpy()
+    except AttributeError:
+        M_np = np.array(M)
+
+    if "TFCategoricalEmitter" in mro_names:
+        A = M_np.shape[2]
+        chars = list(alphabet[:A])
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", message=".*not in color_dict.*", category=UserWarning
+            )
+            # Full match profile — one logomaker call for all L positions
+            df_match = pd.DataFrame(M_np[head, :L, :], columns=chars)
+            logomaker.Logo(
+                df_match, ax=ax_match,
+                color_scheme=color_scheme, vpad=0.1, width=0.8,
+            )
+            # Insert representative (state L)
+            df_ins = pd.DataFrame(M_np[head, L : L + 1, :], columns=chars)
+            logomaker.Logo(
+                df_ins, ax=ax_ins,
+                color_scheme=color_scheme, vpad=0.1, width=0.8,
+            )
+        ax_match.set_ylabel(label, fontsize=8)
+        ax_ins.set_title("ins.", fontsize=8)
+        for ax in (ax_match, ax_ins):
+            ax.set_xticks([])
+            ax.set_yticks([])
+
+    elif "TFMVNormalEmitter" in mro_names:
+        D = M_np.shape[2] // 2
+        colors = plt.cm.tab10.colors  # type: ignore
+        # Match: heatmap of per-dimension means across L states
+        means_match = M_np[head, :L, :D]  # (L, D)
+        ax_match.imshow(
+            means_match.T, aspect="auto", cmap="RdBu_r",
+            interpolation="nearest",
+        )
+        ax_match.set_ylabel(label, fontsize=8)
+        ax_match.set_xticks([])
+        ax_match.set_yticks([])
+        # Insert representative: means as a bar chart
+        ins_means = M_np[head, L, :D]
+        ax_ins.bar(
+            range(D), ins_means,
+            color=[colors[d % len(colors)] for d in range(D)],
+        )
+        ax_ins.set_title("ins.", fontsize=8)
+        ax_ins.set_xticks([])
+        ax_ins.set_yticks([])
+
+
+def _plot_phmm_emissions(
+    layer: PHMMLayer,
+    head: int,
+    pos: dict,
+    ax,
+    inset_offset: tuple[float, float],
+    title_font_size: int,
+    states: list[int],
+    inset_size: float = 0.25,
+) -> None:
+    """Call :func:`plot_emissions` for every active emitter in *layer*."""
+    emitter_index = 0
+    col = 0
+    if not layer.no_aa:
+        plot_emissions(
+            layer.hmm.emitter[emitter_index],
+            head=head,
+            pos=pos,
+            state_labels="AA",
+            inset_column=col,
+            alphabet=SequenceDataset._default_alphabet,
+            ax=ax,
+            inset_offset=inset_offset,
+            title_font_size=title_font_size,
+            states=states,
+            inset_size=inset_size,
+        )
+        emitter_index += 1
+        col += 1
+    if layer.use_language_model:
+        plot_emissions(
+            layer.hmm.emitter[emitter_index],
+            head=head,
+            pos=pos,
+            state_labels="emb",
+            inset_column=(col, col + 2),
+            ax=ax,
+            inset_offset=inset_offset,
+            title_font_size=title_font_size,
+            states=states,
+            inset_size=inset_size,
+            normal_linewidth=3,
+            normal_alpha=0.5,
+        )
+        emitter_index += 1
+        col += 2
+    if layer.use_structure:
+        assert layer.structural_config is not None, \
+            "Structural config must be provided if use_structure is True"
+        plot_emissions(
+            layer.hmm.emitter[emitter_index],
+            head=head,
+            pos=pos,
+            state_labels="3Di",
+            inset_column=col,
+            alphabet=layer.structural_config.structural_alphabet,
+            ax=ax,
+            inset_offset=inset_offset,
+            title_font_size=title_font_size,
+            states=states,
+            inset_size=inset_size,
+            color_scheme="NajafabadiEtAl2017",
+        )
 
 
 
