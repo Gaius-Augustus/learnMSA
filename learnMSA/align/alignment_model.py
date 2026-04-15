@@ -400,7 +400,7 @@ class AlignmentModel():
     def load(
         cls,
         filepath: str | Path,
-        data: SequenceDataset,
+        data: SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]],
         from_packed: bool = True,
     ):
         """ Loads an AlignmentModel instance from a file.

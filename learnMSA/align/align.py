@@ -63,6 +63,8 @@ def align(
             config.training.skip_training:
         # Load a model without any training
         am = AlignmentModel.load(config.input_output.load_model, data)
+        # Override indices
+        am.indices = np.arange(data[0].num_seq)
     else:
         if config.input_output.verbose:
             print(
@@ -192,6 +194,11 @@ def _fit_and_align(
         am = AlignmentModel.load(config.input_output.load_model, data[0])
         if config.input_output.verbose:
             print("Loaded model from file", config.input_output.load_model)
+
+        # Override indices
+        am.indices = np.arange(data[0].num_seq)
+
+        # Make the context use the correct model lengths
         context.model_lengths = am.model.lengths
         model = am.model
     else:
