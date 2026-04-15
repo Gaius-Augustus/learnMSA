@@ -910,7 +910,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             batch_size_impl_factor=0.5,
         )
 
-        ds, _ = make_dataset(
+        ds, steps = make_dataset(
             null_indices,
             self.context.batch_gen,
             shuffle=False,
@@ -940,7 +940,20 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         _background_dist = np.log(_background_dist + 1e-10)
 
         # Compute emission log probs
+        _bg_dist_tf = tf.constant(_background_dist, dtype=tf.float32)
         log_probs = np.zeros((n,))
+
+        def compute_batch_emissions(x):
+            tokens = tf.cast(x[:, :, 0], tf.int32)  # (batch, seq_length)
+            gathered = tf.gather(_bg_dist_tf, tokens)  # (batch, seq_length)
+            return tf.reduce_sum(gathered, axis=1)  # (batch,)
+
+        compute_batch_emissions = tf.function(
+            compute_batch_emissions,
+            jit_compile=self.use_jit_compile(steps),
+            reduce_retracing=True,
+        )
+
         for batch_data, _ in ds:
             # Handle bucketed datasets
             if isinstance(batch_data, tuple) and len(batch_data) == 3:
@@ -950,20 +963,21 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
                 # No bucket indices available, skip this batch
                 continue
 
-            x_np = x.numpy()[:, :, 0]  # (batch, seq_length)
-            em = np.sum(_background_dist[x_np], axis=1)
-            log_probs[batch_idx.numpy()] = em
+            em = compute_batch_emissions(x)
+            log_probs[batch_idx.numpy()] = em.numpy()
 
         # Add transition log probs based on the target sequence lengths
         # We'll assume a geometric distribution with the expected length
         # equal to the length of each target sequence
-        L = data.seq_lens
+        L = tf.cast(tf.constant(data.seq_lens), tf.float32)
         if transition_prob is None:
-            M = np.mean(L)
-            trans_scores = (L - 1) * (np.log(M) - np.log(M+1))
+            M = tf.reduce_mean(L)
+            trans_scores = (L - 1.0) * (tf.math.log(M) - tf.math.log(M + 1.0))
         else:
-            trans_scores = (L - 1) * np.log(transition_prob)
-        log_probs += trans_scores
+            trans_scores = (L - 1.0) * tf.math.log(
+                tf.constant(transition_prob, dtype=tf.float32)
+            )
+        log_probs += trans_scores.numpy()
 
         return log_probs
 
