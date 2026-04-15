@@ -187,7 +187,7 @@ def validate_output_file_requirements(config, parser) -> None:
         # If not using any output options, output_file is required for alignment
         using_scores = config.input_output.scores != Path()
         using_save_model = config.input_output.save_model != ""
-        using_logo = config.visualization.logo != ""
+        using_logo = config.visualization.plot != ""
 
         # If none of these alternative outputs are being used,
         # we need an output file
