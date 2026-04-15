@@ -37,7 +37,7 @@ def args_to_config(args: Namespace) -> Configuration:
         output_file=args.output_file if args.output_file is not None else "",
         format=args.format,
         input_format=args.input_format,
-        save_model=args.save_model,
+        save_model=_get_save_model(args),
         load_model=args.load_model,
         scores=args.scores,
         verbose=not args.silent,
@@ -166,3 +166,11 @@ def _get_save_emb(args: Namespace) -> str:
         return str(Path(args.work_dir) / (Path(args.input_file).stem + ".emb"))
     else:
         return args.save_emb
+
+
+def _get_save_model(args: Namespace) -> str:
+    """Determine the save_model path based on command-line arguments."""
+    if args.save_model == "<workdir>":
+        return str(Path(args.work_dir) / (Path(args.input_file).stem + ".model"))
+    else:
+        return args.save_model if args.save_model is not None else ""

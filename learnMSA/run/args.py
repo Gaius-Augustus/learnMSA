@@ -66,8 +66,11 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         "--save_model",
         dest="save_model",
         type=str,
+        nargs='?',
+        const="<workdir>",
         default="",
-        help="Save a trained model for later reuse"
+        help="Save a trained model for later reuse. Optionally provide a path; "
+            "if omitted, saves to the working directory."
     )
     io_group.add_argument(
         "--load_model",

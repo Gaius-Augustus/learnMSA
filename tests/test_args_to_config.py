@@ -630,6 +630,21 @@ class TestArgsToConfig:
         assert config.input_output is not None
         assert config.input_output.save_model == "my_model"
 
+    def test_save_model_default_workdir(self):
+        """Test: --save_model without a path uses default path under work_dir."""
+        parser = parse_args("test_version")
+        args = parser.parse_args([
+            "-i", "input.fasta",
+            "-o", "output.a2m",
+            "--work_dir", "myworkdir",
+            "--save_model",
+        ])
+
+        config = args_to_config(args)
+
+        assert config.input_output is not None
+        assert config.input_output.save_model == "myworkdir/input.model"
+
     def test_load_model_with_skip_training(self):
         """Test: Load pre-trained model and skip training."""
         parser = parse_args("test_version")

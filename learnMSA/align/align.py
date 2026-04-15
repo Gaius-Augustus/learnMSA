@@ -167,20 +167,8 @@ def _fit_and_align(
     Args:
         data: SequenceDataset or tuple of Dataset(s) with the first dataset
                 being a SequenceDataset (of amino acid sequences).
-        config: Configuration that can be used to control training and decoding
-            (see msa_hmm.config.make_default).
-        model_generator: Optional callback that generates a user defined model
-            (if None, the default model generator will be used).
-        batch_generator: Optional callback that generates sequence batches
-            defined by user (if None, the default batch generator will be used).
-        subset: Optional subset of the sequence ids. Only the specified
-            sequences will be aligned but the models will be trained on all
-            sequences (if None, all sequences in the dataset will be aligned).
-        verbose: If False, all output messages will be disabled.
-        A2M_output: If True, insertions will be indicated by lower case letters
-            in the output and "." will indicate insertions in other sequences.
-            Otherwise all upper case letters and only "-" will be used.
-        load_model: Path to a pre-trained model to load (if any).
+        context: LearnMSAContext object containing the configuration and other
+            context information for training and decoding.
 
     Returns:
         An AlignmentModel object.
@@ -204,9 +192,10 @@ def _fit_and_align(
         am = AlignmentModel.load(config.input_output.load_model, data[0])
         if config.input_output.verbose:
             print("Loaded model from file", config.input_output.load_model)
-
-        # TODO: legacy code did override context.lengths here
-        # still needed?
+        context.model_lengths = am.model.lengths
+        model = am.model
+    else:
+        model = None
 
     # 2 staged main loop: Fits model parameters with GD and optimized model
     # architecture with surgery
@@ -231,8 +220,9 @@ def _fit_and_align(
 
         # Create and compile the model
         context.effective_num_seq = train_indices.shape[0] #todo: workaround
-        model = LearnMSAModel(context)
-        model.build(((batch_size,),))
+        if model is None:
+            model = LearnMSAModel(context)
+            model.build(((batch_size,),))
 
         _pre_training_checkpoint(config, model, data, train_indices, i)
 
@@ -288,6 +278,7 @@ def _fit_and_align(
 
         # Free compiled graphs and cached memory
         del model
+        model = None
         tf.keras.backend.clear_session()
 
     return am
