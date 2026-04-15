@@ -11,6 +11,7 @@ from learnMSA.align.alignment_metadata import AlignmentMetaData
 from learnMSA.model.tf.model import LearnMSAModel
 from learnMSA.util.aligned_dataset import AlignedDataset, SequenceDataset
 from learnMSA.util.dataset import Dataset
+from learnMSA.model.select import SelectionCriterion, select_model
 
 
 class AlignmentModel():
@@ -39,6 +40,9 @@ class AlignmentModel():
     metadata: dict
     """Alignment metadata for each model."""
 
+    best_head: int
+    """Index of the head that best fits the training data."""
+
     def __init__(
         self,
         data: SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]],
@@ -46,6 +50,7 @@ class AlignmentModel():
         indices: np.ndarray|None = None,
         gap_symbol: str = '-',
         gap_symbol_insertions: str = '.',
+        best_head: int = -1,
     ) -> None:
         """
         Args:
@@ -58,6 +63,8 @@ class AlignmentModel():
             gap_symbol: Character used to denote missing match positions.
             gap_symbol_insertions: Character used to denote insertions in other
                 sequences.
+            best_head: Index of the head that best fits the training data.
+                Defaults to -1 (no model selected).
         """
         if isinstance(data, SequenceDataset):
             data = (data,)
@@ -69,6 +76,7 @@ class AlignmentModel():
             self.indices = indices
         self.gap_symbol = gap_symbol
         self.gap_symbol_insertions = gap_symbol_insertions
+        self.best_head = best_head
         self.metadata = {}
 
     def get_output_alphabet(self, a2m: bool = True) -> np.ndarray:
@@ -96,6 +104,17 @@ class AlignmentModel():
             ))
         return output_alphabet
 
+    def select_best(self) -> None:
+        criterion = SelectionCriterion(
+            self.model.context.config.training.model_criterion
+        )
+        self.best_head = select_model(
+            self.model,
+            self.data,
+            criterion,
+            sequence_indices=self.indices,
+            verbose=self.model.context.config.input_output.verbose,
+        )
 
     def to_string(
         self,
@@ -362,6 +381,7 @@ class AlignmentModel():
         d: dict = {
             "gap_symbol" : self.gap_symbol,
             "gap_symbol_insertions" : self.gap_symbol_insertions,
+            "best_head" : getattr(self, "best_head", None),
         }
         with open(filepath / "meta.json", "w") as metafile:
             metafile.write(json.dumps(d, indent=4))
@@ -433,6 +453,7 @@ class AlignmentModel():
             indices,
             d["gap_symbol"],
             d["gap_symbol_insertions"],
+            d.get("best_head", -1),
         )
         return am
 

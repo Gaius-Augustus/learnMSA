@@ -114,13 +114,13 @@ def run_main() -> None:
             datasets += (struct_data, )
 
         # Run a training to align the sequences
-        alignment_model, best_model = align(datasets, config) # type:ignore
+        alignment_model = align(datasets, config) # type:ignore
 
         if config.input_output.save_model:
             alignment_model.save(config.input_output.save_model)
         if config.input_output.scores != Path():
             alignment_model.write_scores(
-                Path(config.input_output.scores), best_model
+                Path(config.input_output.scores), alignment_model.best_head
             )
             if config.input_output.verbose:
                 print(f"Wrote scores to {config.input_output.scores}")
@@ -129,7 +129,7 @@ def run_main() -> None:
             from learnMSA.util.visualize import plot_phmm
 
             if config.visualization.plot_head == -1:
-                head = best_model # type: ignore
+                head = alignment_model.best_head # type: ignore
             else:
                 head = config.visualization.plot_head
             fig = plot_phmm(alignment_model.model.phmm_layer, head)

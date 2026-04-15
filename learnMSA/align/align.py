@@ -10,7 +10,6 @@ import learnMSA.model.training_util as training_util
 from learnMSA import Configuration
 from learnMSA.align.align_inserts import make_aligned_insertions
 from learnMSA.align.alignment_model import AlignmentModel
-from learnMSA.model.select import SelectionCriterion, select_model
 from learnMSA.model.surgery import model_surgery
 from learnMSA.model.tf.model import LearnMSAModel
 from learnMSA.model.context import LearnMSAContext
@@ -22,7 +21,7 @@ np.set_printoptions(legacy='1.21')
 def align(
     data : SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]],
     config : Configuration,
-) -> tuple[AlignmentModel, int]:
+) -> AlignmentModel:
     """ Aligns the sequences in data according to the specified config.
 
     Args:
@@ -80,6 +79,11 @@ def align(
                 am = _fit_and_align(data, context)
             if config.input_output.verbose:
                 print("Time for alignment:", "%.4f" % (time.time()-t_a))
+
+            # Select the head that best fits the training data
+            # according to the criterion specified in the config
+            am.select_best()
+
         except tf.errors.ResourceExhaustedError as e:
             print("Out of memory. A resource was exhausted.")
             runtime_batch_size = context.last_runtime_batch_size
@@ -102,42 +106,38 @@ def align(
         )
     else:
         ind = None
-    best_model = select_model(
-        am.model,
-        data,
-        SelectionCriterion(config.training.model_criterion),
-        sequence_indices=ind,
-        verbose=config.input_output.verbose,
-    )
 
     if config.input_output.output_file == Path():
-        return am, best_model
+        return am
 
     Path(config.input_output.output_file).parent.mkdir(
         parents=True, exist_ok=True
     )
     t = time.time()
 
+    assert am.best_head != -1,\
+        "Best head was not selected. This should not happen."
+
     if config.training.unaligned_insertions or config.training.only_matches:
         # Don't align insertions when requested or when only matches need to
         # be written to the output file
         am.to_file(
             config.input_output.output_file,
-            best_model,
+            am.best_head,
             format=config.input_output.format,
             only_matches=config.training.only_matches
         )
     else:
         aligned_insertions = make_aligned_insertions(
             am,
-            best_model,
+            am.best_head,
             config.advanced.insertion_aligner,
             config.advanced.aligner_threads,
             verbose=config.input_output.verbose
         )
         am.to_file(
             config.input_output.output_file,
-            best_model,
+            am.best_head,
             aligned_insertions=aligned_insertions,
             format=config.input_output.format
         )
@@ -155,7 +155,7 @@ def align(
         print("time for generating output:", "%.4f" % (time.time()-t))
         print("Wrote file", config.input_output.output_file)
 
-    return am, best_model
+    return am
 
 def _fit_and_align(
     data : SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]],

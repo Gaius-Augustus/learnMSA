@@ -126,15 +126,16 @@ def test_alignment_egf() -> None:
         config.training.auto_crop = False
 
         # Fit the alignment model
-        am, best_index = align(data, config)
+        am = align(data, config)
+        am.select_best()
 
         # Evaluate the model
-        eval_output = am.model.evaluate(data, models=[best_index])
+        eval_output = am.model.evaluate(data, models=[am.best_head])
 
     # Check some friendly thresholds to check if the alignment makes sense
     assert np.amin(eval_output["loglik"].mean()) > -70
     # Surgery should have added match states
-    assert am.model.lengths[best_index] > 25
+    assert am.model.lengths[am.best_head] > 25
 
     am.to_file(egf_out_path, 0)
     with AlignedDataset(egf_out_path) as pred_msa:

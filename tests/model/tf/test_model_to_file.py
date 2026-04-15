@@ -71,6 +71,7 @@ def test_model_to_file() -> None:
     context.batch_gen.configure(data, context=context)
     ind = np.array([0,1])
     am = AlignmentModel(data, model, ind)
+    am.best_head = 0
     am.save(test_filepath)
 
     # Decode MSA to string and delete model from memory
@@ -100,6 +101,9 @@ def test_model_to_file() -> None:
     # Test if the decoded MSA is the same
     msa_str_from_deserialized_model = am2.to_string(model_index=0)
     assert msa_str == msa_str_from_deserialized_model
+
+    # Test if best_head is preserved
+    assert am2.best_head == 0
 
     # Clean up: remove saved models from this test
     shutil.rmtree(test_filepath, ignore_errors=True)
