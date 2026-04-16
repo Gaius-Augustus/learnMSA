@@ -358,7 +358,7 @@ class AlignmentModel():
             background_dist=B[model, L],
             transition_prob=A[model, 2*L-1, 2*L-1]
         )
-        bitscore = loglik - log_null
+        bitscore = (loglik - log_null) / np.log(2.0)
 
         # Sort by bitscore in descending order
         sorted_indices = np.argsort(-bitscore)

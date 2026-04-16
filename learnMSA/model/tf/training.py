@@ -433,6 +433,7 @@ def make_default_bucket_scheme(
     batch_generator: BatchGenerator,
     model_lengths: Sequence[int],
     batch_size_impl_factor: float = 1.0,
+    max_batch_size_override: int | None = None,
 ) -> tuple[list[int], list[int]]:
     """
     Create inferred bucketing boundaries and adaptive bucket batch sizes.
@@ -443,6 +444,9 @@ def make_default_bucket_scheme(
         model_lengths: List of model lengths for adaptive batching.
         batch_size_impl_factor: Implementation factor passed to adaptive
             batch-size computation.
+        max_batch_size_override: Optional override for the maximum batch size
+            used in adaptive batch-size computation. If None, uses the default
+            MAX_BATCH_SIZE.
 
     Returns:
         A tuple of (bucket_boundaries, bucket_batch_sizes).
@@ -468,6 +472,7 @@ def make_default_bucket_scheme(
     adaptive_batch = partial(
         training_util.get_adaptive_batch_size,
         impl_factor=batch_size_impl_factor,
+        max_batch_size=max_batch_size_override or training_util.MAX_BATCH_SIZE,
     )
     max_model_len = max(model_lengths)
     num_model = batch_generator.num_models
