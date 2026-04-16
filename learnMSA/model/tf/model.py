@@ -695,7 +695,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         self.loglik_mode()
 
         # restrict to specified models
-        # TODO: revert head_subset later?
+        prev_head_subset = self.phmm_layer.head_subset
         self.phmm_layer.head_subset = models
         if hasattr(self, "anc_probs_layer"):
             self.anc_probs_layer.head_subset = models
@@ -773,6 +773,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
 
         # Reset
         self.context.batch_gen.crop_long_seqs = old_crop_long_seqs
+        self.phmm_layer.head_subset = prev_head_subset
 
         return {
             'loss': np.asarray(total_loss),
