@@ -960,9 +960,10 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             if isinstance(batch_data, tuple) and len(batch_data) == 3:
                 x, _, batch_idx = batch_data
             else:
-                x, _ = batch_data
-                # No bucket indices available, skip this batch
-                continue
+                raise ValueError(
+                    "Expected batch_data to be a tuple of (x, _, batch_idx) for "
+                    "null model computation."
+                )
 
             em = compute_batch_emissions(x)
             log_probs[batch_idx.numpy()] = em.numpy()

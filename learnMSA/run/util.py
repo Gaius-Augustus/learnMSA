@@ -162,6 +162,28 @@ def validate_filepath(filepath : str, expected_ext : str) -> Path:
     return path
 
 
+def resolve_input_file(config, parser) -> None:
+    """Resolve the input file from --from_msa when -i is omitted.
+
+    When no input file is given, both --from_msa and --save_model must be
+    provided so that the MSA can be converted directly into a saved model.
+    In that case the MSA file is used as the sequence input.
+
+    Args:
+        config: Configuration object (mutated in-place when resolved)
+        parser: Argument parser for error reporting
+    """
+    if config.input_output.input_file != Path():
+        return
+
+    if config.init_msa.from_msa is None or config.input_output.save_model == "":
+        parser.error(
+            "argument -i/--in_file is required unless both "
+            "--from_msa and --save_model are provided"
+        )
+    config.input_output.input_file = config.init_msa.from_msa
+
+
 def validate_output_file_requirements(config, parser) -> None:
     """Validate that output_file is provided when required.
 

@@ -163,7 +163,7 @@ class LearnMSAContext:
 
         self.batch_gen = train.BatchGenerator()
         self.last_runtime_batch_size = None
-        if data is not None:
+        if data is not None and not self.config.training.skip_training:
             self.sequence_weights, self.clusters = self._get_clustering(data)
         else:
             if sequence_weights is None:
@@ -235,6 +235,10 @@ class LearnMSAContext:
 
         # Reconstruct the Configuration object
         config = Configuration(**actual_config["config"])
+
+        # Reset from_msa, since the original input MSA is "stored" in the HMM
+        # parameters
+        config.init_msa.from_msa = None
 
         # Set the model lengths
         config.training.length_init = actual_config["model_lengths"]

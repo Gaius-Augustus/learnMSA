@@ -59,7 +59,7 @@ def align(
         print(f"Configuration saved to {config_path}")
 
     # Either load a model from file or train a new model
-    if config.input_output.load_model != Path() and \
+    if config.input_output.load_model and \
             config.training.skip_training:
         # Load a model without any training
         am = AlignmentModel.load(config.input_output.load_model, data)

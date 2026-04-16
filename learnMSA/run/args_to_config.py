@@ -33,7 +33,7 @@ def args_to_config(args: Namespace) -> Configuration:
 
     # Create input/output configuration
     input_output_config = InputOutputConfig(
-        input_file=args.input_file,
+        input_file=args.input_file if args.input_file is not None else "",
         output_file=args.output_file if args.output_file is not None else "",
         format=args.format,
         input_format=args.input_format,
@@ -171,6 +171,11 @@ def _get_save_emb(args: Namespace) -> str:
 def _get_save_model(args: Namespace) -> str:
     """Determine the save_model path based on command-line arguments."""
     if args.save_model == "<workdir>":
-        return str(Path(args.work_dir) / (Path(args.input_file).stem + ".model"))
+        stem = (
+            Path(args.input_file).stem
+            if args.input_file is not None
+            else Path(args.from_msa).stem
+        )
+        return str(Path(args.work_dir) / (stem + ".model"))
     else:
         return args.save_model if args.save_model is not None else ""

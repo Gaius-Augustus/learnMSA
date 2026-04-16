@@ -28,6 +28,9 @@ def run_main() -> None:
     # Convert args to configuration
     config = args_to_config(args)
 
+    # Resolve input file (may use --from_msa when -i is omitted)
+    util.resolve_input_file(config, parser)
+
     # Validate that output_file is provided when required
     util.validate_output_file_requirements(config, parser)
 
@@ -63,7 +66,10 @@ def run_main() -> None:
             )
         )
         # rule out issues with the seq file early on
-        data.validate_dataset()
+        # allow single seq fastas when computing scores (no MSA)
+        data.validate_dataset(
+            single_seq_ok = config.input_output.scores != Path()
+        )
         datasets = (data, )
 
         ## Load a structural dataset (optional)
