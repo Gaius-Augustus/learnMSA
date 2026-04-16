@@ -350,7 +350,14 @@ class AlignmentModel():
             self.data, self.data[0].num_seq, reduce=False, models=[model]
         )[:,0]
         # Compute the bitscore
-        log_null = self.model.compute_null_model_log_probs(self.data[0])
+        A = self.model.phmm_layer.hmm.transitioner.matrix()
+        B = self.model.phmm_layer.hmm.emitter[0].matrix()
+        L = self.model.lengths[model]
+        log_null = self.model.compute_null_model_log_probs(
+            self.data[0],
+            background_dist=B[model, L],
+            transition_prob=A[model, 2*L-1, 2*L-1]
+        )
         bitscore = loglik - log_null
 
         # Sort by bitscore in descending order

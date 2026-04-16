@@ -66,10 +66,11 @@ class PHMMExplicitTransitioner(TFTransitioner):
             # containing indices into the values of this head, accounting
             # for shared transitions
             shared_indices = index_set.shared_indices()
-            u_shared_indices = np.unique(shared_indices)
-            # only keep shared representatives
-            shared_trans = allowed_trans[u_shared_indices]
-            shared_trans = shared_trans[np.argsort(u_shared_indices)]
+            # For each unique parameter index, find the first allowed
+            # transitione that uses it — this is the representative transition
+            # for that parameter.
+            _, first_occ = np.unique(shared_indices, return_index=True)
+            shared_trans = allowed_trans[first_occ]
 
             # Add the values without duplicates for shared transitions
             v = value_set.transitions[shared_trans[:,0], shared_trans[:,1]]

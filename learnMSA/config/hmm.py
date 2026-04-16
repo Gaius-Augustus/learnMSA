@@ -477,14 +477,12 @@ class PHMMConfig(BaseModel):
         if self.shared_flank_transitions:
             LL = self.p_left_left
             RR = self.p_right_right
-            UU = self.p_unannot_unannot
-            if not np.all(np.isclose(LL, RR)) or not np.all(np.isclose(LL, UU)):
+            if not np.all(np.isclose(LL, RR)):
                 raise ValueError(
-                    "When shared_flank_transitions is True, p_left_left, "
-                    "p_right_right, and p_unannot_unannot must be equal. "
+                    "When shared_flank_transitions is True, p_left_left and "
+                    "p_right_right must be equal. "
                     "Small numerical differences are allowed. "
                     "Only p_left_left will be used. "
-                    f"Got p_left_left={LL}, p_right_right={RR}, "
-                    f"p_unannot_unannot={UU}."
+                    f"Got p_left_left={LL}, p_right_right={RR}."
                 )
         return self

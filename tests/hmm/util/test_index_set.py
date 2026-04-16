@@ -109,21 +109,17 @@ def test_shared_flanks() -> None:
     si = ind.shared_indices()
     lf = ind._row_offsets['left_flank']
     rf = ind._row_offsets['right_flank']
-    un = ind._row_offsets['unannotated']
-    # Without sharing, all three groups have distinct parameter indices
+    # Without sharing, we have distinct parameter indices
     assert len(set(si[lf[0]:lf[1]]) & set(si[rf[0]:rf[1]])) == 0
-    assert len(set(si[lf[0]:lf[1]]) & set(si[un[0]:un[1]])) == 0
     assert len(np.unique(si)) == ind.num_transitions
 
     ind2 = PHMMTransitionIndexSet(3, shared_flanks=True)
     si2 = ind2.shared_indices()
     lf2 = ind2._row_offsets['left_flank']
     rf2 = ind2._row_offsets['right_flank']
-    un2 = ind2._row_offsets['unannotated']
-    # With sharing, right_flank and unannotated reuse left_flank's parameter indices
+    # With sharing, right_flank reuses left_flank's parameter indices
     np.testing.assert_equal(si2[rf2[0]:rf2[1]], si2[lf2[0]:lf2[1]])
-    np.testing.assert_equal(si2[un2[0]:un2[1]], si2[lf2[0]:lf2[1]])
-    assert len(np.unique(si2)) == ind.num_transitions - 4
+    assert len(np.unique(si2)) == ind.num_transitions - 2
 
     # shared_flanks is not allowed with folded models
     import pytest

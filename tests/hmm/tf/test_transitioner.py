@@ -183,19 +183,18 @@ def test_shared_flanks_explicit_transitioner() -> None:
     t_no.build()
     t_yes.build()
 
-    # Kernel size should be smaller with shared_flanks: 2 fewer parameters
-    # per shared group (right_flank and unannotated each save 2)
-    assert t_yes.kernel.shape[0] == t_no.kernel.shape[0] - 4
+    # Kernel size should be smaller with shared_flanks: right_flank shares
+    # with left_flank, saving 2 parameters.
+    assert t_yes.kernel.shape[0] == t_no.kernel.shape[0] - 2
 
-    # The share array should map right_flank and unannotated transitions to
-    # the same kernel indices as left_flank
+    # The share array should map right_flank transitions to the same kernel
+    # indices as left_flank (only these two states share params).
     share = t_yes.share
-    # left_flank occupies the last 2 entries before right_flank/unannotated;
-    # find indices by locating the duplicates
     unique, counts = np.unique(share, return_counts=True) #type: ignore
-    shared_param_indices = unique[counts == 3]
+    shared_param_indices = unique[counts == 2]
     assert len(shared_param_indices) == 2, (
-        f"Expected 2 kernel indices shared across 3 flank states, got {shared_param_indices}"
+        f"Expected 2 kernel indices shared across left_flank and right_flank, "
+        f"got {shared_param_indices}"
     )
 
 

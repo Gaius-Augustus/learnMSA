@@ -219,7 +219,6 @@ class PHMMTransitionIndexSet:
             un_trans = np.array([[3*L+2, 3*L+2], [3*L+2, 3*L]], dtype=dtype)
             idx, sidx = self._add_transitions(
                 idx, sidx, un_trans, "unannotated",
-                shared_with="left_flank" if shared_flanks else None
             )
 
             # End: to unannotated, to right, to terminal
