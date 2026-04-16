@@ -47,6 +47,7 @@ def simple_config() -> Configuration:
     config.hmm.p_right_right = 0.4
     config.hmm.p_begin_match = 0.6
     config.hmm.p_begin_delete = 0.2
+    config.hmm.shared_flank_transitions = False
 
     return config
 

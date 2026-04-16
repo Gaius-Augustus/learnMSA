@@ -169,6 +169,36 @@ def test_head_subset(hmm_config: HidtenHMMConfig) -> None:
         A[0], ref.transitions_b, atol=1e-6
     )
 
+def test_shared_flanks_explicit_transitioner() -> None:
+    """Test that shared_flanks reduces the number of parameters and that
+    the gradients of the shared flank parameters are equal (accumulated from
+    all three flank states)."""
+    from learnMSA.config.hmm import PHMMConfig
+    lengths = [4]
+    config = PHMMConfig()
+    values = [PHMMValueSet.from_config(L, h, config) for h, L in enumerate(lengths)]
+
+    t_no = PHMMExplicitTransitioner(values, shared_flanks=False)
+    t_yes = PHMMExplicitTransitioner(values, shared_flanks=True)
+    t_no.build()
+    t_yes.build()
+
+    # Kernel size should be smaller with shared_flanks: 2 fewer parameters
+    # per shared group (right_flank and unannotated each save 2)
+    assert t_yes.kernel.shape[0] == t_no.kernel.shape[0] - 4
+
+    # The share array should map right_flank and unannotated transitions to
+    # the same kernel indices as left_flank
+    share = t_yes.share
+    # left_flank occupies the last 2 entries before right_flank/unannotated;
+    # find indices by locating the duplicates
+    unique, counts = np.unique(share, return_counts=True) #type: ignore
+    shared_param_indices = unique[counts == 3]
+    assert len(shared_param_indices) == 2, (
+        f"Expected 2 kernel indices shared across 3 flank states, got {shared_param_indices}"
+    )
+
+
 def test_gradient(hmm_config: HidtenHMMConfig) -> None:
     """Test that gradients flow correctly through the PHMMTransitioner."""
     lengths = [4, 3]

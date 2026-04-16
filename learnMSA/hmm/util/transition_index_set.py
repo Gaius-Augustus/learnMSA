@@ -35,16 +35,26 @@ class PHMMTransitionIndexSet:
         num_states: Total number of states in the PHMM.
         num_transitions: Total number of transitions in the PHMM.
     """
-    def __init__(self, L: int, folded: bool = False, dtype=np.int32) -> None:
+    def __init__(
+        self, L: int,
+        folded: bool = False,
+        shared_flanks: bool = False,
+        dtype=np.int32,
+    ) -> None:
         """
         Args:
             L: Number of match states.
             folded: Whether the model is folded (does not contain silent states for
                 deletions).
+            shared_flanks: Whether to share transition parameters of flank
+                states within each head.
             dtype: The data type for the indices.
         """
+        assert not (shared_flanks and folded), \
+            "shared_flanks is only supported in the unfolded case."
         self.L = L
         self._folded = folded
+        self._shared_flanks = shared_flanks
         self._dtype = dtype
 
         # Helper arrays for construction
@@ -53,35 +63,33 @@ class PHMMTransitionIndexSet:
 
         # Create the buffer with the correct size
         self._buffer = np.empty((self.num_transitions, 2), dtype=dtype)
+        self._shared_indices = np.empty(self.num_transitions, dtype=dtype)
         self._row_offsets = {}
 
-        # Track current position in buffer
+        # Track current position in buffers
         idx = 0
+        sidx = 0
 
         # Common transitions for both folded and unfolded
         # Match to match
-        n_trans = L - 1
-        self._buffer[idx:idx+n_trans] = np.stack((matches, matches+1), axis=1)
-        self._row_offsets['match_to_match'] = (idx, idx+n_trans)
-        idx += n_trans
+        idx, sidx = self._add_transitions(
+            idx, sidx, np.stack((matches, matches+1), axis=1), "match_to_match"
+        )
 
         # Match to insert
-        n_trans = L - 1
-        self._buffer[idx:idx+n_trans] = np.stack((matches, matches+L), axis=1)
-        self._row_offsets['match_to_insert'] = (idx, idx+n_trans)
-        idx += n_trans
+        idx, sidx = self._add_transitions(
+            idx, sidx, np.stack((matches, matches+L), axis=1), "match_to_insert"
+        )
 
-        # Insert to insert
-        n_trans = L - 1
-        self._buffer[idx:idx+n_trans] = np.stack((matches+L, matches+L), axis=1)
-        self._row_offsets['insert_to_insert'] = (idx, idx+n_trans)
-        idx += n_trans
+        # Insert to insert (independent parameters per position)
+        idx, sidx = self._add_transitions(
+            idx, sidx, np.stack((matches+L, matches+L), axis=1), "insert_to_insert"
+        )
 
-        # Insert to match
-        n_trans = L - 1
-        self._buffer[idx:idx+n_trans] = np.stack((matches+L, matches+1), axis=1)
-        self._row_offsets['insert_to_match'] = (idx, idx+n_trans)
-        idx += n_trans
+        # Insert to match (independent parameters per position)
+        idx, sidx = self._add_transitions(
+            idx, sidx, np.stack((matches+L, matches+1), axis=1), "insert_to_match"
+        )
 
         if folded:
             # Match to match jump transitions
@@ -91,166 +99,139 @@ class PHMMTransitionIndexSet:
                     n_jumps = L - i - 2
                     self._buffer[idx:idx+n_jumps, 0] = i
                     self._buffer[idx:idx+n_jumps, 1] = matches_plus[i+2:]
+                    self._shared_indices[idx:idx+n_jumps] = np.arange(
+                        n_jumps, dtype=dtype
+                    ) + sidx
                     idx += n_jumps
+                    sidx += n_jumps
                 self._row_offsets['match_to_match_jump'] = (start_idx, idx)
 
             # Match to unannotated
-            n_trans = L
-            self._buffer[idx:idx+n_trans] = np.stack(
-                (matches_plus, np.zeros(L, dtype=dtype)+(2*L)), axis=1
+            idx, sidx = self._add_transitions(
+                idx, sidx,
+                np.stack((matches_plus, np.full(L, 2*L, dtype=dtype)), axis=1),
+                "match_to_unannotated"
             )
-            self._row_offsets['match_to_unannotated'] = (idx, idx+n_trans)
-            idx += n_trans
 
             # Match to right
-            n_trans = L
-            self._buffer[idx:idx+n_trans] = np.stack(
-                (matches_plus, np.zeros(L, dtype=dtype)+(2*L+1)), axis=1
+            idx, sidx = self._add_transitions(
+                idx, sidx,
+                np.stack((matches_plus, np.full(L, 2*L+1, dtype=dtype)), axis=1),
+                "match_to_right"
             )
-            self._row_offsets['match_to_right'] = (idx, idx+n_trans)
-            idx += n_trans
 
             # Match to terminal
-            n_trans = L
-            self._buffer[idx:idx+n_trans] = np.stack(
-                (matches_plus, np.full(L, -1, dtype=dtype)), axis=1
+            idx, sidx = self._add_transitions(
+                idx, sidx,
+                np.stack((matches_plus, np.full(L, -1, dtype=dtype)), axis=1),
+                "match_to_terminal"
             )
-            self._row_offsets['match_to_terminal'] = (idx, idx+n_trans)
-            idx += n_trans
 
-            # Left flank
-            start_idx = idx
-            self._buffer[idx] = [2*L-1, 2*L-1]  # self-loop
-            idx += 1
-            self._buffer[idx:idx+L] = np.stack(
-                (np.zeros(L, dtype=dtype) + (2*L - 1), matches_plus), axis=1
+            # Left flank: self-loop, to M1..ML, to unannotated, to right, to terminal
+            lf_trans = np.empty((L+4, 2), dtype=dtype)
+            lf_trans[0] = [2*L-1, 2*L-1]  # self-loop
+            lf_trans[1:1+L] = np.stack(
+                (np.full(L, 2*L-1, dtype=dtype), matches_plus), axis=1
             )
-            idx += L
-            self._buffer[idx] = [2*L - 1, 2*L]  # to unannotated
-            idx += 1
-            self._buffer[idx] = [2*L - 1, 2*L + 1]  # to right
-            idx += 1
-            self._buffer[idx] = [2*L - 1, -1]  # to terminal
-            idx += 1
-            self._row_offsets['left_flank'] = (start_idx, idx)
+            lf_trans[1+L] = [2*L-1, 2*L]    # to unannotated
+            lf_trans[2+L] = [2*L-1, 2*L+1]  # to right
+            lf_trans[3+L] = [2*L-1, -1]     # to terminal
+            idx, sidx = self._add_transitions(idx, sidx, lf_trans, "left_flank")
 
-            # Right flank
-            start_idx = idx
-            self._buffer[idx] = [2*L+1, 2*L+1]  # self-loop
-            idx += 1
-            self._buffer[idx] = [2*L+1, -1]  # to terminal
-            idx += 1
-            self._row_offsets['right_flank'] = (start_idx, idx)
+            # Right flank: self-loop, to terminal
+            rf_trans = np.array([[2*L+1, 2*L+1], [2*L+1, -1]], dtype=dtype)
+            idx, sidx = self._add_transitions(idx, sidx, rf_trans, "right_flank")
 
-            # Unannotated
-            start_idx = idx
-            self._buffer[idx] = [2*L, 2*L]  # self-loop
-            idx += 1
-            self._buffer[idx:idx+L] = np.stack(
-                (np.zeros(L, dtype=dtype) + (2*L), matches_plus), axis=1
+            # Unannotated: self-loop, to M1..ML, to right, to terminal
+            un_trans = np.empty((L+3, 2), dtype=dtype)
+            un_trans[0] = [2*L, 2*L]  # self-loop
+            un_trans[1:1+L] = np.stack(
+                (np.full(L, 2*L, dtype=dtype), matches_plus), axis=1
             )
-            idx += L
-            self._buffer[idx] = [2*L, 2*L + 1]  # to right
-            idx += 1
-            self._buffer[idx] = [2*L, -1]  # to terminal
-            idx += 1
-            self._row_offsets['unannotated'] = (start_idx, idx)
+            un_trans[1+L] = [2*L, 2*L+1]  # to right
+            un_trans[2+L] = [2*L, -1]     # to terminal
+            idx, sidx = self._add_transitions(idx, sidx, un_trans, "unannotated")
 
             # Terminal
-            self._buffer[idx] = [-1, -1]
-            self._row_offsets['terminal'] = (idx, idx+1)
-            idx += 1
+            idx, sidx = self._add_transitions(
+                idx, sidx, np.array([[-1, -1]], dtype=dtype), "terminal"
+            )
 
         else:
             # Unfolded case
             # Match to delete
-            n_trans = L - 1
-            self._buffer[idx:idx+n_trans] = np.stack(
-                (matches, matches+2*L), axis=1
+            idx, sidx = self._add_transitions(
+                idx, sidx,
+                np.stack((matches, matches+2*L), axis=1),
+                "match_to_delete"
             )
-            self._row_offsets['match_to_delete'] = (idx, idx+n_trans)
-            idx += n_trans
 
             # Delete to delete
-            n_trans = L - 1
-            self._buffer[idx:idx+n_trans] = np.stack(
-                (matches+2*L-1, matches+2*L), axis=1
+            idx, sidx = self._add_transitions(
+                idx, sidx,
+                np.stack((matches+2*L-1, matches+2*L), axis=1),
+                "delete_to_delete"
             )
-            self._row_offsets['delete_to_delete'] = (idx, idx+n_trans)
-            idx += n_trans
 
             # Delete to match
-            n_trans = L - 1
-            self._buffer[idx:idx+n_trans] = np.stack(
-                (matches+2*L-1, matches+1), axis=1
+            idx, sidx = self._add_transitions(
+                idx, sidx,
+                np.stack((matches+2*L-1, matches+1), axis=1),
+                "delete_to_match"
             )
-            self._row_offsets['delete_to_match'] = (idx, idx+n_trans)
-            idx += n_trans
 
             # Begin to match
-            n_trans = L
-            self._buffer[idx:idx+n_trans] = np.stack(
-                (np.zeros(L, dtype=dtype) + 3*L, matches_plus), axis=1
+            idx, sidx = self._add_transitions(
+                idx, sidx,
+                np.stack((np.full(L, 3*L, dtype=dtype), matches_plus), axis=1),
+                "begin_to_match"
             )
-            self._row_offsets['begin_to_match'] = (idx, idx+n_trans)
-            idx += n_trans
 
             # Match to end
-            n_trans = L
-            self._buffer[idx:idx+n_trans] = np.stack(
-                (matches_plus, np.zeros(L, dtype=dtype)+(3*L+1)), axis=1
+            idx, sidx = self._add_transitions(
+                idx, sidx,
+                np.stack((matches_plus, np.full(L, 3*L+1, dtype=dtype)), axis=1),
+                "match_to_end"
             )
-            self._row_offsets['match_to_end'] = (idx, idx+n_trans)
-            idx += n_trans
 
             # Begin to delete
-            self._buffer[idx] = [3*L, 2*L-1]
-            self._row_offsets['begin_to_delete'] = (idx, idx+1)
-            idx += 1
+            idx, sidx = self._add_transitions(
+                idx, sidx, np.array([[3*L, 2*L-1]], dtype=dtype), "begin_to_delete"
+            )
 
             # Delete to end
-            self._buffer[idx] = [3*L-2, 3*L+1]
-            self._row_offsets['delete_to_end'] = (idx, idx+1)
-            idx += 1
+            idx, sidx = self._add_transitions(
+                idx, sidx, np.array([[3*L-2, 3*L+1]], dtype=dtype), "delete_to_end"
+            )
 
-            # Left flank
-            start_idx = idx
-            self._buffer[idx] = [3*L-1, 3*L-1]
-            idx += 1
-            self._buffer[idx] = [3*L-1, 3*L]
-            idx += 1
-            self._row_offsets['left_flank'] = (start_idx, idx)
+            # Left flank: self-loop, to begin
+            lf_trans = np.array([[3*L-1, 3*L-1], [3*L-1, 3*L]], dtype=dtype)
+            idx, sidx = self._add_transitions(idx, sidx, lf_trans, "left_flank")
 
-            # Right flank
-            start_idx = idx
-            self._buffer[idx] = [3*L+3, 3*L+3]
-            idx += 1
-            self._buffer[idx] = [3*L+3, -1]
-            idx += 1
-            self._row_offsets['right_flank'] = (start_idx, idx)
+            # Right flank: self-loop, to terminal
+            rf_trans = np.array([[3*L+3, 3*L+3], [3*L+3, -1]], dtype=dtype)
+            idx, sidx = self._add_transitions(
+                idx, sidx, rf_trans, "right_flank",
+                shared_with="left_flank" if shared_flanks else None
+            )
 
-            # Unannotated
-            start_idx = idx
-            self._buffer[idx] = [3*L+2, 3*L+2]
-            idx += 1
-            self._buffer[idx] = [3*L+2, 3*L]
-            idx += 1
-            self._row_offsets['unannotated'] = (start_idx, idx)
+            # Unannotated: self-loop, to begin
+            un_trans = np.array([[3*L+2, 3*L+2], [3*L+2, 3*L]], dtype=dtype)
+            idx, sidx = self._add_transitions(
+                idx, sidx, un_trans, "unannotated",
+                shared_with="left_flank" if shared_flanks else None
+            )
 
-            # End
-            start_idx = idx
-            self._buffer[idx] = [3*L+1, 3*L+2]
-            idx += 1
-            self._buffer[idx] = [3*L+1, 3*L+3]
-            idx += 1
-            self._buffer[idx] = [3*L+1, -1]
-            idx += 1
-            self._row_offsets['end'] = (start_idx, idx)
+            # End: to unannotated, to right, to terminal
+            end_trans = np.array(
+                [[3*L+1, 3*L+2], [3*L+1, 3*L+3], [3*L+1, -1]], dtype=dtype
+            )
+            idx, sidx = self._add_transitions(idx, sidx, end_trans, "end")
 
             # Terminal
-            self._buffer[idx] = [-1, -1]
-            self._row_offsets['terminal'] = (idx, idx+1)
-            idx += 1
+            idx, sidx = self._add_transitions(
+                idx, sidx, np.array([[-1, -1]], dtype=dtype), "terminal"
+            )
 
     @property
     def folded(self) -> bool:
@@ -441,19 +422,75 @@ class PHMMTransitionIndexSet:
             return 4*(self.L-1) + 3*(self.L-1) + self.L + self.L\
                 + 1 + 1 + 2 + 2 + 2 + 3 + 1
 
-    def as_array(self) -> np.ndarray:
+    def as_array(self, shared_flanks: bool = True) -> np.ndarray:
         """
         Returns an array of shape `(num_transitions, 2)` where each row is a
-        (from_state, to_state) pair.
+        (from_state, to_state) pair. If transitions are shared, only the first
+        occurrence of each unique transition is included in the array.
+
+        Args:
+            shared_flanks: Whether to share transition parameters of flank
+                states within each head.
         """
         return self._buffer
 
     def mask(self, dtype=np.float32) -> np.ndarray:
         """
-        Returns a mask matrix of shape `(num_states, num_states)` with ones for invalid
-        transitions and zeros for valid transitions.
+        Returns a mask matrix of shape `(num_states, num_states)` with ones for
+        invalid transitions and zeros for valid transitions.
         """
         n = self.num_states
         M = np.ones((n, n), dtype=dtype)
         M[self._buffer[:, 0], self._buffer[:, 1]] = 0.
         return M
+
+    def shared_indices(self) -> np.ndarray:
+        """
+        Returns an array of indices into the values of this head, indicating
+        which transitions are shared. This has the same length as the array
+        returned by `as_array()`.
+        """
+        return self._shared_indices
+
+    def _add_transitions(
+        self,
+        idx: int,
+        sidx: int,
+        transitions: np.ndarray,
+        name: str,
+        shared_with: str | None = None,
+    ) -> tuple[int, int]:
+        """
+        Utility used to initially fill the buffers of the value set.
+
+        Args:
+            idx: Current index in the buffer to start filling from.
+            sidx: Current index in the shared indices buffer to start filling
+                from.
+            transitions: An array of shape (n_transitions, 2) containing the
+                transitions to add to the buffer, where each row is a
+                (from_state, to_state) pair.
+            shared_with: If not None, the name of another property whose
+                transitions are shared with the transitions being added.
+                The referenced group must have the same number of transitions
+                and must have already been added to the buffer.
+
+        Returns:
+            The next index in the buffer and the next index in
+            the shared indices buffer after filling.
+        """
+        n_trans = transitions.shape[0]
+        self._buffer[idx:idx+n_trans] = transitions
+        self._row_offsets[name] = (idx, idx+n_trans)
+        if shared_with is None:
+            self._shared_indices[idx:idx+n_trans] = np.arange(
+                n_trans, dtype=self._dtype
+            ) + sidx
+            sidx += n_trans
+        else:
+            s = shared_with
+            self._shared_indices[idx:idx+n_trans] = self._shared_indices[
+                self._row_offsets[s][0]:self._row_offsets[s][1]
+            ]
+        idx += n_trans
+        return idx, sidx

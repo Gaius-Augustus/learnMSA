@@ -35,33 +35,57 @@ class PHMMExplicitTransitioner(TFTransitioner):
     def __init__(
         self,
         values: Sequence[PHMMValueSet],
+        shared_flanks: bool = False,
         **kwargs
     ) -> None:
         """
         Args:
             values (Sequence[PHMMValueSet]): A sequence of value sets,
                 one per head, with probabilities.
+            shared_flanks (bool): Whether to share transition parameters of
+                flank states within each head.
             hidten_hmm_config (HidtenHMMConfig): The configuration of the
                 hidten HMM.
         """
         super().__init__(**kwargs)
-        transitions, value_list = [], []
+        allow_list, value_list, shared_list = [], [], []
         start, start_values = [], []
         states = []
         lengths = [value_set.L for value_set in values]
         max_states = PHMMTransitionIndexSet.num_states_unfolded(max(lengths))
+        value_sum = 0
         for h, value_set in enumerate(values):
-            index_set = PHMMTransitionIndexSet(value_set.L, folded=False)
+            index_set = PHMMTransitionIndexSet(
+                value_set.L, folded=False, shared_flanks=shared_flanks
+            )
             # Transitions
-            # get all index pairs (i,j) and add head index (h,i,j)
-            indices = index_set.as_array()
-            # Add the values
-            value_list.append(value_set.transitions[indices[:,0], indices[:,1]])
+            # get all index pairs (i,j) for this head
+            allowed_trans = index_set.as_array() # (n, 2)
+
+            # get and array of the same length as allowed_trans,
+            # containing indices into the values of this head, accounting
+            # for shared transitions
+            shared_indices = index_set.shared_indices()
+            u_shared_indices = np.unique(shared_indices)
+            # only keep shared representatives
+            shared_trans = allowed_trans[u_shared_indices]
+            shared_trans = shared_trans[np.argsort(u_shared_indices)]
+
+            # Add the values without duplicates for shared transitions
+            v = value_set.transitions[shared_trans[:,0], shared_trans[:,1]]
+            value_list.append(v)
+
+            # Keep tracks of which values belong to multiple, shared transitions
+            # Same lengths as the allow_list
+            # indices into the full value_list
+            shared_list.append(shared_indices + value_sum)
+            value_sum += shared_trans.shape[0]
+
             # Handle negative indices (access from the end)
-            indices[indices < 0] += max_states
+            allowed_trans[allowed_trans < 0] += max_states
             # Add the indices with head index
-            transitions.append(
-               np.pad(indices, ((0,0),(1,0)), constant_values=h)
+            allow_list.append(
+                np.pad(allowed_trans, ((0,0),(1,0)), constant_values=h)
             )
 
             # Start distribution
@@ -81,11 +105,14 @@ class PHMMExplicitTransitioner(TFTransitioner):
         # because the state count differs from the folded model
         self.hmm_config = HidtenHMMConfig(states=states)
 
-        self.allow = np.vstack(transitions)
+        self.allow = np.vstack(allow_list)
         self.initializer = np.hstack(value_list)
 
         self.allow_start = np.vstack(start)
         self.initializer_start = np.hstack(start_values)
+
+        self.share = np.hstack(shared_list)
+
 
     @override
     def matrix(self, transition_delta: T_TFTensor | None = None) -> T_TFTensor:
@@ -162,15 +189,21 @@ class PHMMTransitioner(TFTransitioner):
     def __init__(
         self,
         values: Sequence[PHMMValueSet],
+        shared_flanks: bool = False,
         **kwargs
     ) -> None:
         """
         Args:
-            values (Sequence[PHMMValueSet]): A sequence of value sets, one per head.
+            values (Sequence[PHMMValueSet]): A sequence of value sets, one per
+                head.
+            shared_flanks (bool): Whether to share flank parameters across
+                heads.
         """
         super().__init__(**kwargs)
 
-        self.explicit_transitioner = self._make_explicit_transitioner(values)
+        self.explicit_transitioner = self._make_explicit_transitioner(
+            values, shared_flanks=shared_flanks
+        )
         self.lengths = [value_set.L for value_set in values]
 
         # Construct allow indices for the folded models
@@ -460,10 +493,10 @@ class PHMMTransitioner(TFTransitioner):
         return M_skip
 
     def _make_explicit_transitioner(
-        self, values: Sequence[PHMMValueSet]
+        self, values: Sequence[PHMMValueSet], shared_flanks: bool = False
     ) -> PHMMExplicitTransitioner:
         """Helper to create the explicit transitioner with the same
         parameters."""
         return PHMMExplicitTransitioner(
-            values=values
+            values=values, shared_flanks=shared_flanks
         )

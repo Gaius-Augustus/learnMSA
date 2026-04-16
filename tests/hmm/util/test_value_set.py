@@ -307,6 +307,7 @@ def test_from_config_scalar_params() -> None:
         p_end_unannot=1e-4,
         p_end_right=0.6,
         p_start_left_flank=0.3,
+        shared_flank_transitions=False,
     )
 
     L = 3
@@ -410,6 +411,7 @@ def test_from_config_multi_head() -> None:
         p_match_end=0,
         p_left_left=[0.75, 0.8, 0.85],
         p_start_left_flank=[0.2, 0.3, 0.4],
+        shared_flank_transitions=False,
     )
 
     L = 2
@@ -571,6 +573,7 @@ def test_from_config_edge_cases() -> None:
         p_match_delete=0.0,
         p_left_left=1.0,
         p_right_right=1.0,
+        shared_flank_transitions=False,
     )
     value_set_max = PHMMValueSet.from_config(L=2, h=0, config=config_max)
     np.testing.assert_almost_equal(value_set_max.transitions[6, 0], 1.0)  # B->M1

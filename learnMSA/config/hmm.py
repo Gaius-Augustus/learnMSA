@@ -17,13 +17,16 @@ class PHMMPriorConfig(BaseModel):
     """Whether to use a Dirichlet prior for emissions."""
 
     alpha_flank: float = 7000.0
-    """Alpha parameter for flank prior. Favors high probability of staying in flanking states."""
+    """Alpha parameter for flank prior. Favors high probability of staying in
+    flanking states."""
 
     alpha_single: float = 1e9
-    """Alpha parameter for single-hit prior. Favors high probability for a single main model hit."""
+    """Alpha parameter for single-hit prior. Favors high probability for a
+    single main model hit."""
 
     alpha_global: float = 1e4
-    """Alpha parameter for global prior. Favors models with high prob. to enter at the first match and exit after the last match."""
+    """Alpha parameter for global prior. Favors models with high prob. to
+    enter at the first match and exit after the last match."""
 
     alpha_flank_compl: float = 1.0
     """Complement parameter for alpha_flank."""
@@ -194,6 +197,10 @@ class PHMMConfig(BaseModel):
 
     noise_concentration: float = 100.0
     """Concentration of Dirichlet noise added during HMM initialization."""
+
+    shared_flank_transitions: bool = True
+    """Whether to share transition parameters of flank states within each
+    head."""
 
     _length_offsets: ClassVar[dict[str, int]] = {
         "p_begin_match": 0,
@@ -464,3 +471,20 @@ class PHMMConfig(BaseModel):
             "insert_emissions must be None, a sequence of floats, or a sequence "
             "of sequences of floats."
         )
+
+    @model_validator(mode='after')
+    def check_shared_flank_transitions(self):
+        if self.shared_flank_transitions:
+            LL = self.p_left_left
+            RR = self.p_right_right
+            UU = self.p_unannot_unannot
+            if not np.all(np.isclose(LL, RR)) or not np.all(np.isclose(LL, UU)):
+                raise ValueError(
+                    "When shared_flank_transitions is True, p_left_left, "
+                    "p_right_right, and p_unannot_unannot must be equal. "
+                    "Small numerical differences are allowed. "
+                    "Only p_left_left will be used. "
+                    f"Got p_left_left={LL}, p_right_right={RR}, "
+                    f"p_unannot_unannot={UU}."
+                )
+        return self

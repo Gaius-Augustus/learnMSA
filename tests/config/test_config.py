@@ -2,7 +2,7 @@ import pytest
 from pathlib import Path
 from pydantic import ValidationError
 
-from learnMSA.config import (AdvancedConfig, Configuration, PHMMConfig,
+from learnMSA.config import (AdvancedConfig, Configuration,
                              InitMSAConfig, InputOutputConfig, LanguageModelConfig,
                              TrainingConfig, VisualizationConfig, get_value)
 
@@ -360,7 +360,9 @@ class TestVisualizationConfig:
         assert config_dict["logo_gif"] == "logo.gif"
 
         # Deserialization
-        config2 = VisualizationConfig(**{"plot": "path/to/logo.pdf", "logo_gif": "path/to/animation.gif"})
+        config2 = VisualizationConfig(
+            **{"plot": "path/to/logo.pdf", "logo_gif": "path/to/animation.gif"}
+        )
         assert config2.plot == "path/to/logo.pdf"
         assert config2.logo_gif == "path/to/animation.gif"
 

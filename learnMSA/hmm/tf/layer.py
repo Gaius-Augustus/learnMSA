@@ -140,7 +140,7 @@ class PHMMLayer(tf.keras.Layer):
 
         # Add the transitioner and prior
         self.hmm.transitioner = PHMMTransitioner(
-            values = values
+            values=values, shared_flanks=config.shared_flank_transitions
         )
         if self.use_prior:
             self.hmm.transitioner.prior = TFPHMMTransitionPrior(
