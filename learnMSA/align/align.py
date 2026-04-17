@@ -68,7 +68,7 @@ def align(
     else:
         if config.input_output.verbose:
             print(
-                f"Training of {config.training.num_model} models on file "\
+                f"Created {config.training.num_model} models from file "\
                 f"{Path(config.input_output.input_file).name}"
             )
         # Train a new model
