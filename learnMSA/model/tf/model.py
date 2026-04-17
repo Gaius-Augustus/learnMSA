@@ -901,6 +901,10 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
 
         # Configure batch generator
         self.context.batch_gen.configure(data, context=self.context)
+        # Don't use static shapes for prediction - we'll use bucketing
+        self.context.batch_gen.static_shape_mode = False
+        old_crop_long_seqs = self.context.batch_gen.crop_long_seqs
+        self.context.batch_gen.crop_long_seqs = math.inf #do not crop sequences
 
         null_indices = np.arange(n)
         bucket_boundaries, bucket_batch_sizes = make_default_bucket_scheme(
@@ -908,7 +912,8 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             batch_generator=self.context.batch_gen,
             model_lengths=self.phmm_layer.lengths,
             # effectively doubles the batch size compared to training
-            batch_size_impl_factor=0.5,
+            batch_size_impl_factor=0.1,
+            max_batch_size_override=10000,
         )
 
         ds, steps = make_dataset(
@@ -952,7 +957,6 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         compute_batch_emissions = tf.function(
             compute_batch_emissions,
             jit_compile=self.use_jit_compile(steps),
-            reduce_retracing=True,
         )
 
         for batch_data, _ in ds:
@@ -960,9 +964,10 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             if isinstance(batch_data, tuple) and len(batch_data) == 3:
                 x, _, batch_idx = batch_data
             else:
-                x, _ = batch_data
-                # No bucket indices available, skip this batch
-                continue
+                raise ValueError(
+                    "Expected batch_data to be a tuple of (x, _, batch_idx) for "
+                    "null model computation."
+                )
 
             em = compute_batch_emissions(x)
             log_probs[batch_idx.numpy()] = em.numpy()

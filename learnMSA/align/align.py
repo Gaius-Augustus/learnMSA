@@ -59,7 +59,7 @@ def align(
         print(f"Configuration saved to {config_path}")
 
     # Either load a model from file or train a new model
-    if config.input_output.load_model != Path() and \
+    if config.input_output.load_model and \
             config.training.skip_training:
         # Load a model without any training
         am = AlignmentModel.load(config.input_output.load_model, data)
@@ -68,7 +68,7 @@ def align(
     else:
         if config.input_output.verbose:
             print(
-                f"Training of {config.training.num_model} models on file "\
+                f"Created {config.training.num_model} models from file "\
                 f"{Path(config.input_output.input_file).name}"
             )
         # Train a new model
@@ -179,7 +179,7 @@ def _fit_and_align(
         data = (data,)
 
     config = context.config
-    if config.input_output.verbose:
+    if config.input_output.verbose and not config.training.skip_training:
         _dataset_messages(data[0])
 
     # Roughly estimate the full length of a protein
@@ -351,7 +351,10 @@ def _dataset_messages(
         record = data.get_record(i)
         if '-' in record or '.' in record:
             if not warned:
-                print(f"Warning: The sequences in {data.filepath} seem to be already aligned. learnMSA will ignore any gap character.")
+                print(
+                    f"Warning: The sequences in {data.filepath} seem to be " +
+                    "already aligned. learnMSA will ignore any gap character."
+                )
                 warned = True
     if data.num_seq < seq_count_warning_threshold:
         print(

@@ -28,8 +28,10 @@ def parse_args(version : str) -> LearnMSAArgumentParser:
         "--in_file",
         dest="input_file",
         type=str,
-        required=True,
-        help="Input fasta file."
+        required=False,
+        default=None,
+        help="Input fasta file. Optional when --from_msa and --save_model "
+            "are both provided."
     )
     io_group.add_argument(
         "-o",

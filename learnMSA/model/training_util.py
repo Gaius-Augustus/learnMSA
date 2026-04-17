@@ -83,6 +83,7 @@ def get_adaptive_batch_size(
     impl_factor: float = 1.0,
     safety_margin: float = 0.8,
     data_type_size: int = 4,
+    max_batch_size: int = MAX_BATCH_SIZE,
 ) -> int:
     """
     Computes an adaptive batch size depending on sequence and model lengths.
@@ -113,12 +114,13 @@ def get_adaptive_batch_size(
     if denominator <= 0.0:
         return 1
     batch_size = int(np.floor(safety_margin * mem_avail / denominator))
-    return min(max(batch_size, 1), MAX_BATCH_SIZE)
+    return min(max(batch_size, 1), max_batch_size)
 
 def tokens_per_batch_to_batch_size(
     tokens_per_batch: int,
     seq_len: int,
     impl_factor: float = 1.0,
+    max_batch_size: int = MAX_BATCH_SIZE,
 ) -> int:
     """
     Computes the batch size corresponding to a given number of tokens per batch.
@@ -132,4 +134,4 @@ def tokens_per_batch_to_batch_size(
     batch_size = tokens_per_batch /\
         (impl_factor * seq_len * DEFAULT_IMPL_FACTOR)
     batch_size = int(np.floor(batch_size))
-    return min(max(batch_size, 1), MAX_BATCH_SIZE)
+    return min(max(batch_size, 1), max_batch_size)
