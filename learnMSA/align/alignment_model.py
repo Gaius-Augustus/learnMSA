@@ -345,6 +345,10 @@ class AlignmentModel():
             model: The model for which scores are written.
         """
 
+        # Disable ancestral probabilities as they are specific for the
+        # training sequences and will not apply to target sequences
+        self.model.context.config.training.use_anc_probs = False
+
         # Compute the likelihood and bitscores for all sequences
         loglik = self.model.estimate_loglik(
             self.data, self.data[0].num_seq, reduce=False, models=[model]

@@ -163,7 +163,11 @@ def args_to_config(args: Namespace) -> Configuration:
 def _get_save_emb(args: Namespace) -> str:
     """Determine the save_emb path based on command-line arguments."""
     if args.save_emb == "<workdir>":
-        return str(Path(args.work_dir) / (Path(args.input_file).stem + ".emb"))
+        if args.input_file is None:
+            return ""
+        else:
+            return str(Path(args.work_dir)\
+                       / (Path(args.input_file).stem + ".emb"))
     else:
         return args.save_emb
 
