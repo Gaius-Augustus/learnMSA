@@ -2,155 +2,143 @@ from pathlib import Path
 import sys
 from argparse import Namespace
 
-from learnMSA.config import (AdvancedConfig, Configuration, PHMMConfig,
-                             InitMSAConfig, InputOutputConfig,
-                             LanguageModelConfig, TrainingConfig,
-                             VisualizationConfig)
-from learnMSA.config.hmm import PHMMPriorConfig
-from learnMSA.config.structure import StructureConfig
+from learnMSA.config import Configuration
 
 
-def args_to_config(args: Namespace) -> Configuration:
-    """Convert argparse Namespace to Configuration object.
+def args_to_config(args: Namespace, base_config: Configuration | None = None) -> Configuration:
+    """Apply parsed command-line arguments on top of base_config.
 
     Args:
         args: Namespace object from argparse containing command-line arguments.
+        base_config: Configuration to use as starting point. If not provided,
+            a fresh Configuration() with all defaults is used.
 
     Returns:
-        Configuration object with values from the command-line arguments.
+        Validated Configuration with args values placed into base_config.
     """
-    # Convert crop to appropriate type (str or int)
-    auto_crop = args.crop == "auto"
+    if base_config is None:
+        base_config = Configuration()
+
+    # Serialize to a plain dict so we can selectively overwrite CLI-relevant
+    # fields while preserving any extra fields set in base_config.
+    data = base_config.model_dump(mode="json")
+    io = data["input_output"]
+    tr = data["training"]
+    im = data["init_msa"]
+    lm = data["language_model"]
+    vis = data["visualization"]
+    hmm_d = data["hmm"]
+    hp = data["hmm_prior"]
+    st = data["structure"]
+    adv = data["advanced"]
+
+    # --- Input/output ---
+    io["input_file"] = args.input_file if args.input_file is not None else ""
+    io["output_file"] = args.output_file if args.output_file is not None else ""
+    io["format"] = args.format
+    io["input_format"] = args.input_format
+    io["save_model"] = _get_save_model(args)
+    io["load_model"] = args.load_model
+    io["scores"] = args.scores
+    io["verbose"] = not args.silent
+    io["cuda_visible_devices"] = args.cuda_visible_devices
+    io["work_dir"] = args.work_dir
+    io["convert"] = args.convert
+    io["struct_file"] = args.struct_file
+    io["emb_file"] = args.emb_file
+    io["save_emb"] = _get_save_emb(args)
+
+    # --- Training ---
+    tr["num_model"] = args.num_model
+    tr["batch_size"] = args.batch_size
+    tr["tokens_per_batch"] = args.tokens_per_batch
+    tr["learning_rate"] = args.learning_rate
+    tr["epochs"] = args.epochs
+    tr["max_iterations"] = args.max_iterations
+    tr["length_init"] = args.length_init
+    tr["length_init_quantile"] = args.length_init_quantile
+    tr["surgery_quantile"] = args.surgery_quantile
+    tr["min_surgery_seqs"] = args.min_surgery_seqs
+    tr["len_mul"] = args.len_mul
+    tr["surgery_del"] = args.surgery_del
+    tr["surgery_ins"] = args.surgery_ins
+    tr["model_criterion"] = args.model_criterion
+    tr["indexed_data"] = args.indexed_data
+    tr["unaligned_insertions"] = args.unaligned_insertions
+    tr["auto_crop_scale"] = args.auto_crop_scale
+    tr["trainable_insertions"] = args.trainable_insertions
+    tr["no_sequence_weights"] = args.no_sequence_weights
+    tr["skip_training"] = args.skip_training
+    tr["trainable_distances"] = not args.frozen_distances
+    tr["only_matches"] = args.only_matches
+    tr["use_noise"] = not args.no_noise
+    tr["no_aa"] = args.no_aa
+    tr["pre_training_checkpoint"] = args.pre_training_checkpoint
+    tr["reset_emissions_after_surgery"] = args.reset_emissions_after_surgery
+    tr["reset_transitions_after_surgery"] = args.reset_transitions_after_surgery
+
+    # Crop: decode the argparser string representation into config fields.
+    tr["auto_crop"] = args.crop == "auto"
     if args.crop in {"auto", "disable"}:
-        crop = sys.maxsize
+        tr["crop"] = sys.maxsize
     else:
         try:
-            crop = int(args.crop)
+            tr["crop"] = int(args.crop)
         except ValueError:
             raise ValueError(
                 "Invalid value for --crop. Use 'auto', 'disable' or an integer."
             )
 
-    # Create input/output configuration
-    input_output_config = InputOutputConfig(
-        input_file=args.input_file if args.input_file is not None else "",
-        output_file=args.output_file if args.output_file is not None else "",
-        format=args.format,
-        input_format=args.input_format,
-        save_model=_get_save_model(args),
-        load_model=args.load_model,
-        scores=args.scores,
-        verbose=not args.silent,
-        cuda_visible_devices=args.cuda_visible_devices,
-        work_dir=args.work_dir,
-        convert=args.convert,
-        struct_file=args.struct_file,
-        emb_file=args.emb_file,
-        save_emb=_get_save_emb(args),
-    )
+    # --- Init MSA ---
+    im["from_msa"] = str(args.from_msa) if args.from_msa is not None else None
+    im["match_threshold"] = args.match_threshold
+    im["global_factor"] = args.global_factor
+    im["pseudocounts"] = args.pseudocounts
 
-    # Create nested configuration objects
-    training_config = TrainingConfig(
-        num_model=args.num_model,
-        batch_size=args.batch_size,
-        tokens_per_batch=args.tokens_per_batch,
-        learning_rate=args.learning_rate,
-        epochs=args.epochs,
-        max_iterations=args.max_iterations,
-        length_init=args.length_init,
-        length_init_quantile=args.length_init_quantile,
-        surgery_quantile=args.surgery_quantile,
-        min_surgery_seqs=args.min_surgery_seqs,
-        len_mul=args.len_mul,
-        surgery_del=args.surgery_del,
-        surgery_ins=args.surgery_ins,
-        model_criterion=args.model_criterion,
-        indexed_data=args.indexed_data,
-        unaligned_insertions=args.unaligned_insertions,
-        crop=crop,
-        auto_crop=auto_crop,
-        auto_crop_scale=args.auto_crop_scale,
-        trainable_insertions=args.trainable_insertions,
-        no_sequence_weights=args.no_sequence_weights,
-        skip_training=args.skip_training,
-        trainable_distances=not args.frozen_distances,
-        only_matches=args.only_matches,
-        use_noise=not args.no_noise,
-        no_aa=args.no_aa,
-        pre_training_checkpoint=args.pre_training_checkpoint,
-        reset_emissions_after_surgery=args.reset_emissions_after_surgery,
-        reset_transitions_after_surgery=args.reset_transitions_after_surgery,
-    )
+    # --- Language model ---
+    lm["use_language_model"] = args.use_language_model or args.emb_file is not None
+    lm["only_embeddings"] = args.save_emb != "<workdir>" and not args.use_language_model
+    lm["plm_cache_dir"] = args.plm_cache_dir
+    lm["language_model"] = args.language_model
+    lm["scoring_model_dim"] = args.scoring_model_dim
+    lm["scoring_model_activation"] = args.scoring_model_activation
+    lm["scoring_model_suffix"] = args.scoring_model_suffix
+    lm["temperature"] = args.temperature
+    lm["temperature_mode"] = args.temperature_mode
+    lm["use_L2"] = args.use_L2
+    lm["L2_match"] = args.L2_match
+    lm["L2_insert"] = args.L2_insert
+    lm["embedding_prior_components"] = args.embedding_prior_components
+    lm["inverse_gamma_alpha"] = args.inverse_gamma_alpha
+    lm["inverse_gamma_beta"] = args.inverse_gamma_beta
 
-    init_msa_config = InitMSAConfig(
-        from_msa=args.from_msa,
-        match_threshold=args.match_threshold,
-        global_factor=args.global_factor,
-        pseudocounts=args.pseudocounts,
-    )
+    # --- Visualization ---
+    vis["plot"] = args.plot
+    vis["plot_head"] = args.plot_head
+    vis["logo_gif"] = args.logo_gif or ""
 
-    language_model_config = LanguageModelConfig(
-        use_language_model=args.use_language_model or args.emb_file is not None,
-        only_embeddings=args.save_emb != "<workdir>" and not args.use_language_model,
-        plm_cache_dir=args.plm_cache_dir,
-        language_model=args.language_model,
-        scoring_model_dim=args.scoring_model_dim,
-        scoring_model_activation=args.scoring_model_activation,
-        scoring_model_suffix=args.scoring_model_suffix,
-        temperature=args.temperature,
-        temperature_mode=args.temperature_mode,
-        use_L2=args.use_L2,
-        L2_match=args.L2_match,
-        L2_insert=args.L2_insert,
-        embedding_prior_components=args.embedding_prior_components,
-        inverse_gamma_alpha=args.inverse_gamma_alpha,
-        inverse_gamma_beta=args.inverse_gamma_beta,
-    )
+    # --- HMM ---
+    hmm_d["noise_concentration"] = args.noise_concentration
 
-    visualization_config = VisualizationConfig(
-        plot=args.plot,
-        logo_gif=args.logo_gif or "",
-    )
+    # --- HMM prior ---
+    hp["alpha_flank"] = args.alpha_flank
+    hp["alpha_single"] = args.alpha_single
+    hp["alpha_global"] = args.alpha_global
+    hp["alpha_flank_compl"] = args.alpha_flank_compl
+    hp["alpha_single_compl"] = args.alpha_single_compl
+    hp["alpha_global_compl"] = args.alpha_global_compl
 
-    hmm_config = PHMMConfig(
-        noise_concentration=args.noise_concentration,
-    )
+    # --- Structure ---
+    st["use_structure"] = bool(args.struct_file)
+    st["prior_name"] = args.struct_prior_name
+    st["prior_components"] = args.struct_prior_components
+    st["prior_temperature"] = args.struct_prior_temperature
+    st["reset_after_surgery"] = args.struct_reset_after_surgery
 
-    hmm_prior_config = PHMMPriorConfig(
-        alpha_flank=args.alpha_flank,
-        alpha_single=args.alpha_single,
-        alpha_global=args.alpha_global,
-        alpha_flank_compl=args.alpha_flank_compl,
-        alpha_single_compl=args.alpha_single_compl,
-        alpha_global_compl=args.alpha_global_compl,
-    )
-
-    structure_config = StructureConfig(
-        use_structure=bool(args.struct_file),
-        prior_name=args.struct_prior_name,
-        prior_components=args.struct_prior_components,
-        prior_temperature=args.struct_prior_temperature,
-        reset_after_surgery=args.struct_reset_after_surgery,
-    )
-
-    advanced_config = AdvancedConfig(
-        dist_out=args.dist_out,
-        initial_distance=args.initial_distance,
-        jit_compile=not args.no_jit,
-    )
-
-    # Create main Configuration object
-    config = Configuration(
-        input_output=input_output_config,
-        training=training_config,
-        hmm=hmm_config,
-        hmm_prior=hmm_prior_config,
-        init_msa=init_msa_config,
-        language_model=language_model_config,
-        visualization=visualization_config,
-        structure=structure_config,
-        advanced=advanced_config,
-    )
+    # --- Advanced ---
+    adv["dist_out"] = args.dist_out
+    adv["initial_distance"] = args.initial_distance
+    adv["jit_compile"] = not args.no_jit
 
     # Deprecated checks
     if args.noA2M:
@@ -158,7 +146,8 @@ def args_to_config(args: Namespace) -> Configuration:
             "--noA2M is deprecated. Use --format fasta instead."
         )
 
-    return config
+    return Configuration.model_validate(data)
+
 
 def _get_save_emb(args: Namespace) -> str:
     """Determine the save_emb path based on command-line arguments."""
@@ -166,8 +155,7 @@ def _get_save_emb(args: Namespace) -> str:
         if args.input_file is None:
             return ""
         else:
-            return str(Path(args.work_dir)\
-                       / (Path(args.input_file).stem + ".emb"))
+            return str(Path(args.work_dir) / (Path(args.input_file).stem + ".emb"))
     else:
         return args.save_emb
 

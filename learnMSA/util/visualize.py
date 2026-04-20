@@ -111,6 +111,7 @@ def plot_phmm(
     inset_offset: tuple[float, float] = (0, 0.05),
     fast_mode: bool = False,
     all_state_emissions: bool = False,
+    show_information_content: bool = False,
 ) -> Figure | SubFigure | None:
     """Plots the state transition graph of a profile HMM using the explicit
     (unfolded) transition matrix with a structured layout:
@@ -155,6 +156,11 @@ def plot_phmm(
         all_state_emissions: If *True*, show emission insets for all states.
             If *False* (default), only show insets for match states and the
             insert representative.
+        show_information_content: If *True*, scale each logo column by the
+            KL divergence (information content) of the match-state emission
+            relative to the insert-state background distribution, so taller
+            columns reflect positions that deviate more from background.
+            Only affects ``TFCategoricalEmitter`` rows. Default: *False*.
 
     Returns:
         The matplotlib Figure.
@@ -245,6 +251,7 @@ def plot_phmm(
                 alphabet=SequenceDataset._default_alphabet,
                 color_scheme="skylign_protein",
                 label="AA",
+                show_information_content=show_information_content,
             )
             emitter_row += 1
 
@@ -255,6 +262,7 @@ def plot_phmm(
                 layer.hmm.emitter[emitter_row], head, L,
                 ax_m, ax_i,
                 label="emb",
+                show_information_content=show_information_content,
             )
             emitter_row += 1
 
@@ -269,6 +277,7 @@ def plot_phmm(
                 alphabet=layer.structural_config.structural_alphabet,
                 color_scheme="NajafabadiEtAl2017",
                 label="3Di",
+                show_information_content=show_information_content,
             )
 
         # ── Bottom panel: transition graph, no emission insets ───────────────
@@ -313,6 +322,7 @@ def _render_emitter_fast(
     alphabet: str = "ARNDCQEGHILKMFPSTWYVXUO",
     color_scheme: str = "skylign_protein",
     label: str = "",
+    show_information_content: bool = False,
 ) -> None:
     """Draw a full-length match-state profile logo and a single insert
     representative logo side by side using direct draw calls.
@@ -327,6 +337,9 @@ def _render_emitter_fast(
         alphabet: Alphabet string used for categorical emitters.
         color_scheme: Logomaker color scheme for categorical emitters.
         label: Y-axis label placed on *ax_match*.
+        show_information_content: If *True*, scale match-state logo heights by
+            the per-position KL divergence (bits) relative to the insert-state
+            background. Has no effect for non-categorical emitters.
     """
     import warnings
     import pandas as pd
@@ -343,27 +356,50 @@ def _render_emitter_fast(
     if "TFCategoricalEmitter" in mro_names:
         A = M_np.shape[2]
         chars = list(alphabet[:A])
+        match_probs = M_np[head, :L, :]        # (L, A)
+        ins_probs = M_np[head, L : L + 1, :]  # (1, A)
+        if show_information_content:
+            background = M_np[head, L, :]      # insert state as background
+            eps = 1e-10
+            p = np.clip(match_probs, eps, 1.0)
+            q = np.clip(background, eps, 1.0)
+            # KL divergence (bits) per position: sum_a p * log2(p/q)
+            ic = np.sum(
+                p * np.log2(p / q[np.newaxis, :]), axis=-1, keepdims=True
+            )  # (L, 1)
+            match_data = ic * match_probs
+        else:
+            match_data = match_probs
         with warnings.catch_warnings():
             warnings.filterwarnings(
                 "ignore", message=".*not in color_dict.*", category=UserWarning
             )
             # Full match profile — one logomaker call for all L positions
-            df_match = pd.DataFrame(M_np[head, :L, :], columns=chars)
+            df_match = pd.DataFrame(match_data, columns=chars)
             logomaker.Logo(
                 df_match, ax=ax_match,
                 color_scheme=color_scheme, vpad=0.1, width=0.8,
             )
-            # Insert representative (state L)
-            df_ins = pd.DataFrame(M_np[head, L : L + 1, :], columns=chars)
+            # Insert representative (state L) — always raw probabilities
+            df_ins = pd.DataFrame(ins_probs, columns=chars)
             logomaker.Logo(
                 df_ins, ax=ax_ins,
                 color_scheme=color_scheme, vpad=0.1, width=0.8,
             )
-        ax_match.set_ylabel(label, fontsize=8)
+        if show_information_content:
+            ax_match.set_ylabel(f"{label}\n(bits)", fontsize=8)
+            ax_match.set_xticks([])
+            from matplotlib.ticker import FuncFormatter
+            ax_match.yaxis.set_major_formatter(
+                FuncFormatter(lambda x, _: f"{x:.1f}")
+            )
+        else:
+            ax_match.set_ylabel(label, fontsize=8)
+            ax_match.set_xticks([])
+            ax_match.set_yticks([])
         ax_ins.set_title("ins.", fontsize=8)
-        for ax in (ax_match, ax_ins):
-            ax.set_xticks([])
-            ax.set_yticks([])
+        ax_ins.set_xticks([])
+        ax_ins.set_yticks([])
 
     elif "TFMVNormalEmitter" in mro_names:
         D = M_np.shape[2] // 2

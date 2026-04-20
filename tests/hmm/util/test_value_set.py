@@ -42,9 +42,9 @@ def test_msa_to_counts() -> None:
     np.testing.assert_equal(
         np.sum(counts_local.match_emissions, -1), [3, 4, 3, 3]
     )
-    np.testing.assert_equal(counts_local.insert_emissions[a_ind], 14)
-    np.testing.assert_equal(counts_local.insert_emissions[c_ind], 3)
-    np.testing.assert_equal(np.sum(counts_local.insert_emissions), 17)
+    np.testing.assert_almost_equal(counts_local.insert_emissions[a_ind], 14/9)
+    np.testing.assert_almost_equal(counts_local.insert_emissions[c_ind], 3/9)
+    np.testing.assert_almost_equal(np.sum(counts_local.insert_emissions), 17/9)
     np.testing.assert_equal(
         counts_local.match_emissions, counts_local.match_emissions
     )

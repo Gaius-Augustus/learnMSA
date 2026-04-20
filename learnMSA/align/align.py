@@ -159,6 +159,40 @@ def align(
 
     return am
 
+
+def _transfer_model_weights(
+    dst: LearnMSAModel,
+    src: LearnMSAModel,
+) -> None:
+    """Transfer learned parameters from a loaded model to a freshly built one.
+
+    The pHMM layer weights are copied in full (both models must share the same
+    architecture, i.e. the same model lengths).  For ``anc_probs_layer`` the
+    rate-matrix parameters (exchangeability and equilibrium kernels) are
+    preserved, while the per-sequence evolutionary-distance kernel
+    (``tau_kernel``) is only copied when both models have the same shape for
+    that variable – otherwise it is left at the new model's initialised values.
+
+    Args:
+        dst: Freshly built target model.
+        src: Previously loaded source model whose weights should be copied.
+    """
+    dst.phmm_layer.set_weights(src.phmm_layer.get_weights())
+    if hasattr(src, 'anc_probs_layer') and hasattr(dst, 'anc_probs_layer'):
+        dst.anc_probs_layer.exchangeability_kernel.assign(
+            src.anc_probs_layer.exchangeability_kernel
+        )
+        dst.anc_probs_layer.equilibrium_kernel.assign(
+            src.anc_probs_layer.equilibrium_kernel
+        )
+        # tau_kernel is per-sequence; only copy when shapes match (same dataset)
+        if (src.anc_probs_layer.tau_kernel.shape
+                == dst.anc_probs_layer.tau_kernel.shape):
+            dst.anc_probs_layer.tau_kernel.assign(
+                src.anc_probs_layer.tau_kernel
+            )
+
+
 def _fit_and_align(
     data : SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]],
     context : LearnMSAContext
@@ -195,14 +229,24 @@ def _fit_and_align(
         if config.input_output.verbose:
             print("Loaded model from file", config.input_output.load_model)
 
-        # Override indices
-        am.indices = np.arange(data[0].num_seq)
-
         # Make the context use the correct model lengths
         context.model_lengths = am.model.lengths
-        model = am.model
+        # Preserve the use_anc_probs setting from the loaded model so that
+        # the new model's architecture matches.
+        context.config.training.use_anc_probs = (
+            am.model.context.config.training.use_anc_probs
+        )
+        # Keep a reference to the loaded model for weight transfer later.
+        # We do NOT reuse am.model directly: its anc_probs_layer.tau_kernel
+        # has shape [old_num_seq, heads, tracks] which is incompatible with
+        # the new dataset size, and Keras forbids replacing sub-layers on an
+        # already-built model. Instead we build a fresh LearnMSAModel with the
+        # new context inside the training loop (where batch_size is known) and
+        # copy the relevant weights across.
+        loaded_model = am.model
     else:
-        model = None
+        loaded_model = None
+    model = None
 
     # 2 staged main loop: Fits model parameters with GD and optimized model
     # architecture with surgery
@@ -230,6 +274,11 @@ def _fit_and_align(
         if model is None:
             model = LearnMSAModel(context)
             model.build(((batch_size,),))
+            if loaded_model is not None:
+                _transfer_model_weights(model, loaded_model)
+                # Release the loaded model; weights must not be re-applied
+                # after surgery (model lengths change).
+                loaded_model = None
 
         _pre_training_checkpoint(config, model, data, train_indices, i)
 

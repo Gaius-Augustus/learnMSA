@@ -305,7 +305,7 @@ class PHMMValueSet:
         aa_indices = np.arange(len(data.alphabet))[np.newaxis, np.newaxis, :]
         matrix_expanded = data.msa_matrix[:, :, np.newaxis]
         # Sum over sequences
-        counts = np.sum(matrix_expanded == aa_indices, axis=0)
+        counts = np.sum(matrix_expanded == aa_indices, axis=0) # (N, L, S)
         counts = counts[:, :-1] # exclude gaps
         counts = counts.astype(np.float32)
 
@@ -313,8 +313,8 @@ class PHMMValueSet:
         match_counts = counts[match_columns, :]
         if np.any(~match_columns):
             insert_counts = counts[~match_columns, :]
-            # Sum over insert states
-            insert_counts = np.sum(insert_counts, axis=0)
+            # Mean over insert states
+            insert_counts = np.mean(insert_counts, axis=0)
         else:
             insert_counts = np.zeros(counts.shape[-1], dtype=np.float32)
 
@@ -355,10 +355,10 @@ class PHMMValueSet:
 
         counts_global = _count_transitions(state_seqs_global, L)
 
-        # Remove all cases where we counted transitions evolving deletes before the
-        # first or after the last match states
-        # Delete states are in range [2*L-1, 3*L-2], corresponding to match states
-        # [0, L-1]
+        # Remove all cases where we counted transitions evolving deletes before
+        # the first or after the last match states
+        # Delete states are in range [2*L-1, 3*L-2], corresponding to match
+        # states [0, L-1]
 
         # Indices of the first and last match states in {0, ..., L-1}
         first_match_indices = np.argmax(

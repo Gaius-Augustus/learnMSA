@@ -284,7 +284,15 @@ class LearnMSAContext:
                 "amino_acid_dirichlet.weights",
                 dim = len(SequenceDataset._default_alphabet)-1
             )
-            aa_psc = aa_prior.matrix()[0, 0].numpy()
+            alpha = aa_prior.matrix().numpy()[0,0]
+            C = aa_prior.config.components
+            if C > 1:
+                mix_coeff = alpha[C * aa_prior.input_dim:]
+                alpha = alpha[:C * aa_prior.input_dim]
+                alpha = np.reshape(alpha, (C, aa_prior.input_dim))
+                aa_psc = np.sum(mix_coeff[:, np.newaxis] * alpha, axis=0)
+            else:
+                aa_psc = alpha
 
             # Get transition pseudocounts
             transition_prior = TFPHMMTransitionPrior(
