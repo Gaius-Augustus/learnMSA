@@ -39,6 +39,10 @@ class StructureConfig(BaseModel):
     prior_temperature: float = 1.0
     """Scaling factor for the prior log-likelihood."""
 
+    emitter_temperature: float = 1.0
+    """Temperature applied as an exponent (1/temperature) to the structural
+    emission scores."""
+
     reset_after_surgery: bool = False
     """Whether to reset the structural information emission parameters after
     model surgery. default: False."""

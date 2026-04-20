@@ -223,7 +223,9 @@ class PHMMLayer(tf.keras.Layer):
                 for h, L in enumerate(self.lengths)
             ]
             structural_emitter = ProfileEmitter(
-                values=struct_values, trainable_insertions=trainable_insertions
+                values=struct_values,
+                trainable_insertions=trainable_insertions,
+                temperature=structural_config.emitter_temperature,
             )
             self.hmm.add_emitter(structural_emitter)
 

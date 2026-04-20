@@ -29,6 +29,7 @@ class ProfileEmitter(TFCategoricalEmitter):
         values: Sequence[PHMMValueSet],
         trainable_insertions: bool = True,
         use_full_matmul: bool = True,
+        temperature: float = 1.0,
         **kwargs
     ) -> None:
         """
@@ -40,8 +41,11 @@ class ProfileEmitter(TFCategoricalEmitter):
             use_full_matmul (bool): Whether to compute emission scores via
                 a full matrix multiplication instead of copying insertion
                 emissions.
+            temperature (float): Temperature applied as an exponent
+                (1/temperature) to the emission scores. Defaults to 1.0.
         """
         super().__init__(**kwargs)
+        self.temperature = temperature
 
         if len(values) == 0:
             raise ValueError("At least one value set must be provided.")
@@ -121,7 +125,7 @@ class ProfileEmitter(TFCategoricalEmitter):
 
     def emission_scores(self, observations: T_TFTensor) -> T_TFTensor:
         if self.use_full_matmul:
-            return super().emission_scores(observations)
+            emission_scores = super().emission_scores(observations)
         else:
             # Override to handle insertion state via copying instead of
             # explicit computations
@@ -141,7 +145,10 @@ class ProfileEmitter(TFCategoricalEmitter):
                 self.lengths+1, dtype=emission_scores.dtype
             )
 
-            return emission_scores
+        if self.temperature != 1.0:
+            emission_scores = emission_scores ** (1.0 / self.temperature)
+
+        return emission_scores
 
     @override
     def call(
