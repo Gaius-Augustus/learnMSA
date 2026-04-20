@@ -220,44 +220,34 @@ def validate_output_file_requirements(config, parser) -> None:
             )
 
 
-def _flatten_nested_dict(data: dict[str, Any]) -> dict[str, Any]:
-    """Flatten nested dictionaries by keeping leaf keys as destinations."""
-    flattened: dict[str, Any] = {}
-    for key, value in data.items():
-        if isinstance(value, dict):
-            flattened.update(_flatten_nested_dict(value))
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    """Recursively merge override into base, returning a new dict."""
+    result = base.copy()
+    for key, value in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _deep_merge(result[key], value)
         else:
-            flattened[key] = value
-    return flattened
+            result[key] = value
+    return result
 
 
-def _config_to_argparse_defaults(config: Configuration) -> dict[str, Any]:
-    """Convert Configuration to argparse defaults with minimal special mapping."""
-    conf = config.model_dump(mode="json")
-    defaults = _flatten_nested_dict(conf)
+def merge_config_file(
+    config_path: str, base_config: Configuration, parser: ArgumentParser
+) -> Configuration:
+    """Load a JSON config file and merge it on top of base_config.
 
-    training = conf.get("training", {})
-    input_output = conf.get("input_output", {})
-    advanced = conf.get("advanced", {})
+    Values from the file override those already in base_config, so --config
+    takes the highest priority in the resolution chain:
+      program defaults → CLI args → --config file
 
-    if training.get("auto_crop", True):
-        defaults["crop"] = "auto"
-    elif training.get("crop", 0) == sys.maxsize:
-        defaults["crop"] = "disable"
-    else:
-        defaults["crop"] = str(training.get("crop"))
+    Args:
+        config_path: Path to the JSON configuration file.
+        base_config: Configuration object to merge into.
+        parser: Argument parser used for error reporting.
 
-    defaults["silent"] = not input_output.get("verbose", True)
-    defaults["no_jit"] = not advanced.get("jit_compile", True)
-    defaults["frozen_distances"] = not training.get("trainable_distances", True)
-
-    return defaults
-
-
-def apply_baseline_config_defaults(
-    parser: ArgumentParser, config_path: str
-) -> None:
-    """Load baseline configuration from JSON and apply as parser defaults."""
+    Returns:
+        A new Configuration with the file values applied on top.
+    """
     path = Path(config_path)
     try:
         with open(path, "r", encoding="utf-8") as file:
@@ -267,26 +257,11 @@ def apply_baseline_config_defaults(
     except json.JSONDecodeError as exc:
         parser.error(f"Config file '{path}' is not valid JSON: {exc}")
 
+    merged = _deep_merge(base_config.model_dump(mode="json"), config_dict)
     try:
-        config = Configuration.model_validate(config_dict)
+        return Configuration.model_validate(merged)
     except Exception as exc:
         parser.error(f"Invalid config file '{path}': {exc}")
-
-    all_defaults = _config_to_argparse_defaults(config)
-    parser_dests = {action.dest for action in parser._actions}
-    defaults = {
-        key: value for key, value in all_defaults.items() if key in parser_dests
-    }
-    parser.set_defaults(**defaults)
-
-    for action in parser._actions:
-        if not action.required:
-            continue
-        if action.dest not in defaults:
-            continue
-        value = defaults[action.dest]
-        if value not in (None, "", []):
-            action.required = False
 
 
 def load_struct_data(

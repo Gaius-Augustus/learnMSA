@@ -347,6 +347,7 @@ class AlignmentModel():
 
         # Disable ancestral probabilities as they are specific for the
         # training sequences and will not apply to target sequences
+        _anc_probs = self.model.context.config.training.use_anc_probs
         self.model.context.config.training.use_anc_probs = False
 
         # Compute the likelihood and bitscores for all sequences
@@ -378,6 +379,9 @@ class AlignmentModel():
                     f"{loglik[idx]}",
                     f"{bitscore[idx]}"
                 ]) + "\n")
+
+        # Restore the original setting for ancestral probabilities
+        self.model.context.config.training.use_anc_probs = _anc_probs
 
     def save(self, filepath: str | Path, pack: bool = True) -> None:
         """ Writes the underlying models to file.

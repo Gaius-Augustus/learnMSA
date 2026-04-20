@@ -315,8 +315,7 @@ class PHMMLayer(tf.keras.Layer):
         Returns:
             New value sets with emissions replaced by prior distribution.
         """
-        prior_dist = prior.matrix().numpy()[0, 0]
-        prior_dist = prior_dist / np.sum(prior_dist)
+        prior_dist = prior.mean().numpy()[0, 0]
         updated_values = []
         if not override_matches and not override_insertions:
             return list(values)

@@ -19,14 +19,14 @@ def run_main() -> None:
     version = util.get_version()
     if handle_help_command():
         return
-    parser = parse_args(version)
-    pre_args, _ = parser.parse_known_args()
-    if pre_args.config:
-        util.apply_baseline_config_defaults(parser, pre_args.config)
+    default_config = Configuration()
+    parser = parse_args(version, default_config)
     args = parser.parse_args()
 
-    # Convert args to configuration
-    config = args_to_config(args)
+    # Build configuration: CLI args first, then overlay --config file if given
+    config = args_to_config(args, default_config)
+    if args.config:
+        config = util.merge_config_file(args.config, config, parser)
 
     # Resolve input file (may use --from_msa when -i is omitted)
     util.resolve_input_file(config, parser)
@@ -143,7 +143,7 @@ def run_main() -> None:
             if config.input_output.verbose:
                 print(f"Saved HMM plot to {config.visualization.plot}")
 
-        if args.dist_out:
+        if config.advanced.dist_out:
             raise NotImplementedError(
                 "Distribution output is not implemented in this version."
             )
