@@ -28,6 +28,11 @@ class PHMMMixin():
         """
         self.phmm_layer.viterbi_mode()
 
+    def mea_mode(self) -> None:
+        """Makes the model return MEA paths.
+        """
+        self.phmm_layer.mea_mode()
+
     def posterior_mode(self) -> None:
         """Makes the model return state posterior probabilities.
         """

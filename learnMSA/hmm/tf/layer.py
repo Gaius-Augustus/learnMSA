@@ -255,6 +255,11 @@ class PHMMLayer(tf.keras.Layer):
         """
         self._mode = HMMMode.VITERBI
 
+    def mea_mode(self) -> None:
+        """Makes the layer return Viterbi paths.
+        """
+        self._mode = HMMMode.MEA
+
     def posterior_mode(self) -> None:
         """Makes the layer return state posterior probabilities.
         """
@@ -269,6 +274,16 @@ class PHMMLayer(tf.keras.Layer):
         """Check if the layer is in Viterbi mode.
         """
         return self._mode == HMMMode.VITERBI
+
+    def is_mea_mode(self) -> bool:
+        """Check if the layer is in MEA mode.
+        """
+        return self._mode == HMMMode.MEA
+
+    def is_decoding_mode(self) -> bool:
+        """Check if the layer is in decoding mode.
+        """
+        return self._mode in {HMMMode.VITERBI, HMMMode.MEA}
 
     def is_posterior_mode(self) -> bool:
         """Check if the layer is in posterior mode.

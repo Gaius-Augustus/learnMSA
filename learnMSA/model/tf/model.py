@@ -591,7 +591,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         max_len = int(max(data[0].seq_lens[indices]) + 1)
 
         if self.phmm_layer.is_posterior_mode()\
-                or self.phmm_layer.is_viterbi_mode():
+                or self.phmm_layer.is_decoding_mode():
             # Process predictions: slice if too long, pad if needed
             # (only in posterior/loglik modes)
             processed_predictions = []
@@ -609,7 +609,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
                     pad_width = [(0, 0)] * len(pred.shape)
                     pad_width[1] = (0, max_len - pred.shape[1])
                     pred = np.pad(pred, pad_width, constant_values=pad_value)
-                    if self.phmm_layer.is_viterbi_mode():
+                    if self.phmm_layer.is_decoding_mode():
                         for i, j in enumerate(_models):
                             q = self.phmm_layer.states[j]
                             pred[...,i][pred[...,i] == -1] = q
@@ -635,7 +635,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         # Replace -1 padding
         if self.phmm_layer.is_posterior_mode():
             decoded_array[decoded_array == -1] = 0
-        elif self.phmm_layer.is_viterbi_mode():
+        elif self.phmm_layer.is_decoding_mode():
             for i,j in enumerate(_models):
                 L = self.phmm_layer.lengths[j]
                 decoded_array[:,:,i][decoded_array[:,:,i] == -1] = 2*L + 2

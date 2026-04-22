@@ -100,6 +100,22 @@ def test_only_matches(
     for s, r in zip(subalignment_strings, ref_subalignment):
         assert s == r
 
+def test_mea(
+    simple_data : SequenceDataset,
+    simple_model : LearnMSAModel,
+) -> None:
+    """Test writing only match columns to file"""
+    # subalignment
+    subset = np.array([0, 2, 5])
+    # create alignment after building model
+    sub_am = AlignmentModel(simple_data, simple_model, subset)
+    subalignment_strings = sub_am.to_string(
+        0, add_block_sep=False, decoding_mode=AlignmentModel.DecodingMode.MEA
+    )
+    ref_subalignment = ["FE...LIK...", "FE...LIKhac", "FEahcLIK..."]
+    for s, r in zip(subalignment_strings, ref_subalignment):
+        assert s == r
+
 def test_alignment_egf() -> None:
     """Test the high-level alignment function with real world data"""
     egf_fasta_path = os.path.join(

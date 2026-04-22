@@ -129,6 +129,9 @@ class TrainingConfig(BaseModel):
     reset_transitions_after_surgery: bool = False
     """Whether to reset the transition probabilities after surgery."""
 
+    decoding_mode: str = "viterbi"
+    """Decoding mode for training. Options: "viterbi", "mea"."""
+
 
     @field_validator("learning_rate")
     def validate_learning_rate(cls, v: float) -> float:

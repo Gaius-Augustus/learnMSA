@@ -221,6 +221,14 @@ def parse_args(
         "This requires an alternative data source like structure information." \
         "Default: use amino acid emissions."
     )
+    train_group.add_argument(
+        "--decode", "--decoding_mode",
+        dest="decoding_mode",
+        type=str,
+        default=tr.decoding_mode,
+        help="Decoding mode for training. Options: 'viterbi', 'mea'. "\
+        "(default: %(default)s)"
+    )
 
     class EpochsAction(argparse.Action):
         def __call__(

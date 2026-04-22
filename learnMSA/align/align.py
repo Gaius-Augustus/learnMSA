@@ -120,6 +120,9 @@ def align(
     assert am.best_head != -1,\
         "Best head was not selected. This should not happen."
 
+    decoding_mode=AlignmentModel.DecodingMode.from_str(
+        config.training.decoding_mode
+    )
     if config.training.unaligned_insertions or config.training.only_matches:
         # Don't align insertions when requested or when only matches need to
         # be written to the output file
@@ -127,21 +130,24 @@ def align(
             config.input_output.output_file,
             am.best_head,
             format=config.input_output.format,
-            only_matches=config.training.only_matches
+            only_matches=config.training.only_matches,
+            decoding_mode=decoding_mode,
         )
     else:
         aligned_insertions = make_aligned_insertions(
             am,
             am.best_head,
-            config.advanced.insertion_aligner,
-            config.advanced.aligner_threads,
-            verbose=config.input_output.verbose
+            decoding_mode=decoding_mode,
+            method=config.advanced.insertion_aligner,
+            threads=config.advanced.aligner_threads,
+            verbose=config.input_output.verbose,
         )
         am.to_file(
             config.input_output.output_file,
             am.best_head,
             aligned_insertions=aligned_insertions,
-            format=config.input_output.format
+            format=config.input_output.format,
+            decoding_mode=decoding_mode,
         )
 
     if config.input_output.verbose:

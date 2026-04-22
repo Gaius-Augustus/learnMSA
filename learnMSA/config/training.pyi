@@ -39,6 +39,7 @@ class TrainingConfig(BaseModel):
     no_aa: bool
     reset_emissions_after_surgery: bool
     reset_transitions_after_surgery: bool
+    decoding_mode: str
 
     def __init__(
         self,
@@ -77,6 +78,7 @@ class TrainingConfig(BaseModel):
         no_aa: bool = False,
         reset_emissions_after_surgery: bool = False,
         reset_transitions_after_surgery: bool = False,
+        decoding_mode: str = "viterbi",
         **kwargs: Any,
     ) -> None: ...
 

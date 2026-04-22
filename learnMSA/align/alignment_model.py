@@ -1,6 +1,7 @@
 import json
 import shutil
 import warnings
+from enum import Enum
 from pathlib import Path
 
 import numpy as np
@@ -8,10 +9,10 @@ import tensorflow as tf
 
 from learnMSA.align.align_inserts import AlignedInsertions
 from learnMSA.align.alignment_metadata import AlignmentMetaData
+from learnMSA.model.select import SelectionCriterion, select_model
 from learnMSA.model.tf.model import LearnMSAModel
 from learnMSA.util.aligned_dataset import AlignedDataset, SequenceDataset
 from learnMSA.util.dataset import Dataset
-from learnMSA.model.select import SelectionCriterion, select_model
 
 
 class AlignmentModel():
@@ -42,6 +43,19 @@ class AlignmentModel():
 
     best_head: int
     """Index of the head that best fits the training data."""
+    class DecodingMode(Enum):
+        VITERBI = "viterbi"
+        MEA = "mea"
+
+        @staticmethod
+        def from_str(label: str) -> 'AlignmentModel.DecodingMode':
+            if label.lower() == 'viterbi':
+                return AlignmentModel.DecodingMode.VITERBI
+            elif label.lower() == 'mea':
+                return AlignmentModel.DecodingMode.MEA
+            else:
+                raise ValueError(f"Unsupported decoding mode: {label}")
+
 
     def __init__(
         self,
@@ -123,6 +137,7 @@ class AlignmentModel():
         aligned_insertions: AlignedInsertions = AlignedInsertions(),
         a2m: bool = True,
         only_matches: bool = False,
+        decoding_mode: DecodingMode = DecodingMode.VITERBI,
     ) -> list[str]:
         """ Select one model and decode an alignment that is returned as a
             list of strings.
@@ -141,6 +156,7 @@ class AlignmentModel():
                 gaps in insertions).
             only_matches: If true, omit all insertions and write only those
                 amino acids that are assigned to match states.
+            decoding_mode: The mode used for decoding the alignment.
         """
         output_alphabet = self.get_output_alphabet(a2m)
         batch_alignment = self.get_batch_alignment(
@@ -149,6 +165,7 @@ class AlignmentModel():
             add_block_sep=add_block_sep,
             aligned_insertions=aligned_insertions,
             only_matches=only_matches,
+            decoding_mode=decoding_mode,
         )
         alignment_strings = self.batch_to_string(
             batch_alignment, output_alphabet=output_alphabet
@@ -165,6 +182,7 @@ class AlignmentModel():
         format: str = "fasta",
         fasta_line_limit: int = 80,
         only_matches: bool = False,
+        decoding_mode: DecodingMode = DecodingMode.VITERBI,
     ) -> None:
         """ Select one model and decode an alignment that is written in fasta
             or a2m file format.
@@ -188,6 +206,7 @@ class AlignmentModel():
                 fasta file (only applies to sequences).
             only_matches: If true, omit all insertions and write only those
                 amino acids that are assigned to match states.
+            decoding_mode: The mode used for decoding the alignment.
         """
         if format == "fasta" or format == "a2m":
             # Stream batches to file
@@ -203,6 +222,7 @@ class AlignmentModel():
                         add_block_sep=add_block_sep,
                         aligned_insertions=aligned_insertions,
                         only_matches=only_matches,
+                        decoding_mode=decoding_mode,
                     )
                     alignment_strings = self.batch_to_string(
                         batch_alignment, output_alphabet=output_alphabet
@@ -235,6 +255,7 @@ class AlignmentModel():
         add_block_sep: bool = True,
         aligned_insertions: AlignedInsertions = AlignedInsertions(),
         only_matches: bool = False,
+        decoding_mode: DecodingMode = DecodingMode.VITERBI,
     ) -> np.ndarray:
         """ Returns a dense matrix representing a subset of sequences
             as specified by batch_indices with respect to the alignment of all
@@ -250,9 +271,10 @@ class AlignmentModel():
                 insertions are aligned after the main procedure.
             only_matches: If true, omit all insertions and write only those
                 amino acids that are assigned to match states.
+            decoding_mode: The mode used for decoding the alignment.
         """
         if not model_index in self.metadata:
-            self._build_alignment([model_index])
+            self._build_alignment([model_index], decoding_mode)
         data = self.metadata[model_index]
         b = batch_indices.size
         sequences = np.zeros((b, self.data[0].max_len), dtype=np.uint16)
@@ -699,11 +721,17 @@ class AlignmentModel():
     #computes an implicit alignment (without storing gaps)
     #eventually, an alignment with explicit gaps can be written
     #in a memory friendly manner to file
-    def _build_alignment(self, models):
+    def _build_alignment(self, models, decoding_mode: DecodingMode):
 
         assert len(models) == 1, "Not implemented for multiple models."
 
-        self.model.viterbi_mode()
+        if decoding_mode == AlignmentModel.DecodingMode.VITERBI:
+            self.model.viterbi_mode()
+        elif decoding_mode == AlignmentModel.DecodingMode.MEA:
+            self.model.mea_mode()
+        else:
+            raise ValueError(f"Unsupported decoding mode: {decoding_mode}")
+
         state_seqs_max_lik = self.model.predict(
             self.data, indices=self.indices, models=models
         ) # (B, T, H)
