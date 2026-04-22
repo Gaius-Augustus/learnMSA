@@ -39,7 +39,7 @@ class StructureConfig(BaseModel):
     prior_temperature: float = 1.0
     """Scaling factor for the prior log-likelihood."""
 
-    use_prior_for_emission_init: bool = False
+    use_prior_for_emission_init: bool = True
     """Whether to use the prior distribution for initializing the structural
     emission parameters."""
 

@@ -8,6 +8,7 @@ from learnMSA.config.structure import StructureConfig
 from learnMSA.config.training import TrainingConfig
 from learnMSA.config.util import get_value
 from learnMSA.hmm.tf.layer import PHMMLayer
+from learnMSA.hmm.tf.util import load_dirichlet
 from learnMSA.hmm.util.transition_index_set import PHMMTransitionIndexSet
 from learnMSA.model.tf.model import LearnMSAModel
 from learnMSA.util.dataset import Dataset
@@ -284,7 +285,16 @@ def update_kernels(
         assert aa_emissions.shape[0] == 1,\
             "Head subset is not working properly for the amino acid emitter."
         aa_emissions = aa_emissions[0, :L, :]
-        aa_insert_value = np.array(config.background_distribution)
+        if config.use_prior_for_emission_init:
+            # use prior mean as brackground distribution
+            emission_prior = load_dirichlet(
+                "amino_acid_dirichlet.weights",
+                dim = len(SequenceDataset._default_alphabet)-1,
+                states = [1],
+            )
+            aa_insert_value = emission_prior.mean()[0,0].numpy()
+        else:
+            aa_insert_value = np.array(config.background_distribution)
         aa_emissions_new = apply_mods(
             aa_emissions,
             pos_expand=pos_expand,
@@ -333,8 +343,17 @@ def update_kernels(
         assert struct_emissions.shape[0] == 1,\
             "Head subset is not working properly for the structural emitter."
         struct_emissions = struct_emissions[0, :L, :]
-        struct_insert_value = np.array(
-            structural_config.background_distribution # type: ignore
+        if structural_config.use_prior_for_emission_init:
+            struct_prior = load_dirichlet(
+                    structural_config.prior_name+".weights",
+                    dim=structural_config.alphabet_size,
+                    components=structural_config.prior_components,
+                    states=[1],
+                )
+            struct_insert_value = struct_prior.mean()[0,0].numpy()
+        else:
+            struct_insert_value = np.array(
+                structural_config.background_distribution # type: ignore
         )
         struct_emissions_new = apply_mods(
             struct_emissions,

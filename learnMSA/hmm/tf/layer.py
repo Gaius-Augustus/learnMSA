@@ -236,7 +236,7 @@ class PHMMLayer(tf.keras.Layer):
                 # Override emission values with prior distribution if requested
                 override_matches=structural_config.match_emissions is None
                 override_insertions=structural_config.insert_emissions is None
-                if config.use_prior_for_emission_init:
+                if structural_config.use_prior_for_emission_init:
                     struct_values = self._override_emissions_with_prior(
                         struct_values,
                         struct_prior,
