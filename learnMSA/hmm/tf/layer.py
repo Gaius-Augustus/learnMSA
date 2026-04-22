@@ -222,12 +222,6 @@ class PHMMLayer(tf.keras.Layer):
                 PHMMValueSet.from_structural_config(L, h, structural_config)
                 for h, L in enumerate(self.lengths)
             ]
-            structural_emitter = ProfileEmitter(
-                values=struct_values,
-                trainable_insertions=trainable_insertions,
-                temperature=structural_config.emitter_temperature,
-            )
-            self.hmm.add_emitter(structural_emitter)
 
             # If specified, load and add a Dirichlet prior
             if structural_config.prior_name:
@@ -238,7 +232,28 @@ class PHMMLayer(tf.keras.Layer):
                     states=self.states,
                 )
                 struct_prior.temperature = structural_config.prior_temperature
+
+                # Override emission values with prior distribution if requested
+                override_matches=structural_config.match_emissions is None
+                override_insertions=structural_config.insert_emissions is None
+                if config.use_prior_for_emission_init:
+                    struct_values = self._override_emissions_with_prior(
+                        struct_values,
+                        struct_prior,
+                        override_matches=override_matches,
+                        override_insertions=override_insertions,
+                    )
+            else:
+                struct_prior = None
+
+            structural_emitter = ProfileEmitter(
+                values=struct_values,
+                trainable_insertions=trainable_insertions,
+                temperature=structural_config.emitter_temperature,
+            )
+            if struct_prior is not None and self.use_prior:
                 structural_emitter.prior = struct_prior
+            self.hmm.add_emitter(structural_emitter)
         else:
             self.use_structure = False
 
