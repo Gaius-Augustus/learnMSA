@@ -146,7 +146,13 @@ class ProfileEmitter(TFCategoricalEmitter):
             )
 
         if self.temperature != 1.0:
-            emission_scores = emission_scores ** (1.0 / self.temperature)
+            # Clip to a small epsilon before raising to a fractional power.
+            # Clipping to 0 would cause the gradient p*x^(p-1) -> +Inf at x=0
+            # when temperature > 1 (p = 1/temperature < 1). Masked positions
+            # with near-zero scores are irrelevant to the loss anyway.
+            emission_scores = tf.pow(
+                tf.maximum(emission_scores, 1e-12), 1.0 / self.temperature
+            )
 
         return emission_scores
 

@@ -343,7 +343,8 @@ def update_kernels(
         assert struct_emissions.shape[0] == 1,\
             "Head subset is not working properly for the structural emitter."
         struct_emissions = struct_emissions[0, :L, :]
-        if structural_config.use_prior_for_emission_init:
+        if structural_config.use_prior_for_emission_init\
+                and structural_config.prior_name:
             struct_prior = load_dirichlet(
                     structural_config.prior_name+".weights",
                     dim=structural_config.alphabet_size,
