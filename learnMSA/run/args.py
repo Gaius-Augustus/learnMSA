@@ -163,6 +163,12 @@ def parse_args(
             "stores embeddings in the working directory. Set to an empty "\
             "string to disable."
     )
+    io_group.add_argument(
+        "--block_sep",
+        dest="block_sep",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
 
     # Training
     train_group = parser.add_argument_group("Training")

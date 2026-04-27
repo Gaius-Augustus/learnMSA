@@ -47,6 +47,7 @@ def args_to_config(args: Namespace, base_config: Configuration | None = None) ->
     io["struct_file"] = args.struct_file
     io["emb_file"] = args.emb_file
     io["save_emb"] = _get_save_emb(args)
+    io["add_block_separator_to_msa"] = args.block_sep
 
     # --- Training ---
     tr["num_model"] = args.num_model

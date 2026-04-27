@@ -132,6 +132,7 @@ def align(
             format=config.input_output.format,
             only_matches=config.training.only_matches,
             decoding_mode=decoding_mode,
+            add_block_sep=config.input_output.add_block_separator_to_msa,
         )
     else:
         aligned_insertions = make_aligned_insertions(
@@ -148,6 +149,7 @@ def align(
             aligned_insertions=aligned_insertions,
             format=config.input_output.format,
             decoding_mode=decoding_mode,
+            add_block_sep=config.input_output.add_block_separator_to_msa,
         )
 
     if config.input_output.verbose:

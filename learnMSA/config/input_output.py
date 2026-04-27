@@ -68,6 +68,11 @@ class InputOutputConfig(BaseModel):
     save_emb: PathField | None = None
     """If set, path to save the computed embeddings for each sequence."""
 
+    add_block_separator_to_msa: bool = False
+    """If True, add a block separator ($) in the output MSA to indicate where
+    sequences hit the profile. This can be seen as an extended A2M format that
+    shows multi-hits."""
+
     @field_validator("format")
     @classmethod
     def validate_format(cls, v: str) -> str:
