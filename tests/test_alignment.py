@@ -6,6 +6,7 @@ import tensorflow as tf
 
 from learnMSA import Configuration
 from learnMSA.align.align import align
+from learnMSA.align.alignment_metadata import AlignmentMetaData
 from learnMSA.align.alignment_model import (AlignmentModel,
                                             find_faulty_sequences,
                                             non_homogeneous_mask_func)
@@ -1048,3 +1049,80 @@ def test_viterbi(
                 meta_data.insertion_start[i],
             )
             np.testing.assert_equal(alignment_block, ref)
+
+
+def test_alignment_metadata_shift() -> None:
+    """Test AlignmentMetaData.shift() with random data."""
+    rng = np.random.default_rng(42)
+    R, N, M = 3, 5, 4  # repeats, rows, match states
+
+    skip = np.zeros((R, N), dtype=np.int32)
+    meta = AlignmentMetaData(
+        num_rows=N,
+        num_match=M,
+        num_repeats=R,
+        domain_hit=rng.integers(0, 10, (R, N, M)),
+        domain_loc=rng.integers(0, 100, (R, N, 2)),
+        insertion_lens=rng.integers(0, 5, (R, N, M - 1)),
+        insertion_start=rng.integers(0, 100, (R, N, M - 1)),
+        skip=skip,
+        left_flank_len=rng.integers(0, 10, N),
+        left_flank_start=rng.integers(0, 10, N),
+        right_flank_len=rng.integers(0, 10, N),
+        right_flank_start=rng.integers(0, 10, N),
+        unannotated_segments_len=rng.integers(0, 5, (R, N)),
+        unannotated_segments_start=rng.integers(0, 100, (R, N)),
+    )
+
+    # Save originals before shift
+    orig = {
+        "domain_hit": meta.domain_hit.copy(),
+        "insertion_lens": meta.insertion_lens.copy(),
+        "skip": meta.skip.copy(),
+    }
+
+    # Each row gets a different shift amount
+    shift = np.array([0, 1, 0, 2, 1])
+    assert len(shift) == N
+
+    meta.shift(shift)
+
+    # num_repeats: hits_per_row == R for all rows (no skips)
+    expected_num_repeats = int(np.amax(R + shift)) + 1
+    assert meta.num_repeats == expected_num_repeats
+
+    # Check shapes of per-repeat arrays
+    assert meta.domain_hit.shape == (expected_num_repeats, N, M)
+    assert meta.skip.shape == (expected_num_repeats, N)
+    assert meta.insertion_lens.shape == (expected_num_repeats, N, M - 1)
+
+    # Verify shifted values and padding for domain_hit (pad=-1) and skip (pad=1)
+    for field, pad in [("domain_hit", -1), ("skip", 1)]:
+        arr_new = getattr(meta, field)
+        arr_old = orig[field]
+        for i in range(N):
+            s = shift[i]
+            np.testing.assert_array_equal(
+                arr_new[s : s + R, i],
+                arr_old[:, i],
+                err_msg=f"{field}: shifted content mismatch for row {i}",
+            )
+            if s > 0:
+                np.testing.assert_array_equal(
+                    arr_new[:s, i],
+                    np.full_like(arr_new[:s, i], pad),
+                    err_msg=f"{field}: padding mismatch for row {i}",
+                )
+
+    # Verify insertion_lens (pad=0) content
+    for i in range(N):
+        s = shift[i]
+        np.testing.assert_array_equal(
+            meta.insertion_lens[s : s + R, i],
+            orig["insertion_lens"][:, i],
+        )
+        if s > 0:
+            np.testing.assert_array_equal(
+                meta.insertion_lens[:s, i],
+                np.zeros((s, M - 1), dtype=meta.insertion_lens.dtype),
+            )

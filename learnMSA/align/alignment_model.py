@@ -9,6 +9,7 @@ import tensorflow as tf
 
 from learnMSA.align.align_inserts import AlignedInsertions
 from learnMSA.align.alignment_metadata import AlignmentMetaData
+from learnMSA.align.align_hits import greedy_hit_alignment
 from learnMSA.model.select import SelectionCriterion, select_model
 from learnMSA.model.tf.model import LearnMSAModel
 from learnMSA.util.aligned_dataset import AlignedDataset, SequenceDataset
@@ -811,7 +812,18 @@ class AlignmentModel():
         for i,j in enumerate(models):
             model_len = self.model.context.model_lengths[j]
             s = state_seqs_max_lik[:,:,i]
-            self.metadata[j] = AlignmentModel.decode(model_len, s)
+            meta_data = AlignmentModel.decode(model_len, s)
+
+            # TODO
+            fake_scores = np.zeros((meta_data.num_repeats, meta_data.num_rows))
+            fake_scores[0, :] = 99 # score first hits high just for testing
+            # this should exactly replicate the original behavior of learnMSA
+
+            shift = greedy_hit_alignment(fake_scores)
+
+            meta_data.shift(shift)
+
+            self.metadata[j] = meta_data
 
     def _clean_up_viterbi_seqs(self, state_seqs_max_lik, models):
 

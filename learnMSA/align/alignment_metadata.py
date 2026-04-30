@@ -104,3 +104,60 @@ class AlignmentMetaData:
             np.sum(self.unannotated_segment_lens_total) +
             self.right_flank_len_total
         )
+
+    def shift(self, shift: np.ndarray) -> None:
+        """Shifts the domain hits according to the given shift vector. Can be
+        used to align domain hits. Note that this only supports shifting all
+        domain hits to the right as a continuous block. Gaps are currently not
+        supported.
+        Will affect alignment length when a row is shifted beyond the current
+        alignment length.
+
+        Args:
+            shift: np.ndarray of shape (num_rows,) containing the shift values
+                for each row.
+        """
+        hits_per_row = np.sum(self.skip == 0, axis=0) + 1
+        self.num_repeats = np.amax(hits_per_row + shift)
+        self.domain_hit = self._ashift(self.domain_hit, shift, -1)
+        self.domain_loc = self._ashift(self.domain_loc, shift, -1)
+        self.insertion_lens = self._ashift(self.insertion_lens, shift, 0)
+        self.insertion_start = self._ashift(self.insertion_start, shift, -1)
+        self.skip = self._ashift(self.skip, shift, 1)
+        self.unannotated_segments_len = self._ashift(
+            self.unannotated_segments_len, shift, 0
+        )
+        self.unannotated_segments_start = self._ashift(
+            self.unannotated_segments_start, shift, -1
+        )
+
+    def _ashift(
+        self, arr: np.ndarray, shift: np.ndarray, padding_value: int | float,
+    ) -> np.ndarray:
+        """Shifts the given array according to the given shift vector. This is
+        a helper function for shift().
+
+        Args:
+            arr: np.ndarray of shape (num_repeats, N, ...)
+            shift: np.ndarray of shape (N,) containing the shift values
+                for each row.
+            padding_value: The value to use for padding.
+
+        Returns:
+            shifted_arr: np.ndarray of shape (new_num_repeats, N, ...)
+            where in each row i the values of `arr` are shifted by shift[i]
+            positions to the right.
+        """
+        old_num_repeats = arr.shape[0]
+        new_shape = (self.num_repeats,) + arr.shape[1:]
+        result = np.full(new_shape, padding_value, dtype=arr.dtype)
+
+        if old_num_repeats == 0 or self.num_repeats == 0:
+            return result
+
+        r_idx = np.arange(old_num_repeats)[:, np.newaxis]   # (old_R, 1)
+        row_idx = np.arange(arr.shape[1])[np.newaxis, :]    # (1, N)
+        dest_r = r_idx + shift[np.newaxis, :]               # (old_R, N)
+
+        result[dest_r, row_idx] = arr
+        return result
