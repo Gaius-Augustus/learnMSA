@@ -38,7 +38,7 @@ class AlignmentModel():
     gap_symbol_insertions: str
     """Character used to denote insertions in other sequences."""
 
-    metadata: dict
+    metadata: dict[int, AlignmentMetaData]
     """Alignment metadata for each model."""
 
     best_head: int
@@ -275,7 +275,9 @@ class AlignmentModel():
         """
         if not model_index in self.metadata:
             self._build_alignment([model_index], decoding_mode)
-        data = self.metadata[model_index]
+        meta_data = self.metadata[model_index]
+
+        # Gather the sequences for the batch
         b = batch_indices.size
         sequences = np.zeros((b, self.data[0].max_len), dtype=np.uint16)
         sequences += (len(self.data[0].alphabet)-1)
@@ -283,51 +285,63 @@ class AlignmentModel():
             idx = int(self.indices[j])
             l = self.data[0].seq_lens[idx]
             sequences[i, :l] = self.data[0].get_encoded_seq(idx)
+
+        # Construct the alignment blocks
         blocks = []
         if add_block_sep:
             sep = np.zeros((b,1), dtype=np.uint16) + 2*len(self.data[0].alphabet)
+
+        # Left flank
         if not only_matches:
             left_flank_block = self.get_insertion_block(
                 sequences,
-                data.left_flank_len[batch_indices],
-                max(data.left_flank_len_total, aligned_insertions.ext_left_flank),
-                data.left_flank_start[batch_indices],
+                meta_data.left_flank_len[batch_indices],
+                max(
+                    meta_data.left_flank_len_total,
+                    aligned_insertions.ext_left_flank
+                ),
+                meta_data.left_flank_start[batch_indices],
                 adjust_to_right=True,
                 custom_columns=aligned_insertions.left_flank(batch_indices)
             )
             blocks.append(left_flank_block)
             if add_block_sep:
                 blocks.append(sep)
-        for i in range(data.num_repeats):
-            consensus = data.consensus[i]
-            #remove columns consisting only of gaps
+
+        for i in range(meta_data.num_repeats):
+            consensus = meta_data.domain_hit[i]
+
+            # remove columns consisting only of gaps
             is_non_empty = np.any(consensus != -1, axis=0)
-            ins_len = data.insertion_lens[i]
-            ins_start = data.insertion_start[i]
+
+            # One domain hit
             alignment_block = self.get_alignment_block(
                 sequences=sequences,
                 consensus=consensus[batch_indices],
-                ins_len=data.insertion_lens[i][batch_indices],
+                ins_len=meta_data.insertion_lens[i][batch_indices],
                 ins_len_total=np.maximum(
-                    data.insertion_lens_total,
+                    meta_data.insertion_lens_total,
                     aligned_insertions.ext_insertions
                 )[i],
-                ins_start=data.insertion_start[i][batch_indices],
+                ins_start=meta_data.insertion_start[i][batch_indices],
                 is_non_empty=is_non_empty,
                 custom_columns=aligned_insertions.insertion(batch_indices, i),
                 only_matches=only_matches
             )
             blocks.append(alignment_block)
+
             if add_block_sep:
                 blocks.append(sep)
-            if i < data.num_repeats-1 and not only_matches:
-                unannotated_segment_l = data.unannotated_segments_len[i]
-                unannotated_segment_s = data.unannotated_segments_start[i]
+
+            # Unannotated segment (if there are more repeats to come)
+            if i < meta_data.num_repeats-1 and not only_matches:
+                unannotated_segment_l = meta_data.unannotated_segments_len[i]
+                unannotated_segment_s = meta_data.unannotated_segments_start[i]
                 unannotated_block = self.get_insertion_block(
                     sequences,
                     unannotated_segment_l[batch_indices],
                     np.maximum(
-                        data.unannotated_segment_lens_total,
+                        meta_data.unannotated_segment_lens_total,
                         aligned_insertions.ext_unannotated
                     )[i],
                     unannotated_segment_s[batch_indices],
@@ -338,15 +352,21 @@ class AlignmentModel():
                 blocks.append(unannotated_block)
                 if add_block_sep:
                     blocks.append(sep)
+
+        # Right flank
         if not only_matches:
             right_flank_block = self.get_insertion_block(
                 sequences,
-                data.right_flank_len[batch_indices],
-                max(data.right_flank_len_total, aligned_insertions.ext_right_flank),
-                data.right_flank_start[batch_indices],
+                meta_data.right_flank_len[batch_indices],
+                max(
+                    meta_data.right_flank_len_total,
+                    aligned_insertions.ext_right_flank
+                ),
+                meta_data.right_flank_start[batch_indices],
                 custom_columns=aligned_insertions.right_flank(batch_indices)
             )
             blocks.append(right_flank_block)
+
         batch_alignment = np.concatenate(blocks, axis=1)
         return batch_alignment
 
@@ -497,8 +517,9 @@ class AlignmentModel():
 
     @classmethod
     def decode_core(cls, model_length, state_seqs_max_lik, indices):
-        """ Decodes consensus columns as a matrix as well as insertion lengths
-            and starting positions as auxiliary vectors.
+        """
+        Decodes consensus columns as a matrix as well as insertion lengths
+        and starting positions as auxiliary vectors.
 
         Args:
             model_length: Number of match states
@@ -552,14 +573,17 @@ class AlignmentModel():
 
     @classmethod
     def decode_flank(cls, state_seqs_max_lik, flank_state_id, indices):
-        """ Decodes flanking insertion states. The deconding is active as long
-            as at least one sequence remains in a flank/unannotated state.
+        """
+        Decodes flanking insertion states. The deconding is active as long
+        as at least one sequence remains in a flank/unannotated state.
+
         Args:
             state_seqs_max_lik: A tensor with the most likeli state sequences.
                 Shape: (num_seq, L)
             flank_state_id: Index of the flanking state.
             indices: Indices in the sequences where decoding should start.
                 Shape: (num_seq)
+
         Returns:
             insertion_lens: Number of amino acids emitted per insertion state.
                 Shape: (num_seq, model_length-1)
@@ -579,38 +603,81 @@ class AlignmentModel():
 
 
     @classmethod
-    def decode(cls, model_length, state_seqs_max_lik):
-        """ Decodes an implicit alignment (insertion start/length are
-            represented as 2 integers) from most likely state sequences.
+    def decode(cls, model_length, state_seqs_max_lik) -> AlignmentMetaData:
+        """
+        Decodes an implicit alignment (insertion start/length are
+        represented as 2 integers) from most likely state sequences.
+
         Args:
             model_length: Number of match states (length of the consensus
                 sequence).
             state_seqs_max_lik: A tensor with the most likeli state sequences.
                 Shape: (num_seq, L)
+
         Returns:
-            core_blocks: Representation of the consensus.
-            left_flank:
-            right_flank:
-            unannotated_segments:
+            AlignmentMetaData: Object containing the decoded alignment
+                information.
         """
         n = state_seqs_max_lik.shape[0]
         c = model_length #alias for code readability
         indices = np.zeros(n, np.int16) # active positions in the sequence
+
         left_flank = cls.decode_flank(state_seqs_max_lik, 2*c-1, indices)
+
         core_blocks = []
+        insertion_lens = []
+        insertion_starts = []
         unannotated_segments = []
+        core_starts = []
+        core_ends = []
+        finished_blocks = []
         while True:
+            core_start = np.copy(indices)
             C, IL, IS, finished = cls.decode_core(
                 model_length, state_seqs_max_lik, indices
             )
-            core_blocks.append((C, IL, IS, finished))
+            core_end = np.copy(indices)
+            core_blocks.append(C)
+            insertion_lens.append(IL)
+            insertion_starts.append(IS)
+            core_starts.append(core_start)
+            core_ends.append(core_end)
+            finished_blocks.append(finished)
+
             if np.all(finished):
                 break
+
             unannotated_segments.append(
                 cls.decode_flank(state_seqs_max_lik, 2*c, indices)
             )
+
         right_flank = cls.decode_flank(state_seqs_max_lik, 2*c+1, indices)
-        return core_blocks, left_flank, right_flank, unannotated_segments
+
+        if len(unannotated_segments) > 0:
+            unannotated_segments = np.stack(unannotated_segments, axis=0)
+            unannotated_segments_len = unannotated_segments[:,0]
+            unannotated_segments_start = unannotated_segments[:,1]
+        else:
+            unannotated_segments_len = np.zeros((0, n), dtype=np.int16)
+            unannotated_segments_start = np.zeros((0, n), dtype=np.int16)
+
+        return AlignmentMetaData(
+            num_rows = n,
+            num_match = c,
+            num_repeats = len(core_blocks),
+            domain_hit = np.stack(core_blocks, axis=0),
+            domain_loc = np.stack([core_starts, core_ends], axis=-1),
+            insertion_lens = np.stack(insertion_lens, axis=0),
+            insertion_start = np.stack(insertion_starts, axis=0),
+            skip = np.stack(finished_blocks, axis=0),
+            left_flank_len = left_flank[0],
+            left_flank_start = left_flank[1],
+            right_flank_len = right_flank[0],
+            right_flank_start = right_flank[1],
+            unannotated_segments_len = unannotated_segments_len,
+            unannotated_segments_start = unannotated_segments_start,
+        )
+
 
 
     @classmethod
@@ -665,14 +732,16 @@ class AlignmentModel():
         ins_start,
         is_non_empty=None,
         custom_columns=None,
-        only_matches=False
+        only_matches=False,
     ):
-        """ Constructs one core model hit block from an implicitly represented
-            alignment.
+        """
+        Constructs one core model hit block from an implicitly represented
+        alignment.
 
         Args:
 
         Returns:
+             block: Shape (num_seq, block_length)
         """
         A = np.arange(sequences.shape[0])
         if only_matches:
@@ -742,8 +811,7 @@ class AlignmentModel():
         for i,j in enumerate(models):
             model_len = self.model.context.model_lengths[j]
             s = state_seqs_max_lik[:,:,i]
-            decoded_data = AlignmentModel.decode(model_len, s)
-            self.metadata[j] = AlignmentMetaData(*decoded_data)
+            self.metadata[j] = AlignmentModel.decode(model_len, s)
 
     def _clean_up_viterbi_seqs(self, state_seqs_max_lik, models):
 

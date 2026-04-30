@@ -584,34 +584,60 @@ def test_alignment_decoding(simple_data : SequenceDataset) -> None:
         np.testing.assert_equal(left_flank_start, np.array([0, 0, 0, 0, 0, 0, 0, 0]))
 
         # Test full decode
-        core_blocks, left_flank, right_flank, unannotated_segments = AlignmentModel.decode(
+        meta_data = AlignmentModel.decode(
             length[i], viterbi_seqs[i]
         )
-        assert len(core_blocks) == ref_num_blocks[i]
+        assert meta_data.num_repeats == ref_num_blocks[i]
 
         # Verify first core block
-        C, IL, IS, finished = core_blocks[0]
         for seq_idx in range(simple_data.num_seq):
-            np.testing.assert_equal(C[seq_idx], ref_consensus[i][seq_idx])
-            np.testing.assert_equal(IL[seq_idx], ref_insertion_lens[i][seq_idx])
-            np.testing.assert_equal(IS[seq_idx], ref_insertion_start[i][seq_idx])
-            np.testing.assert_equal(finished[seq_idx], ref_finished[i][seq_idx])
+            np.testing.assert_equal(
+                meta_data.domain_hit[0, seq_idx], ref_consensus[i][seq_idx]
+            )
+            np.testing.assert_equal(
+                meta_data.insertion_lens[0, seq_idx], ref_insertion_lens[i][seq_idx]
+            )
+            np.testing.assert_equal(
+                meta_data.insertion_start[0, seq_idx], ref_insertion_start[i][seq_idx]
+            )
+            np.testing.assert_equal(
+                meta_data.skip[0, seq_idx], ref_finished[i][seq_idx]
+            )
 
         # Verify second core block
-        C, IL, IS, finished = core_blocks[1]
         for seq_idx in range(simple_data.num_seq):
-            np.testing.assert_equal(C[seq_idx], ref_consensus_2[i][seq_idx])
-            np.testing.assert_equal(IL[seq_idx], ref_insertion_lens_2[i][seq_idx])
-            np.testing.assert_equal(IS[seq_idx], ref_insertion_start_2[i][seq_idx])
-            np.testing.assert_equal(finished[seq_idx], ref_finished_2[i][seq_idx])
+            np.testing.assert_equal(
+                meta_data.domain_hit[1, seq_idx], ref_consensus_2[i][seq_idx]
+            )
+            np.testing.assert_equal(
+                meta_data.insertion_lens[1, seq_idx], ref_insertion_lens_2[i][seq_idx]
+            )
+            np.testing.assert_equal(
+                meta_data.insertion_start[1, seq_idx], ref_insertion_start_2[i][seq_idx]
+            )
+            np.testing.assert_equal(
+                meta_data.skip[1, seq_idx], ref_finished_2[i][seq_idx]
+            )
 
         # Verify flanks and segments
-        np.testing.assert_equal(left_flank[0], ref_left_flank_lens[i])
-        np.testing.assert_equal(left_flank[1], np.array([0, 0, 0, 0, 0, 0, 0, 0]))
-        np.testing.assert_equal(unannotated_segments[0][0], ref_segment_lens[i])
-        np.testing.assert_equal(unannotated_segments[0][1], ref_segment_start[i])
-        np.testing.assert_equal(right_flank[0], ref_right_flank_lens[i])
-        np.testing.assert_equal(right_flank[1], ref_right_flank_start[i])
+        np.testing.assert_equal(
+            meta_data.left_flank_len, ref_left_flank_lens[i]
+        )
+        np.testing.assert_equal(
+            meta_data.left_flank_start, np.array([0, 0, 0, 0, 0, 0, 0, 0])
+        )
+        np.testing.assert_equal(
+            meta_data.unannotated_segments_len[0], ref_segment_lens[i]
+        )
+        np.testing.assert_equal(
+            meta_data.unannotated_segments_start[0], ref_segment_start[i]
+        )
+        np.testing.assert_equal(
+            meta_data.right_flank_len, ref_right_flank_lens[i]
+        )
+        np.testing.assert_equal(
+            meta_data.right_flank_start, ref_right_flank_start[i]
+        )
 
         # Test conversion to alignment blocks
         # Prepare sequences array for all sequences
@@ -623,24 +649,24 @@ def test_alignment_decoding(simple_data : SequenceDataset) -> None:
 
         left_flank_block = AlignmentModel.get_insertion_block(
             sequences_2d,
-            left_flank[0],
-            np.amax(left_flank[0]),
-            left_flank[1],
+            meta_data.left_flank_len,
+            np.amax(meta_data.left_flank_len),
+            meta_data.left_flank_start,
             adjust_to_right=True
         )
         np.testing.assert_equal(left_flank_block, ref_left_flank_block[i])
 
         right_flank_block = AlignmentModel.get_insertion_block(
             sequences_2d,
-            right_flank[0],
-            np.amax(right_flank[0]),
-            right_flank[1]
+            meta_data.right_flank_len,
+            np.amax(meta_data.right_flank_len),
+            meta_data.right_flank_start
         )
         np.testing.assert_equal(right_flank_block, ref_right_flank_block[i])
 
         # Test insertion block (first insert only)
-        ins_lens = core_blocks[0][1][:, 0]
-        ins_start = core_blocks[0][2][:, 0]
+        ins_lens = meta_data.insertion_lens[0, :, 0]
+        ins_start = meta_data.insertion_start[0, :, 0]
         ins_block = AlignmentModel.get_insertion_block(
             sequences_2d,
             ins_lens,
@@ -650,10 +676,14 @@ def test_alignment_decoding(simple_data : SequenceDataset) -> None:
         np.testing.assert_equal(ins_block, ref_ins_block[i])
 
         # Test alignment blocks
-        for (C, IL, IS, f), ref in zip(core_blocks, ref_core_blocks[i]):
+        np.testing.assert_equal(ins_block, ref_ins_block[i])
+        for i, ref in enumerate(ref_core_blocks[i]):
             alignment_block = AlignmentModel.get_alignment_block(
                 sequences_2d,
-                C, IL, np.amax(IL, axis=0), IS
+                meta_data.domain_hit[i],
+                meta_data.insertion_lens[i],
+                np.amax(meta_data.insertion_lens[i], axis=0),
+                meta_data.insertion_start[i],
             )
             np.testing.assert_equal(alignment_block, ref)
 
@@ -927,11 +957,15 @@ def test_viterbi(
             left_flank_start, np.array([0, 0, 0, 0, 0, 0, 0, 0])
         )
         # test whole decoding
-        core_blocks, left_flank, right_flank, unannotated_segments =\
-            AlignmentModel.decode(L, viterbi_seqs[i])
-        assert len(core_blocks) == ref_num_blocks[i]
+        meta_data = AlignmentModel.decode(L, viterbi_seqs[i])
+        assert len(meta_data.domain_hit) == ref_num_blocks[i]
         assert_decoding_core_results(
-            core_blocks[0],
+            (
+                meta_data.domain_hit[0],
+                meta_data.insertion_lens[0],
+                meta_data.insertion_start[0],
+                meta_data.skip[0],
+            ),
             (
                 ref_consensus[i],
                 ref_insertion_lens[i],
@@ -940,7 +974,12 @@ def test_viterbi(
             ),
         )
         assert_decoding_core_results(
-            core_blocks[1],
+            (
+                meta_data.domain_hit[1],
+                meta_data.insertion_lens[1],
+                meta_data.insertion_start[1],
+                meta_data.skip[1],
+            ),
             (
                 ref_consensus_2[i],
                 ref_insertion_lens_2[i],
@@ -948,12 +987,24 @@ def test_viterbi(
                 ref_finished_2[i],
             ),
         )
-        np.testing.assert_equal(left_flank[0], ref_left_flank_lens[i])
-        np.testing.assert_equal(left_flank[1], np.array([0, 0, 0, 0, 0, 0, 0, 0]))
-        np.testing.assert_equal(unannotated_segments[0][0], ref_segment_lens[i])
-        np.testing.assert_equal(unannotated_segments[0][1], ref_segment_start[i])
-        np.testing.assert_equal(right_flank[0], ref_right_flank_lens[i])
-        np.testing.assert_equal(right_flank[1], ref_right_flank_start[i])
+        np.testing.assert_equal(
+            meta_data.left_flank_len, ref_left_flank_lens[i]
+        )
+        np.testing.assert_equal(
+            meta_data.left_flank_start, np.array([0, 0, 0, 0, 0, 0, 0, 0])
+        )
+        np.testing.assert_equal(
+            meta_data.unannotated_segments_len[0], ref_segment_lens[i]
+        )
+        np.testing.assert_equal(
+            meta_data.unannotated_segments_start[0], ref_segment_start[i]
+        )
+        np.testing.assert_equal(
+            meta_data.right_flank_len, ref_right_flank_lens[i]
+        )
+        np.testing.assert_equal(
+            meta_data.right_flank_start, ref_right_flank_start[i]
+        )
 
         # test conversion of decoded data to an actual alignment in table form
         # Prepare sequences array for all sequences
@@ -965,22 +1016,22 @@ def test_viterbi(
 
         left_flank_block = AlignmentModel.get_insertion_block(
             sequences,
-            left_flank[0],
-            np.amax(left_flank[0]),
-            left_flank[1],
+            meta_data.left_flank_len,
+            np.amax(meta_data.left_flank_len),
+            meta_data.left_flank_start,
             adjust_to_right=True,
         )
         np.testing.assert_equal(left_flank_block, ref_left_flank_block[i])
         right_flank_block = AlignmentModel.get_insertion_block(
             sequences,
-            right_flank[0],
-            np.amax(right_flank[0]),
-            right_flank[1],
+            meta_data.right_flank_len,
+            np.amax(meta_data.right_flank_len),
+            meta_data.right_flank_start,
         )
         np.testing.assert_equal(right_flank_block, ref_right_flank_block[i])
         # just check the first insert for simplicity
-        ins_lens = core_blocks[0][1][:, 0]
-        ins_start = core_blocks[0][2][:, 0]
+        ins_lens = meta_data.insertion_lens[0, :, 0]
+        ins_start = meta_data.insertion_start[0, :, 0]
         ins_block = AlignmentModel.get_insertion_block(
             sequences,
             ins_lens,
@@ -988,9 +1039,12 @@ def test_viterbi(
             ins_start,
         )
         np.testing.assert_equal(ins_block, ref_ins_block[i])
-        for (C, IL, IS, f), ref in zip(core_blocks, ref_core_blocks[i]):
+        for i, ref in enumerate(ref_core_blocks[i]):
             alignment_block = AlignmentModel.get_alignment_block(
                 sequences,
-                C, IL, np.amax(IL, axis=0), IS,
+                meta_data.domain_hit[i],
+                meta_data.insertion_lens[i],
+                np.amax(meta_data.insertion_lens[i], axis=0),
+                meta_data.insertion_start[i],
             )
             np.testing.assert_equal(alignment_block, ref)

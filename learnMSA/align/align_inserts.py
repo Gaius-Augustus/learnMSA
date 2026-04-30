@@ -193,6 +193,7 @@ def make_aligned_insertions(
 ):
     """
     Aligns insertions with the given method and adds them to the alignment model.
+
     Args:
         am: Alignment model.
         best_model: The best model to use for extracting insertions.
@@ -202,31 +203,39 @@ def make_aligned_insertions(
     """
     if not best_model in am.metadata:
         am._build_alignment([best_model], decoding_mode)
-    data = am.metadata[best_model]
-    num_seq = data.left_flank_len.shape[0]
+    meta_data = am.metadata[best_model]
+    num_seq = meta_data.left_flank_len.shape[0]
 
     insertions_long = []
-    for r in range(data.num_repeats):
+    for r in range(meta_data.num_repeats):
         insertions_long.append([])
-        for i in range(data.insertion_lens.shape[2]):
-            ins_long = find_long_insertions_and_get_sequences(am.data[0], data.insertion_lens[r, :, i], data.insertion_start[r, :, i])
+        for i in range(meta_data.insertion_lens.shape[2]):
+            ins_long = find_long_insertions_and_get_sequences(
+                am.data[0], meta_data.insertion_lens[r, :, i], meta_data.insertion_start[r, :, i]
+            )
             insertions_long[-1].append(ins_long)
-    left_flank_long = find_long_insertions_and_get_sequences(am.data[0], data.left_flank_len, data.left_flank_start)
-    right_flank_long = find_long_insertions_and_get_sequences(am.data[0], data.right_flank_len, data.right_flank_start)
+    left_flank_long = find_long_insertions_and_get_sequences(
+        am.data[0], meta_data.left_flank_len, meta_data.left_flank_start
+    )
+    right_flank_long = find_long_insertions_and_get_sequences(
+        am.data[0], meta_data.right_flank_len, meta_data.right_flank_start
+    )
     unannotated_long = []
-    for r in range(data.num_repeats-1):
-        unannotated_long.append(find_long_insertions_and_get_sequences(am.data[0], data.unannotated_segments_len[r], data.unannotated_segments_start[r]))
+    for r in range(meta_data.num_repeats-1):
+        unannotated_long.append(find_long_insertions_and_get_sequences(
+            am.data[0], meta_data.unannotated_segments_len[r], meta_data.unannotated_segments_start[r]
+        ))
 
     slices = {}
     if left_flank_long is not None:
         slices["left_flank"] = left_flank_long[1]
     if right_flank_long is not None:
         slices["right_flank"] = right_flank_long[1]
-    for r in range(data.num_repeats):
-        for i in range(data.insertion_lens.shape[2]):
+    for r in range(meta_data.num_repeats):
+        for i in range(meta_data.insertion_lens.shape[2]):
             if insertions_long[r][i] is not None:
                 slices[f"ins_{r}_{i}"] = insertions_long[r][i][1]
-    for r in range(data.num_repeats-1):
+    for r in range(meta_data.num_repeats-1):
         if unannotated_long[r] is not None:
             slices[f"unannotated_{r}"] = unannotated_long[r][1]
 

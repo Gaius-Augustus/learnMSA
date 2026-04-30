@@ -163,11 +163,11 @@ def test_discard_or_expand_positions(
     assert 0 in am.metadata
     assert am.metadata[0].alignment_len == len(ref_seqs[0])
     # Shape: [number of domain hits, length]
-    deletions = np.sum(am.metadata[0].consensus == -1, axis=1)
+    deletions = np.sum(am.metadata[0].domain_hit == -1, axis=1)
     np.testing.assert_equal(deletions, [[4, 5, 2, 0, 4], [2, 5, 4, 2, 4]])
     # Shape: [number of domain hits, num seq]
     np.testing.assert_equal(
-        am.metadata[0].finished,
+        am.metadata[0].skip,
         [[False, False, True, True, False, False],
             [True, True, True, True, True, True]]
     )
