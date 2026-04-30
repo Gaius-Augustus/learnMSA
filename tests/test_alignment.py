@@ -6,6 +6,7 @@ import tensorflow as tf
 
 from learnMSA import Configuration
 from learnMSA.align.align import align
+from learnMSA.align.align_hits import HitAlignmentMode
 from learnMSA.align.alignment_metadata import AlignmentMetaData
 from learnMSA.align.alignment_model import (AlignmentModel,
                                             find_faulty_sequences,
@@ -239,16 +240,8 @@ def test_aligned_insertions() -> None:
         block, expected_block + len(SequenceDataset._default_alphabet)
     )
 
-def test_alignment_decoding(simple_data : SequenceDataset) -> None:
-    """Test AlignmentModel decoding of Viterbi state sequences.
-
-    This test verifies that the AlignmentModel correctly decodes Viterbi
-    state sequences into alignment structures (core blocks, flanks, etc.)
-    for the two-motif felix.fa dataset.
-    """
-    # Model lengths for FELIK (5) and AHC (3)
-    length = [5, 3]
-
+@pytest.fixture
+def viterbi_seqs() -> np.ndarray:
     # Reference Viterbi state sequences (pre-computed)
     # States: [MATCH x length, INSERT x length-1, LEFT_FLANK, UNANNOTATED_SEGMENT, RIGHT_FLANK, END]
     viterbi_seqs = np.array([
@@ -271,6 +264,20 @@ def test_alignment_decoding(simple_data : SequenceDataset) -> None:
          [5, 0, 1, 6, 6, 0, 6, 0, 1, 2, 7, 8, 8, 8, 8],
          [5, 5, 5, 0, 1, 2, 6, 6, 0, 1, 2, 8, 8, 8, 8]]
     ])
+    return viterbi_seqs
+
+def test_alignment_decoding(
+    simple_data : SequenceDataset,
+    viterbi_seqs: np.ndarray,
+) -> None:
+    """Test AlignmentModel decoding of Viterbi state sequences.
+
+    This test verifies that the AlignmentModel correctly decodes Viterbi
+    state sequences into alignment structures (core blocks, flanks, etc.)
+    for the two-motif felix.fa dataset.
+    """
+    # Model lengths for FELIK (5) and AHC (3)
+    length = [5, 3]
 
     sequences = np.zeros(
         (simple_data.num_seq, simple_data.max_len), dtype=np.int32
@@ -1049,6 +1056,78 @@ def test_viterbi(
                 meta_data.insertion_start[i],
             )
             np.testing.assert_equal(alignment_block, ref)
+
+
+def test_alignment_decoding_mode_left(
+    simple_data : SequenceDataset,
+    simple_model : LearnMSAModel,
+) -> None:
+    """Test extraction of subalignments from AlignmentModel"""
+    # subalignment
+    subset = np.array([0, 1, 2, 3, 4])
+    # create alignment after building model
+    sub_am = AlignmentModel(
+        simple_data, simple_model, subset,
+        hit_alignment_mode=HitAlignmentMode.LEFT_ALIGN
+    )
+    subalignment_strings = sub_am.to_string(0, add_block_sep=False)
+    ref_subalignment = [
+        "...FELIK...-----...",
+        "ahcFELIK...-----...",
+        "...FELIK...-----hac",
+        "...FELIKahcFELIKa..",
+        "..a-ELI-...-----h..",
+    ]
+    for s, r in zip(subalignment_strings, ref_subalignment):
+        assert s == r
+
+
+def test_alignment_decoding_mode_right(
+    simple_data : SequenceDataset,
+    simple_model : LearnMSAModel,
+) -> None:
+    """Test extraction of subalignments from AlignmentModel"""
+    # subalignment
+    subset = np.array([0, 1, 2, 3, 4])
+    # create alignment after building model
+    sub_am = AlignmentModel(
+        simple_data, simple_model, subset,
+        hit_alignment_mode=HitAlignmentMode.RIGHT_ALIGN
+    )
+    subalignment_strings = sub_am.to_string(0, add_block_sep=False)
+    ref_subalignment = [
+        "...-----...FELIK...",
+        "ahc-----...FELIK...",
+        "...-----...FELIKhac",
+        "...FELIKahcFELIKa..",
+        "..a-----...-ELI-h..",
+    ]
+    for s, r in zip(subalignment_strings, ref_subalignment):
+        assert s == r
+
+
+def test_alignment_decoding_mode_greedy_consensus(
+    simple_data : SequenceDataset,
+    simple_model : LearnMSAModel,
+) -> None:
+    """Test extraction of subalignments from AlignmentModel"""
+    # subalignment
+    subset = np.array([0, 1, 2, 3, 4])
+    # create alignment after building model
+    sub_am = AlignmentModel(
+        simple_data, simple_model, subset,
+        hit_alignment_mode=HitAlignmentMode.GREEDY_CONSENSUS
+    )
+    subalignment_strings = sub_am.to_string(0, add_block_sep=False)
+    ref_subalignment = [
+        "...FELIK...-----...",
+        "ahcFELIK...-----...",
+        "...FELIK...-----hac",
+        "...FELIKahcFELIKa..",
+        "..a-ELI-...-----h..",
+    ]
+    for s, r in zip(subalignment_strings, ref_subalignment):
+        assert s == r
 
 
 def test_alignment_metadata_shift() -> None:

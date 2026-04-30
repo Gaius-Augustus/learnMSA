@@ -9,7 +9,7 @@ import tensorflow as tf
 
 from learnMSA.align.align_inserts import AlignedInsertions
 from learnMSA.align.alignment_metadata import AlignmentMetaData
-from learnMSA.align.align_hits import greedy_hit_alignment
+from learnMSA.align.align_hits import HitAlignmentMode, hit_alignment
 from learnMSA.model.select import SelectionCriterion, select_model
 from learnMSA.model.tf.model import LearnMSAModel
 from learnMSA.util.aligned_dataset import AlignedDataset, SequenceDataset
@@ -44,6 +44,9 @@ class AlignmentModel():
 
     best_head: int
     """Index of the head that best fits the training data."""
+
+    hit_alignment_mode: HitAlignmentMode
+    """Mode for aligning the domain hits."""
     class DecodingMode(Enum):
         VITERBI = "viterbi"
         MEA = "mea"
@@ -66,6 +69,7 @@ class AlignmentModel():
         gap_symbol: str = '-',
         gap_symbol_insertions: str = '.',
         best_head: int = -1,
+        hit_alignment_mode: HitAlignmentMode = HitAlignmentMode.GREEDY_CONSENSUS,
     ) -> None:
         """
         Args:
@@ -80,6 +84,7 @@ class AlignmentModel():
                 sequences.
             best_head: Index of the head that best fits the training data.
                 Defaults to -1 (no model selected).
+            hit_alignment_mode: Mode for aligning the domain hits.
         """
         if isinstance(data, SequenceDataset):
             data = (data,)
@@ -92,6 +97,7 @@ class AlignmentModel():
         self.gap_symbol = gap_symbol
         self.gap_symbol_insertions = gap_symbol_insertions
         self.best_head = best_head
+        self.hit_alignment_mode = hit_alignment_mode
         self.metadata = {}
 
     def get_output_alphabet(self, a2m: bool = True) -> np.ndarray:
@@ -813,16 +819,15 @@ class AlignmentModel():
             model_len = self.model.context.model_lengths[j]
             s = state_seqs_max_lik[:,:,i]
             meta_data = AlignmentModel.decode(model_len, s)
-
-            # TODO
-            fake_scores = np.zeros((meta_data.num_repeats, meta_data.num_rows))
-            fake_scores[0, :] = 99 # score first hits high just for testing
-            # this should exactly replicate the original behavior of learnMSA
-
-            shift = greedy_hit_alignment(fake_scores)
-
-            meta_data.shift(shift)
-
+            if self.hit_alignment_mode == HitAlignmentMode.GREEDY_CONSENSUS:
+                # Use simple occupancy counter for hit alignment, i.e. score is
+                # simply the number of used match states
+                occupancy = np.sum(meta_data.domain_hit != -1, axis=-1)
+                meta_data = hit_alignment(
+                    meta_data, self.hit_alignment_mode, occupancy
+                )
+            else:
+                meta_data = hit_alignment(meta_data, self.hit_alignment_mode)
             self.metadata[j] = meta_data
 
     def _clean_up_viterbi_seqs(self, state_seqs_max_lik, models):

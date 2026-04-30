@@ -1,12 +1,65 @@
+from enum import Enum
+
 import numpy as np
 
+from learnMSA.align.alignment_metadata import AlignmentMetaData
 
-def greedy_hit_alignment(Z: np.ndarray) -> np.ndarray:
+
+class HitAlignmentMode(Enum):
+    LEFT_ALIGN = "left_align"
+    """Aligns the domain hits by index (starting from the left)."""
+    RIGHT_ALIGN = "right_align"
+    """Aligns the domain hits by negative index (starting from the right)."""
+    GREEDY_CONSENSUS = "greedy_consensus"
+    """Aligns the domain hits such that the highest-scoring
+    domain hits assemble into the same column."""
+
+
+def hit_alignment(
+    data: AlignmentMetaData,
+    mode: HitAlignmentMode,
+    scores: np.ndarray | None = None,
+) -> AlignmentMetaData:
+    """Aligns the domain hits according to the specified mode.
+
+    Args:
+        alignmnent_data : AlignmentMetaData
+            Alignment metadata containing the domain hits and their locations.
+        mode : HitAlignmentMode
+            Mode for aligning the domain hits.
+        scores : np.ndarray, shape (num_repeats, num_rows)
+            Score matrix required by `GREEDY_CONSENSUS` mode.
+
+    Returns:
+        Updated AlignmentMetaData with aligned domain hits.
+    """
+    if mode == HitAlignmentMode.LEFT_ALIGN:
+        return data
+
+    elif mode == HitAlignmentMode.RIGHT_ALIGN:
+        scores = np.zeros((data.num_repeats, data.num_rows))
+        scores[data.num_repeats_per_row - 1, np.arange(data.num_rows)] = 1
+        shift = greedy_consensus_hit_alignment(scores)
+        data.shift(shift)
+        return data
+
+    elif mode == HitAlignmentMode.GREEDY_CONSENSUS:
+        assert scores is not None,\
+            "Scores are required for greedy consensus hit alignment."
+        shift = greedy_consensus_hit_alignment(scores)
+        data.shift(shift)
+        return data
+
+    else:
+        raise ValueError(f"Unknown hit alignment mode: {mode}")
+
+
+def greedy_consensus_hit_alignment(Z: np.ndarray) -> np.ndarray:
     """Aligns the domain hits such that the highest-scoring
     domain hits assemble into the same column. This is greedy
     heuristic that quickly constructs a representative, high-scoring
-    hit column. The remaining hits are not directly aligned and their
-    scores do not contribute. Hits are just shifted as a continuous block.
+    hit column. Hits are shifted as a continuous block. Non-best hits
+    are not directly aligned and their scores do not contribute.
 
     Args:
         Z : np.ndarray, shape (num_repeats, num_rows)

@@ -6,6 +6,7 @@ import pytest
 import tensorflow as tf
 
 from learnMSA import Configuration
+from learnMSA.align.align_hits import HitAlignmentMode
 from learnMSA.config.hmm import PHMMConfig
 from learnMSA.hmm.tf.layer import PHMMLayer
 from learnMSA.hmm.util.transition_index_set import PHMMTransitionIndexSet
@@ -151,7 +152,10 @@ def test_discard_or_expand_positions(
         "..........FnE-...ICaaaF-LnI-nnn"
     ]
 
-    am = AlignmentModel(data_insert_delete, model_single_head)
+    am = AlignmentModel(
+        data_insert_delete, model_single_head,
+        hit_alignment_mode=HitAlignmentMode.LEFT_ALIGN
+    )
 
     # Decode the alignment depending on the sequences and model parameters
     aligned_sequences = am.to_string(model_index=0, add_block_sep=False)

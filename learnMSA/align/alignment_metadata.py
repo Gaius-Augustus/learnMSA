@@ -58,14 +58,21 @@ class AlignmentMetaData:
     """
 
     unannotated_segments_len: np.ndarray
-    """An array of shape (num_repeat, num_rows,) containing the lengths of the
+    """An array of shape (num_repeat-1, num_rows,) containing the lengths of the
     unannotated segments.
     """
 
     unannotated_segments_start: np.ndarray
-    """An array of shape (num_repeat, num_rows,) containing the starting
+    """An array of shape (num_repeat-1, num_rows,) containing the starting
     positions of the unannotated segments.
     """
+
+    @property
+    def num_repeats_per_row(self) -> np.ndarray:
+        """An array of shape (num_rows,) containing the number of repeats for
+        each row.
+        """
+        return np.sum(self.skip == 0, axis=0) + 1
 
     @property
     def insertion_lens_total(self) -> np.ndarray:
@@ -86,7 +93,7 @@ class AlignmentMetaData:
 
     @property
     def unannotated_segment_lens_total(self) -> np.ndarray:
-        """An array of shape (num_repeats,) containing the maximum total length
+        """An array of shape (num_repeats-1,) containing the maximum total length
         of the unannotated segments across all sequences for each repeat.
         """
         return np.amax(self.unannotated_segments_len, axis=1).astype(np.int32)
@@ -117,22 +124,25 @@ class AlignmentMetaData:
             shift: np.ndarray of shape (num_rows,) containing the shift values
                 for each row.
         """
-        hits_per_row = np.sum(self.skip == 0, axis=0) + 1
-        self.num_repeats = np.amax(hits_per_row + shift)
+        self.num_repeats = np.amax(self.num_repeats_per_row + shift)
         self.domain_hit = self._ashift(self.domain_hit, shift, -1)
         self.domain_loc = self._ashift(self.domain_loc, shift, -1)
         self.insertion_lens = self._ashift(self.insertion_lens, shift, 0)
         self.insertion_start = self._ashift(self.insertion_start, shift, -1)
         self.skip = self._ashift(self.skip, shift, 1)
         self.unannotated_segments_len = self._ashift(
-            self.unannotated_segments_len, shift, 0
+            self.unannotated_segments_len, shift, 0, margin=-1
         )
         self.unannotated_segments_start = self._ashift(
-            self.unannotated_segments_start, shift, -1
+            self.unannotated_segments_start, shift, -1, margin=-1
         )
 
     def _ashift(
-        self, arr: np.ndarray, shift: np.ndarray, padding_value: int | float,
+        self,
+        arr: np.ndarray,
+        shift: np.ndarray,
+        padding_value: int | float,
+        margin: int = 0,
     ) -> np.ndarray:
         """Shifts the given array according to the given shift vector. This is
         a helper function for shift().
@@ -142,22 +152,26 @@ class AlignmentMetaData:
             shift: np.ndarray of shape (N,) containing the shift values
                 for each row.
             padding_value: The value to use for padding.
+            margin: Margin added to the number of repeats.
 
         Returns:
             shifted_arr: np.ndarray of shape (new_num_repeats, N, ...)
             where in each row i the values of `arr` are shifted by shift[i]
             positions to the right.
         """
-        old_num_repeats = arr.shape[0]
-        new_shape = (self.num_repeats,) + arr.shape[1:]
+        assert margin <= 0, "Margin must be non-positive."
+        new_num_repeats = self.num_repeats + margin
+        new_shape = (new_num_repeats,) + arr.shape[1:]
         result = np.full(new_shape, padding_value, dtype=arr.dtype)
 
-        if old_num_repeats == 0 or self.num_repeats == 0:
+        if arr.shape[0] == 0 or new_num_repeats == 0:
             return result
 
-        r_idx = np.arange(old_num_repeats)[:, np.newaxis]   # (old_R, 1)
+        r_idx = np.arange(arr.shape[0])[:, np.newaxis]      # (old_R, 1)
         row_idx = np.arange(arr.shape[1])[np.newaxis, :]    # (1, N)
         dest_r = r_idx + shift[np.newaxis, :]               # (old_R, N)
 
-        result[dest_r, row_idx] = arr
+        mask = dest_r < new_num_repeats                     # (old_R, N)
+        row_idx_exp = np.broadcast_to(row_idx, dest_r.shape)
+        result[dest_r[mask], row_idx_exp[mask]] = arr[mask]
         return result
