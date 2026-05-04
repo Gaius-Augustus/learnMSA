@@ -271,7 +271,7 @@ class PHMMLayer(tf.keras.Layer):
         self._mode = HMMMode.VITERBI
 
     def mea_mode(self) -> None:
-        """Makes the layer return Viterbi paths.
+        """Makes the layer return MEA paths.
         """
         self._mode = HMMMode.MEA
 

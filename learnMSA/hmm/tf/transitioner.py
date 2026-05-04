@@ -271,6 +271,7 @@ class PHMMTransitioner(TFTransitioner):
 
         if TransitionMode.ALLOWED in mode:
             self._A = tf.where(self._A > tiny(self._A), 1., 0.)
+            start_dist = tf.where(start_dist > tiny(start_dist), 1., 0.)
 
         if TransitionMode.LOG_SUM_EXP in mode or TransitionMode.MAX in mode:
             self._A_log = safe_log(self._A)
