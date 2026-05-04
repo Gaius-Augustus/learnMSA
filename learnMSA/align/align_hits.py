@@ -52,6 +52,8 @@ def hit_alignment(
     elif mode == HitAlignmentMode.RIGHT_ALIGN:
         scores = np.zeros((data.num_repeats, data.num_rows))
         scores[data.num_repeats_per_row - 1, np.arange(data.num_rows)] = 1
+        # set padding to -1
+        scores[np.all(data.domain_hit == -1, axis=-1)] = -1
         shift = greedy_consensus_hit_alignment(scores)
         data.shift(shift)
         return data
