@@ -66,6 +66,9 @@ def align(
         am = AlignmentModel.load(config.input_output.load_model, data)
         # Override indices
         am.indices = np.arange(data[0].num_seq)
+        am.hit_alignment_mode = HitAlignmentMode.from_str(
+            config.training.hit_alignment_mode
+        )
     else:
         if config.input_output.verbose:
             print(

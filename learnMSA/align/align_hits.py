@@ -39,17 +39,17 @@ def hit_alignment(
         mode : HitAlignmentMode
             Mode for aligning the domain hits.
         scores : np.ndarray, shape (num_repeats, num_rows)
-            Score matrix required by `GREEDY_CONSENSUS` mode.
+            Score matrix required by `GREEDY_CONSENSUS` mode. The scores should
+            be non-negative, except for -1 which is allowed to indicate empty
+            hits.
 
     Returns:
         Updated AlignmentMetaData with aligned domain hits.
     """
     if mode == HitAlignmentMode.LEFT_ALIGN:
-        print("Aligning hits by left index...")
         return data
 
     elif mode == HitAlignmentMode.RIGHT_ALIGN:
-        print("Aligning hits by right index...")
         scores = np.zeros((data.num_repeats, data.num_rows))
         scores[data.num_repeats_per_row - 1, np.arange(data.num_rows)] = 1
         shift = greedy_consensus_hit_alignment(scores)
@@ -57,7 +57,6 @@ def hit_alignment(
         return data
 
     elif mode == HitAlignmentMode.GREEDY_CONSENSUS:
-        print("Aligning hits by greedy consensus...")
         assert scores is not None,\
             "Scores are required for greedy consensus hit alignment."
         shift = greedy_consensus_hit_alignment(scores)
@@ -68,7 +67,9 @@ def hit_alignment(
         raise ValueError(f"Unknown hit alignment mode: {mode}")
 
 
-def greedy_consensus_hit_alignment(Z: np.ndarray) -> np.ndarray:
+def greedy_consensus_hit_alignment(
+    Z: np.ndarray, prevent_extend: bool = True
+) -> np.ndarray:
     """Aligns the domain hits such that the highest-scoring
     domain hits assemble into the same column. This is greedy
     heuristic that quickly constructs a representative, high-scoring
@@ -78,6 +79,8 @@ def greedy_consensus_hit_alignment(Z: np.ndarray) -> np.ndarray:
     Args:
         Z : np.ndarray, shape (num_repeats, num_rows)
             Score matrix.
+        prevent_extend: If True, prevents shifting beyond the existing
+            number of repeats, i.e. prevents extending the alignment.
 
     Returns:
         shifts : np.ndarray of bool, shape (N,)
@@ -87,4 +90,9 @@ def greedy_consensus_hit_alignment(Z: np.ndarray) -> np.ndarray:
     Zm = np.argmax(Z, axis=0)
     # Compute how much the domains per row must be shifted
     shifts = np.amax(Zm) - Zm
+    if prevent_extend:
+        original_num_repeats = np.sum(Z != -1, axis=0)
+        total_num_repeats = Z.shape[0]
+        # Prevent shifting beyond the existing number of repeats
+        shifts = np.minimum(shifts, total_num_repeats - original_num_repeats)
     return shifts

@@ -1,5 +1,6 @@
 import json
 import shutil
+import sys
 import warnings
 from enum import Enum
 from pathlib import Path
@@ -823,6 +824,8 @@ class AlignmentModel():
                 # Use simple occupancy counter for hit alignment, i.e. score is
                 # simply the number of used match states
                 occupancy = np.sum(meta_data.domain_hit != -1, axis=-1)
+                # Mark missing hits with -1
+                occupancy[occupancy == 0] = -1
                 meta_data = hit_alignment(
                     meta_data, self.hit_alignment_mode, occupancy
                 )
