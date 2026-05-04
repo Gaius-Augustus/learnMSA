@@ -23,6 +23,12 @@ def simple_data() -> SequenceDataset:
     return data
 
 @pytest.fixture
+def multi_hit_data() -> SequenceDataset:
+    filename = os.path.dirname(__file__)+"/../tests/data/felix_multi_hit.fa"
+    data = SequenceDataset(filename)
+    return data
+
+@pytest.fixture
 def simple_config() -> Configuration:
     config = Configuration()
     config.training.num_model = 1
@@ -1059,72 +1065,63 @@ def test_viterbi(
 
 
 def test_alignment_decoding_mode_left(
-    simple_data : SequenceDataset,
+    multi_hit_data : SequenceDataset,
     simple_model : LearnMSAModel,
 ) -> None:
-    """Test extraction of subalignments from AlignmentModel"""
-    # subalignment
-    subset = np.array([0, 1, 2, 3, 4])
     # create alignment after building model
-    sub_am = AlignmentModel(
-        simple_data, simple_model, subset,
+    am = AlignmentModel(
+        multi_hit_data, simple_model,
         hit_alignment_mode=HitAlignmentMode.LEFT_ALIGN
     )
-    subalignment_strings = sub_am.to_string(0, add_block_sep=False)
+    subalignment_strings = am.to_string(0, add_block_sep=False)
     ref_subalignment = [
-        "...FELIK...-----...",
-        "ahcFELIK...-----...",
-        "...FELIK...-----hac",
-        "...FELIKahcFELIKa..",
-        "..a-ELI-...-----h..",
+        "...FEL-K...-----...---...",
+        "ahcF-LI-...-----...---...",
+        "...F-L-KhacFELIKhaaELIaah",
+        "...FELIKahc-ELI-...---...",
+        "...F-L-Ka..FELIK...---..."
     ]
     for s, r in zip(subalignment_strings, ref_subalignment):
         assert s == r
 
 
 def test_alignment_decoding_mode_right(
-    simple_data : SequenceDataset,
+    multi_hit_data : SequenceDataset,
     simple_model : LearnMSAModel,
 ) -> None:
-    """Test extraction of subalignments from AlignmentModel"""
-    # subalignment
-    subset = np.array([0, 1, 2, 3, 4])
     # create alignment after building model
     sub_am = AlignmentModel(
-        simple_data, simple_model, subset,
+        multi_hit_data, simple_model,
         hit_alignment_mode=HitAlignmentMode.RIGHT_ALIGN
     )
     subalignment_strings = sub_am.to_string(0, add_block_sep=False)
     ref_subalignment = [
-        "...-----...FELIK...",
-        "ahc-----...FELIK...",
-        "...-----...FELIKhac",
-        "...FELIKahcFELIKa..",
-        "..a-----...-ELI-h..",
+        "...---...-----...FEL-K...",
+        "ahc---...-----...F-LI-...",
+        "...FLKhacFELIKhaa-ELI-aah",
+        "...---...FELIKahc-ELI-...",
+        "...---...F-L-Ka..FELIK..."
     ]
     for s, r in zip(subalignment_strings, ref_subalignment):
         assert s == r
 
 
 def test_alignment_decoding_mode_greedy_consensus(
-    simple_data : SequenceDataset,
+    multi_hit_data : SequenceDataset,
     simple_model : LearnMSAModel,
 ) -> None:
-    """Test extraction of subalignments from AlignmentModel"""
-    # subalignment
-    subset = np.array([0, 1, 2, 3, 4])
     # create alignment after building model
     sub_am = AlignmentModel(
-        simple_data, simple_model, subset,
+        multi_hit_data, simple_model,
         hit_alignment_mode=HitAlignmentMode.GREEDY_CONSENSUS
     )
     subalignment_strings = sub_am.to_string(0, add_block_sep=False)
     ref_subalignment = [
-        "...FELIK...-----...",
-        "ahcFELIK...-----...",
-        "...FELIK...-----hac",
-        "...FELIKahcFELIKa..",
-        "..a-ELI-...-----h..",
+        "...---...FEL-K...---...",
+        "ahc---...F-LI-...---...",
+        "...FLKhacFELIKhaaELIaah",
+        "...---...FELIKahcELI...",
+        "...FLKa..FELIK...---..."
     ]
     for s, r in zip(subalignment_strings, ref_subalignment):
         assert s == r
