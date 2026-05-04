@@ -235,6 +235,15 @@ def parse_args(
         help="Decoding mode for training. Options: 'viterbi', 'mea'. "\
         "(default: %(default)s)"
     )
+    train_group.add_argument(
+        "--align_hits",
+        dest="align_hits",
+        type=str,
+        default=tr.hit_alignment_mode,
+        help="Mode for aligning the domain hits during training. Options:" \
+        "'left_align', 'right_align', 'greedy_consensus'. "\
+        "(default: %(default)s)"
+    )
 
     class EpochsAction(argparse.Action):
         def __call__(

@@ -132,6 +132,10 @@ class TrainingConfig(BaseModel):
     decoding_mode: str = "viterbi"
     """Decoding mode for training. Options: "viterbi", "mea"."""
 
+    hit_alignment_mode: str = "greedy"
+    """Mode for aligning the domain hits during training. Options: "left",
+    "right", "greedy"."""
+
 
     @field_validator("learning_rate")
     def validate_learning_rate(cls, v: float) -> float:

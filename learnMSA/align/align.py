@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import tensorflow as tf
 
+from learnMSA.align.align_hits import HitAlignmentMode
 import learnMSA.model.training_util as training_util
 from learnMSA import Configuration
 from learnMSA.align.align_inserts import make_aligned_insertions
@@ -295,7 +296,12 @@ def _fit_and_align(
             data, indices=train_indices, iteration=i, batch_size=batch_size
         )
 
-        am = AlignmentModel(data, model, decode_indices)
+        am = AlignmentModel(
+            data, model, decode_indices,
+            hit_alignment_mode = HitAlignmentMode.from_str(
+                config.training.hit_alignment_mode
+            ),
+        )
 
         if config.input_output.verbose:
             print("Created alignment model successfully.")

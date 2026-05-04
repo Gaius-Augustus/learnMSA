@@ -40,6 +40,7 @@ class TrainingConfig(BaseModel):
     reset_emissions_after_surgery: bool
     reset_transitions_after_surgery: bool
     decoding_mode: str
+    hit_alignment_mode: str
 
     def __init__(
         self,
@@ -79,6 +80,7 @@ class TrainingConfig(BaseModel):
         reset_emissions_after_surgery: bool = False,
         reset_transitions_after_surgery: bool = False,
         decoding_mode: str = "viterbi",
+        hit_alignment_mode: str = "greedy_consensus",
         **kwargs: Any,
     ) -> None: ...
 

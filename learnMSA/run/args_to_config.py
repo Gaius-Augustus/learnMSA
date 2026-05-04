@@ -78,6 +78,7 @@ def args_to_config(args: Namespace, base_config: Configuration | None = None) ->
     tr["reset_emissions_after_surgery"] = args.reset_emissions_after_surgery
     tr["reset_transitions_after_surgery"] = args.reset_transitions_after_surgery
     tr["decoding_mode"] = args.decoding_mode
+    tr["hit_alignment_mode"] = args.align_hits
 
     # Crop: decode the argparser string representation into config fields.
     tr["auto_crop"] = args.crop == "auto"
