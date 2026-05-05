@@ -193,7 +193,7 @@ def run_main() -> None:
                 ]))
                 if am.fixed_viterbi_seqs.size > max_show_seqs:
                     print("...")
-            print("time for generating output:", "%.4f" % (time.time()-t))
+            print(f"Generating output took {time.time()-t:.4f} seconds.")
             print("Wrote file", config.input_output.output_file)
 
         if config.input_output.scores != Path():

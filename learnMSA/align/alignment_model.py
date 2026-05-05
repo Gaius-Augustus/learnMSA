@@ -1,6 +1,6 @@
 import json
 import shutil
-import sys
+import time
 import warnings
 from enum import Enum
 from pathlib import Path
@@ -557,43 +557,55 @@ class AlignmentModel():
             finished: Boolean vector indicating sequences that are fully
                 decoded. Shape: (num_seq)
         """
-        n = state_seqs_max_lik.shape[0]
+        n, T = state_seqs_max_lik.shape
         c = model_length
-        # initialize the consensus with gaps
         consensus_columns = -np.ones((n, c), dtype=np.int16)
-        # insertion lengths and starting positions per sequence
-        insertion_lens = np.zeros((n, c-1), dtype=np.int16)
-        insertion_start = -np.ones((n, c-1), dtype=np.int16)
-        # is true if and only if the previous hidden state was an insertion
-        # state (not counting flanks)
-        last_insert = np.zeros(n, dtype=bool)
-        A = np.arange(n)
-        while True:
-            q = state_seqs_max_lik[A, indices]
-            is_match = ((q >= 0) & (q < c))
-            is_insert = ((q >= c) & (q < 2*c-1))
-            is_insert_start = is_insert & ~last_insert
-            is_unannotated = (q == 2*c)
-            is_at_end = ((q == 2*c+1) | (q == 2*c+2))
-            if np.all(is_unannotated | is_at_end):
-                finished = ~is_unannotated
-                break
-            # track matches
-            consensus_columns[A[is_match], q[is_match]] = indices[is_match]
-            # track insertions
-            is_insert_subset = A[is_insert]
-            is_insert_start_subset = A[is_insert_start]
-            insertion_lens[is_insert_subset, q[is_insert]-c] += 1
-            insertion_start[is_insert_start_subset, q[is_insert_start]-c] = indices[is_insert_start]
-            indices[is_match | is_insert] += 1
-            last_insert = is_insert
+        insertion_lens    = np.zeros((n, c-1), dtype=np.int16)
+        insertion_start   = -np.ones((n, c-1), dtype=np.int16)
+
+        pos    = np.arange(T)
+        active = pos[None, :] >= indices[:, None]  # (n, T): positions in scope
+        s      = state_seqs_max_lik
+
+        # Locate the terminal state (unannotated or end) for each sequence
+        is_unannotated = active & (s == 2*c)
+        is_at_end      = active & ((s == 2*c+1) | (s == 2*c+2))
+        is_terminal    = is_unannotated | is_at_end
+        has_terminal   = np.any(is_terminal, axis=1)                           # (n,)
+        end_pos        = np.where(has_terminal, np.argmax(is_terminal, axis=1), T)  # (n,)
+
+        # Only process positions inside the core region [indices[i], end_pos[i])
+        in_core   = active & (pos[None, :] < end_pos[:, None])
+        is_match  = in_core & (s >= 0)   & (s < c)
+        is_insert = in_core & (s >= c)   & (s < 2*c - 1)
+
+        # Consensus columns: record which sequence position fills each match state
+        seq_idx_m, pos_idx_m = np.where(is_match)
+        consensus_columns[seq_idx_m, s[seq_idx_m, pos_idx_m]] = pos_idx_m.astype(np.int16)
+
+        # Insertion lengths (count per seq × insert-state)
+        seq_idx_i, pos_idx_i = np.where(is_insert)
+        insert_states = s[seq_idx_i, pos_idx_i] - c
+        np.add.at(insertion_lens, (seq_idx_i, insert_states), 1)
+
+        # Insertion starts: minimum position per (seq, insert-state)
+        ins_start_tmp = np.full((n, c-1), T, dtype=np.int32)
+        np.minimum.at(ins_start_tmp, (seq_idx_i, insert_states), pos_idx_i)
+        has_insert = ins_start_tmp < T
+        insertion_start[has_insert] = ins_start_tmp[has_insert].astype(np.int16)
+
+        # finished[i] = True when terminal is an end state, not unannotated
+        ep_clamped = np.minimum(end_pos, T - 1)
+        finished   = has_terminal & is_at_end[np.arange(n), ep_clamped]
+
+        indices[:] = end_pos.astype(indices.dtype)
         return consensus_columns, insertion_lens, insertion_start, finished
 
 
     @classmethod
     def decode_flank(cls, state_seqs_max_lik, flank_state_id, indices):
         """
-        Decodes flanking insertion states. The deconding is active as long
+        Decodes flanking insertion states. The decoding is active as long
         as at least one sequence remains in a flank/unannotated state.
 
         Args:
@@ -609,15 +621,19 @@ class AlignmentModel():
             insertion_start: Starting position of each insertion in the
                 sequences. Shape: (num_seq, model_length-1)
         """
-        n = state_seqs_max_lik.shape[0]
+        n, T = state_seqs_max_lik.shape
         insertion_start = np.copy(indices)
-        while True:
-            q = state_seqs_max_lik[np.arange(n), indices]
-            is_flank = (q == flank_state_id)
-            if ~np.any(is_flank):
-                break
-            indices[is_flank] += 1
-        insertion_lens = indices - insertion_start
+
+        # For each sequence find the first position >= indices[i] that is not
+        # the flank state; that is where the flank run ends.
+        pos       = np.arange(T)
+        active    = pos[None, :] >= indices[:, None]  # (n, T)
+        non_flank = active & (state_seqs_max_lik != flank_state_id)
+        has_non_flank = np.any(non_flank, axis=1)
+        end_pos   = np.where(has_non_flank, np.argmax(non_flank, axis=1), T)
+
+        insertion_lens = (end_pos - indices).astype(np.int16)
+        indices[:] = end_pos.astype(indices.dtype)
         return insertion_lens, insertion_start
 
 
@@ -827,6 +843,9 @@ class AlignmentModel():
         state_seqs_max_lik = self._clean_up_viterbi_seqs(
             state_seqs_max_lik, models
         )
+
+        t = time.time()
+
         for i,j in enumerate(models):
             model_len = self.model.context.model_lengths[j]
             s = state_seqs_max_lik[:,:,i]
@@ -843,6 +862,12 @@ class AlignmentModel():
             else:
                 meta_data = hit_alignment(meta_data, self.hit_alignment_mode)
             self.metadata[j] = meta_data
+
+        if self.model.context.config.input_output.verbose:
+            print(
+                f"Building alignment took {time.time() - t:.2f} "+
+                "seconds."
+            )
 
     def _clean_up_viterbi_seqs(self, state_seqs_max_lik, models):
 
