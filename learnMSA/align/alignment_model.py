@@ -11,7 +11,6 @@ import tensorflow as tf
 from learnMSA.align.align_inserts import AlignedInsertions
 from learnMSA.align.alignment_metadata import AlignmentMetaData
 from learnMSA.align.align_hits import HitAlignmentMode, hit_alignment
-from learnMSA.align.tf.decode import decode_tf
 from learnMSA.model.select import SelectionCriterion, select_model
 from learnMSA.model.tf.model import LearnMSAModel
 from learnMSA.util.aligned_dataset import AlignedDataset, SequenceDataset
@@ -185,7 +184,7 @@ class AlignmentModel():
         self,
         filepath: str | Path,
         model_index: int,
-        batch_size: int = 10000,
+        batch_size: int = 100000,
         add_block_sep: bool = False,
         aligned_insertions : AlignedInsertions = AlignedInsertions(),
         format: str = "fasta",
@@ -869,20 +868,20 @@ class AlignmentModel():
         else:
             raise ValueError(f"Unsupported decoding mode: {decoding_mode}")
 
-        state_seqs_max_lik = self.model.predict(
+        # predict returns list[AlignmentMetaData] when _decode_msa is True.
+        # The full state-sequence array is never materialised in CPU memory.
+        metas = self.model.predict(
             self.data, indices=self.indices, models=models
-        ) # (B, T, H)
-
-        state_seqs_max_lik = self._clean_up_viterbi_seqs(
-            state_seqs_max_lik, models
         )
+
+        # TODO: this is just here to generate empty fixed_viterbi_seqs
+        _ = self._clean_up_viterbi_seqs(None, [0])
+
 
         t = time.time()
 
         for i,j in enumerate(models):
-            model_len = self.model.context.model_lengths[j]
-            s = state_seqs_max_lik[:,:,i]
-            meta_data = decode_tf(int(model_len), s)
+            meta_data = metas[i]
             if self.hit_alignment_mode == HitAlignmentMode.GREEDY_CONSENSUS:
                 # Use occupancy (number of used match states) as hit score.
                 occupancy = meta_data.occupancy_matrix()  # (R, N), -1 for empty

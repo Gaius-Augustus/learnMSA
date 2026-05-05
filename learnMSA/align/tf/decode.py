@@ -118,10 +118,13 @@ def _tf_decode_core_inner(state_seqs, c, indices):
         insertion_start = tf.zeros([n, 0], dtype=tf.int32)                  # (n, 0)
 
     # ---- finished flag ------------------------------------------------------
+    # finished = True when the sequence reached a right-flank / end state
+    # OR when no terminal state was found at all (sequence ended with padding,
+    # meaning this was the last repeat block).
     ep_clamped   = tf.minimum(end_pos, T - 1)                               # (n,)
     row_indices  = tf.range(n)
     gather_idx   = tf.stack([row_indices, ep_clamped], axis=1)               # (n, 2)
-    finished     = has_terminal & tf.gather_nd(is_at_end, gather_idx)       # (n,)
+    finished     = tf.logical_not(has_terminal) | tf.gather_nd(is_at_end, gather_idx)  # (n,)
 
     return consensus_columns, insertion_lens, insertion_start, finished, end_pos
 
@@ -196,12 +199,11 @@ def decode_core_tf(model_length: int, state_seqs, indices):
 # Batch-decode infrastructure for OOM-safe GPU processing
 # ---------------------------------------------------------------------------
 
-@tf.function(jit_compile=True)
 def _count_repeats_batch(batch, unann_state):
-    """JIT-compiled per-batch repeat counter.
+    """Per-batch repeat counter (no decorator; wrap via _get_count_fn).
 
-    ``unann_state`` is a scalar int32 tensor so XLA traces once per concrete
-    (batch_size, T, unann_state) combination.
+    ``unann_state`` is a scalar int32 tensor baked in at wrapping time so
+    ``tf.function`` never retraces due to different model lengths.
     """
     is_unann = tf.equal(batch, unann_state)
     entries  = tf.logical_and(
@@ -211,52 +213,83 @@ def _count_repeats_batch(batch, unann_state):
     return tf.reduce_sum(tf.cast(entries, tf.int32), axis=1) + 1  # (B,)
 
 
+# Cache of tf.function-wrapped counters keyed by (c, jit_compile).
+_COUNT_FN_CACHE: dict = {}
+
+
+def _get_count_fn(c: int, jit_compile: bool):
+    """Return (and cache) a ``tf.function``-wrapped repeat counter that has
+    the unannotated-state id ``2*c`` baked in as a Python constant.
+
+    Baking ``c`` prevents retracing when the same function object is called
+    with different model lengths; a separate compiled function is stored per
+    ``(c, jit_compile)`` pair instead.
+    """
+    key = (c, jit_compile)
+    if key in _COUNT_FN_CACHE:
+        return _COUNT_FN_CACHE[key]
+    unann = 2 * c  # baked Python constant
+    def _count(batch):
+        return _count_repeats_batch(batch, tf.constant(unann, dtype=tf.int32))
+    # jit_compile=False: the count op is just tf.equal + tf.reduce_sum — no XLA
+    # benefit but XLA's shape-specialisation would cause one retrace per
+    # unique (B, T) pair.  reduce_retracing=True further avoids Python-level
+    # retracing when batch/sequence sizes vary across calls.
+    _COUNT_FN_CACHE[key] = tf.function(
+        _count, jit_compile=False, reduce_retracing=True
+    )
+    return _COUNT_FN_CACHE[key]
+
+
 def _tf_count_repeats(state_seqs_t: tf.Tensor, c: int,
-                      batch_size: int = 512) -> np.ndarray:
+                      batch_size: int = 512,
+                      jit_compile: bool = True) -> np.ndarray:
     """Count repeats per sequence by detecting unannotated-state transitions.
 
     Processes sequences in batches padded to ``batch_size`` so that the
-    JIT-compiled kernel is traced only once per unique (batch_size, T) shape.
+    compiled kernel is traced only once per unique (batch_size, T) shape.
 
     Args:
         state_seqs_t: ``(n, T)`` int32 tensor (GPU or CPU).
         c: Python int – model length.
         batch_size: Sequences per GPU batch (also used as static batch dim).
+        jit_compile: Whether to JIT-compile the counting kernel.
 
     Returns:
         ``(n,)`` int32 numpy array with the number of repeats per sequence.
     """
-    n     = int(state_seqs_t.shape[0])
-    T     = int(state_seqs_t.shape[1])
-    unann = tf.constant(2 * c, dtype=tf.int32)
+    n        = int(state_seqs_t.shape[0])
+    T        = int(state_seqs_t.shape[1])
     pad_rows = tf.zeros([batch_size, T], dtype=tf.int32)
-    result = np.empty(n, dtype=np.int32)
+    count_fn = _get_count_fn(c, jit_compile)
+    result   = np.empty(n, dtype=np.int32)
     for start in range(0, n, batch_size):
         end  = min(start + batch_size, n)
         B    = end - start
         rows = state_seqs_t[start:end]
         if B < batch_size:
             rows = tf.concat([rows, pad_rows[:batch_size - B]], axis=0)
-        result[start:end] = _count_repeats_batch(rows, unann).numpy()[:B]
+        result[start:end] = count_fn(rows).numpy()[:B]
     return result
 
 
-# Cache of JIT-compiled decode functions keyed by (num_repeats, model_length).
+# Cache of compiled decode functions keyed by (num_repeats, model_length, jit_compile).
 _DECODE_BATCH_CACHE: dict = {}
 
 
-def _get_decode_batch_fn(num_repeats: int, model_length: int):
-    """Return (and cache) a ``jit_compile=True`` decode function for exactly
+def _get_decode_batch_fn(num_repeats: int, model_length: int,
+                         jit_compile: bool = True):
+    """Return (and cache) a compiled decode function for exactly
     ``num_repeats`` repeats and ``model_length`` match states.
 
     The returned callable takes a single ``(n, T)`` int32 tensor and returns
-    a tuple of all decoded tensors kept on the GPU until ``.numpy()`` is called
-    by the caller.  The Python-level loop over repeats is unrolled at trace
-    time so XLA can fuse the entire decode into a single kernel.
+    a tuple of tensors kept on the GPU until ``.numpy()`` is called by the
+    caller.  The Python-level loop over repeats is unrolled at trace time so
+    XLA can fuse the entire decode into a single kernel.
 
     Returns:
         A ``tf.function``-wrapped callable ``fn(state_seqs_t)`` whose output
-        is a 11-tuple::
+        is a 12-tuple::
 
             (left_flank_len,    # (n,) int32
              left_flank_start,  # (n,) int32
@@ -265,19 +298,19 @@ def _get_decode_batch_fn(num_repeats: int, model_length: int):
              is_stack,          # (R, n, c-1) int32
              cs_stack,          # (R, n) int32  – core start positions
              ce_stack,          # (R, n) int32  – core end positions
+             fin_stack,         # (R, n) bool   – finished flag per repeat
              ul_stack,          # (R-1, n) int32 or shape-(0,) for R=1
              us_stack,          # (R-1, n) int32 or shape-(0,) for R=1
              right_flank_len,   # (n,) int32
              right_flank_start) # (n,) int32
     """
-    key = (num_repeats, model_length)
+    key = (num_repeats, model_length, jit_compile)
     if key in _DECODE_BATCH_CACHE:
         return _DECODE_BATCH_CACHE[key]
 
     R = num_repeats
     c = model_length
 
-    @tf.function(jit_compile=True)
     def _decode_batch(state_seqs):
         # Left flank ---------------------------------------------------------
         lfl, lfs, indices = _tf_decode_flank_core(state_seqs, 2 * c - 1,
@@ -285,18 +318,19 @@ def _get_decode_batch_fn(num_repeats: int, model_length: int):
                                                             dtype=tf.int32))
 
         # Core blocks (R) and unannotated segments (R-1) ---------------------
-        core_cc, core_il, core_is_, core_cs, core_ce = [], [], [], [], []
+        core_cc, core_il, core_is_, core_cs, core_ce, core_fin = [], [], [], [], [], []
         uns_l, uns_s = [], []
 
         for r in range(R):
             core_cs.append(indices)
-            cc, il, is_, _fin, indices = _tf_decode_core_inner(
+            cc, il, is_, fin, indices = _tf_decode_core_inner(
                 state_seqs, c, indices
             )
             core_cc.append(cc)
             core_il.append(il)
             core_is_.append(is_)
             core_ce.append(indices)
+            core_fin.append(fin)
 
             if r < R - 1:
                 ul, us, indices = _tf_decode_flank_core(state_seqs, 2 * c, indices)
@@ -307,11 +341,12 @@ def _get_decode_batch_fn(num_repeats: int, model_length: int):
         rfl, rfs, _ = _tf_decode_flank_core(state_seqs, 2 * c + 1, indices)
 
         # Stack results ------------------------------------------------------
-        cc_stack = tf.stack(core_cc, axis=0)   # (R, n, c)
-        il_stack = tf.stack(core_il, axis=0)   # (R, n, c-1)
-        is_stack = tf.stack(core_is_, axis=0)  # (R, n, c-1)
-        cs_stack = tf.stack(core_cs, axis=0)   # (R, n)
-        ce_stack = tf.stack(core_ce, axis=0)   # (R, n)
+        cc_stack  = tf.stack(core_cc,  axis=0)   # (R, n, c)
+        il_stack  = tf.stack(core_il,  axis=0)   # (R, n, c-1)
+        is_stack  = tf.stack(core_is_, axis=0)   # (R, n, c-1)
+        cs_stack  = tf.stack(core_cs,  axis=0)   # (R, n)
+        ce_stack  = tf.stack(core_ce,  axis=0)   # (R, n)
+        fin_stack = tf.stack(core_fin, axis=0)   # (R, n)
 
         if R > 1:
             ul_stack = tf.stack(uns_l, axis=0)  # (R-1, n)
@@ -323,10 +358,118 @@ def _get_decode_batch_fn(num_repeats: int, model_length: int):
             us_stack = tf.constant([], dtype=tf.int32)
 
         return lfl, lfs, cc_stack, il_stack, is_stack, cs_stack, ce_stack, \
-               ul_stack, us_stack, rfl, rfs
+               fin_stack, ul_stack, us_stack, rfl, rfs
 
-    _DECODE_BATCH_CACHE[key] = _decode_batch
-    return _decode_batch
+    # reduce_retracing=True: TF traces once with abstract (None, None) input
+    # specs so the Python graph is built only once per (R, c, jit_compile)
+    # key.  XLA still compiles per concrete shape internally, but that is
+    # much cheaper than repeated Python-level tracing.
+    _DECODE_BATCH_CACHE[key] = tf.function(
+        _decode_batch, jit_compile=jit_compile, reduce_retracing=True
+    )
+    return _DECODE_BATCH_CACHE[key]
+
+
+def decode_batch_to_meta(outputs_np: tuple, model_length: int):
+    """Assemble :class:`~learnMSA.align.alignment_metadata.AlignmentMetaData`
+    from the dense numpy arrays produced by :func:`_get_decode_batch_fn`.
+
+    This is the CPU post-processing step.  It extracts the *valid* repeat
+    entries (determined by the ``finished`` flag) from the padded
+    ``(R_max, B, ...)`` arrays and builds the flat storage layout expected by
+    :class:`~learnMSA.align.alignment_metadata.AlignmentMetaData`.
+
+    Args:
+        outputs_np: 12-tuple of numpy arrays as returned by calling
+            :func:`_get_decode_batch_fn` and converting each element with
+            ``.numpy()``:
+
+            ``(lfl, lfs, cc, il, is_, cs, ce, fin, ul, us, rfl, rfs)``
+
+            where shapes (with ``R = num_repeats``, ``B = batch``,
+            ``c = model_length``) are:
+
+            * ``lfl``  : (B,) int32  – left-flank lengths
+            * ``lfs``  : (B,) int32  – left-flank starts
+            * ``cc``   : (R, B, c)   int32
+            * ``il``   : (R, B, c-1) int32
+            * ``is_``  : (R, B, c-1) int32
+            * ``cs``   : (R, B)      int32
+            * ``ce``   : (R, B)      int32
+            * ``fin``  : (R, B)      bool
+            * ``ul``   : (R-1, B) or (0,) int32  – unannotated-seg lengths
+            * ``us``   : (R-1, B) or (0,) int32  – unannotated-seg starts
+            * ``rfl``  : (B,) int32  – right-flank lengths
+            * ``rfs``  : (B,) int32  – right-flank starts
+
+        model_length: Number of match states ``c``.
+
+    Returns:
+        :class:`~learnMSA.align.alignment_metadata.AlignmentMetaData` with
+        ``sort_perm=None``.
+    """
+    from learnMSA.align.alignment_metadata import AlignmentMetaData
+
+    lfl, lfs, cc, il, is_, cs, ce, fin, ul, us, rfl, rfs = outputs_np
+    c  = int(model_length)
+    R  = cc.shape[0]   # num_repeats (dense upper bound)
+    B  = cc.shape[1]   # batch size (may include padding rows)
+
+    # num_repeats_per_row[i] = index of first True in fin[:, i] + 1
+    # fin is (R, B) bool; argmax on axis=0 finds the first True.
+    # If no repeat is finished (all False), argmax returns 0 — so we use
+    # tf.reduce_any to detect this case and clamp to R.
+    has_any_finished = np.any(fin, axis=0)          # (B,)
+    first_finished   = np.argmax(fin, axis=0)        # (B,) index of first True
+    num_repeats_per_row = np.where(
+        has_any_finished, first_finished + 1, R
+    ).astype(np.int32)                               # (B,)
+
+    # Build flat output arrays.
+    row_off  = np.concatenate([[0], np.cumsum(num_repeats_per_row)]).astype(np.int32)
+    total_R  = int(row_off[-1])
+    uns_per  = np.maximum(num_repeats_per_row - 1, 0)
+    uns_off  = np.concatenate([[0], np.cumsum(uns_per)]).astype(np.int32)
+    total_U  = int(uns_off[-1])
+    M        = c
+
+    domain_hit_flat  = np.full((total_R, M),       -1, dtype=np.int16)
+    domain_loc_flat  = np.full((total_R, 2),        -1, dtype=np.int32)
+    ins_lens_flat    = np.zeros((total_R, max(0, M - 1)), dtype=np.int16)
+    ins_start_flat   = np.full((total_R, max(0, M - 1)), -1, dtype=np.int16)
+    uns_len_flat     = np.zeros(total_U,  dtype=np.int16)
+    uns_start_flat   = np.full(total_U,   -1, dtype=np.int32)
+
+    for i in range(B):
+        nr = int(num_repeats_per_row[i])
+        for r in range(nr):
+            flat = int(row_off[i]) + r
+            domain_hit_flat[flat]    = cc[r, i].astype(np.int16)
+            domain_loc_flat[flat, 0] = cs[r, i]
+            domain_loc_flat[flat, 1] = ce[r, i]
+            if M > 1:
+                ins_lens_flat[flat]  = il[r, i].astype(np.int16)
+                ins_start_flat[flat] = is_[r, i].astype(np.int16)
+            if r < nr - 1 and total_U > 0:
+                uf = int(uns_off[i]) + r
+                uns_len_flat[uf]   = ul[r, i].astype(np.int16)
+                uns_start_flat[uf] = us[r, i]
+
+    return AlignmentMetaData(
+        num_rows                   = B,
+        num_match                  = c,
+        num_repeats_per_row        = num_repeats_per_row,
+        domain_hit                 = domain_hit_flat,
+        domain_loc                 = domain_loc_flat,
+        insertion_lens             = ins_lens_flat,
+        insertion_start            = ins_start_flat,
+        left_flank_len             = lfl.astype(np.int16),
+        left_flank_start           = lfs.astype(np.int32),
+        right_flank_len            = rfl.astype(np.int16),
+        right_flank_start          = rfs.astype(np.int32),
+        unannotated_segments_len   = uns_len_flat,
+        unannotated_segments_start = uns_start_flat,
+    )
 
 
 def decode_tf(model_length: int, state_seqs, batch_size: int = 2048):
@@ -411,7 +554,7 @@ def decode_tf(model_length: int, state_seqs, batch_size: int = 2048):
     unique_Rs = np.unique(sorted_nrpr)
     for R_val in unique_Rs:
         R_int     = int(R_val)
-        decode_fn = _get_decode_batch_fn(R_int, c)
+        decode_fn = _get_decode_batch_fn(R_int, c, jit_compile=True)
         group_idx = np.where(sorted_nrpr == R_val)[0]   # indices in sorted order
 
         for b_start in range(0, len(group_idx), batch_size):
@@ -427,7 +570,7 @@ def decode_tf(model_length: int, state_seqs, batch_size: int = 2048):
                 )
             batch_t = tf.constant(rows, dtype=tf.int32)
             (lfl_t, lfs_t, cc_t, il_t, is_t, cs_t, ce_t,
-             ul_t, us_t, rfl_t, rfs_t) = decode_fn(batch_t)
+             fin_t, ul_t, us_t, rfl_t, rfs_t) = decode_fn(batch_t)
 
             # Transfer to CPU (slice [:B] to discard padding rows)
             lfl = lfl_t.numpy()[:B].astype(np.int16)

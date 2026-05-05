@@ -378,3 +378,163 @@ class AlignmentMetaData:
             shift: (num_rows,) int array of non-negative shift values.
         """
         self._repeat_offset += shift.astype(np.int32)
+
+    # ------------------------------------------------------------------
+    # Row reordering / concatenation utilities
+    # ------------------------------------------------------------------
+
+    def _reindex_rows(self, perm: np.ndarray) -> 'AlignmentMetaData':
+        """Return a copy with rows reordered so that new row *i* is old row
+        *perm[i]*.  ``sort_perm`` must already be ``None`` (call
+        :meth:`to_original_order` first if needed).
+
+        Args:
+            perm: 1-D int array of length ``num_rows``.  ``perm[i]`` is the
+                old row index that should appear at new position *i*.
+
+        Returns:
+            A new :class:`AlignmentMetaData` with ``sort_perm=None``.
+        """
+        n = self.num_rows
+        perm = np.asarray(perm, dtype=np.int32)
+
+        nrpr_new = self.num_repeats_per_row[perm]
+
+        # Per-row arrays
+        lfl_new = self.left_flank_len[perm]
+        lfs_new = self.left_flank_start[perm]
+        rfl_new = self.right_flank_len[perm]
+        rfs_new = self.right_flank_start[perm]
+
+        # Flat repeat arrays – build a flat index into the old arrays
+        new_row_off = np.concatenate([[0], np.cumsum(nrpr_new)]).astype(np.int32)
+        total_R_new = int(new_row_off[-1])
+
+        if total_R_new > 0:
+            # For each new flat position k: which new row does it belong to?
+            row_of_flat = np.repeat(
+                np.arange(n, dtype=np.int32), nrpr_new
+            )                                                  # (total_R_new,)
+            local_of_flat = (
+                np.arange(total_R_new, dtype=np.int32) - new_row_off[row_of_flat]
+            )                                                  # (total_R_new,)
+            flat_order = (
+                self._row_offsets[perm[row_of_flat]] + local_of_flat
+            )                                                  # (total_R_new,)
+            dh_new = self.domain_hit[flat_order]
+            dl_new = self.domain_loc[flat_order]
+            il_new = self.insertion_lens[flat_order]
+            is_new = self.insertion_start[flat_order]
+        else:
+            dh_new = self.domain_hit[:0]
+            dl_new = self.domain_loc[:0]
+            il_new = self.insertion_lens[:0]
+            is_new = self.insertion_start[:0]
+
+        # Flat unannotated arrays
+        uns_per_row_new = np.maximum(nrpr_new - 1, 0)
+        new_uns_off = np.concatenate(
+            [[0], np.cumsum(uns_per_row_new)]
+        ).astype(np.int32)
+        total_U_new = int(new_uns_off[-1])
+
+        old_uns_per_row = np.maximum(self.num_repeats_per_row - 1, 0)
+        old_uns_off = np.concatenate(
+            [[0], np.cumsum(old_uns_per_row)]
+        ).astype(np.int32)
+
+        if total_U_new > 0:
+            uns_row_of_flat = np.repeat(
+                np.arange(n, dtype=np.int32), uns_per_row_new
+            )
+            uns_local = (
+                np.arange(total_U_new, dtype=np.int32)
+                - new_uns_off[uns_row_of_flat]
+            )
+            uns_flat_order = (
+                old_uns_off[perm[uns_row_of_flat]] + uns_local
+            )
+            ul_new = self.unannotated_segments_len[uns_flat_order]
+            us_new = self.unannotated_segments_start[uns_flat_order]
+        else:
+            ul_new = np.zeros(0, dtype=self.unannotated_segments_len.dtype)
+            us_new = np.zeros(0, dtype=self.unannotated_segments_start.dtype)
+
+        return AlignmentMetaData(
+            num_rows=n,
+            num_match=self.num_match,
+            num_repeats_per_row=nrpr_new,
+            domain_hit=dh_new,
+            domain_loc=dl_new,
+            insertion_lens=il_new,
+            insertion_start=is_new,
+            left_flank_len=lfl_new,
+            left_flank_start=lfs_new,
+            right_flank_len=rfl_new,
+            right_flank_start=rfs_new,
+            unannotated_segments_len=ul_new,
+            unannotated_segments_start=us_new,
+        )
+
+    def to_original_order(self) -> 'AlignmentMetaData':
+        """Return a copy with all arrays in the original (pre-sort) row order.
+
+        When ``sort_perm`` is ``None`` this method returns ``self`` unchanged.
+        Otherwise it calls :meth:`_reindex_rows` with the inverse permutation
+        to undo the sort applied by
+        :func:`~learnMSA.align.tf.decode.decode_tf`.
+        """
+        if self._inv_perm is None:
+            return self
+        return self._reindex_rows(self._inv_perm)
+
+    @staticmethod
+    def concat(metas: 'list[AlignmentMetaData]') -> 'AlignmentMetaData':
+        """Concatenate a list of :class:`AlignmentMetaData` objects in order.
+
+        All entries must have the same ``num_match`` and ``sort_perm=None``
+        (call :meth:`to_original_order` on each one first if needed).
+
+        Args:
+            metas: Non-empty list of :class:`AlignmentMetaData` to join.
+
+        Returns:
+            A new :class:`AlignmentMetaData` whose rows are the rows of
+            *metas[0]* followed by the rows of *metas[1]*, etc.
+        """
+        if not metas:
+            raise ValueError("Cannot concatenate an empty list")
+        assert all(m.num_match == metas[0].num_match for m in metas), \
+            "All AlignmentMetaData must have the same num_match"
+        assert all(m.sort_perm is None for m in metas), \
+            "Call to_original_order() on each entry before concat()"
+
+        return AlignmentMetaData(
+            num_rows=sum(m.num_rows for m in metas),
+            num_match=metas[0].num_match,
+            num_repeats_per_row=np.concatenate(
+                [m.num_repeats_per_row for m in metas]
+            ),
+            domain_hit=np.concatenate([m.domain_hit for m in metas], axis=0),
+            domain_loc=np.concatenate([m.domain_loc for m in metas], axis=0),
+            insertion_lens=np.concatenate(
+                [m.insertion_lens for m in metas], axis=0
+            ),
+            insertion_start=np.concatenate(
+                [m.insertion_start for m in metas], axis=0
+            ),
+            left_flank_len=np.concatenate([m.left_flank_len for m in metas]),
+            left_flank_start=np.concatenate(
+                [m.left_flank_start for m in metas]
+            ),
+            right_flank_len=np.concatenate([m.right_flank_len for m in metas]),
+            right_flank_start=np.concatenate(
+                [m.right_flank_start for m in metas]
+            ),
+            unannotated_segments_len=np.concatenate(
+                [m.unannotated_segments_len for m in metas]
+            ),
+            unannotated_segments_start=np.concatenate(
+                [m.unannotated_segments_start for m in metas]
+            ),
+        )
