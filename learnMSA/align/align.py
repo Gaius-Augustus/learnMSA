@@ -260,6 +260,7 @@ def _fit_and_align(
         surgery_result = model_surgery(
             am.model,
             data,
+            indices=train_indices,
             surgery_del = config.training.surgery_del,
             surgery_ins = config.training.surgery_ins,
             verbose = config.input_output.verbose,
