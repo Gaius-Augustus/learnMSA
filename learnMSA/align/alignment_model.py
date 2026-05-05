@@ -182,7 +182,7 @@ class AlignmentModel():
 
     def to_file(
         self,
-        filepath: str,
+        filepath: str | Path,
         model_index: int,
         batch_size: int = 100000,
         add_block_sep: bool = False,
@@ -219,7 +219,11 @@ class AlignmentModel():
         if format == "fasta" or format == "a2m":
             # Stream batches to file
             output_alphabet = self.get_output_alphabet(format == "a2m")
-            with open(filepath, "w") as output_file:
+            # Use a large write buffer only when the output is large enough to
+            # benefit from it. Total residues is a lower bound on output size.
+            total_residues = int(np.sum(self.data[0].seq_lens[self.indices]))
+            write_buffer = 8 * 1024 * 1024 if total_residues > 1_000_000 else -1
+            with open(filepath, "w", buffering=write_buffer) as output_file:
                 n = self.indices.size
                 i = 0
                 while i < n:
@@ -235,13 +239,19 @@ class AlignmentModel():
                     alignment_strings = self.batch_to_string(
                         batch_alignment, output_alphabet=output_alphabet
                     )
+                    entries = []
                     for s, seq_ind in zip(alignment_strings, batch_indices):
                         seq_header = self.data[0].get_header(
                             self.indices[seq_ind]
                         )
-                        output_file.write(">"+seq_header+"\n")
-                        for j in range(0, len(s), fasta_line_limit):
-                            output_file.write(s[j:j+fasta_line_limit]+"\n")
+                        entry = ">"+seq_header+"\n"
+                        entry += "\n".join(
+                            s[j:j+fasta_line_limit]
+                            for j in range(0, len(s), fasta_line_limit)
+                        )
+                        entry += "\n"
+                        entries.append(entry)
+                    output_file.writelines(entries)
                     i += batch_size
         else:
             # Decode the whole alignment into memory and write the entire
@@ -282,7 +292,7 @@ class AlignmentModel():
             decoding_mode: The mode used for decoding the alignment.
         """
         if not model_index in self.metadata:
-            self._build_alignment([model_index], decoding_mode)
+            self.build_alignment([model_index], decoding_mode)
         meta_data = self.metadata[model_index]
 
         # Gather the sequences for the batch
@@ -383,9 +393,10 @@ class AlignmentModel():
     ) -> list[str]:
         """ Converts a dense matrix into string format.
         """
-        alignment_arr = output_alphabet[batch_alignment]
-        alignment_strings = [''.join(s) for s in alignment_arr]
-        return alignment_strings
+        chars = output_alphabet[batch_alignment]  # (n, L) dtype '<U1'
+        # View each row as a single string (requires C-contiguous, fixed-width chars)
+        n, L = chars.shape
+        return np.ascontiguousarray(chars).view(f'U{L}').reshape(n).tolist()
 
     def write_scores(self, filepath: Path, model: int) -> None:
         """ Writes per-sequence scores (loglik, bitscore) to a
@@ -798,7 +809,7 @@ class AlignmentModel():
     #computes an implicit alignment (without storing gaps)
     #eventually, an alignment with explicit gaps can be written
     #in a memory friendly manner to file
-    def _build_alignment(self, models, decoding_mode: DecodingMode):
+    def build_alignment(self, models, decoding_mode: DecodingMode):
 
         assert len(models) == 1, "Not implemented for multiple models."
 

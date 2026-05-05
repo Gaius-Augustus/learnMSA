@@ -1,4 +1,5 @@
 import os
+import time
 from contextlib import ExitStack
 from pathlib import Path
 
@@ -54,6 +55,8 @@ def run_main() -> None:
     )
 
     from learnMSA.align.align import align
+    from learnMSA.align.alignment_model import AlignmentModel
+    from learnMSA.align.align_inserts import make_aligned_insertions
     from learnMSA.util import SequenceDataset, EmbeddingDataset
 
     with ExitStack() as stack:
@@ -120,13 +123,82 @@ def run_main() -> None:
             datasets += (struct_data, )
 
         # Run a training to align the sequences
-        alignment_model = align(datasets, config) # type:ignore
+        am = align(datasets, config) # type:ignore
 
         if config.input_output.save_model:
-            alignment_model.save(config.input_output.save_model)
+            am.save(config.input_output.save_model)
+
+        if config.input_output.output_file != Path():
+
+            Path(config.input_output.output_file).parent.mkdir(
+                parents=True, exist_ok=True
+            )
+
+            # build the alignment (= predict state sequences and create metadata)
+            am.build_alignment(
+                [am.best_head],
+                decoding_mode=AlignmentModel.DecodingMode.from_str(
+                    config.training.decoding_mode
+                )
+            )
+
+            # measure time of the file generation
+            t = time.time()
+            if config.input_output.verbose:
+                print("Generating output file...")
+
+            assert am.best_head != -1,\
+                "Best head was not selected. This should not happen."
+
+            decoding_mode=AlignmentModel.DecodingMode.from_str(
+                config.training.decoding_mode
+            )
+            if config.training.unaligned_insertions\
+                    or config.training.only_matches:
+                # Don't align insertions when requested or when only matches need to
+                # be written to the output file
+                am.to_file(
+                    config.input_output.output_file,
+                    am.best_head,
+                    format=config.input_output.format,
+                    only_matches=config.training.only_matches,
+                    decoding_mode=decoding_mode,
+                    add_block_sep=config.input_output.add_block_separator_to_msa,
+                )
+            else:
+                aligned_insertions = make_aligned_insertions(
+                    am,
+                    am.best_head,
+                    decoding_mode=decoding_mode,
+                    method=config.advanced.insertion_aligner,
+                    threads=config.advanced.aligner_threads,
+                    verbose=config.input_output.verbose,
+                )
+                am.to_file(
+                    config.input_output.output_file,
+                    am.best_head,
+                    aligned_insertions=aligned_insertions,
+                    format=config.input_output.format,
+                    decoding_mode=decoding_mode,
+                    add_block_sep=config.input_output.add_block_separator_to_msa,
+                )
+
+        if config.input_output.verbose:
+            if am.fixed_viterbi_seqs.size > 0:
+                max_show_seqs = 5
+                print(f"Fixed {am.fixed_viterbi_seqs.size} Viterbi sequences:")
+                print("\n".join([
+                    am.data[0].seq_ids[i]
+                    for i in am.fixed_viterbi_seqs[:max_show_seqs]
+                ]))
+                if am.fixed_viterbi_seqs.size > max_show_seqs:
+                    print("...")
+            print("time for generating output:", "%.4f" % (time.time()-t))
+            print("Wrote file", config.input_output.output_file)
+
         if config.input_output.scores != Path():
-            alignment_model.write_scores(
-                Path(config.input_output.scores), alignment_model.best_head
+            am.write_scores(
+                Path(config.input_output.scores), am.best_head
             )
             if config.input_output.verbose:
                 print(f"Wrote scores to {config.input_output.scores}")
@@ -135,10 +207,10 @@ def run_main() -> None:
             from learnMSA.util.visualize import plot_phmm
 
             if config.visualization.plot_head == -1:
-                head = alignment_model.best_head # type: ignore
+                head = am.best_head # type: ignore
             else:
                 head = config.visualization.plot_head
-            fig = plot_phmm(alignment_model.model.phmm_layer, head)
+            fig = plot_phmm(am.model.phmm_layer, head)
             fig.savefig(config.visualization.plot, bbox_inches="tight") # type: ignore
             if config.input_output.verbose:
                 print(f"Saved HMM plot to {config.visualization.plot}")
