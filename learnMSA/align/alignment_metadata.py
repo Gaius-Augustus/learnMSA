@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import numpy as np
 
 
@@ -68,6 +68,16 @@ class AlignmentMetaData:
     unannotated segments (same layout as unannotated_segments_len).
     """
 
+    sort_perm: np.ndarray | None = field(default=None, repr=False)
+    """Optional permutation array of shape (num_rows,) set when data is stored
+    in sorted order (e.g. by :func:`~learnMSA.align.tf.decode.decode_tf`).
+    ``sort_perm[k]`` is the *original* row index of the k-th sorted row.
+    When present, ``_inv_perm`` is computed in ``__post_init__`` and all
+    accessor methods (``get_repeat_data``, ``get_unannotated_data``, and the
+    ``*_for`` getters) transparently map original row indices to storage
+    positions.
+    """
+
     def __post_init__(self):
         nrpr = np.asarray(self.num_repeats_per_row, dtype=np.int32)
         self.num_repeats_per_row = nrpr
@@ -78,6 +88,15 @@ class AlignmentMetaData:
         # _repeat_offset[j] = virtual (logical) column of row j's first repeat
         # (all zeros initially; modified by shift())
         self._repeat_offset = np.zeros(self.num_rows, dtype=np.int32)
+        # Build inverse permutation if sort_perm is provided.
+        if self.sort_perm is not None:
+            perm = np.asarray(self.sort_perm, dtype=np.int32)
+            self.sort_perm = perm
+            inv = np.empty_like(perm)
+            inv[perm] = np.arange(len(perm), dtype=np.int32)
+            self._inv_perm: np.ndarray | None = inv
+        else:
+            self._inv_perm = None
 
     # ------------------------------------------------------------------
     # Derived scalar / array properties
@@ -111,7 +130,26 @@ class AlignmentMetaData:
         # is_active: row j has a non-last actual repeat at position r
         is_active = (r_idx >= start) & (r_idx < end)
         result[is_active] = False
+        if self._inv_perm is not None:
+            # Return columns in original-row order so that callers can index
+            # with original sequence indices without knowing sort_perm.
+            return result[:, self._inv_perm]
         return result
+
+    # ------------------------------------------------------------------
+    # Row-index translation (sort_perm support)
+    # ------------------------------------------------------------------
+
+    def _resolve_rows(self, row_indices: np.ndarray) -> np.ndarray:
+        """Map *original* row indices to storage (sorted) row indices.
+
+        When ``sort_perm`` is set the data arrays are stored in sorted order,
+        so we must translate caller-supplied original indices before indexing
+        into ``_row_offsets`` / ``num_repeats_per_row`` etc.
+        """
+        if self._inv_perm is None:
+            return row_indices
+        return self._inv_perm[row_indices]
 
     # ------------------------------------------------------------------
     # Core flat-to-virtual helpers
@@ -155,17 +193,18 @@ class AlignmentMetaData:
             domain_loc_slice   : (B, 2)
             has_repeat         : (B,) bool
         """
-        local_idx = repeat_idx - self._repeat_offset[row_indices]
+        sr = self._resolve_rows(row_indices)
+        local_idx = repeat_idx - self._repeat_offset[sr]
         has_repeat = (
             (local_idx >= 0)
-            & (local_idx < self.num_repeats_per_row[row_indices])
+            & (local_idx < self.num_repeats_per_row[sr])
         )
         safe_local = np.clip(
             local_idx, 0,
-            np.maximum(self.num_repeats_per_row[row_indices] - 1, 0),
+            np.maximum(self.num_repeats_per_row[sr] - 1, 0),
         )
         flat_idx = np.clip(
-            self._row_offsets[row_indices] + safe_local,
+            self._row_offsets[sr] + safe_local,
             0, max(0, len(self.domain_hit) - 1),
         )
         dh = self.domain_hit[flat_idx].copy()
@@ -186,20 +225,21 @@ class AlignmentMetaData:
 
         Rows without this unannotated segment return (0, -1).
         """
-        local_r = repeat_idx - self._repeat_offset[row_indices]
+        sr = self._resolve_rows(row_indices)
+        local_r = repeat_idx - self._repeat_offset[sr]
         has_seg = (
             (local_r >= 0)
-            & (local_r < self.num_repeats_per_row[row_indices] - 1)
+            & (local_r < self.num_repeats_per_row[sr] - 1)
         )
         safe_local = np.clip(
             local_r, 0,
-            np.maximum(self.num_repeats_per_row[row_indices] - 2, 0),
+            np.maximum(self.num_repeats_per_row[sr] - 2, 0),
         )
         uns_row_off = (
             self._row_offsets[:-1] - np.arange(self.num_rows, dtype=np.int32)
         )
         flat_idx = np.clip(
-            uns_row_off[row_indices] + safe_local,
+            uns_row_off[sr] + safe_local,
             0, max(0, len(self.unannotated_segments_len) - 1),
         )
         l = self.unannotated_segments_len[flat_idx].copy()
@@ -207,6 +247,26 @@ class AlignmentMetaData:
         s = self.unannotated_segments_start[flat_idx].copy()
         s[~has_seg] = -1
         return l, s
+
+    # ------------------------------------------------------------------
+    # Per-row flank getters (respect sort_perm)
+    # ------------------------------------------------------------------
+
+    def left_flank_len_for(self, row_indices: np.ndarray) -> np.ndarray:
+        """Return ``left_flank_len`` for *row_indices* (original ordering)."""
+        return self.left_flank_len[self._resolve_rows(row_indices)]
+
+    def left_flank_start_for(self, row_indices: np.ndarray) -> np.ndarray:
+        """Return ``left_flank_start`` for *row_indices* (original ordering)."""
+        return self.left_flank_start[self._resolve_rows(row_indices)]
+
+    def right_flank_len_for(self, row_indices: np.ndarray) -> np.ndarray:
+        """Return ``right_flank_len`` for *row_indices* (original ordering)."""
+        return self.right_flank_len[self._resolve_rows(row_indices)]
+
+    def right_flank_start_for(self, row_indices: np.ndarray) -> np.ndarray:
+        """Return ``right_flank_start`` for *row_indices* (original ordering)."""
+        return self.right_flank_start[self._resolve_rows(row_indices)]
 
     # ------------------------------------------------------------------
     # Aggregate properties

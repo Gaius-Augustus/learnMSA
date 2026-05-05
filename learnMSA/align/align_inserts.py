@@ -235,10 +235,10 @@ def make_aligned_insertions(
             )
             insertions_long[-1].append(ins_long)
     left_flank_long = find_long_insertions_and_get_sequences(
-        am.data[0], meta_data.left_flank_len, meta_data.left_flank_start
+        am.data[0], meta_data.left_flank_len_for(all_rows), meta_data.left_flank_start_for(all_rows)
     )
     right_flank_long = find_long_insertions_and_get_sequences(
-        am.data[0], meta_data.right_flank_len, meta_data.right_flank_start
+        am.data[0], meta_data.right_flank_len_for(all_rows), meta_data.right_flank_start_for(all_rows)
     )
     unannotated_long = []
     for r in range(meta_data.num_repeats-1):

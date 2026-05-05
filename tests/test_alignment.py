@@ -625,10 +625,10 @@ def test_alignment_decoding(
 
         # Verify flanks and segments
         np.testing.assert_equal(
-            meta_data.left_flank_len, ref_left_flank_lens[i]
+            meta_data.left_flank_len_for(all_rows), ref_left_flank_lens[i]
         )
         np.testing.assert_equal(
-            meta_data.left_flank_start, np.array([0, 0, 0, 0, 0, 0, 0, 0])
+            meta_data.left_flank_start_for(all_rows), np.array([0, 0, 0, 0, 0, 0, 0, 0])
         )
         uns_l, uns_s = meta_data.get_unannotated_data(0, all_rows)
         np.testing.assert_equal(uns_l, ref_segment_lens[i])
@@ -636,10 +636,10 @@ def test_alignment_decoding(
         mask = ref_segment_lens[i] > 0
         np.testing.assert_equal(uns_s[mask], ref_segment_start[i][mask])
         np.testing.assert_equal(
-            meta_data.right_flank_len, ref_right_flank_lens[i]
+            meta_data.right_flank_len_for(all_rows), ref_right_flank_lens[i]
         )
         np.testing.assert_equal(
-            meta_data.right_flank_start, ref_right_flank_start[i]
+            meta_data.right_flank_start_for(all_rows), ref_right_flank_start[i]
         )
 
         # Test conversion to alignment blocks
@@ -652,18 +652,18 @@ def test_alignment_decoding(
 
         left_flank_block = AlignmentModel.get_insertion_block(
             sequences_2d,
-            meta_data.left_flank_len,
-            np.amax(meta_data.left_flank_len),
-            meta_data.left_flank_start,
+            meta_data.left_flank_len_for(all_rows),
+            np.amax(meta_data.left_flank_len_for(all_rows)),
+            meta_data.left_flank_start_for(all_rows),
             adjust_to_right=True
         )
         np.testing.assert_equal(left_flank_block, ref_left_flank_block[i])
 
         right_flank_block = AlignmentModel.get_insertion_block(
             sequences_2d,
-            meta_data.right_flank_len,
-            np.amax(meta_data.right_flank_len),
-            meta_data.right_flank_start
+            meta_data.right_flank_len_for(all_rows),
+            np.amax(meta_data.right_flank_len_for(all_rows)),
+            meta_data.right_flank_start_for(all_rows)
         )
         np.testing.assert_equal(right_flank_block, ref_right_flank_block[i])
 
@@ -1046,20 +1046,20 @@ def test_viterbi(
             ),
         )
         np.testing.assert_equal(
-            meta_data.left_flank_len, ref_left_flank_lens[i]
+            meta_data.left_flank_len_for(all_rows_v), ref_left_flank_lens[i]
         )
         np.testing.assert_equal(
-            meta_data.left_flank_start, np.array([0, 0, 0, 0, 0, 0, 0, 0])
+            meta_data.left_flank_start_for(all_rows_v), np.array([0, 0, 0, 0, 0, 0, 0, 0])
         )
         uns_lv, uns_sv = meta_data.get_unannotated_data(0, all_rows_v)
         np.testing.assert_equal(uns_lv, ref_segment_lens[i])
         mask_v = ref_segment_lens[i] > 0
         np.testing.assert_equal(uns_sv[mask_v], ref_segment_start[i][mask_v])
         np.testing.assert_equal(
-            meta_data.right_flank_len, ref_right_flank_lens[i]
+            meta_data.right_flank_len_for(all_rows_v), ref_right_flank_lens[i]
         )
         np.testing.assert_equal(
-            meta_data.right_flank_start, ref_right_flank_start[i]
+            meta_data.right_flank_start_for(all_rows_v), ref_right_flank_start[i]
         )
 
         # test conversion of decoded data to an actual alignment in table form
@@ -1072,17 +1072,17 @@ def test_viterbi(
 
         left_flank_block = AlignmentModel.get_insertion_block(
             sequences,
-            meta_data.left_flank_len,
-            np.amax(meta_data.left_flank_len),
-            meta_data.left_flank_start,
+            meta_data.left_flank_len_for(all_rows_v),
+            np.amax(meta_data.left_flank_len_for(all_rows_v)),
+            meta_data.left_flank_start_for(all_rows_v),
             adjust_to_right=True,
         )
         np.testing.assert_equal(left_flank_block, ref_left_flank_block[i])
         right_flank_block = AlignmentModel.get_insertion_block(
             sequences,
-            meta_data.right_flank_len,
-            np.amax(meta_data.right_flank_len),
-            meta_data.right_flank_start,
+            meta_data.right_flank_len_for(all_rows_v),
+            np.amax(meta_data.right_flank_len_for(all_rows_v)),
+            meta_data.right_flank_start_for(all_rows_v),
         )
         np.testing.assert_equal(right_flank_block, ref_right_flank_block[i])
         # just check the first insert for simplicity

@@ -314,12 +314,12 @@ class AlignmentModel():
         if not only_matches:
             left_flank_block = self.get_insertion_block(
                 sequences,
-                meta_data.left_flank_len[batch_indices],
+                meta_data.left_flank_len_for(batch_indices),
                 max(
                     meta_data.left_flank_len_total,
                     aligned_insertions.ext_left_flank
                 ),
-                meta_data.left_flank_start[batch_indices],
+                meta_data.left_flank_start_for(batch_indices),
                 adjust_to_right=True,
                 custom_columns=aligned_insertions.left_flank(batch_indices)
             )
@@ -377,12 +377,12 @@ class AlignmentModel():
         if not only_matches:
             right_flank_block = self.get_insertion_block(
                 sequences,
-                meta_data.right_flank_len[batch_indices],
+                meta_data.right_flank_len_for(batch_indices),
                 max(
                     meta_data.right_flank_len_total,
                     aligned_insertions.ext_right_flank
                 ),
-                meta_data.right_flank_start[batch_indices],
+                meta_data.right_flank_start_for(batch_indices),
                 custom_columns=aligned_insertions.right_flank(batch_indices)
             )
             blocks.append(right_flank_block)

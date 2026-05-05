@@ -44,7 +44,15 @@ def _tf_decode_flank_core(state_seqs, flank_state_id, indices):
 
 
 def _tf_decode_core_inner(state_seqs, c, indices):
-    """Shared TF logic for decode_core.  All args are tf.Tensor."""
+    """Shared TF logic for decode_core.
+
+    Args:
+        state_seqs: ``(n, T)`` int32 tensor.
+        c: Python int – number of match states.  Used as a Python constant so
+           that ``tf.function(jit_compile=True)`` can unroll loops and infer
+           static output shapes.
+        indices: ``(n,)`` int32 tensor of per-sequence start positions.
+    """
     n = tf.shape(state_seqs)[0]
     T = tf.shape(state_seqs)[1]
 
@@ -90,21 +98,24 @@ def _tf_decode_core_inner(state_seqs, c, indices):
         tf.ones(tf.shape(ins_coords)[0], dtype=tf.int32),
     )                                                                         # (n, c-1)
 
-    # ---- insertion starts (min pos per seq×insert-state) -------------------
-    pos_idx_i = ins_coords[:, 1]
-    lin_idx   = seq_idx_i * (c - 1) + ins_state_i                           # (M,) flat index
-    ins_start_flat = tf.math.unsorted_segment_min(
-        pos_idx_i,
-        lin_idx,
-        num_segments=n * (c - 1),
-    )                                                                         # (n*(c-1),)
-    # Positions equal to T indicate "no insertion" – remap to -1
-    ins_start_2d = tf.reshape(ins_start_flat, [n, c - 1])
-    insertion_start = tf.where(
-        tf.equal(ins_start_2d, T),
-        tf.fill([n, c - 1], tf.cast(-1, tf.int32)),
-        ins_start_2d,
-    )                                                                         # (n, c-1)
+    # ---- insertion starts (first position per seq×insert-state) -----------
+    # XLA-compatible: loop over each insert state (Python loop, unrolled at
+    # trace time) and use argmax to find the first active position.
+    # unsorted_segment_min is NOT XLA-compatible, so we avoid it here.
+    ins_start_list = []
+    for j in range(c - 1):
+        mask_j  = is_insert & tf.equal(s, c + j)                            # (n, T) bool
+        has_j   = tf.reduce_any(mask_j, axis=1)                             # (n,) bool
+        first_j = tf.cast(
+            tf.argmax(tf.cast(mask_j, tf.int8), axis=1), tf.int32
+        )                                                                    # (n,)
+        ins_start_list.append(
+            tf.where(has_j, first_j, tf.fill([n], tf.cast(-1, tf.int32)))
+        )
+    if c > 1:
+        insertion_start = tf.stack(ins_start_list, axis=1)                  # (n, c-1)
+    else:
+        insertion_start = tf.zeros([n, 0], dtype=tf.int32)                  # (n, 0)
 
     # ---- finished flag ------------------------------------------------------
     ep_clamped   = tf.minimum(end_pos, T - 1)                               # (n,)
@@ -164,7 +175,9 @@ def decode_core_tf(model_length: int, state_seqs, indices):
         insertion_start: ``(n, c-1)`` int16 numpy array.
         finished: ``(n,)`` bool numpy array.
     """
-    c             = tf.cast(model_length, tf.int32)
+    # model_length is passed as Python int so _tf_decode_core_inner can use
+    # it as a compile-time constant for static shape inference.
+    c             = int(model_length)
     state_seqs_t  = tf.cast(state_seqs, tf.int32)
     indices_t     = tf.cast(indices, tf.int32)
 
@@ -179,104 +192,263 @@ def decode_core_tf(model_length: int, state_seqs, indices):
     return consensus_columns, insertion_lens, insertion_start, finished
 
 
-def decode_tf(model_length: int, state_seqs):
-    """TensorFlow equivalent of :meth:`AlignmentModel.decode`.
+# ---------------------------------------------------------------------------
+# Batch-decode infrastructure for OOM-safe GPU processing
+# ---------------------------------------------------------------------------
 
-    Runs the full decode loop (flank → core* → flank) using TF ops for each
-    individual step while keeping the repeat-detection loop in Python.
+def _tf_count_repeats(state_seqs_t: tf.Tensor, c: int) -> np.ndarray:
+    """Count repeats per sequence by detecting unannotated-state transitions.
+
+    A new repeat follows every time the model leaves the unannotated state
+    (state ``2*c``).  The number of repeats is the number of *entries* into
+    that state plus one.
+
+    Args:
+        state_seqs_t: ``(n, T)`` int32 tensor (GPU or CPU).
+        c: Python int – model length.
+
+    Returns:
+        ``(n,)`` int32 numpy array with the number of repeats per sequence.
+    """
+    # Rising edge: position t is unannotated, position t-1 is not.
+    is_unann = tf.equal(state_seqs_t, 2 * c)                 # (n, T) bool
+    entries  = tf.logical_and(
+        tf.logical_not(is_unann[:, :-1]),                    # prev != unann
+        is_unann[:, 1:],                                     # curr == unann
+    )                                                         # (n, T-1)
+    counts = tf.reduce_sum(tf.cast(entries, tf.int32), axis=1)  # (n,)
+    return (counts + 1).numpy().astype(np.int32)
+
+
+# Cache of JIT-compiled decode functions keyed by (num_repeats, model_length).
+_DECODE_BATCH_CACHE: dict = {}
+
+
+def _get_decode_batch_fn(num_repeats: int, model_length: int):
+    """Return (and cache) a ``jit_compile=True`` decode function for exactly
+    ``num_repeats`` repeats and ``model_length`` match states.
+
+    The returned callable takes a single ``(n, T)`` int32 tensor and returns
+    a tuple of all decoded tensors kept on the GPU until ``.numpy()`` is called
+    by the caller.  The Python-level loop over repeats is unrolled at trace
+    time so XLA can fuse the entire decode into a single kernel.
+
+    Returns:
+        A ``tf.function``-wrapped callable ``fn(state_seqs_t)`` whose output
+        is a 11-tuple::
+
+            (left_flank_len,    # (n,) int32
+             left_flank_start,  # (n,) int32
+             cc_stack,          # (R, n, c) int32
+             il_stack,          # (R, n, c-1) int32
+             is_stack,          # (R, n, c-1) int32
+             cs_stack,          # (R, n) int32  – core start positions
+             ce_stack,          # (R, n) int32  – core end positions
+             ul_stack,          # (R-1, n) int32 or shape-(0,) for R=1
+             us_stack,          # (R-1, n) int32 or shape-(0,) for R=1
+             right_flank_len,   # (n,) int32
+             right_flank_start) # (n,) int32
+    """
+    key = (num_repeats, model_length)
+    if key in _DECODE_BATCH_CACHE:
+        return _DECODE_BATCH_CACHE[key]
+
+    R = num_repeats
+    c = model_length
+
+    @tf.function(jit_compile=True)
+    def _decode_batch(state_seqs):
+        # Left flank ---------------------------------------------------------
+        lfl, lfs, indices = _tf_decode_flank_core(state_seqs, 2 * c - 1,
+                                                   tf.zeros([tf.shape(state_seqs)[0]],
+                                                            dtype=tf.int32))
+
+        # Core blocks (R) and unannotated segments (R-1) ---------------------
+        core_cc, core_il, core_is_, core_cs, core_ce = [], [], [], [], []
+        uns_l, uns_s = [], []
+
+        for r in range(R):
+            core_cs.append(indices)
+            cc, il, is_, _fin, indices = _tf_decode_core_inner(
+                state_seqs, c, indices
+            )
+            core_cc.append(cc)
+            core_il.append(il)
+            core_is_.append(is_)
+            core_ce.append(indices)
+
+            if r < R - 1:
+                ul, us, indices = _tf_decode_flank_core(state_seqs, 2 * c, indices)
+                uns_l.append(ul)
+                uns_s.append(us)
+
+        # Right flank --------------------------------------------------------
+        rfl, rfs, _ = _tf_decode_flank_core(state_seqs, 2 * c + 1, indices)
+
+        # Stack results ------------------------------------------------------
+        cc_stack = tf.stack(core_cc, axis=0)   # (R, n, c)
+        il_stack = tf.stack(core_il, axis=0)   # (R, n, c-1)
+        is_stack = tf.stack(core_is_, axis=0)  # (R, n, c-1)
+        cs_stack = tf.stack(core_cs, axis=0)   # (R, n)
+        ce_stack = tf.stack(core_ce, axis=0)   # (R, n)
+
+        if R > 1:
+            ul_stack = tf.stack(uns_l, axis=0)  # (R-1, n)
+            us_stack = tf.stack(uns_s, axis=0)  # (R-1, n)
+        else:
+            # No unannotated segments for single-repeat sequences.
+            # Return empty 1-D tensors (shape (0,)) as placeholders.
+            ul_stack = tf.constant([], dtype=tf.int32)
+            us_stack = tf.constant([], dtype=tf.int32)
+
+        return lfl, lfs, cc_stack, il_stack, is_stack, cs_stack, ce_stack, \
+               ul_stack, us_stack, rfl, rfs
+
+    _DECODE_BATCH_CACHE[key] = _decode_batch
+    return _decode_batch
+
+
+def decode_tf(model_length: int, state_seqs, batch_size: int = 512):
+    """OOM-safe TensorFlow decode.
+
+    Strategy
+    --------
+    1. **Count repeats** in a single O(n × T) GPU pass by detecting
+       transitions into the unannotated state.
+    2. **Sort** sequences by repeat count so all sequences in a batch have
+       the same number of repeats – enabling a fully static loop that XLA can
+       compile once per ``(num_repeats, model_length)`` pair.
+    3. **Batch** over sequences to keep GPU memory bounded.
+    4. Collect CPU results and construct
+       :class:`~learnMSA.align.alignment_metadata.AlignmentMetaData` with
+       ``sort_perm`` stored so that callers can map original-index queries
+       back to the sorted storage layout.
 
     Args:
         model_length: Number of match states.
         state_seqs: ``(n, T)`` int32 array/tensor of Viterbi/MEA paths
             (single model, already sliced to ``[:, :, model_idx]``).
+        batch_size: Maximum number of sequences per GPU batch.
 
     Returns:
         :class:`~learnMSA.align.alignment_metadata.AlignmentMetaData`
     """
     from learnMSA.align.alignment_metadata import AlignmentMetaData
 
-    # Ensure numpy so we can do in-place updates on `indices`
     if isinstance(state_seqs, tf.Tensor):
         state_seqs = state_seqs.numpy()
 
     n = state_seqs.shape[0]
-    c = model_length
-    indices = np.zeros(n, dtype=np.int32)
+    c = int(model_length)
 
-    left_flank_len, left_flank_start = decode_flank_tf(state_seqs, 2 * c - 1, indices)
+    # ------------------------------------------------------------------
+    # Step 1 – count repeats per sequence (single GPU pass)
+    # ------------------------------------------------------------------
+    state_seqs_t = tf.constant(state_seqs, dtype=tf.int32)
+    num_repeats_per_row = _tf_count_repeats(state_seqs_t, c)   # (n,) CPU
 
-    core_blocks      = []
-    insertion_lens   = []
-    insertion_starts = []
-    unannotated_segs = []
-    core_starts      = []
-    core_ends        = []
-    finished_blocks  = []
+    # ------------------------------------------------------------------
+    # Step 2 – sort by repeat count (stable, so equal-repeat groups are
+    # contiguous and within a group the original order is preserved)
+    # ------------------------------------------------------------------
+    sort_perm   = np.argsort(num_repeats_per_row, kind='stable').astype(np.int32)
+    sorted_nrpr = num_repeats_per_row[sort_perm]               # (n,) sorted
 
-    while True:
-        core_starts.append(indices.copy())
-        C, IL, IS, finished = decode_core_tf(c, state_seqs, indices)
-        core_ends.append(indices.copy())
-        core_blocks.append(C)
-        insertion_lens.append(IL)
-        insertion_starts.append(IS)
-        finished_blocks.append(finished)
+    # Pre-compute flat offsets in the sorted layout
+    sorted_row_off = np.concatenate(
+        [[0], np.cumsum(sorted_nrpr)]
+    ).astype(np.int32)
+    sorted_uns_per_row = np.maximum(sorted_nrpr - 1, 0)
+    sorted_uns_off = np.concatenate(
+        [[0], np.cumsum(sorted_uns_per_row)]
+    ).astype(np.int32)
 
-        if np.all(finished):
-            break
+    total_R = int(sorted_row_off[-1])
+    total_U = int(sorted_uns_off[-1])
+    M       = c
 
-        uns_len, uns_start = decode_flank_tf(state_seqs, 2 * c, indices)
-        unannotated_segs.append((uns_len, uns_start))
-
-    right_flank_len, right_flank_start = decode_flank_tf(state_seqs, 2 * c + 1, indices)
-
-    # Compute num_repeats_per_row from finished_blocks
-    max_R = len(core_blocks)
-    finished_stack = np.stack(finished_blocks, axis=0)   # (max_R, n)
-    first_finish   = np.argmax(finished_stack, axis=0)    # (n,)
-    num_repeats_per_row = (first_finish + 1).astype(np.int32)
-
-    row_offsets = np.concatenate([[0], np.cumsum(num_repeats_per_row)]).astype(np.int32)
-    total_R = int(row_offsets[-1])
-    M = core_blocks[0].shape[1] if max_R > 0 else 0
-
-    domain_hit_flat  = np.full((total_R, M), -1, dtype=np.int16)
-    domain_loc_flat  = np.full((total_R, 2), -1, dtype=np.int32)
-    ins_lens_flat    = np.zeros((total_R, max(0, M - 1)), dtype=np.int16)
+    # ------------------------------------------------------------------
+    # Step 3 – allocate output arrays (sorted layout)
+    # ------------------------------------------------------------------
+    domain_hit_flat  = np.full((total_R, M),          -1, dtype=np.int16)
+    domain_loc_flat  = np.full((total_R, 2),           -1, dtype=np.int32)
+    ins_lens_flat    = np.zeros((total_R, max(0, M - 1)),   dtype=np.int16)
     ins_start_flat   = np.full((total_R, max(0, M - 1)), -1, dtype=np.int16)
 
-    for r in range(max_R):
-        rows     = np.where(num_repeats_per_row > r)[0]
-        flat_idx = row_offsets[rows] + r
-        domain_hit_flat[flat_idx]      = core_blocks[r][rows]
-        domain_loc_flat[flat_idx, 0]   = core_starts[r][rows]
-        domain_loc_flat[flat_idx, 1]   = core_ends[r][rows]
-        ins_lens_flat[flat_idx]        = insertion_lens[r][rows]
-        ins_start_flat[flat_idx]       = insertion_starts[r][rows]
+    left_flank_len_s   = np.zeros(n, dtype=np.int16)
+    left_flank_start_s = np.zeros(n, dtype=np.int32)
+    right_flank_len_s  = np.zeros(n, dtype=np.int16)
+    right_flank_start_s= np.zeros(n, dtype=np.int32)
 
-    num_uns_per_row = np.maximum(num_repeats_per_row - 1, 0)
-    uns_offsets = np.concatenate([[0], np.cumsum(num_uns_per_row)]).astype(np.int32)
-    total_U = int(uns_offsets[-1])
     uns_len_flat   = np.zeros(total_U, dtype=np.int16)
     uns_start_flat = np.full(total_U, -1, dtype=np.int32)
-    for r, (seg_len, seg_start) in enumerate(unannotated_segs):
-        rows     = np.where(num_repeats_per_row > r + 1)[0]
-        flat_idx = uns_offsets[rows] + r
-        uns_len_flat[flat_idx]   = seg_len[rows]
-        uns_start_flat[flat_idx] = seg_start[rows]
+
+    # ------------------------------------------------------------------
+    # Step 4 – process each unique-R group in batches
+    # ------------------------------------------------------------------
+    unique_Rs = np.unique(sorted_nrpr)
+    for R_val in unique_Rs:
+        R_int     = int(R_val)
+        decode_fn = _get_decode_batch_fn(R_int, c)
+        group_idx = np.where(sorted_nrpr == R_val)[0]   # indices in sorted order
+
+        for b_start in range(0, len(group_idx), batch_size):
+            batch_sorted = group_idx[b_start : b_start + batch_size]
+            orig_idx     = sort_perm[batch_sorted]       # original sequence indices
+
+            # GPU decode
+            batch_t = tf.constant(state_seqs[orig_idx], dtype=tf.int32)
+            (lfl_t, lfs_t, cc_t, il_t, is_t, cs_t, ce_t,
+             ul_t, us_t, rfl_t, rfs_t) = decode_fn(batch_t)
+
+            # Transfer to CPU
+            lfl = lfl_t.numpy().astype(np.int16)
+            lfs = lfs_t.numpy().astype(np.int32)
+            cc  = cc_t.numpy().astype(np.int16)         # (R, B, c)
+            il  = il_t.numpy().astype(np.int16)         # (R, B, c-1)
+            is_ = is_t.numpy().astype(np.int16)         # (R, B, c-1)
+            cs  = cs_t.numpy().astype(np.int32)         # (R, B)
+            ce  = ce_t.numpy().astype(np.int32)         # (R, B)
+            rfl = rfl_t.numpy().astype(np.int16)
+            rfs = rfs_t.numpy().astype(np.int32)
+
+            # Per-row arrays (indexed by sorted position)
+            left_flank_len_s[batch_sorted]    = lfl
+            left_flank_start_s[batch_sorted]  = lfs
+            right_flank_len_s[batch_sorted]   = rfl
+            right_flank_start_s[batch_sorted] = rfs
+
+            # Flat repeat arrays
+            for r in range(R_int):
+                flat_idx = sorted_row_off[batch_sorted] + r
+                domain_hit_flat[flat_idx]    = cc[r]
+                domain_loc_flat[flat_idx, 0] = cs[r]
+                domain_loc_flat[flat_idx, 1] = ce[r]
+                ins_lens_flat[flat_idx]       = il[r]
+                ins_start_flat[flat_idx]      = is_[r]
+
+            # Unannotated segment arrays
+            if R_int > 1:
+                ul = ul_t.numpy().astype(np.int16)      # (R-1, B)
+                us = us_t.numpy().astype(np.int32)      # (R-1, B)
+                for r in range(R_int - 1):
+                    uf_idx = sorted_uns_off[batch_sorted] + r
+                    uns_len_flat[uf_idx]   = ul[r]
+                    uns_start_flat[uf_idx] = us[r]
 
     return AlignmentMetaData(
-        num_rows            = n,
-        num_match           = c,
-        num_repeats_per_row = num_repeats_per_row,
-        domain_hit          = domain_hit_flat,
-        domain_loc          = domain_loc_flat,
-        insertion_lens      = ins_lens_flat,
-        insertion_start     = ins_start_flat,
-        left_flank_len      = left_flank_len,
-        left_flank_start    = left_flank_start,
-        right_flank_len     = right_flank_len,
-        right_flank_start   = right_flank_start,
+        num_rows             = n,
+        num_match            = c,
+        num_repeats_per_row  = sorted_nrpr,
+        sort_perm            = sort_perm,
+        domain_hit           = domain_hit_flat,
+        domain_loc           = domain_loc_flat,
+        insertion_lens       = ins_lens_flat,
+        insertion_start      = ins_start_flat,
+        left_flank_len       = left_flank_len_s,
+        left_flank_start     = left_flank_start_s,
+        right_flank_len      = right_flank_len_s,
+        right_flank_start    = right_flank_start_s,
         unannotated_segments_len   = uns_len_flat,
         unannotated_segments_start = uns_start_flat,
     )
