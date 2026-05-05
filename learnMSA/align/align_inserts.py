@@ -10,12 +10,15 @@ import Bio.SeqIO
 
 class AlignedInsertions():
     def __init__(self,
+                 n_total: int = 0,
                  aligned_insertions = None,
                  aligned_left_flank = None,
                  aligned_right_flank = None,
                  aligned_unannotated_segments = None):
         """
         Args:
+            n_total: Total number of sequences being aligned. Required to
+                build the index maps used for fast batch lookup.
             aligned_insertions: List of lists of pairs
                 (indices, AlignedDataset with aligned slices) or None.
                 Inner lists have length equal to length of model -1.
@@ -32,15 +35,25 @@ class AlignedInsertions():
         self.aligned_right_flank = aligned_right_flank
         self.aligned_unannotated_segments = aligned_unannotated_segments
 
-        def _process(msa_data : AlignedDataset):
-            custom_columns = np.zeros(
-                (msa_data.num_seq, np.amax(msa_data.alignment_len)),
-                dtype=np.int32
+        def _process(msa_data: AlignedDataset, custom_indices: np.ndarray):
+            """Build (index_map, sparse_cols) for fast vectorized lookup.
+
+            index_map[i] = row in sparse_cols for sequence i, or -1 if
+            sequence i has no aligned insertion for this block.
+            sparse_cols[j] = column map for the j-th sequence in custom_indices.
+            """
+            max_len = msa_data.alignment_len
+            sparse_cols = np.zeros(
+                (msa_data.num_seq, max_len), dtype=np.int32
             )
             for i in range(msa_data.num_seq):
                 cols = msa_data.get_column_map(i)
-                custom_columns[i, :cols.size] = cols
-            return custom_columns
+                sparse_cols[i, :cols.size] = cols
+            index_map = np.full(n_total, -1, dtype=np.int32)
+            index_map[custom_indices] = np.arange(
+                len(custom_indices), dtype=np.int32
+            )
+            return index_map, sparse_cols
 
 
         if aligned_insertions is None:
@@ -54,34 +67,38 @@ class AlignedInsertions():
                         self.custom_columns_insertions[-1].append(None)
                     else:
                         self.custom_columns_insertions[-1].append(
-                            _process(x[1])
+                            _process(x[1], x[0])
                         )
             self.ext_insertions = np.array([
-                [np.amax(x)+1 if x is not None else 0 for x in repeats]
+                [x[1].shape[1] if x is not None else 0 for x in repeats]
                 for repeats in self.custom_columns_insertions
             ])
 
         if aligned_left_flank is None:
             self.ext_left_flank = 0
         else:
-            self.custom_columns_left_flank = _process(aligned_left_flank[1])
-            self.ext_left_flank = np.amax(self.custom_columns_left_flank)+1
+            self.custom_columns_left_flank = _process(
+                aligned_left_flank[1], aligned_left_flank[0]
+            )
+            self.ext_left_flank = self.custom_columns_left_flank[1].shape[1]
 
         if aligned_right_flank is None:
             self.ext_right_flank = 0
         else:
-            self.custom_columns_right_flank = _process(aligned_right_flank[1])
-            self.ext_right_flank = np.amax(self.custom_columns_right_flank)+1
+            self.custom_columns_right_flank = _process(
+                aligned_right_flank[1], aligned_right_flank[0]
+            )
+            self.ext_right_flank = self.custom_columns_right_flank[1].shape[1]
 
         if aligned_unannotated_segments is None:
             self.ext_unannotated = 0
         else:
             self.custom_columns_unannotated_segments = [
-                _process(x[1]) if x is not None else None
+                _process(x[1], x[0]) if x is not None else None
                 for x in aligned_unannotated_segments
             ]
             self.ext_unannotated = np.array([
-                np.amax(x)+1 if x is not None else 0
+                x[1].shape[1] if x is not None else 0
                 for x in self.custom_columns_unannotated_segments
             ])
 
@@ -92,8 +109,7 @@ class AlignedInsertions():
             return [
                 self._get_custom_columns(
                     batch_indices,
-                    self.aligned_insertions[r][i][0],
-                    self.custom_columns_insertions[r][i],
+                    *self.custom_columns_insertions[r][i],
                     self.ext_insertions[r,i]
                 )
                 if self.aligned_insertions[r][i] is not None else None
@@ -106,8 +122,7 @@ class AlignedInsertions():
         else:
             return self._get_custom_columns(
                 batch_indices,
-                self.aligned_left_flank[0],
-                self.custom_columns_left_flank,
+                *self.custom_columns_left_flank,
                 self.ext_left_flank
             )
 
@@ -117,8 +132,7 @@ class AlignedInsertions():
         else:
             return self._get_custom_columns(
                 batch_indices,
-                self.aligned_right_flank[0],
-                self.custom_columns_right_flank,
+                *self.custom_columns_right_flank,
                 self.ext_right_flank
             )
 
@@ -131,22 +145,25 @@ class AlignedInsertions():
             else:
                 return self._get_custom_columns(
                     batch_indices,
-                    self.aligned_unannotated_segments[r][0],
-                    self.custom_columns_unannotated_segments[r],
+                    *self.custom_columns_unannotated_segments[r],
                     self.ext_unannotated[r]
                 )
 
     def _get_custom_columns(
         self,
         batch_indices,
-        custom_indices,
-        custom_columns,
+        index_map,
+        sparse_cols,
         max_len
     ):
-        columns = np.stack([np.arange(max_len)]*batch_indices.shape[0])
-        for i, c in zip(custom_indices, custom_columns):
-            columns[batch_indices == i, :c.size] = c
-        return columns
+        result = np.tile(
+            np.arange(max_len, dtype=np.int32), (batch_indices.shape[0], 1)
+        )
+        local_rows = index_map[batch_indices]  # (batch_size,), -1 if no insertion
+        has_ins = local_rows >= 0
+        if np.any(has_ins):
+            result[has_ins] = sparse_cols[local_rows[has_ins]]
+        return result
 
 
 def find_long_insertions_and_get_sequences(data : SequenceDataset, lens, starts, t = 20, k=2, max_insertions_len=500, max_insertions_len_below_seq_ok = 100):
@@ -249,7 +266,7 @@ def make_aligned_insertions(
     right_flank_long = (right_flank_long[0],  AlignedDataset(sequences = alignments["right_flank"])) if right_flank_long is not None else None
     unannotated_long = [(x[0], AlignedDataset(sequences = alignments[f"unannotated_{r}"])) if x is not None else None for r,x in enumerate(unannotated_long)]
 
-    aligned_insertions = AlignedInsertions(insertions_long, left_flank_long, right_flank_long, unannotated_long)
+    aligned_insertions = AlignedInsertions(num_seq, insertions_long, left_flank_long, right_flank_long, unannotated_long)
     return aligned_insertions
 
 
@@ -265,10 +282,18 @@ def make_slice_msas(slices, method="famsa", threads=0):
 def align_with_famsa(slices, threads):
     #keep conditional import, famsa could be optional in the future
     from pyfamsa import Aligner as FamsaAligner, Sequence as FamsaSequence
-    aligner = FamsaAligner(threads = threads)
-    alignments = {}
-    for key, seqs in slices.items():
-        enc_seqs =  [FamsaSequence(sid.encode(), seq.encode()) for sid,seq in seqs]
+    import multiprocessing.pool
+
+    aligner = FamsaAligner(threads=threads)
+    keys = list(slices.keys())
+
+    def _align(key):
+        seqs = slices[key]
+        enc_seqs = [FamsaSequence(sid.encode(), seq.encode()) for sid, seq in seqs]
         msa = aligner.align(enc_seqs)
-        alignments[key] = [(sequence.id.decode(), sequence.sequence.decode()) for sequence in msa]
-    return alignments
+        return key, [(sequence.id.decode(), sequence.sequence.decode()) for sequence in msa]
+
+    with multiprocessing.pool.ThreadPool() as pool:
+        results = pool.map(_align, keys)
+
+    return dict(results)
