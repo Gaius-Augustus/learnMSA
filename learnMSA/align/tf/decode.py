@@ -196,28 +196,49 @@ def decode_core_tf(model_length: int, state_seqs, indices):
 # Batch-decode infrastructure for OOM-safe GPU processing
 # ---------------------------------------------------------------------------
 
-def _tf_count_repeats(state_seqs_t: tf.Tensor, c: int) -> np.ndarray:
+@tf.function(jit_compile=True)
+def _count_repeats_batch(batch, unann_state):
+    """JIT-compiled per-batch repeat counter.
+
+    ``unann_state`` is a scalar int32 tensor so XLA traces once per concrete
+    (batch_size, T, unann_state) combination.
+    """
+    is_unann = tf.equal(batch, unann_state)
+    entries  = tf.logical_and(
+        tf.logical_not(is_unann[:, :-1]),
+        is_unann[:, 1:],
+    )
+    return tf.reduce_sum(tf.cast(entries, tf.int32), axis=1) + 1  # (B,)
+
+
+def _tf_count_repeats(state_seqs_t: tf.Tensor, c: int,
+                      batch_size: int = 512) -> np.ndarray:
     """Count repeats per sequence by detecting unannotated-state transitions.
 
-    A new repeat follows every time the model leaves the unannotated state
-    (state ``2*c``).  The number of repeats is the number of *entries* into
-    that state plus one.
+    Processes sequences in batches padded to ``batch_size`` so that the
+    JIT-compiled kernel is traced only once per unique (batch_size, T) shape.
 
     Args:
         state_seqs_t: ``(n, T)`` int32 tensor (GPU or CPU).
         c: Python int – model length.
+        batch_size: Sequences per GPU batch (also used as static batch dim).
 
     Returns:
         ``(n,)`` int32 numpy array with the number of repeats per sequence.
     """
-    # Rising edge: position t is unannotated, position t-1 is not.
-    is_unann = tf.equal(state_seqs_t, 2 * c)                 # (n, T) bool
-    entries  = tf.logical_and(
-        tf.logical_not(is_unann[:, :-1]),                    # prev != unann
-        is_unann[:, 1:],                                     # curr == unann
-    )                                                         # (n, T-1)
-    counts = tf.reduce_sum(tf.cast(entries, tf.int32), axis=1)  # (n,)
-    return (counts + 1).numpy().astype(np.int32)
+    n     = int(state_seqs_t.shape[0])
+    T     = int(state_seqs_t.shape[1])
+    unann = tf.constant(2 * c, dtype=tf.int32)
+    pad_rows = tf.zeros([batch_size, T], dtype=tf.int32)
+    result = np.empty(n, dtype=np.int32)
+    for start in range(0, n, batch_size):
+        end  = min(start + batch_size, n)
+        B    = end - start
+        rows = state_seqs_t[start:end]
+        if B < batch_size:
+            rows = tf.concat([rows, pad_rows[:batch_size - B]], axis=0)
+        result[start:end] = _count_repeats_batch(rows, unann).numpy()[:B]
+    return result
 
 
 # Cache of JIT-compiled decode functions keyed by (num_repeats, model_length).
@@ -308,7 +329,7 @@ def _get_decode_batch_fn(num_repeats: int, model_length: int):
     return _decode_batch
 
 
-def decode_tf(model_length: int, state_seqs, batch_size: int = 512):
+def decode_tf(model_length: int, state_seqs, batch_size: int = 2048):
     """OOM-safe TensorFlow decode.
 
     Strategy
@@ -339,13 +360,14 @@ def decode_tf(model_length: int, state_seqs, batch_size: int = 512):
         state_seqs = state_seqs.numpy()
 
     n = state_seqs.shape[0]
+    T = state_seqs.shape[1]
     c = int(model_length)
 
     # ------------------------------------------------------------------
     # Step 1 – count repeats per sequence (single GPU pass)
     # ------------------------------------------------------------------
     state_seqs_t = tf.constant(state_seqs, dtype=tf.int32)
-    num_repeats_per_row = _tf_count_repeats(state_seqs_t, c)   # (n,) CPU
+    num_repeats_per_row = _tf_count_repeats(state_seqs_t, c, batch_size)   # (n,) CPU
 
     # ------------------------------------------------------------------
     # Step 2 – sort by repeat count (stable, so equal-repeat groups are
@@ -395,22 +417,28 @@ def decode_tf(model_length: int, state_seqs, batch_size: int = 512):
         for b_start in range(0, len(group_idx), batch_size):
             batch_sorted = group_idx[b_start : b_start + batch_size]
             orig_idx     = sort_perm[batch_sorted]       # original sequence indices
+            B            = len(batch_sorted)
 
-            # GPU decode
-            batch_t = tf.constant(state_seqs[orig_idx], dtype=tf.int32)
+            # GPU decode – pad to batch_size so XLA sees a constant shape
+            rows = state_seqs[orig_idx]
+            if B < batch_size:
+                rows = np.concatenate(
+                    [rows, np.zeros((batch_size - B, T), dtype=np.int32)], axis=0
+                )
+            batch_t = tf.constant(rows, dtype=tf.int32)
             (lfl_t, lfs_t, cc_t, il_t, is_t, cs_t, ce_t,
              ul_t, us_t, rfl_t, rfs_t) = decode_fn(batch_t)
 
-            # Transfer to CPU
-            lfl = lfl_t.numpy().astype(np.int16)
-            lfs = lfs_t.numpy().astype(np.int32)
-            cc  = cc_t.numpy().astype(np.int16)         # (R, B, c)
-            il  = il_t.numpy().astype(np.int16)         # (R, B, c-1)
-            is_ = is_t.numpy().astype(np.int16)         # (R, B, c-1)
-            cs  = cs_t.numpy().astype(np.int32)         # (R, B)
-            ce  = ce_t.numpy().astype(np.int32)         # (R, B)
-            rfl = rfl_t.numpy().astype(np.int16)
-            rfs = rfs_t.numpy().astype(np.int32)
+            # Transfer to CPU (slice [:B] to discard padding rows)
+            lfl = lfl_t.numpy()[:B].astype(np.int16)
+            lfs = lfs_t.numpy()[:B].astype(np.int32)
+            cc  = cc_t.numpy()[:, :B].astype(np.int16)  # (R, B, c)
+            il  = il_t.numpy()[:, :B].astype(np.int16)  # (R, B, c-1)
+            is_ = is_t.numpy()[:, :B].astype(np.int16)  # (R, B, c-1)
+            cs  = cs_t.numpy()[:, :B].astype(np.int32)  # (R, B)
+            ce  = ce_t.numpy()[:, :B].astype(np.int32)  # (R, B)
+            rfl = rfl_t.numpy()[:B].astype(np.int16)
+            rfs = rfs_t.numpy()[:B].astype(np.int32)
 
             # Per-row arrays (indexed by sorted position)
             left_flank_len_s[batch_sorted]    = lfl
@@ -429,8 +457,8 @@ def decode_tf(model_length: int, state_seqs, batch_size: int = 512):
 
             # Unannotated segment arrays
             if R_int > 1:
-                ul = ul_t.numpy().astype(np.int16)      # (R-1, B)
-                us = us_t.numpy().astype(np.int32)      # (R-1, B)
+                ul = ul_t.numpy()[:, :B].astype(np.int16)  # (R-1, B)
+                us = us_t.numpy()[:, :B].astype(np.int32)  # (R-1, B)
                 for r in range(R_int - 1):
                     uf_idx = sorted_uns_off[batch_sorted] + r
                     uns_len_flat[uf_idx]   = ul[r]
