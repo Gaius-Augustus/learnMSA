@@ -222,13 +222,16 @@ def make_aligned_insertions(
         am._build_alignment([best_model], decoding_mode)
     meta_data = am.metadata[best_model]
     num_seq = meta_data.left_flank_len.shape[0]
+    all_rows = np.arange(num_seq)
+    num_ins_pos = meta_data.insertion_lens.shape[1]
 
     insertions_long = []
     for r in range(meta_data.num_repeats):
+        _, il_r, is_r, _, _ = meta_data.get_repeat_data(r, all_rows)
         insertions_long.append([])
-        for i in range(meta_data.insertion_lens.shape[2]):
+        for i in range(num_ins_pos):
             ins_long = find_long_insertions_and_get_sequences(
-                am.data[0], meta_data.insertion_lens[r, :, i], meta_data.insertion_start[r, :, i]
+                am.data[0], il_r[:, i], is_r[:, i]
             )
             insertions_long[-1].append(ins_long)
     left_flank_long = find_long_insertions_and_get_sequences(
@@ -239,8 +242,9 @@ def make_aligned_insertions(
     )
     unannotated_long = []
     for r in range(meta_data.num_repeats-1):
+        uns_l, uns_s = meta_data.get_unannotated_data(r, all_rows)
         unannotated_long.append(find_long_insertions_and_get_sequences(
-            am.data[0], meta_data.unannotated_segments_len[r], meta_data.unannotated_segments_start[r]
+            am.data[0], uns_l, uns_s
         ))
 
     slices = {}
@@ -249,7 +253,7 @@ def make_aligned_insertions(
     if right_flank_long is not None:
         slices["right_flank"] = right_flank_long[1]
     for r in range(meta_data.num_repeats):
-        for i in range(meta_data.insertion_lens.shape[2]):
+        for i in range(num_ins_pos):
             if insertions_long[r][i] is not None:
                 slices[f"ins_{r}_{i}"] = insertions_long[r][i][1]
     for r in range(meta_data.num_repeats-1):

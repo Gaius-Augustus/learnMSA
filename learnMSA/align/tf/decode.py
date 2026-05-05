@@ -230,26 +230,53 @@ def decode_tf(model_length: int, state_seqs):
 
     right_flank_len, right_flank_start = decode_flank_tf(state_seqs, 2 * c + 1, indices)
 
-    if unannotated_segs:
-        unannotated_segments_len   = np.stack([x[0] for x in unannotated_segs], axis=0)
-        unannotated_segments_start = np.stack([x[1] for x in unannotated_segs], axis=0)
-    else:
-        unannotated_segments_len   = np.zeros((0, n), dtype=np.int16)
-        unannotated_segments_start = np.zeros((0, n), dtype=np.int32)
+    # Compute num_repeats_per_row from finished_blocks
+    max_R = len(core_blocks)
+    finished_stack = np.stack(finished_blocks, axis=0)   # (max_R, n)
+    first_finish   = np.argmax(finished_stack, axis=0)    # (n,)
+    num_repeats_per_row = (first_finish + 1).astype(np.int32)
+
+    row_offsets = np.concatenate([[0], np.cumsum(num_repeats_per_row)]).astype(np.int32)
+    total_R = int(row_offsets[-1])
+    M = core_blocks[0].shape[1] if max_R > 0 else 0
+
+    domain_hit_flat  = np.full((total_R, M), -1, dtype=np.int16)
+    domain_loc_flat  = np.full((total_R, 2), -1, dtype=np.int32)
+    ins_lens_flat    = np.zeros((total_R, max(0, M - 1)), dtype=np.int16)
+    ins_start_flat   = np.full((total_R, max(0, M - 1)), -1, dtype=np.int16)
+
+    for r in range(max_R):
+        rows     = np.where(num_repeats_per_row > r)[0]
+        flat_idx = row_offsets[rows] + r
+        domain_hit_flat[flat_idx]      = core_blocks[r][rows]
+        domain_loc_flat[flat_idx, 0]   = core_starts[r][rows]
+        domain_loc_flat[flat_idx, 1]   = core_ends[r][rows]
+        ins_lens_flat[flat_idx]        = insertion_lens[r][rows]
+        ins_start_flat[flat_idx]       = insertion_starts[r][rows]
+
+    num_uns_per_row = np.maximum(num_repeats_per_row - 1, 0)
+    uns_offsets = np.concatenate([[0], np.cumsum(num_uns_per_row)]).astype(np.int32)
+    total_U = int(uns_offsets[-1])
+    uns_len_flat   = np.zeros(total_U, dtype=np.int16)
+    uns_start_flat = np.full(total_U, -1, dtype=np.int32)
+    for r, (seg_len, seg_start) in enumerate(unannotated_segs):
+        rows     = np.where(num_repeats_per_row > r + 1)[0]
+        flat_idx = uns_offsets[rows] + r
+        uns_len_flat[flat_idx]   = seg_len[rows]
+        uns_start_flat[flat_idx] = seg_start[rows]
 
     return AlignmentMetaData(
-        num_rows   = n,
-        num_match  = c,
-        num_repeats= len(core_blocks),
-        domain_hit = np.stack(core_blocks, axis=0),
-        domain_loc = np.stack([core_starts, core_ends], axis=-1),
-        insertion_lens   = np.stack(insertion_lens, axis=0),
-        insertion_start  = np.stack(insertion_starts, axis=0),
-        skip       = np.stack(finished_blocks, axis=0),
-        left_flank_len   = left_flank_len,
-        left_flank_start = left_flank_start,
-        right_flank_len  = right_flank_len,
-        right_flank_start= right_flank_start,
-        unannotated_segments_len   = unannotated_segments_len,
-        unannotated_segments_start = unannotated_segments_start,
+        num_rows            = n,
+        num_match           = c,
+        num_repeats_per_row = num_repeats_per_row,
+        domain_hit          = domain_hit_flat,
+        domain_loc          = domain_loc_flat,
+        insertion_lens      = ins_lens_flat,
+        insertion_start     = ins_start_flat,
+        left_flank_len      = left_flank_len,
+        left_flank_start    = left_flank_start,
+        right_flank_len     = right_flank_len,
+        right_flank_start   = right_flank_start,
+        unannotated_segments_len   = uns_len_flat,
+        unannotated_segments_start = uns_start_flat,
     )

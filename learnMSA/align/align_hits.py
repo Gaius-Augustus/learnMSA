@@ -50,10 +50,12 @@ def hit_alignment(
         return data
 
     elif mode == HitAlignmentMode.RIGHT_ALIGN:
-        scores = np.zeros((data.num_repeats, data.num_rows))
-        scores[data.num_repeats_per_row - 1, np.arange(data.num_rows)] = 1
-        # set padding to -1
-        scores[np.all(data.domain_hit == -1, axis=-1)] = -1
+        # Build (num_repeats, num_rows) scores: 0 for actual hits, -1 for empty,
+        # 1 for the last actual repeat of each row.
+        occ = data.occupancy_matrix()  # (R, N), -1 for empty
+        scores = np.where(occ == -1, -1.0, 0.0)
+        last_virt = data._repeat_offset + data.num_repeats_per_row - 1
+        scores[last_virt, np.arange(data.num_rows)] = 1.0
         shift = greedy_consensus_hit_alignment(scores)
         data.shift(shift)
         return data

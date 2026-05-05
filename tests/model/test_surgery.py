@@ -166,8 +166,14 @@ def test_discard_or_expand_positions(
 
     assert 0 in am.metadata
     assert am.metadata[0].alignment_len == len(ref_seqs[0])
-    # Shape: [number of domain hits, length]
-    deletions = np.sum(am.metadata[0].domain_hit == -1, axis=1)
+    # Reconstruct per-repeat statistics using the flat API
+    _meta0 = am.metadata[0]
+    _all_rows = np.arange(_meta0.num_rows)
+    # Count deleted (gap) positions per (repeat, match_state)
+    deletions = np.array([
+        np.sum(_meta0.get_repeat_data(r, _all_rows)[0] == -1, axis=0)
+        for r in range(_meta0.num_repeats)
+    ])
     np.testing.assert_equal(deletions, [[4, 5, 2, 0, 4], [2, 5, 4, 2, 4]])
     # Shape: [number of domain hits, num seq]
     np.testing.assert_equal(
@@ -176,8 +182,12 @@ def test_discard_or_expand_positions(
             [True, True, True, True, True, True]]
     )
     # Shape: [number of domain hits, num seq, L-1 inner positions]
+    ins_lens_dense = np.array([
+        _meta0.get_repeat_data(r, _all_rows)[1]
+        for r in range(_meta0.num_repeats)
+    ])
     np.testing.assert_equal(
-        am.metadata[0].insertion_lens,
+        ins_lens_dense,
         [[[0, 0, 3, 0],
             [0, 0, 2, 0],
             [0, 0, 2, 0],

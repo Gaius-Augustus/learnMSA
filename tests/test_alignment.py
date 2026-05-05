@@ -603,31 +603,22 @@ def test_alignment_decoding(
         assert meta_data.num_repeats == ref_num_blocks[i]
 
         # Verify first core block
+        all_rows = np.arange(simple_data.num_seq)
+        dh0, il0, is0, _, _ = meta_data.get_repeat_data(0, all_rows)
         for seq_idx in range(simple_data.num_seq):
-            np.testing.assert_equal(
-                meta_data.domain_hit[0, seq_idx], ref_consensus[i][seq_idx]
-            )
-            np.testing.assert_equal(
-                meta_data.insertion_lens[0, seq_idx], ref_insertion_lens[i][seq_idx]
-            )
-            np.testing.assert_equal(
-                meta_data.insertion_start[0, seq_idx], ref_insertion_start[i][seq_idx]
-            )
+            np.testing.assert_equal(dh0[seq_idx], ref_consensus[i][seq_idx])
+            np.testing.assert_equal(il0[seq_idx], ref_insertion_lens[i][seq_idx])
+            np.testing.assert_equal(is0[seq_idx], ref_insertion_start[i][seq_idx])
             np.testing.assert_equal(
                 meta_data.skip[0, seq_idx], ref_finished[i][seq_idx]
             )
 
         # Verify second core block
+        dh1, il1, is1, _, _ = meta_data.get_repeat_data(1, all_rows)
         for seq_idx in range(simple_data.num_seq):
-            np.testing.assert_equal(
-                meta_data.domain_hit[1, seq_idx], ref_consensus_2[i][seq_idx]
-            )
-            np.testing.assert_equal(
-                meta_data.insertion_lens[1, seq_idx], ref_insertion_lens_2[i][seq_idx]
-            )
-            np.testing.assert_equal(
-                meta_data.insertion_start[1, seq_idx], ref_insertion_start_2[i][seq_idx]
-            )
+            np.testing.assert_equal(dh1[seq_idx], ref_consensus_2[i][seq_idx])
+            np.testing.assert_equal(il1[seq_idx], ref_insertion_lens_2[i][seq_idx])
+            np.testing.assert_equal(is1[seq_idx], ref_insertion_start_2[i][seq_idx])
             np.testing.assert_equal(
                 meta_data.skip[1, seq_idx], ref_finished_2[i][seq_idx]
             )
@@ -639,12 +630,11 @@ def test_alignment_decoding(
         np.testing.assert_equal(
             meta_data.left_flank_start, np.array([0, 0, 0, 0, 0, 0, 0, 0])
         )
-        np.testing.assert_equal(
-            meta_data.unannotated_segments_len[0], ref_segment_lens[i]
-        )
-        np.testing.assert_equal(
-            meta_data.unannotated_segments_start[0], ref_segment_start[i]
-        )
+        uns_l, uns_s = meta_data.get_unannotated_data(0, all_rows)
+        np.testing.assert_equal(uns_l, ref_segment_lens[i])
+        # start positions are only meaningful where segment length > 0
+        mask = ref_segment_lens[i] > 0
+        np.testing.assert_equal(uns_s[mask], ref_segment_start[i][mask])
         np.testing.assert_equal(
             meta_data.right_flank_len, ref_right_flank_lens[i]
         )
@@ -678,8 +668,9 @@ def test_alignment_decoding(
         np.testing.assert_equal(right_flank_block, ref_right_flank_block[i])
 
         # Test insertion block (first insert only)
-        ins_lens = meta_data.insertion_lens[0, :, 0]
-        ins_start = meta_data.insertion_start[0, :, 0]
+        dh0_b, il0_b, is0_b, _, _ = meta_data.get_repeat_data(0, all_rows)
+        ins_lens = il0_b[:, 0]
+        ins_start = is0_b[:, 0]
         ins_block = AlignmentModel.get_insertion_block(
             sequences_2d,
             ins_lens,
@@ -690,13 +681,14 @@ def test_alignment_decoding(
 
         # Test alignment blocks
         np.testing.assert_equal(ins_block, ref_ins_block[i])
-        for i, ref in enumerate(ref_core_blocks[i]):
+        for ri, ref in enumerate(ref_core_blocks[i]):
+            dh_ri, il_ri, is_ri, _, _ = meta_data.get_repeat_data(ri, all_rows)
             alignment_block = AlignmentModel.get_alignment_block(
                 sequences_2d,
-                meta_data.domain_hit[i],
-                meta_data.insertion_lens[i],
-                np.amax(meta_data.insertion_lens[i], axis=0),
-                meta_data.insertion_start[i],
+                dh_ri,
+                il_ri,
+                np.amax(il_ri, axis=0),
+                is_ri,
             )
             np.testing.assert_equal(alignment_block, ref)
 
@@ -1031,14 +1023,12 @@ def test_viterbi(
         )
         # test whole decoding
         meta_data = decode_tf(L, viterbi_seqs[i])
-        assert len(meta_data.domain_hit) == ref_num_blocks[i]
+        assert meta_data.num_repeats == ref_num_blocks[i]
+        all_rows_v = np.arange(simple_data.num_seq)
+        dh0v, il0v, is0v, _, _ = meta_data.get_repeat_data(0, all_rows_v)
+        dh1v, il1v, is1v, _, _ = meta_data.get_repeat_data(1, all_rows_v)
         assert_decoding_core_results(
-            (
-                meta_data.domain_hit[0],
-                meta_data.insertion_lens[0],
-                meta_data.insertion_start[0],
-                meta_data.skip[0],
-            ),
+            (dh0v, il0v, is0v, meta_data.skip[0]),
             (
                 ref_consensus[i],
                 ref_insertion_lens[i],
@@ -1047,12 +1037,7 @@ def test_viterbi(
             ),
         )
         assert_decoding_core_results(
-            (
-                meta_data.domain_hit[1],
-                meta_data.insertion_lens[1],
-                meta_data.insertion_start[1],
-                meta_data.skip[1],
-            ),
+            (dh1v, il1v, is1v, meta_data.skip[1]),
             (
                 ref_consensus_2[i],
                 ref_insertion_lens_2[i],
@@ -1066,12 +1051,10 @@ def test_viterbi(
         np.testing.assert_equal(
             meta_data.left_flank_start, np.array([0, 0, 0, 0, 0, 0, 0, 0])
         )
-        np.testing.assert_equal(
-            meta_data.unannotated_segments_len[0], ref_segment_lens[i]
-        )
-        np.testing.assert_equal(
-            meta_data.unannotated_segments_start[0], ref_segment_start[i]
-        )
+        uns_lv, uns_sv = meta_data.get_unannotated_data(0, all_rows_v)
+        np.testing.assert_equal(uns_lv, ref_segment_lens[i])
+        mask_v = ref_segment_lens[i] > 0
+        np.testing.assert_equal(uns_sv[mask_v], ref_segment_start[i][mask_v])
         np.testing.assert_equal(
             meta_data.right_flank_len, ref_right_flank_lens[i]
         )
@@ -1103,8 +1086,9 @@ def test_viterbi(
         )
         np.testing.assert_equal(right_flank_block, ref_right_flank_block[i])
         # just check the first insert for simplicity
-        ins_lens = meta_data.insertion_lens[0, :, 0]
-        ins_start = meta_data.insertion_start[0, :, 0]
+        dh0_v, il0_v, is0_v, _, _ = meta_data.get_repeat_data(0, all_rows_v)
+        ins_lens = il0_v[:, 0]
+        ins_start = is0_v[:, 0]
         ins_block = AlignmentModel.get_insertion_block(
             sequences,
             ins_lens,
@@ -1112,13 +1096,14 @@ def test_viterbi(
             ins_start,
         )
         np.testing.assert_equal(ins_block, ref_ins_block[i])
-        for i, ref in enumerate(ref_core_blocks[i]):
+        for ri, ref in enumerate(ref_core_blocks[i]):
+            dh_riv, il_riv, is_riv, _, _ = meta_data.get_repeat_data(ri, all_rows_v)
             alignment_block = AlignmentModel.get_alignment_block(
                 sequences,
-                meta_data.domain_hit[i],
-                meta_data.insertion_lens[i],
-                np.amax(meta_data.insertion_lens[i], axis=0),
-                meta_data.insertion_start[i],
+                dh_riv,
+                il_riv,
+                np.amax(il_riv, axis=0),
+                is_riv,
             )
             np.testing.assert_equal(alignment_block, ref)
 
@@ -1187,77 +1172,75 @@ def test_alignment_decoding_mode_greedy_consensus(
 
 
 def test_alignment_metadata_shift() -> None:
-    """Test AlignmentMetaData.shift() with random data."""
+    """Test AlignmentMetaData.shift() with the flat data layout."""
     rng = np.random.default_rng(42)
-    R, N, M = 3, 5, 4  # repeats, rows, match states
+    R, N, M = 3, 5, 4  # repeats per row, rows, match states
+    total_R = R * N    # all rows have exactly R repeats
 
-    skip = np.zeros((R, N), dtype=np.int32)
+    # Build flat arrays (row-major: row 0 repeats, row 1 repeats, ...)
+    orig_dh  = rng.integers(0, 10,  (total_R, M),     dtype=np.int16)
+    orig_il  = rng.integers(0, 5,   (total_R, M - 1), dtype=np.int16)
+    orig_is  = rng.integers(0, 100, (total_R, M - 1), dtype=np.int16)
+    orig_dl  = rng.integers(0, 100, (total_R, 2),      dtype=np.int16)
+    uns_len  = rng.integers(0, 5,   (R - 1) * N,      dtype=np.int16)
+    uns_start= rng.integers(0, 100, (R - 1) * N,       dtype=np.int16)
+
     meta = AlignmentMetaData(
         num_rows=N,
         num_match=M,
-        num_repeats=R,
-        domain_hit=rng.integers(0, 10, (R, N, M)),
-        domain_loc=rng.integers(0, 100, (R, N, 2)),
-        insertion_lens=rng.integers(0, 5, (R, N, M - 1)),
-        insertion_start=rng.integers(0, 100, (R, N, M - 1)),
-        skip=skip,
+        num_repeats_per_row=np.full(N, R, dtype=np.int32),
+        domain_hit=orig_dh.copy(),
+        domain_loc=orig_dl.copy(),
+        insertion_lens=orig_il.copy(),
+        insertion_start=orig_is.copy(),
         left_flank_len=rng.integers(0, 10, N),
         left_flank_start=rng.integers(0, 10, N),
         right_flank_len=rng.integers(0, 10, N),
         right_flank_start=rng.integers(0, 10, N),
-        unannotated_segments_len=rng.integers(0, 5, (R, N)),
-        unannotated_segments_start=rng.integers(0, 100, (R, N)),
+        unannotated_segments_len=uns_len.copy(),
+        unannotated_segments_start=uns_start.copy(),
     )
 
-    # Save originals before shift
-    orig = {
-        "domain_hit": meta.domain_hit.copy(),
-        "insertion_lens": meta.insertion_lens.copy(),
-        "skip": meta.skip.copy(),
-    }
+    # Before shift: flat data is unchanged, virtual offsets are 0
+    assert meta.num_repeats == R
+    assert meta._repeat_offset.tolist() == [0] * N
 
     # Each row gets a different shift amount
-    shift = np.array([0, 1, 0, 2, 1])
-    assert len(shift) == N
+    shift_arr = np.array([0, 1, 0, 2, 1])
+    assert len(shift_arr) == N
 
-    meta.shift(shift)
+    meta.shift(shift_arr)
 
-    # num_repeats: hits_per_row == R for all rows (no skips)
-    expected_num_repeats = int(np.amax(R + shift)) + 1
+    # Virtual num_repeats = max(_repeat_offset + num_repeats_per_row)
+    expected_num_repeats = int(np.amax(shift_arr + R))
     assert meta.num_repeats == expected_num_repeats
 
-    # Check shapes of per-repeat arrays
-    assert meta.domain_hit.shape == (expected_num_repeats, N, M)
-    assert meta.skip.shape == (expected_num_repeats, N)
-    assert meta.insertion_lens.shape == (expected_num_repeats, N, M - 1)
+    # Flat data must be unchanged by shift
+    np.testing.assert_array_equal(meta.domain_hit, orig_dh)
+    np.testing.assert_array_equal(meta.insertion_lens, orig_il)
 
-    # Verify shifted values and padding for domain_hit (pad=-1) and skip (pad=1)
-    for field, pad in [("domain_hit", -1), ("skip", 1)]:
-        arr_new = getattr(meta, field)
-        arr_old = orig[field]
-        for i in range(N):
-            s = shift[i]
-            np.testing.assert_array_equal(
-                arr_new[s : s + R, i],
-                arr_old[:, i],
-                err_msg=f"{field}: shifted content mismatch for row {i}",
-            )
-            if s > 0:
-                np.testing.assert_array_equal(
-                    arr_new[:s, i],
-                    np.full_like(arr_new[:s, i], pad),
-                    err_msg=f"{field}: padding mismatch for row {i}",
-                )
+    # _repeat_offset must equal shift_arr
+    np.testing.assert_array_equal(meta._repeat_offset, shift_arr)
 
-    # Verify insertion_lens (pad=0) content
-    for i in range(N):
-        s = shift[i]
-        np.testing.assert_array_equal(
-            meta.insertion_lens[s : s + R, i],
-            orig["insertion_lens"][:, i],
-        )
-        if s > 0:
-            np.testing.assert_array_equal(
-                meta.insertion_lens[:s, i],
-                np.zeros((s, M - 1), dtype=meta.insertion_lens.dtype),
-            )
+    # For each row i with shift s, get_repeat_data(s+r, [i]) must return orig repeat r
+    for row_i in range(N):
+        s = shift_arr[row_i]
+        for r in range(R):
+            virt = s + r
+            flat_orig = row_i * R + r   # flat index in orig arrays
+            dh, il, is_, _, has_r = meta.get_repeat_data(virt, np.array([row_i]))
+            assert has_r[0], f"row {row_i} repeat {virt} should exist"
+            np.testing.assert_array_equal(dh[0], orig_dh[flat_orig])
+            np.testing.assert_array_equal(il[0], orig_il[flat_orig])
+            np.testing.assert_array_equal(is_[0], orig_is[flat_orig])
+
+        # Positions before the shift should return padding
+        for pre in range(s):
+            dh, il, _, _, has_r = meta.get_repeat_data(pre, np.array([row_i]))
+            assert not has_r[0], f"row {row_i} repeat {pre} should be empty (pre-shift)"
+            np.testing.assert_array_equal(dh[0], np.full(M, -1, dtype=np.int16))
+            np.testing.assert_array_equal(il[0], np.zeros(M - 1, dtype=np.int16))
+
+        # Positions after the last repeat should return padding
+        dh, il, _, _, has_r = meta.get_repeat_data(s + R, np.array([row_i]))
+        assert not has_r[0], f"row {row_i} repeat {s+R} should be empty (post-shift)"

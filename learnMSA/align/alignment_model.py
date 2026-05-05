@@ -327,23 +327,25 @@ class AlignmentModel():
             if add_block_sep:
                 blocks.append(sep)
 
-        for i in range(meta_data.num_repeats):
-            consensus = meta_data.domain_hit[i]
+        # Pre-compute which match-state columns are non-empty across all rows.
+        is_non_empty_all = meta_data.repeat_occupancy_mask()  # (num_repeats, num_match)
 
-            # remove columns consisting only of gaps
-            is_non_empty = np.any(consensus != -1, axis=0)
+        for i in range(meta_data.num_repeats):
+            dh_batch, il_batch, is_batch, _, _ = meta_data.get_repeat_data(
+                i, batch_indices
+            )
 
             # One domain hit
             alignment_block = self.get_alignment_block(
                 sequences=sequences,
-                consensus=consensus[batch_indices],
-                ins_len=meta_data.insertion_lens[i][batch_indices],
+                consensus=dh_batch,
+                ins_len=il_batch,
                 ins_len_total=np.maximum(
                     meta_data.insertion_lens_total,
                     aligned_insertions.ext_insertions
                 )[i],
-                ins_start=meta_data.insertion_start[i][batch_indices],
-                is_non_empty=is_non_empty,
+                ins_start=is_batch,
+                is_non_empty=is_non_empty_all[i],
                 custom_columns=aligned_insertions.insertion(batch_indices, i),
                 only_matches=only_matches
             )
@@ -353,17 +355,16 @@ class AlignmentModel():
                 blocks.append(sep)
 
             # Unannotated segment (if there are more repeats to come)
-            if i < meta_data.num_repeats-1 and not only_matches:
-                unannotated_segment_l = meta_data.unannotated_segments_len[i]
-                unannotated_segment_s = meta_data.unannotated_segments_start[i]
+            if i < meta_data.num_repeats - 1 and not only_matches:
+                uns_l, uns_s = meta_data.get_unannotated_data(i, batch_indices)
                 unannotated_block = self.get_insertion_block(
                     sequences,
-                    unannotated_segment_l[batch_indices],
+                    uns_l,
                     np.maximum(
                         meta_data.unannotated_segment_lens_total,
                         aligned_insertions.ext_unannotated
                     )[i],
-                    unannotated_segment_s[batch_indices],
+                    uns_s,
                     custom_columns=aligned_insertions.unannotated_segment(
                         batch_indices, i
                     )
@@ -689,29 +690,60 @@ class AlignmentModel():
 
         right_flank = cls.decode_flank(state_seqs_max_lik, 2*c+1, indices)
 
-        if len(unannotated_segments) > 0:
-            unannotated_segments = np.stack(unannotated_segments, axis=0)
-            unannotated_segments_len = unannotated_segments[:,0]
-            unannotated_segments_start = unannotated_segments[:,1]
-        else:
-            unannotated_segments_len = np.zeros((0, n), dtype=np.int16)
-            unannotated_segments_start = np.zeros((0, n), dtype=np.int16)
+        # Compute num_repeats_per_row from finished_blocks.
+        # finished_blocks[r][j] = True means sequence j finishes after repeat r.
+        max_R = len(core_blocks)
+        finished_stack = np.stack(finished_blocks, axis=0)  # (max_R, n)
+        first_finish = np.argmax(finished_stack, axis=0)    # (n,) 0-based index
+        num_repeats_per_row = (first_finish + 1).astype(np.int32)
+
+        # Row offsets into flat arrays
+        row_offsets = np.concatenate([[0], np.cumsum(num_repeats_per_row)]).astype(np.int32)
+        total_R = int(row_offsets[-1])
+        M = core_blocks[0].shape[1] if max_R > 0 else 0
+
+        # Allocate flat arrays
+        domain_hit_flat  = np.full((total_R, M), -1, dtype=np.int16)
+        domain_loc_flat  = np.full((total_R, 2), -1, dtype=np.int16)
+        ins_lens_flat    = np.zeros((total_R, max(0, M - 1)), dtype=np.int16)
+        ins_start_flat   = np.full((total_R, max(0, M - 1)), -1, dtype=np.int16)
+
+        for r in range(max_R):
+            rows = np.where(num_repeats_per_row > r)[0]
+            flat_idx = row_offsets[rows] + r
+            domain_hit_flat[flat_idx] = core_blocks[r][rows]
+            domain_loc_flat[flat_idx, 0] = core_starts[r][rows]
+            domain_loc_flat[flat_idx, 1] = core_ends[r][rows]
+            ins_lens_flat[flat_idx]  = insertion_lens[r][rows]
+            ins_start_flat[flat_idx] = insertion_starts[r][rows]
+
+        # Flat unannotated segments
+        # row j with k repeats has k-1 unannotated segments
+        num_uns_per_row = np.maximum(num_repeats_per_row - 1, 0)
+        uns_offsets = np.concatenate([[0], np.cumsum(num_uns_per_row)]).astype(np.int32)
+        total_U = int(uns_offsets[-1])
+        uns_len_flat   = np.zeros(total_U, dtype=np.int16)
+        uns_start_flat = np.full(total_U, -1, dtype=np.int16)
+        for r, (seg_len, seg_start) in enumerate(unannotated_segments):
+            rows = np.where(num_repeats_per_row > r + 1)[0]
+            flat_idx = uns_offsets[rows] + r
+            uns_len_flat[flat_idx]   = seg_len[rows]
+            uns_start_flat[flat_idx] = seg_start[rows]
 
         return AlignmentMetaData(
-            num_rows = n,
-            num_match = c,
-            num_repeats = len(core_blocks),
-            domain_hit = np.stack(core_blocks, axis=0),
-            domain_loc = np.stack([core_starts, core_ends], axis=-1),
-            insertion_lens = np.stack(insertion_lens, axis=0),
-            insertion_start = np.stack(insertion_starts, axis=0),
-            skip = np.stack(finished_blocks, axis=0),
-            left_flank_len = left_flank[0],
-            left_flank_start = left_flank[1],
-            right_flank_len = right_flank[0],
-            right_flank_start = right_flank[1],
-            unannotated_segments_len = unannotated_segments_len,
-            unannotated_segments_start = unannotated_segments_start,
+            num_rows           = n,
+            num_match          = c,
+            num_repeats_per_row= num_repeats_per_row,
+            domain_hit         = domain_hit_flat,
+            domain_loc         = domain_loc_flat,
+            insertion_lens     = ins_lens_flat,
+            insertion_start    = ins_start_flat,
+            left_flank_len     = left_flank[0],
+            left_flank_start   = left_flank[1],
+            right_flank_len    = right_flank[0],
+            right_flank_start  = right_flank[1],
+            unannotated_segments_len   = uns_len_flat,
+            unannotated_segments_start = uns_start_flat,
         )
 
 
@@ -852,11 +884,8 @@ class AlignmentModel():
             s = state_seqs_max_lik[:,:,i]
             meta_data = decode_tf(int(model_len), s)
             if self.hit_alignment_mode == HitAlignmentMode.GREEDY_CONSENSUS:
-                # Use simple occupancy counter for hit alignment, i.e. score is
-                # simply the number of used match states
-                occupancy = np.sum(meta_data.domain_hit != -1, axis=-1)
-                # Mark missing hits with -1
-                occupancy[occupancy == 0] = -1
+                # Use occupancy (number of used match states) as hit score.
+                occupancy = meta_data.occupancy_matrix()  # (R, N), -1 for empty
                 meta_data = hit_alignment(
                     meta_data, self.hit_alignment_mode, occupancy
                 )
