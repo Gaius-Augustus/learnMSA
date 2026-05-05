@@ -11,6 +11,7 @@ import tensorflow as tf
 from learnMSA.align.align_inserts import AlignedInsertions
 from learnMSA.align.alignment_metadata import AlignmentMetaData
 from learnMSA.align.align_hits import HitAlignmentMode, hit_alignment
+from learnMSA.align.tf.decode import decode_tf
 from learnMSA.model.select import SelectionCriterion, select_model
 from learnMSA.model.tf.model import LearnMSAModel
 from learnMSA.util.aligned_dataset import AlignedDataset, SequenceDataset
@@ -184,7 +185,7 @@ class AlignmentModel():
         self,
         filepath: str | Path,
         model_index: int,
-        batch_size: int = 100000,
+        batch_size: int = 10000,
         add_block_sep: bool = False,
         aligned_insertions : AlignedInsertions = AlignedInsertions(),
         format: str = "fasta",
@@ -830,9 +831,9 @@ class AlignmentModel():
         assert len(models) == 1, "Not implemented for multiple models."
 
         if decoding_mode == AlignmentModel.DecodingMode.VITERBI:
-            self.model.viterbi_mode()
+            self.model.viterbi_decode_mode()
         elif decoding_mode == AlignmentModel.DecodingMode.MEA:
-            self.model.mea_mode()
+            self.model.mea_decode_mode()
         else:
             raise ValueError(f"Unsupported decoding mode: {decoding_mode}")
 
@@ -849,7 +850,7 @@ class AlignmentModel():
         for i,j in enumerate(models):
             model_len = self.model.context.model_lengths[j]
             s = state_seqs_max_lik[:,:,i]
-            meta_data = AlignmentModel.decode(model_len, s)
+            meta_data = decode_tf(int(model_len), s)
             if self.hit_alignment_mode == HitAlignmentMode.GREEDY_CONSENSUS:
                 # Use simple occupancy counter for hit alignment, i.e. score is
                 # simply the number of used match states

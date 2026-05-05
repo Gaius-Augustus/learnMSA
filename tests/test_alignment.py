@@ -11,6 +11,7 @@ from learnMSA.align.alignment_metadata import AlignmentMetaData
 from learnMSA.align.alignment_model import (AlignmentModel,
                                             find_faulty_sequences,
                                             non_homogeneous_mask_func)
+from learnMSA.align.tf.decode import decode_core_tf, decode_flank_tf, decode_tf
 from learnMSA.model.context import LearnMSAContext
 from learnMSA.model.tf.model import LearnMSAModel
 from learnMSA.util.aligned_dataset import AlignedDataset, SequenceDataset
@@ -577,7 +578,7 @@ def test_alignment_decoding(
     # Test decoding for both models
     for i in range(len(length)):
         # Test decode_core for first core block
-        decoding_core_results = AlignmentModel.decode_core(
+        decoding_core_results = decode_core_tf(
             length[i], viterbi_seqs[i], indices[i]
         )
         C, IL, IS, finished = decoding_core_results
@@ -589,7 +590,7 @@ def test_alignment_decoding(
             np.testing.assert_equal(finished[seq_idx], ref_finished[i][seq_idx])
 
         # Test decode_flank for left flank
-        left_flank_lens, left_flank_start = AlignmentModel.decode_flank(
+        left_flank_lens, left_flank_start = decode_flank_tf(
             viterbi_seqs[i],
             flank_state_id=length[i]*2-1,  # LEFT_FLANK state
             indices=np.array([0, 0, 0, 0, 0, 0, 0, 0])
@@ -598,9 +599,7 @@ def test_alignment_decoding(
         np.testing.assert_equal(left_flank_start, np.array([0, 0, 0, 0, 0, 0, 0, 0]))
 
         # Test full decode
-        meta_data = AlignmentModel.decode(
-            length[i], viterbi_seqs[i]
-        )
+        meta_data = decode_tf(int(length[i]), viterbi_seqs[i])
         assert meta_data.num_repeats == ref_num_blocks[i]
 
         # Verify first core block
@@ -700,6 +699,66 @@ def test_alignment_decoding(
                 meta_data.insertion_start[i],
             )
             np.testing.assert_equal(alignment_block, ref)
+
+def test_tf_decode(
+    simple_data: SequenceDataset,
+    viterbi_seqs: np.ndarray,
+) -> None:
+    """TF decode_core_tf / decode_flank_tf / decode_tf must produce the same
+    results as the numpy reference implementations for both test models."""
+    length = [5, 3]
+
+    for i in range(len(length)):
+        c = length[i]
+        s = viterbi_seqs[i]  # (n, T)
+
+        # ---- decode_flank_tf must match decode_flank -------------------------
+        indices_np = np.array([0, 0, 0, 0, 0, 0, 0, 0], dtype=np.int32)
+        indices_tf = indices_np.copy()
+        ref_lens, ref_start = decode_flank_tf(
+            s, c * 2 - 1, indices_np
+        )
+        got_lens, got_start = decode_flank_tf(s, c * 2 - 1, indices_tf)
+        np.testing.assert_equal(got_lens, ref_lens)
+        np.testing.assert_equal(got_start, ref_start)
+        np.testing.assert_equal(indices_tf, indices_np)
+
+        # ---- decode_core_tf must match decode_core ---------------------------
+        indices_np = np.array([0, 3, 0, 0, 1, 0, 0, 0] if i == 0
+                               else [5, 0, 6, 5, 0, 2, 1, 3], dtype=np.int32)
+        indices_tf = indices_np.copy()
+        ref_C, ref_IL, ref_IS, ref_fin = decode_core_tf(
+            c, s, indices_np
+        )
+        got_C, got_IL, got_IS, got_fin = decode_core_tf(c, s, indices_tf)
+        np.testing.assert_equal(got_C,   ref_C)
+        np.testing.assert_equal(got_IL,  ref_IL)
+        np.testing.assert_equal(got_IS,  ref_IS)
+        np.testing.assert_equal(got_fin, ref_fin)
+        np.testing.assert_equal(indices_tf, indices_np)
+
+        # ---- decode_tf must match decode for full metadata -------------------
+        ref_meta = decode_tf(c, s)
+        got_meta = decode_tf(c, s)
+
+        assert got_meta.num_repeats == ref_meta.num_repeats
+        np.testing.assert_equal(got_meta.domain_hit,    ref_meta.domain_hit)
+        np.testing.assert_equal(got_meta.insertion_lens, ref_meta.insertion_lens)
+        np.testing.assert_equal(got_meta.insertion_start, ref_meta.insertion_start)
+        np.testing.assert_equal(got_meta.skip,          ref_meta.skip)
+        np.testing.assert_equal(got_meta.left_flank_len,   ref_meta.left_flank_len)
+        np.testing.assert_equal(got_meta.left_flank_start, ref_meta.left_flank_start)
+        np.testing.assert_equal(got_meta.right_flank_len,   ref_meta.right_flank_len)
+        np.testing.assert_equal(got_meta.right_flank_start, ref_meta.right_flank_start)
+        if ref_meta.unannotated_segments_len.shape[0] > 0:
+            np.testing.assert_equal(
+                got_meta.unannotated_segments_len,
+                ref_meta.unannotated_segments_len
+            )
+            np.testing.assert_equal(
+                got_meta.unannotated_segments_start,
+                ref_meta.unannotated_segments_start
+            )
 
 def test_viterbi(
     simple_data: SequenceDataset, simple_model: LearnMSAModel,
@@ -946,7 +1005,7 @@ def test_viterbi(
     for i,L in enumerate(length):
         # test decoding
         # test first core block isolated
-        decoding_core_results = AlignmentModel.decode_core(
+        decoding_core_results = decode_core_tf(
             L, viterbi_seqs[i], indices[i]
         )
         assert_decoding_core_results(
@@ -959,7 +1018,7 @@ def test_viterbi(
             )
         )
         # test left flank insertions isolated
-        left_flank_lens, left_flank_start = AlignmentModel.decode_flank(
+        left_flank_lens, left_flank_start = decode_flank_tf(
             viterbi_seqs[i],
             flank_state_id=2*L-1,
             indices=np.array([0, 0, 0, 0, 0, 0, 0, 0]),
@@ -971,7 +1030,7 @@ def test_viterbi(
             left_flank_start, np.array([0, 0, 0, 0, 0, 0, 0, 0])
         )
         # test whole decoding
-        meta_data = AlignmentModel.decode(L, viterbi_seqs[i])
+        meta_data = decode_tf(L, viterbi_seqs[i])
         assert len(meta_data.domain_hit) == ref_num_blocks[i]
         assert_decoding_core_results(
             (
