@@ -282,62 +282,10 @@ def make_slice_msas(slices, method="famsa", threads=0):
 def align_with_famsa(slices, threads, max_ram_gb=None):
     #keep conditional import, famsa could be optional in the future
     from pyfamsa import Aligner as FamsaAligner, Sequence as FamsaSequence
-    import multiprocessing.pool
-    import threading
-
-    if max_ram_gb is None:
-        try:
-            import psutil
-            max_ram_gb = psutil.virtual_memory().available / 1024 ** 3 * 0.75
-        except ImportError:
-            max_ram_gb = 8.0
-
-    # FAMSA uses roughly 4 bytes per (sequence × position) for its scoring matrices
-    # on top of the raw sequence bytes, so use 4 as a conservative overhead factor.
-    _FAMSA_OVERHEAD = 4
-    _capacity = int(max_ram_gb * 1024 ** 3)
-
-    class _WeightedSemaphore:
-        """Semaphore that blocks until `weight` bytes of budget are available."""
-        def __init__(self, capacity):
-            self._cap = capacity
-            self._used = 0
-            self._cond = threading.Condition()
-
-        def acquire(self, weight):
-            with self._cond:
-                # Always allow when nothing else is running to avoid deadlock
-                # if a single job exceeds the total budget.
-                while self._used > 0 and self._used + weight > self._cap:
-                    self._cond.wait()
-                self._used += weight
-
-        def release(self, weight):
-            with self._cond:
-                self._used -= weight
-                self._cond.notify_all()
-
-    sem = _WeightedSemaphore(_capacity)
-    aligner = FamsaAligner(threads=threads)
-    keys = list(slices.keys())
-
-    def _estimate_bytes(seqs):
-        n = len(seqs)
-        max_len = max(len(seq) for _, seq in seqs) if seqs else 1
-        return n * max_len * _FAMSA_OVERHEAD
-
-    def _align(key):
-        seqs = slices[key]
-        weight = _estimate_bytes(seqs)
-        sem.acquire(weight)
-        try:
-            enc_seqs = [FamsaSequence(sid.encode(), seq.encode()) for sid, seq in seqs]
-            msa = aligner.align(enc_seqs)
-            return key, [(sequence.id.decode(), sequence.sequence.decode()) for sequence in msa]
-        finally:
-            sem.release(weight)
-
-    with multiprocessing.pool.ThreadPool() as pool:
-        results = pool.map(_align, keys)
-
-    return dict(results)
+    aligner = FamsaAligner(threads = threads)
+    alignments = {}
+    for key, seqs in slices.items():
+        enc_seqs =  [FamsaSequence(sid.encode(), seq.encode()) for sid,seq in seqs]
+        msa = aligner.align(enc_seqs)
+        alignments[key] = [(sequence.id.decode(), sequence.sequence.decode()) for sequence in msa]
+    return alignments
