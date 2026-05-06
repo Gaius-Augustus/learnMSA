@@ -184,7 +184,7 @@ class AlignmentModel():
         self,
         filepath: str | Path,
         model_index: int,
-        batch_size: int = 20000,
+        batch_size: int = 10000,
         add_block_sep: bool = False,
         aligned_insertions : AlignedInsertions = AlignedInsertions(),
         format: str = "fasta",
@@ -989,40 +989,83 @@ class AlignmentModel():
 
         assert len(models) == 1, "Not implemented for multiple models."
 
-        if decoding_mode == AlignmentModel.DecodingMode.VITERBI:
-            self.model.viterbi_decode_mode()
-        elif decoding_mode == AlignmentModel.DecodingMode.MEA:
-            self.model.mea_decode_mode()
-        else:
-            raise ValueError(f"Unsupported decoding mode: {decoding_mode}")
+        if False: # NEW implementation
 
-        # predict returns a plain dict of arrays when _decode_msa is True.
-        # The full state-sequence array is never materialised in CPU memory.
-        raw_dict = self.model.predict(
-            self.data, indices=self.indices, models=models
-        )
-        assert isinstance(raw_dict, dict)
-        c = int(self.model.phmm_layer.lengths[models[0]])
-        meta_data_base = AlignmentMetaData.from_kwargs(
-            num_rows=len(self.indices), num_match=c, **raw_dict
-        )
+            if decoding_mode == AlignmentModel.DecodingMode.VITERBI:
+                self.model.viterbi_decode_mode()
+            elif decoding_mode == AlignmentModel.DecodingMode.MEA:
+                self.model.mea_decode_mode()
+            else:
+                raise ValueError(f"Unsupported decoding mode: {decoding_mode}")
 
-        # TODO: this is just here to generate empty fixed_viterbi_seqs
-        _ = self._clean_up_viterbi_seqs(None, [0])
-
-
-        t = time.time()
-
-        j = models[0]
-        if self.hit_alignment_mode == HitAlignmentMode.GREEDY_CONSENSUS:
-            # Use occupancy (number of used match states) as hit score.
-            occupancy = meta_data_base.occupancy_matrix()  # (R, N), -1 for empty
-            meta_data = hit_alignment(
-                meta_data_base, self.hit_alignment_mode, occupancy
+            # predict returns a plain dict of arrays when _decode_msa is True.
+            # The full state-sequence array is never materialised in CPU memory.
+            raw_dict = self.model.predict(
+                self.data, indices=self.indices, models=models
             )
-        else:
-            meta_data = hit_alignment(meta_data_base, self.hit_alignment_mode)
-        self.metadata[j] = meta_data
+            assert isinstance(raw_dict, dict)
+            c = int(self.model.phmm_layer.lengths[models[0]])
+            meta_data_base = AlignmentMetaData.from_kwargs(
+                num_rows=len(self.indices), num_match=c, **raw_dict
+            )
+
+            # TODO: this is just here to generate empty fixed_viterbi_seqs
+            _ = self._clean_up_viterbi_seqs(None, [0])
+
+
+            t = time.time()
+
+            j = models[0]
+            if self.hit_alignment_mode == HitAlignmentMode.GREEDY_CONSENSUS:
+                # Use occupancy (number of used match states) as hit score.
+                occupancy = meta_data_base.occupancy_matrix()  # (R, N), -1 for empty
+                meta_data = hit_alignment(
+                    meta_data_base, self.hit_alignment_mode, occupancy
+                )
+            else:
+                meta_data = hit_alignment(meta_data_base, self.hit_alignment_mode)
+            self.metadata[j] = meta_data
+
+        else: # OLD implementation
+
+            if decoding_mode == AlignmentModel.DecodingMode.VITERBI:
+                self.model.viterbi_mode()
+            elif decoding_mode == AlignmentModel.DecodingMode.MEA:
+                self.model.mea_mode()
+            else:
+                raise ValueError(f"Unsupported decoding mode: {decoding_mode}")
+
+            state_seqs_max_lik = self.model.predict(
+                self.data, indices=self.indices, models=models,
+                ragged_output=True
+            ) # (B, T, H)
+
+            # TODO: this is just here to generate empty fixed_viterbi_seqs
+            _ = self._clean_up_viterbi_seqs(None, [0])
+
+            t = time.time()
+
+            for i,j in enumerate(models):
+                model_len = self.model.context.model_lengths[j]
+                meta_data_list = [
+                    AlignmentModel.decode(model_len, seqs[:,:,i])
+                    for seqs, _ in state_seqs_max_lik
+                ]
+                all_idx = np.concat([idx for _, idx in state_seqs_max_lik])
+                meta_data = AlignmentMetaData.concat(meta_data_list)
+                meta_data.reorder(all_idx)
+
+                if self.hit_alignment_mode == HitAlignmentMode.GREEDY_CONSENSUS:
+                    # Use occupancy (number of used match states) as hit score.
+                    occupancy = meta_data.occupancy_matrix()  # (R, N), -1 for empty
+                    meta_data = hit_alignment(
+                        meta_data, self.hit_alignment_mode, occupancy
+                    )
+                else:
+                    meta_data = hit_alignment(meta_data, self.hit_alignment_mode)
+                self.metadata[j] = meta_data
+
+
 
         if self.model.context.config.input_output.verbose:
             print(

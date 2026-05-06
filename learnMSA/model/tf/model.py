@@ -1,7 +1,7 @@
 import math
 from pathlib import Path
 import time
-from typing import Any, Literal, Sequence, override
+from typing import Any, Literal, Sequence, override, overload
 
 import numpy as np
 import tensorflow as tf
@@ -431,6 +431,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
     def metrics(self):
         return [self.loss_tracker, self.loglik_tracker, self.prior_tracker]
 
+    @overload
     def predict(
         self,
         data: SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]],
@@ -439,7 +440,32 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         bucket_boundaries: Sequence[int | float] | None = None,
         bucket_batch_sizes: Sequence[int] | None = None,
         reduce: bool = False,
-    ) -> np.ndarray | dict[str, np.ndarray]:
+        ragged_output: Literal[True] = True,
+    ) -> list[tuple[np.ndarray, np.ndarray]]:
+        ...
+    @overload
+    def predict(
+        self,
+        data: SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]],
+        indices: np.ndarray | None = None,
+        models: list[int] | None = None,
+        bucket_boundaries: Sequence[int | float] | None = None,
+        bucket_batch_sizes: Sequence[int] | None = None,
+        reduce: bool = False,
+        ragged_output: Literal[False] = False,
+    ) -> np.ndarray:
+        ...
+
+    def predict(
+        self,
+        data: SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]],
+        indices: np.ndarray | None = None,
+        models: list[int] | None = None,
+        bucket_boundaries: Sequence[int | float] | None = None,
+        bucket_batch_sizes: Sequence[int] | None = None,
+        reduce: bool = False,
+        ragged_output: bool = False,
+    ) -> np.ndarray | list[tuple[np.ndarray, np.ndarray]]:
         """
         Computes predictions for all sequences specified by indices in data.
         Buckets sequences by length for efficiency and determines appropriate
@@ -465,6 +491,9 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             reduce: If True and in posterior mode, reduces over sequences and
                 positions to return state expectations instead of full posteriors.
                 This saves memory for large datasets.
+            ragged_output: If True and in Viterbi or mea mode, returns a list
+                of arrays of varying lengths instead of a padded array and
+                the indices for reordering.
 
         Returns: An array whose shape depends on the call mode and reduce option:
             - Viterbi mode: (num_sequences, length, num_models) with the
@@ -564,11 +593,16 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
                 num_sequences=len(indices),
                 steps=steps,
             )
+
+            # Reset
+            self.context.batch_gen.crop_long_seqs = old_crop_long_seqs
+            self.phmm_layer.head_subset = prev_head_subset
+
             return accumulated_posteriors
 
         # Run a custom prediction loop with batching to collect all predictions
-        all_predictions = []
-        all_indices = []
+        all_pred = []
+        all_idx = []
 
         if self._decode_msa:
             # only support single models
@@ -649,64 +683,95 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             # Standard mode: collect predictions
             if isinstance(batch_result, tuple) and len(batch_result) == 2:
                 batch_pred, batch_idx = batch_result
-                all_predictions.append(batch_pred.numpy())
-                all_indices.append(batch_idx.numpy())
+                all_pred.append(batch_pred.numpy())
+                all_idx.append(batch_idx.numpy())
             elif isinstance(batch_result, tf.Tensor):
-                all_predictions.append(batch_result.numpy())
+                all_pred.append(batch_result.numpy())
 
         # Handle variable lengths - slice bucket padding and optionally pad
         # Use actual data max length (+1 for terminal), not bucket padding
         max_len = int(max(data[0].seq_lens[indices]) + 1)
 
+        # Helper to replace -1 padding
+        def _replace_padding(pred: np.ndarray) -> None:
+            if self.phmm_layer.is_posterior_mode():
+                pred[pred == -1] = 0
+            elif self.phmm_layer.is_decoding_mode():
+                for i,j in enumerate(_models):
+                    L = self.phmm_layer.lengths[j]
+                    pred[:,:,i][pred[:,:,i] == -1] = 2*L + 2
+
         if self.phmm_layer.is_posterior_mode()\
                 or self.phmm_layer.is_decoding_mode():
-            # Process predictions: slice if too long, pad if needed
-            # (only in posterior/loglik modes)
-            processed_predictions = []
-            for pred in all_predictions:
-                # Slice off bucket padding if prediction is too long
-                if pred.shape[1] > max_len:
-                    pred = pred[:, :max_len]
 
-                # Pad if needed and in posterior/loglik mode
-                if pred.shape[1] < max_len:
-                    if self.phmm_layer.is_posterior_mode():
-                        pad_value = 0
-                    else:
-                        pad_value = -1
-                    pad_width = [(0, 0)] * len(pred.shape)
-                    pad_width[1] = (0, max_len - pred.shape[1])
-                    pred = np.pad(pred, pad_width, constant_values=pad_value)
-                    if self.phmm_layer.is_decoding_mode():
-                        for i, j in enumerate(_models):
-                            q = self.phmm_layer.states[j]
-                            pred[...,i][pred[...,i] == -1] = q
+            if ragged_output:
+                assert len(all_pred) == len(all_idx),\
+                    "Ragged output requires bucket indices for reordering."
+                assert len(all_pred) > 0,\
+                    "No predictions were made; cannot produce ragged output."
 
-                processed_predictions.append(pred)
+                outputs_dict = {}
+                for i, (pred, idx) in enumerate(zip(all_pred, all_idx)):
+                    L = pred.shape[1]
+                    # Slice off bucket padding if prediction is too long
+                    if L > max_len:
+                        pred = pred[:, :max_len]
+                        L = max_len
+                    _replace_padding(pred)
+                    L1, L2 = outputs_dict.setdefault(L, ([], []))
+                    L1.append(pred)
+                    L2.append(idx)
+
+                outputs = []
+                # Concatenate predictions within each length group
+                for pred, idx in outputs_dict.values():
+                    outputs.append((
+                        np.concatenate(pred, axis=0),
+                        np.concatenate(idx, axis=0)
+                    ))
+            else:
+                # Process predictions: slice if too long, pad if needed
+                # (only in posterior/loglik modes)
+                processed_predictions = []
+                for pred in all_pred:
+                    # Slice off bucket padding if prediction is too long
+                    if pred.shape[1] > max_len:
+                        pred = pred[:, :max_len]
+
+                    # Pad if needed and in posterior/loglik mode
+                    if pred.shape[1] < max_len:
+                        if self.phmm_layer.is_posterior_mode():
+                            pad_value = 0
+                        else:
+                            pad_value = -1
+                        pad_width = [(0, 0)] * len(pred.shape)
+                        pad_width[1] = (0, max_len - pred.shape[1])
+                        pred = np.pad(
+                            pred, pad_width, constant_values=pad_value
+                        )
+                        if self.phmm_layer.is_decoding_mode():
+                            for i, j in enumerate(_models):
+                                q = self.phmm_layer.states[j]
+                                pred[...,i][pred[...,i] == -1] = q
+
+                    processed_predictions.append(pred)
+                outputs = np.concatenate(processed_predictions, axis=0)
+                _replace_padding(outputs)
         else:
             # In loglik mode, no slicing/padding needed
-            processed_predictions = all_predictions
-
-        # Concatenate all predictions
-        decoded_array = np.concatenate(processed_predictions, axis=0)
+            outputs = np.concatenate(all_pred, axis=0)
+            _replace_padding(outputs)
 
         # If bucketing was used, reorder to original sequence order
-        if all_indices:
-            bucket_indices = np.concatenate(all_indices, axis=0)
-            sorted_order = np.argsort(bucket_indices)
-            decoded_array = decoded_array[sorted_order]
+        if not ragged_output:
+            if all_idx:
+                bucket_indices = np.concatenate(all_idx, axis=0)
+                sorted_order = np.argsort(bucket_indices)
+                outputs = outputs[sorted_order]
 
         # Reset
         self.context.batch_gen.crop_long_seqs = old_crop_long_seqs
         self.phmm_layer.head_subset = prev_head_subset
-
-        # Replace -1 padding
-        if self.phmm_layer.is_posterior_mode():
-            decoded_array[decoded_array == -1] = 0
-        elif self.phmm_layer.is_decoding_mode():
-            for i,j in enumerate(_models):
-                L = self.phmm_layer.lengths[j]
-                decoded_array[:,:,i][decoded_array[:,:,i] == -1] = 2*L + 2
 
         self._print_predict_timing(
             elapsed_seconds=time.perf_counter() - start_time,
@@ -714,7 +779,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             steps=steps,
         )
 
-        return decoded_array
+        return outputs
 
     @override
     def predict_step(self, data : Any) -> Any:

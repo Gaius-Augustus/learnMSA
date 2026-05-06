@@ -353,6 +353,74 @@ class AlignmentMetaData:
     # Row reordering / concatenation utilities
     # ------------------------------------------------------------------
 
+    def reorder(self, idx: np.ndarray) -> None:
+        """Reorder rows in-place.
+
+        Args:
+            idx: (num_rows,) int array where ``idx[i]`` is the new position
+                of row *i* (i.e. a scatter permutation).
+        """
+        if self.num_rows == 0:
+            return
+
+        idx = np.asarray(idx, dtype=np.int32)
+        # gather_order[k] = source row for new position k
+        gather_order = np.argsort(idx)
+
+        # Snapshot offsets before any mutation
+        old_row_offsets = self._row_offsets          # (num_rows+1,)
+        old_nrpr = self.num_repeats_per_row           # (num_rows,)
+        # uns_row_off[j] = start of row j in the flat unannotated arrays
+        # = _row_offsets[j] - j  (row j has nrpr[j]-1 unannotated segments)
+        old_uns_offsets = (
+            old_row_offsets[:-1] - np.arange(self.num_rows, dtype=np.int32)
+        )
+
+        # --- Flat repeat arrays: one contiguous chunk per row ---
+        def _reorder_flat(arr):
+            chunks = [arr[old_row_offsets[r]:old_row_offsets[r + 1]] for r in gather_order]
+            return np.concatenate(chunks)
+
+        new_domain_hit   = _reorder_flat(self.domain_hit)
+        new_domain_loc   = _reorder_flat(self.domain_loc)
+        new_ins_lens     = _reorder_flat(self.insertion_lens)
+        new_ins_start    = _reorder_flat(self.insertion_start)
+
+        # --- Flat unannotated arrays: row j has max(0, nrpr[j]-1) entries ---
+        uns_len_chunks   = []
+        uns_start_chunks = []
+        for r in gather_order:
+            n_uns = int(old_nrpr[r]) - 1
+            if n_uns > 0:
+                off = int(old_uns_offsets[r])
+                uns_len_chunks.append(self.unannotated_segments_len[off:off + n_uns])
+                uns_start_chunks.append(self.unannotated_segments_start[off:off + n_uns])
+
+        # --- Apply all mutations ---
+        self.num_repeats_per_row  = old_nrpr[gather_order]
+        self.left_flank_len       = self.left_flank_len[gather_order]
+        self.left_flank_start     = self.left_flank_start[gather_order]
+        self.right_flank_len      = self.right_flank_len[gather_order]
+        self.right_flank_start    = self.right_flank_start[gather_order]
+        self._repeat_offset       = self._repeat_offset[gather_order]
+
+        self.domain_hit      = new_domain_hit
+        self.domain_loc      = new_domain_loc
+        self.insertion_lens  = new_ins_lens
+        self.insertion_start = new_ins_start
+
+        if uns_len_chunks:
+            self.unannotated_segments_len   = np.concatenate(uns_len_chunks)
+            self.unannotated_segments_start = np.concatenate(uns_start_chunks)
+        else:
+            self.unannotated_segments_len   = np.array([], dtype=self.unannotated_segments_len.dtype)
+            self.unannotated_segments_start = np.array([], dtype=self.unannotated_segments_start.dtype)
+
+        # Recompute _row_offsets from the updated num_repeats_per_row
+        self._row_offsets = np.concatenate(
+            [[0], np.cumsum(self.num_repeats_per_row)]
+        ).astype(np.int32)
+
     @staticmethod
     def concat(metas: 'list[AlignmentMetaData]') -> 'AlignmentMetaData':
         """Concatenate a list of :class:`AlignmentMetaData` objects in order.
