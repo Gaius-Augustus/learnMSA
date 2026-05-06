@@ -355,46 +355,91 @@ def _get_decode_batch_fn(num_repeats: int, model_length: int,
     return _DECODE_BATCH_CACHE[key]
 
 
-def decode_batch_to_meta(outputs_np: tuple, model_length: int):
-    """Assemble :class:`~learnMSA.align.alignment_metadata.AlignmentMetaData`
-    from the dense numpy arrays produced by :func:`_get_decode_batch_fn`.
+def reorder_decode_arrays(flat_dict: dict, sorted_order: np.ndarray) -> dict:
+    """Reorder all arrays in a flat-dict (as returned by
+    :func:`decode_batch_to_arrays`) so that new row ``i`` comes from old row
+    ``sorted_order[i]``.
 
-    This is the CPU post-processing step.  It extracts the *valid* repeat
-    entries (determined by the ``finished`` flag) from the padded
-    ``(R_max, B, ...)`` arrays and builds the flat storage layout expected by
+    Args:
+        flat_dict: Dict produced by :func:`decode_batch_to_arrays`.
+        sorted_order: 1-D int array of length ``num_rows``.
+
+    Returns:
+        New dict with the same keys but reordered rows.
+    """
+    perm = np.asarray(sorted_order, dtype=np.int32)
+    n    = len(perm)
+
+    nrpr_old = flat_dict['num_repeats_per_row']
+    nrpr_new = nrpr_old[perm]
+
+    old_row_off = np.concatenate([[0], np.cumsum(nrpr_old)]).astype(np.int32)
+    new_row_off = np.concatenate([[0], np.cumsum(nrpr_new)]).astype(np.int32)
+    total_R_new = int(new_row_off[-1])
+
+    if total_R_new > 0:
+        row_of_flat  = np.repeat(np.arange(n, dtype=np.int32), nrpr_new)
+        local_of_flat = (
+            np.arange(total_R_new, dtype=np.int32) - new_row_off[row_of_flat]
+        )
+        flat_order = old_row_off[perm[row_of_flat]] + local_of_flat
+        dh_new = flat_dict['domain_hit'][flat_order]
+        dl_new = flat_dict['domain_loc'][flat_order]
+        il_new = flat_dict['insertion_lens'][flat_order]
+        is_new = flat_dict['insertion_start'][flat_order]
+    else:
+        dh_new = flat_dict['domain_hit'][:0]
+        dl_new = flat_dict['domain_loc'][:0]
+        il_new = flat_dict['insertion_lens'][:0]
+        is_new = flat_dict['insertion_start'][:0]
+
+    uns_per_new = np.maximum(nrpr_new - 1, 0)
+    uns_per_old = np.maximum(nrpr_old - 1, 0)
+    new_uns_off = np.concatenate([[0], np.cumsum(uns_per_new)]).astype(np.int32)
+    old_uns_off = np.concatenate([[0], np.cumsum(uns_per_old)]).astype(np.int32)
+    total_U_new = int(new_uns_off[-1])
+
+    if total_U_new > 0:
+        uns_row = np.repeat(np.arange(n, dtype=np.int32), uns_per_new)
+        uns_loc = (
+            np.arange(total_U_new, dtype=np.int32) - new_uns_off[uns_row]
+        )
+        uns_flat_order = old_uns_off[perm[uns_row]] + uns_loc
+        ul_new = flat_dict['unannotated_segments_len'][uns_flat_order]
+        us_new = flat_dict['unannotated_segments_start'][uns_flat_order]
+    else:
+        ul_new = np.zeros(0, dtype=flat_dict['unannotated_segments_len'].dtype)
+        us_new = np.zeros(0, dtype=flat_dict['unannotated_segments_start'].dtype)
+
+    return dict(
+        num_repeats_per_row        = nrpr_new,
+        domain_hit                 = dh_new,
+        domain_loc                 = dl_new,
+        insertion_lens             = il_new,
+        insertion_start            = is_new,
+        left_flank_len             = flat_dict['left_flank_len'][perm],
+        left_flank_start           = flat_dict['left_flank_start'][perm],
+        right_flank_len            = flat_dict['right_flank_len'][perm],
+        right_flank_start          = flat_dict['right_flank_start'][perm],
+        unannotated_segments_len   = ul_new,
+        unannotated_segments_start = us_new,
+    )
+
+
+def decode_batch_to_arrays(outputs_np: tuple, model_length: int) -> dict:
+    """Convert the dense GPU output of :func:`_get_decode_batch_fn` to the
+    flat numpy arrays used by
     :class:`~learnMSA.align.alignment_metadata.AlignmentMetaData`.
 
     Args:
-        outputs_np: 12-tuple of numpy arrays as returned by calling
-            :func:`_get_decode_batch_fn` and converting each element with
-            ``.numpy()``:
-
-            ``(lfl, lfs, cc, il, is_, cs, ce, fin, ul, us, rfl, rfs)``
-
-            where shapes (with ``R = num_repeats``, ``B = batch``,
-            ``c = model_length``) are:
-
-            * ``lfl``  : (B,) int32  – left-flank lengths
-            * ``lfs``  : (B,) int32  – left-flank starts
-            * ``cc``   : (R, B, c)   int32
-            * ``il``   : (R, B, c-1) int32
-            * ``is_``  : (R, B, c-1) int32
-            * ``cs``   : (R, B)      int32
-            * ``ce``   : (R, B)      int32
-            * ``fin``  : (R, B)      bool
-            * ``ul``   : (R-1, B) or (0,) int32  – unannotated-seg lengths
-            * ``us``   : (R-1, B) or (0,) int32  – unannotated-seg starts
-            * ``rfl``  : (B,) int32  – right-flank lengths
-            * ``rfs``  : (B,) int32  – right-flank starts
-
+        outputs_np: 12-tuple ``(lfl, lfs, cc, il, is_, cs, ce, fin, ul, us,
+            rfl, rfs)`` – numpy arrays from ``.numpy()`` on each tensor.
         model_length: Number of match states ``c``.
 
     Returns:
-        :class:`~learnMSA.align.alignment_metadata.AlignmentMetaData` with
-        ``sort_perm=None``.
+        dict with keys matching :class:`AlignmentMetaData` array fields
+        (no ``num_rows``, ``num_match``).
     """
-    from learnMSA.align.alignment_metadata import AlignmentMetaData
-
     lfl, lfs, cc, il, is_, cs, ce, fin, ul, us, rfl, rfs = outputs_np
     c  = int(model_length)
     R  = cc.shape[0]   # num_repeats (dense upper bound)
@@ -495,9 +540,7 @@ def decode_batch_to_meta(outputs_np: tuple, model_length: int):
             uns_len_flat   = np.zeros(0, dtype=np.int16)
             uns_start_flat = np.zeros(0, dtype=np.int32)
 
-    return AlignmentMetaData(
-        num_rows                   = B,
-        num_match                  = c,
+    return dict(
         num_repeats_per_row        = num_repeats_per_row,
         domain_hit                 = domain_hit_flat,
         domain_loc                 = domain_loc_flat,
@@ -523,10 +566,8 @@ def decode_tf(model_length: int, state_seqs, batch_size: int = 2048):
        the same number of repeats – enabling a fully static loop that XLA can
        compile once per ``(num_repeats, model_length)`` pair.
     3. **Batch** over sequences to keep GPU memory bounded.
-    4. Collect CPU results and construct
-       :class:`~learnMSA.align.alignment_metadata.AlignmentMetaData` with
-       ``sort_perm`` stored so that callers can map original-index queries
-       back to the sorted storage layout.
+    4. Collect CPU results, reorder back to original sequence order, and
+       construct :class:`~learnMSA.align.alignment_metadata.AlignmentMetaData`.
 
     Args:
         model_length: Number of match states.
@@ -647,19 +688,25 @@ def decode_tf(model_length: int, state_seqs, batch_size: int = 2048):
                     uns_len_flat[uf_idx]   = ul[r]
                     uns_start_flat[uf_idx] = us[r]
 
-    return AlignmentMetaData(
-        num_rows             = n,
-        num_match            = c,
-        num_repeats_per_row  = sorted_nrpr,
-        sort_perm            = sort_perm,
-        domain_hit           = domain_hit_flat,
-        domain_loc           = domain_loc_flat,
-        insertion_lens       = ins_lens_flat,
-        insertion_start      = ins_start_flat,
-        left_flank_len       = left_flank_len_s,
-        left_flank_start     = left_flank_start_s,
-        right_flank_len      = right_flank_len_s,
-        right_flank_start    = right_flank_start_s,
+    # Reorder from repeat-count-sorted layout back to the original row order.
+    sorted_flat = dict(
+        num_repeats_per_row        = sorted_nrpr,
+        domain_hit                 = domain_hit_flat,
+        domain_loc                 = domain_loc_flat,
+        insertion_lens             = ins_lens_flat,
+        insertion_start            = ins_start_flat,
+        left_flank_len             = left_flank_len_s,
+        left_flank_start           = left_flank_start_s,
+        right_flank_len            = right_flank_len_s,
+        right_flank_start          = right_flank_start_s,
         unannotated_segments_len   = uns_len_flat,
         unannotated_segments_start = uns_start_flat,
+    )
+    inv_perm = np.argsort(sort_perm, kind='stable').astype(np.int32)
+    orig_flat = reorder_decode_arrays(sorted_flat, inv_perm)
+
+    return AlignmentMetaData(
+        num_rows = n,
+        num_match = c,
+        **orig_flat,
     )

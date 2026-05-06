@@ -439,7 +439,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         bucket_boundaries: Sequence[int | float] | None = None,
         bucket_batch_sizes: Sequence[int] | None = None,
         reduce: bool = False,
-    ) -> np.ndarray:
+    ) -> np.ndarray | dict[str, np.ndarray]:
         """
         Computes predictions for all sequences specified by indices in data.
         Buckets sequences by length for efficiency and determines appropriate
@@ -571,58 +571,42 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         all_indices = []
 
         if self._decode_msa:
+            # only support single models
+            assert len(_models) == 1,\
+                "Decoding mode only supports a single model at a time."
+
             # Decode mode: GPU-fused decode — count repeats per batch on GPU,
-            # run the repeat-specific compiled decode fn, accumulate raw GPU
-            # tensors, then assemble AlignmentMetaData on CPU after the loop.
-            # No GPU→CPU→GPU round-trip inside the hot loop.
+            # run the repeat-specific compiled decode fn, accumulate raw numpy
+            # dicts, then concatenate and reorder on CPU after the loop.
             from learnMSA.align.tf.decode import (
-                _get_decode_batch_fn, _get_count_fn, decode_batch_to_meta,
+                _get_decode_batch_fn, _get_count_fn, decode_batch_to_arrays,
+                reorder_decode_arrays,
             )
-            from learnMSA.align.alignment_metadata import AlignmentMetaData
 
             jit = self.use_jit_compile(steps)
-            print(f"Using JIT compile for decode: {jit}")
             predict_step_fn = self.predict_step
             if jit:
                 predict_step_fn = tf.function(predict_step_fn, jit_compile=True)
 
-            # Pre-build per-model count functions with baked model_length to
-            # avoid TF retracing when model lengths differ across heads.
-            count_fns = {
-                model_j: _get_count_fn(int(self.phmm_layer.lengths[model_j]), jit)
-                for model_j in _models
-            }
+            model_j = _models[0]
+            c = int(self.phmm_layer.lengths[model_j])
+            count_fn = _get_count_fn(c, jit)
 
-            # Per-model lists of (AlignmentMetaData, j_np) pairs
-            all_metas_per_model: list[list] = [[] for _ in _models]
+            all_raw: list[dict] = []
+            all_j: list[np.ndarray] = []
 
             for batch_data in ds.take(steps):
                 batch_pred_t, batch_j_t = predict_step_fn(batch_data)
-                j_np = batch_j_t.numpy()  # small O(B) int transfer
+                all_j.append(batch_j_t.numpy())
+                ss_t = batch_pred_t[:, :, 0]
 
-                for model_i, model_j in enumerate(_models):
-                    c = int(self.phmm_layer.lengths[model_j])
-                    # Pass the full bucket-padded tensor — all sequences in a
-                    # bucket share the same T, so count_fn and decode_fn are
-                    # compiled exactly once per bucket (≈ num_buckets traces
-                    # total) rather than once per batch step.
-                    ss_t = batch_pred_t[:, :, model_i]
+                counts_t = count_fn(ss_t)
+                R_max = int(tf.reduce_max(counts_t))
 
-                    # Count repeats per sequence — one scalar GPU→CPU copy.
-                    counts_t = count_fns[model_j](ss_t)
-                    R_max = int(tf.reduce_max(counts_t))
-
-                    # Look up / compile decode fn for this (R_max, c) pair.
-                    decode_fn = _get_decode_batch_fn(R_max, c, jit)
-                    outputs_t = decode_fn(ss_t)
-
-                    # Convert outputs to numpy immediately so GPU memory for
-                    # this batch is freed before the next iteration begins.
-                    # (j_np = batch_j_t.numpy() above already forced a GPU
-                    # sync, so these .numpy() calls add no extra barrier.)
-                    outputs_np = tuple(t.numpy() for t in outputs_t)
-                    meta = decode_batch_to_meta(outputs_np, c)
-                    all_metas_per_model[model_i].append((meta, j_np))
+                decode_fn = _get_decode_batch_fn(R_max, c, jit)
+                outputs_t = decode_fn(ss_t)
+                outputs_np = tuple(t.numpy() for t in outputs_t)
+                all_raw.append(decode_batch_to_arrays(outputs_np, c))
 
             # Reset
             self.context.batch_gen.crop_long_seqs = old_crop_long_seqs
@@ -635,17 +619,13 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             )
 
             # Concatenate batches and restore original sequence order.
-            result_metas = []
-            for model_i in range(len(_models)):
-                batch_metas = all_metas_per_model[model_i]
-                all_j = np.concatenate([j for _, j in batch_metas])
-                sorted_order = np.argsort(all_j, kind='stable')
-                concat_meta = AlignmentMetaData.concat(
-                    [m for m, _ in batch_metas]
-                )
-                result_metas.append(concat_meta._reindex_rows(sorted_order))
-
-            return result_metas
+            all_j_cat = np.concatenate(all_j)
+            sorted_order = np.argsort(all_j_cat, kind='stable')
+            concat_dict = {
+                k: np.concatenate([r[k] for r in all_raw], axis=0)
+                for k in all_raw[0]
+            }
+            return reorder_decode_arrays(concat_dict, sorted_order)
 
         def predict_batch(batch_data):
             return self.predict_step(batch_data)

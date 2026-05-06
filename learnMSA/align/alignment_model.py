@@ -868,10 +868,14 @@ class AlignmentModel():
         else:
             raise ValueError(f"Unsupported decoding mode: {decoding_mode}")
 
-        # predict returns list[AlignmentMetaData] when _decode_msa is True.
+        # predict returns a plain dict of arrays when _decode_msa is True.
         # The full state-sequence array is never materialised in CPU memory.
-        metas = self.model.predict(
+        raw_dict = self.model.predict(
             self.data, indices=self.indices, models=models
+        )
+        c = int(self.model.phmm_layer.lengths[models[0]])
+        meta_data_base = AlignmentMetaData(
+            num_rows=len(self.indices), num_match=c, **raw_dict
         )
 
         # TODO: this is just here to generate empty fixed_viterbi_seqs
@@ -880,17 +884,16 @@ class AlignmentModel():
 
         t = time.time()
 
-        for i,j in enumerate(models):
-            meta_data = metas[i]
-            if self.hit_alignment_mode == HitAlignmentMode.GREEDY_CONSENSUS:
-                # Use occupancy (number of used match states) as hit score.
-                occupancy = meta_data.occupancy_matrix()  # (R, N), -1 for empty
-                meta_data = hit_alignment(
-                    meta_data, self.hit_alignment_mode, occupancy
-                )
-            else:
-                meta_data = hit_alignment(meta_data, self.hit_alignment_mode)
-            self.metadata[j] = meta_data
+        j = models[0]
+        if self.hit_alignment_mode == HitAlignmentMode.GREEDY_CONSENSUS:
+            # Use occupancy (number of used match states) as hit score.
+            occupancy = meta_data_base.occupancy_matrix()  # (R, N), -1 for empty
+            meta_data = hit_alignment(
+                meta_data_base, self.hit_alignment_mode, occupancy
+            )
+        else:
+            meta_data = hit_alignment(meta_data_base, self.hit_alignment_mode)
+        self.metadata[j] = meta_data
 
         if self.model.context.config.input_output.verbose:
             print(
