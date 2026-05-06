@@ -581,6 +581,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             from learnMSA.align.alignment_metadata import AlignmentMetaData
 
             jit = self.use_jit_compile(steps)
+            print(f"Using JIT compile for decode: {jit}")
             predict_step_fn = self.predict_step
             if jit:
                 predict_step_fn = tf.function(predict_step_fn, jit_compile=True)

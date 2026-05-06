@@ -74,48 +74,39 @@ def _tf_decode_core_inner(state_seqs, c, indices):
     is_match  = in_core & (s >= 0) & (s < c)
     is_insert = in_core & (s >= c) & (s < 2 * c - 1)
 
-    # ---- consensus columns --------------------------------------------------
-    # For every (seq, pos) where is_match: consensus_columns[seq, state] = pos
-    match_coords = tf.cast(tf.where(is_match), tf.int32)                     # (K, 2)
-    seq_idx_m = match_coords[:, 0]
-    pos_idx_m = match_coords[:, 1]
-    state_m   = tf.gather_nd(s, match_coords)                                # (K,)
-    cc_indices = tf.stack([seq_idx_m, state_m], axis=1)                      # (K, 2)
-    consensus_columns = tf.tensor_scatter_nd_update(
-        tf.fill([n, c], tf.cast(-1, tf.int32)),
-        cc_indices,
-        pos_idx_m,
-    )                                                                         # (n, c)
-
-    # ---- insertion lengths --------------------------------------------------
-    ins_coords  = tf.cast(tf.where(is_insert), tf.int32)                     # (M, 2)
-    seq_idx_i   = ins_coords[:, 0]
-    ins_state_i = tf.gather_nd(s, ins_coords) - c                            # (M,) insert-state idx
-    il_indices  = tf.stack([seq_idx_i, ins_state_i], axis=1)                 # (M, 2)
-    insertion_lens = tf.tensor_scatter_nd_add(
-        tf.zeros([n, c - 1], dtype=tf.int32),
-        il_indices,
-        tf.ones(tf.shape(ins_coords)[0], dtype=tf.int32),
-    )                                                                         # (n, c-1)
-
-    # ---- insertion starts (first position per seq×insert-state) -----------
-    # XLA-compatible: loop over each insert state (Python loop, unrolled at
-    # trace time) and use argmax to find the first active position.
-    # unsorted_segment_min is NOT XLA-compatible, so we avoid it here.
-    ins_start_list = []
-    for j in range(c - 1):
-        mask_j  = is_insert & tf.equal(s, c + j)                            # (n, T) bool
-        has_j   = tf.reduce_any(mask_j, axis=1)                             # (n,) bool
+    # ---- consensus columns, insertion lengths, insertion starts -----------
+    # All three use per-state Python loops (unrolled at XLA trace time) so
+    # that every intermediate tensor has a statically-known shape.  The
+    # previous tf.where(is_match/is_insert) approach returned variable-length
+    # coordinate tensors, which forced XLA into slow dynamic-shape handling.
+    cc_list, il_list, ins_start_list = [], [], []
+    for j in range(c):
+        is_j   = in_core & tf.equal(s, j)                                   # (n, T)
+        has_j  = tf.reduce_any(is_j, axis=1)                                # (n,)
         first_j = tf.cast(
-            tf.argmax(tf.cast(mask_j, tf.int8), axis=1), tf.int32
+            tf.argmax(tf.cast(is_j, tf.int8), axis=1), tf.int32
+        )                                                                    # (n,)
+        cc_list.append(
+            tf.where(has_j, first_j, tf.fill([n], tf.cast(-1, tf.int32)))
+        )
+    consensus_columns = tf.stack(cc_list, axis=1)                           # (n, c)
+
+    for j in range(c - 1):
+        is_j = is_insert & tf.equal(s, c + j)                               # (n, T)
+        il_list.append(tf.reduce_sum(tf.cast(is_j, tf.int32), axis=1))      # (n,)
+        has_j  = tf.reduce_any(is_j, axis=1)                                # (n,)
+        first_j = tf.cast(
+            tf.argmax(tf.cast(is_j, tf.int8), axis=1), tf.int32
         )                                                                    # (n,)
         ins_start_list.append(
             tf.where(has_j, first_j, tf.fill([n], tf.cast(-1, tf.int32)))
         )
     if c > 1:
+        insertion_lens  = tf.stack(il_list,        axis=1)                  # (n, c-1)
         insertion_start = tf.stack(ins_start_list, axis=1)                  # (n, c-1)
     else:
-        insertion_start = tf.zeros([n, 0], dtype=tf.int32)                  # (n, 0)
+        insertion_lens  = tf.zeros([n, 0], dtype=tf.int32)
+        insertion_start = tf.zeros([n, 0], dtype=tf.int32)
 
     # ---- finished flag ------------------------------------------------------
     # finished = True when the sequence reached a right-flank / end state
@@ -231,13 +222,10 @@ def _get_count_fn(c: int, jit_compile: bool):
     unann = 2 * c  # baked Python constant
     def _count(batch):
         return _count_repeats_batch(batch, tf.constant(unann, dtype=tf.int32))
-    # jit_compile=False: the count op is just tf.equal + tf.reduce_sum — no XLA
-    # benefit but XLA's shape-specialisation would cause one retrace per
-    # unique (B, T) pair.  reduce_retracing=True further avoids Python-level
-    # retracing when batch/sequence sizes vary across calls.
-    _COUNT_FN_CACHE[key] = tf.function(
-        _count, jit_compile=False, reduce_retracing=True
-    )
+    # jit_compile=False: the count op is just tf.equal + tf.reduce_sum —
+    # no XLA benefit.  With a single model and single bucket the concrete
+    # (B, T) shape is always the same, so one trace is all we ever get.
+    _COUNT_FN_CACHE[key] = tf.function(_count, jit_compile=False)
     return _COUNT_FN_CACHE[key]
 
 
@@ -360,13 +348,10 @@ def _get_decode_batch_fn(num_repeats: int, model_length: int,
         return lfl, lfs, cc_stack, il_stack, is_stack, cs_stack, ce_stack, \
                fin_stack, ul_stack, us_stack, rfl, rfs
 
-    # reduce_retracing=True: TF traces once with abstract (None, None) input
-    # specs so the Python graph is built only once per (R, c, jit_compile)
-    # key.  XLA still compiles per concrete shape internally, but that is
-    # much cheaper than repeated Python-level tracing.
-    _DECODE_BATCH_CACHE[key] = tf.function(
-        _decode_batch, jit_compile=jit_compile, reduce_retracing=True
-    )
+    # No reduce_retracing: with a single model and a single bucket all
+    # batches share the same concrete (B, T) shape, so TF traces once and
+    # XLA receives exact dimensions for tighter kernel specialisation.
+    _DECODE_BATCH_CACHE[key] = tf.function(_decode_batch, jit_compile=jit_compile)
     return _DECODE_BATCH_CACHE[key]
 
 
@@ -433,27 +418,82 @@ def decode_batch_to_meta(outputs_np: tuple, model_length: int):
     total_U  = int(uns_off[-1])
     M        = c
 
-    domain_hit_flat  = np.full((total_R, M),       -1, dtype=np.int16)
-    domain_loc_flat  = np.full((total_R, 2),        -1, dtype=np.int32)
-    ins_lens_flat    = np.zeros((total_R, max(0, M - 1)), dtype=np.int16)
-    ins_start_flat   = np.full((total_R, max(0, M - 1)), -1, dtype=np.int16)
-    uns_len_flat     = np.zeros(total_U,  dtype=np.int16)
-    uns_start_flat   = np.full(total_U,   -1, dtype=np.int32)
-
-    for i in range(B):
-        nr = int(num_repeats_per_row[i])
-        for r in range(nr):
-            flat = int(row_off[i]) + r
-            domain_hit_flat[flat]    = cc[r, i].astype(np.int16)
-            domain_loc_flat[flat, 0] = cs[r, i]
-            domain_loc_flat[flat, 1] = ce[r, i]
+    # -----------------------------------------------------------------------
+    # Assemble flat output arrays – vectorized, no Python loop over B.
+    # -----------------------------------------------------------------------
+    if np.all(num_repeats_per_row == R):
+        # Fast path: every sequence has exactly R repeats.  Arrays can be
+        # transposed and reshaped without any masked scatter.
+        if R == 1:
+            domain_hit_flat  = cc[0].astype(np.int16)                          # (B, c)
+            domain_loc_flat  = np.stack(
+                [cs[0], ce[0]], axis=1
+            ).astype(np.int32)                                                  # (B, 2)
             if M > 1:
-                ins_lens_flat[flat]  = il[r, i].astype(np.int16)
-                ins_start_flat[flat] = is_[r, i].astype(np.int16)
-            if r < nr - 1 and total_U > 0:
-                uf = int(uns_off[i]) + r
-                uns_len_flat[uf]   = ul[r, i].astype(np.int16)
-                uns_start_flat[uf] = us[r, i]
+                ins_lens_flat  = il[0].astype(np.int16)                        # (B, c-1)
+                ins_start_flat = is_[0].astype(np.int16)                       # (B, c-1)
+            else:
+                ins_lens_flat  = np.zeros((B, 0), dtype=np.int16)
+                ins_start_flat = np.zeros((B, 0), dtype=np.int16)
+            uns_len_flat   = np.zeros(0, dtype=np.int16)
+            uns_start_flat = np.zeros(0, dtype=np.int32)
+        else:
+            # (R, B, c) -> transpose (B, R, c) -> reshape (B*R, c)
+            domain_hit_flat  = cc.transpose(1, 0, 2).reshape(
+                total_R, c).astype(np.int16)
+            domain_loc_flat  = np.stack(
+                [cs, ce], axis=2
+            ).transpose(1, 0, 2).reshape(total_R, 2).astype(np.int32)
+            if M > 1:
+                ins_lens_flat  = il.transpose(1, 0, 2).reshape(
+                    total_R, M - 1).astype(np.int16)
+                ins_start_flat = is_.transpose(1, 0, 2).reshape(
+                    total_R, M - 1).astype(np.int16)
+            else:
+                ins_lens_flat  = np.zeros((total_R, 0), dtype=np.int16)
+                ins_start_flat = np.zeros((total_R, 0), dtype=np.int16)
+            if R > 1:
+                # ul: (R-1, B) -> transpose (B, R-1) -> ravel (B*(R-1),)
+                uns_len_flat   = ul.T.ravel().astype(np.int16)
+                uns_start_flat = us.T.ravel().astype(np.int32)
+            else:
+                uns_len_flat   = np.zeros(0, dtype=np.int16)
+                uns_start_flat = np.zeros(0, dtype=np.int32)
+    else:
+        # Slow path: sequences have different repeat counts.  Use vectorized
+        # numpy scatter (np.where returns valid index pairs in one call).
+        r_arr  = np.arange(R, dtype=np.int32)[:, np.newaxis]   # (R, 1)
+        valid  = r_arr < num_repeats_per_row[np.newaxis, :]     # (R, B)
+        valid_r, valid_i = np.where(valid)                      # (total_R,) each
+        flat_idx = row_off[valid_i] + valid_r
+
+        domain_hit_flat  = np.full((total_R, M), -1, dtype=np.int16)
+        domain_loc_flat  = np.full((total_R, 2),  -1, dtype=np.int32)
+        domain_hit_flat[flat_idx]    = cc[valid_r, valid_i].astype(np.int16)
+        domain_loc_flat[flat_idx, 0] = cs[valid_r, valid_i]
+        domain_loc_flat[flat_idx, 1] = ce[valid_r, valid_i]
+
+        if M > 1:
+            ins_lens_flat  = np.zeros((total_R, M - 1), dtype=np.int16)
+            ins_start_flat = np.full((total_R, M - 1), -1, dtype=np.int16)
+            ins_lens_flat[flat_idx]  = il[valid_r, valid_i].astype(np.int16)
+            ins_start_flat[flat_idx] = is_[valid_r, valid_i].astype(np.int16)
+        else:
+            ins_lens_flat  = np.zeros((total_R, 0), dtype=np.int16)
+            ins_start_flat = np.zeros((total_R, 0), dtype=np.int16)
+
+        if R > 1 and total_U > 0:
+            r_uns = np.arange(R - 1, dtype=np.int32)[:, np.newaxis]
+            valid_uns         = r_uns < (num_repeats_per_row[np.newaxis, :] - 1)
+            vur, vui          = np.where(valid_uns)
+            uf_idx            = uns_off[vui] + vur
+            uns_len_flat      = np.zeros(total_U, dtype=np.int16)
+            uns_start_flat    = np.zeros(total_U, dtype=np.int32)
+            uns_len_flat[uf_idx]   = ul[vur, vui].astype(np.int16)
+            uns_start_flat[uf_idx] = us[vur, vui].astype(np.int32)
+        else:
+            uns_len_flat   = np.zeros(0, dtype=np.int16)
+            uns_start_flat = np.zeros(0, dtype=np.int32)
 
     return AlignmentMetaData(
         num_rows                   = B,
