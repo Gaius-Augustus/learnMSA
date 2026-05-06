@@ -495,7 +495,7 @@ def test_hmm_prior_config_alpha_defaults():
     assert config.alpha_single == 1e9
     assert config.alpha_global == 1e4
     assert config.alpha_flank_compl == 1.0
-    assert config.alpha_single_compl == 1.0
+    assert config.alpha_single_compl == 1e-3
     assert config.alpha_global_compl == 1.0
     assert config.epsilon == 1e-16
 

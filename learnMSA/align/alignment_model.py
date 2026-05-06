@@ -223,7 +223,7 @@ class AlignmentModel():
             # benefit from it. Total residues is a lower bound on output size.
             total_residues = int(np.sum(self.data[0].seq_lens[self.indices]))
             write_buffer = 8 * 1024 * 1024 if total_residues > 1_000_000 else -1
-            with open(filepath, "w", buffering=write_buffer) as output_file:
+            with open(filepath, "wb", buffering=write_buffer) as output_file:
                 n = self.indices.size
                 i = 0
                 while i < n:
@@ -239,19 +239,46 @@ class AlignmentModel():
                     alignment_strings = self.batch_to_string(
                         batch_alignment, output_alphabet=output_alphabet
                     )
-                    entries = []
-                    for s, seq_ind in zip(alignment_strings, batch_indices):
-                        seq_header = self.data[0].get_header(
-                            self.indices[seq_ind]
+                    # Pre-fetch all headers for the batch
+                    headers = [
+                        self.data[0].get_header(self.indices[int(j)])
+                        for j in batch_indices
+                    ]
+                    # Vectorized line wrapping via numpy reshape
+                    b = len(alignment_strings)
+                    W = len(alignment_strings[0]) if b > 0 else 0
+                    if W > 0:
+                        num_lines = (W + fasta_line_limit - 1) // fasta_line_limit
+                        total_len = W + num_lines
+                        arr = (
+                            np.array(alignment_strings, dtype=f'U{W}')
+                            .view('<U1')
+                            .reshape(b, W)
                         )
-                        entry = ">"+seq_header+"\n"
-                        entry += "\n".join(
-                            s[j:j+fasta_line_limit]
-                            for j in range(0, len(s), fasta_line_limit)
+                        out = np.empty((b, total_len), dtype='<U1')
+                        for k in range(num_lines):
+                            src_s = k * fasta_line_limit
+                            src_e = min(src_s + fasta_line_limit, W)
+                            line_len = src_e - src_s
+                            dst_s = k * (fasta_line_limit + 1)
+                            out[:, dst_s:dst_s + line_len] = arr[:, src_s:src_e]
+                            out[:, dst_s + line_len] = '\n'
+                        wrapped = (
+                            np.ascontiguousarray(out)
+                            .view(f'U{total_len}')
+                            .reshape(b)
+                            .tolist()
                         )
-                        entry += "\n"
-                        entries.append(entry)
-                    output_file.writelines(entries)
+                    else:
+                        wrapped = ["\n"] * b
+                    # Join the whole batch and write as bytes in one
+                    # call, avoiding per-string write overhead and text-codec.
+                    output_file.write(
+                        "".join(
+                            ">" + h + "\n" + w
+                            for h, w in zip(headers, wrapped)
+                        ).encode("utf-8")
+                    )
                     i += batch_size
         else:
             # Decode the whole alignment into memory and write the entire
@@ -873,8 +900,9 @@ class AlignmentModel():
         raw_dict = self.model.predict(
             self.data, indices=self.indices, models=models
         )
+        assert isinstance(raw_dict, dict)
         c = int(self.model.phmm_layer.lengths[models[0]])
-        meta_data_base = AlignmentMetaData(
+        meta_data_base = AlignmentMetaData.from_kwargs(
             num_rows=len(self.indices), num_match=c, **raw_dict
         )
 

@@ -68,6 +68,14 @@ class AlignmentMetaData:
     unannotated segments (same layout as unannotated_segments_len).
     """
 
+    @classmethod
+    def from_kwargs(cls, num_rows: int, num_match: int, **kwargs):
+        return cls(
+            num_rows=num_rows,
+            num_match=num_match,
+            **kwargs
+        )
+
     def __post_init__(self):
         nrpr = np.asarray(self.num_repeats_per_row, dtype=np.int32)
         self.num_repeats_per_row = nrpr

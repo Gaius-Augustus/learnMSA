@@ -522,7 +522,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             self.context.batch_gen,
             shuffle=False,
             bucket_by_seq_length=True,
-            bucket_boundaries=bucket_boundaries,
+            bucket_boundaries=bucket_boundaries, # type: ignore
             bucket_batch_sizes=bucket_batch_sizes,
         )
 
@@ -907,7 +907,9 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         else:
             self.loglik_mode()
             self.compile(total_steps=len(indices))
-            return self.predict(data, indices=indices, models=models)
+            loglik = self.predict(data, indices=indices, models=models)
+            assert isinstance(loglik, np.ndarray)
+            return loglik
 
     def _pack_datasets(
         self,
