@@ -355,6 +355,131 @@ def _get_decode_batch_fn(num_repeats: int, model_length: int,
     return _DECODE_BATCH_CACHE[key]
 
 
+# ---------------------------------------------------------------------------
+# Dynamic-R decode (R_max is a TF tensor, not a Python int)
+# ---------------------------------------------------------------------------
+
+# Cache of compiled dynamic-decode functions keyed by model_length.
+_DYNAMIC_DECODE_CACHE: dict = {}
+
+
+def _decode_batch_dynamic_inner(state_seqs: tf.Tensor, c: int,
+                                R_max: tf.Tensor) -> tuple:
+    """Decode a batch of state sequences with a *dynamic* repeat count.
+
+    Unlike :func:`_get_decode_batch_fn`, ``R_max`` is a scalar ``int32``
+    TF tensor so it never needs to be synchronised to the CPU host.  A
+    ``tf.while_loop`` drives the per-repeat decode.
+
+    Args:
+        state_seqs: ``(n, T)`` int32 tensor of Viterbi / MEA state sequences.
+        c: Python int – number of match states (baked in at trace time so
+            that the inner ``_tf_decode_core_inner`` loops can unroll).
+        R_max: Scalar int32 tensor – maximum repeat count for this batch.
+
+    Returns:
+        Same 12-tuple as :func:`_get_decode_batch_fn`'s output.
+    """
+    n = tf.shape(state_seqs)[0]
+
+    # Left flank ----------------------------------------------------------------
+    lfl, lfs, indices = _tf_decode_flank_core(
+        state_seqs, 2 * c - 1, tf.zeros([n], dtype=tf.int32)
+    )
+
+    # Pre-allocate TensorArrays for per-repeat results.
+    # dynamic_size=False: size is a runtime tensor but pre-allocated.
+    ta_kw = dict(dynamic_size=False, clear_after_read=False)
+    ta_cs  = tf.TensorArray(tf.int32, size=R_max, **ta_kw)
+    ta_cc  = tf.TensorArray(tf.int32, size=R_max, **ta_kw)
+    ta_il  = tf.TensorArray(tf.int32, size=R_max, **ta_kw)
+    ta_is_ = tf.TensorArray(tf.int32, size=R_max, **ta_kw)
+    ta_ce  = tf.TensorArray(tf.int32, size=R_max, **ta_kw)
+    ta_fin = tf.TensorArray(tf.bool,  size=R_max, **ta_kw)
+    ta_ul  = tf.TensorArray(tf.int16, size=R_max, **ta_kw)
+    ta_us  = tf.TensorArray(tf.int32, size=R_max, **ta_kw)
+
+    def _body(r, indices,
+              ta_cs, ta_cc, ta_il, ta_is_, ta_ce, ta_fin, ta_ul, ta_us):
+        ta_cs  = ta_cs.write(r, indices)
+        cc, il, is_, fin, end_idx = _tf_decode_core_inner(
+            state_seqs, c, indices
+        )
+        ta_cc  = ta_cc.write(r, cc)
+        ta_il  = ta_il.write(r, il)
+        ta_is_ = ta_is_.write(r, is_)
+        ta_ce  = ta_ce.write(r, end_idx)
+        ta_fin = ta_fin.write(r, fin)
+        # Unannotated segment – always decode; only advance past it when not
+        # the last repeat so that the right-flank decode starts correctly.
+        ul, us, post_uns = _tf_decode_flank_core(state_seqs, 2 * c, end_idx)
+        ta_ul  = ta_ul.write(r, ul)
+        ta_us  = ta_us.write(r, us)
+        next_idx = tf.cond(
+            r < R_max - 1,
+            true_fn=lambda: post_uns,
+            false_fn=lambda: end_idx,
+        )
+        return (r + 1, next_idx,
+                ta_cs, ta_cc, ta_il, ta_is_, ta_ce, ta_fin, ta_ul, ta_us)
+
+    def _cond(r, _indices, *_tas):
+        return r < R_max
+
+    loop_vars = (
+        tf.constant(0, tf.int32), indices,
+        ta_cs, ta_cc, ta_il, ta_is_, ta_ce, ta_fin, ta_ul, ta_us,
+    )
+    _, final_idx, ta_cs, ta_cc, ta_il, ta_is_, ta_ce, ta_fin, ta_ul, ta_us = \
+        tf.while_loop(_cond, _body, loop_vars, parallel_iterations=1)
+
+    # Right flank ---------------------------------------------------------------
+    rfl, rfs, _ = _tf_decode_flank_core(state_seqs, 2 * c + 1, final_idx)
+
+    # Stack TensorArrays --------------------------------------------------------
+    cc_stack  = ta_cc.stack()   # (R_max, n, c)
+    il_stack  = ta_il.stack()   # (R_max, n, c-1)
+    is_stack  = ta_is_.stack()  # (R_max, n, c-1)
+    cs_stack  = ta_cs.stack()   # (R_max, n)
+    ce_stack  = ta_ce.stack()   # (R_max, n)
+    fin_stack = ta_fin.stack()  # (R_max, n)
+    ul_all    = ta_ul.stack()   # (R_max, n)
+    us_all    = ta_us.stack()   # (R_max, n)
+    # Drop the last unannotated entry (written for last repeat, unused).
+    # For R_max=1 this yields shape (0, n); for R_max>1 shape (R_max-1, n).
+    ul_stack  = ul_all[:R_max - 1]
+    us_stack  = us_all[:R_max - 1]
+
+    return (lfl, lfs, cc_stack, il_stack, is_stack,
+            cs_stack, ce_stack, fin_stack, ul_stack, us_stack, rfl, rfs)
+
+
+def _get_dynamic_decode_fn(model_length: int):
+    """Return (and cache) a ``tf.function``-wrapped dynamic decode function.
+
+    Unlike :func:`_get_decode_batch_fn`, the returned callable accepts
+    ``R_max`` as a runtime tensor, avoiding the CPU synchronisation that
+    the static version requires::
+
+        fn(state_seqs: tf.Tensor, R_max: tf.Tensor) -> 12-tuple
+
+    Compiled with ``jit_compile=False`` because ``tf.while_loop`` with
+    ``TensorArray`` is not XLA-compatible.  ``model_length`` is baked in as
+    a Python constant so that ``_tf_decode_core_inner``'s per-column loops
+    unroll at trace time (one cached entry per unique model length).
+    """
+    if model_length in _DYNAMIC_DECODE_CACHE:
+        return _DYNAMIC_DECODE_CACHE[model_length]
+
+    c = int(model_length)
+
+    def _fn(state_seqs, R_max):
+        return _decode_batch_dynamic_inner(state_seqs, c, R_max)
+
+    _DYNAMIC_DECODE_CACHE[model_length] = tf.function(_fn, jit_compile=False)
+    return _DYNAMIC_DECODE_CACHE[model_length]
+
+
 def reorder_decode_arrays(flat_dict: dict, sorted_order: np.ndarray) -> dict:
     """Reorder all arrays in a flat-dict (as returned by
     :func:`decode_batch_to_arrays`) so that new row ``i`` comes from old row

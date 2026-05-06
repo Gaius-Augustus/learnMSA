@@ -184,7 +184,7 @@ class AlignmentModel():
         self,
         filepath: str | Path,
         model_index: int,
-        batch_size: int = 100000,
+        batch_size: int = 20000,
         add_block_sep: bool = False,
         aligned_insertions : AlignedInsertions = AlignedInsertions(),
         format: str = "fasta",
@@ -322,99 +322,156 @@ class AlignmentModel():
             self.build_alignment([model_index], decoding_mode)
         meta_data = self.metadata[model_index]
 
-        # Gather the sequences for the batch
+        # Gather the sequences for the batch.
+        # uint8 suffices: amino-acid indices are 0-24, which fits in one byte.
         b = batch_indices.size
-        sequences = np.zeros((b, self.data[0].max_len), dtype=np.uint16)
-        sequences += (len(self.data[0].alphabet)-1)
-        for i,j in enumerate(batch_indices):
+        term_val = len(self.data[0].alphabet) - 1
+        sequences = np.full((b, self.data[0].max_len), term_val, dtype=np.uint8)
+        for i, j in enumerate(batch_indices):
             idx = int(self.indices[j])
             l = self.data[0].seq_lens[idx]
-            sequences[i, :l] = self.data[0].get_encoded_seq(idx)
+            sequences[i, :l] = self.data[0].get_encoded_seq(idx, dtype=np.uint8)
 
-        # Construct the alignment blocks
-        blocks = []
-        if add_block_sep:
-            sep = np.zeros((b,1), dtype=np.uint16) + 2*len(self.data[0].alphabet)
+        # Cache expensive metadata properties (each triggers _flat_virt_rep_and_row).
+        _ins_lens_total = meta_data.insertion_lens_total          # (num_repeats, M-1)
+        _uns_lens_total = meta_data.unannotated_segment_lens_total  # (num_repeats-1,)
 
-        # Left flank
-        if not only_matches:
-            left_flank_block = self.get_insertion_block(
-                sequences,
-                meta_data.left_flank_len_for(batch_indices),
-                max(
-                    meta_data.left_flank_len_total,
-                    aligned_insertions.ext_left_flank
-                ),
-                meta_data.left_flank_start_for(batch_indices),
-                adjust_to_right=True,
-                custom_columns=aligned_insertions.left_flank(batch_indices)
-            )
-            blocks.append(left_flank_block)
-            if add_block_sep:
-                blocks.append(sep)
+        # Pre-apply aligned_insertions extensions so that per-repeat indexing
+        # is safe regardless of whether ext_insertions is a scalar or a
+        # (num_repeats, M-1) array (broadcasting would give the wrong shape
+        # if done after slicing by rep_i).
+        _ins_lens_total_ext = np.maximum(
+            _ins_lens_total, aligned_insertions.ext_insertions
+        )  # (num_repeats, M-1)
+        _uns_lens_total_ext = np.maximum(
+            _uns_lens_total, aligned_insertions.ext_unannotated
+        )  # (num_repeats-1,)
 
         # Pre-compute which match-state columns are non-empty across all rows.
         is_non_empty_all = meta_data.repeat_occupancy_mask()  # (num_repeats, num_match)
 
-        for i in range(meta_data.num_repeats):
+        # ------------------------------------------------------------------ #
+        # Phase 1: compute total alignment width so we can pre-allocate the   #
+        # output array and write each block directly into it, avoiding the    #
+        # intermediate list and the final np.concatenate call.                #
+        # ------------------------------------------------------------------ #
+        sep_val = 2 * len(self.data[0].alphabet)  # separator token value
+        num_repeats = meta_data.num_repeats
+
+        if only_matches:
+            # Only match columns remain; count non-empty per repeat.
+            total_width = int(np.sum(is_non_empty_all))
+        else:
+            left_flank_len = int(max(
+                meta_data.left_flank_len_total,
+                aligned_insertions.ext_left_flank
+            ))
+            right_flank_len = int(max(
+                meta_data.right_flank_len_total,
+                aligned_insertions.ext_right_flank
+            ))
+            # For each repeat: match cols + insertion cols (after removing
+            # empty match cols).  Separators add one column per block.
+            total_width = left_flank_len + right_flank_len
+            if add_block_sep:
+                # left flank sep + num_repeats seps + unannotated seps
+                n_seps = 1 + num_repeats
+                if num_repeats > 1:
+                    n_seps += num_repeats - 1  # unannotated segments
+                total_width += n_seps
+            for rep_i in range(num_repeats):
+                n_match = int(np.sum(is_non_empty_all[rep_i]))
+                n_ins = int(np.sum(_ins_lens_total_ext[rep_i]))
+                total_width += n_match + n_ins
+                if rep_i < num_repeats - 1:
+                    total_width += int(_uns_lens_total_ext[rep_i])
+
+        out = np.full((b, total_width), term_val, dtype=np.uint8)
+        # Mark separator columns immediately so we don't have to scatter them later.
+        if add_block_sep and not only_matches:
+            out[:, :] = term_val  # already done; separators written below
+        col = 0  # current write cursor
+
+        # ------ Left flank ------ #
+        if not only_matches:
+            lf_maxlen = int(max(
+                meta_data.left_flank_len_total,
+                aligned_insertions.ext_left_flank
+            ))
+            if lf_maxlen > 0:
+                out[:, col:col + lf_maxlen] = self.get_insertion_block(
+                    sequences,
+                    meta_data.left_flank_len_for(batch_indices),
+                    lf_maxlen,
+                    meta_data.left_flank_start_for(batch_indices),
+                    adjust_to_right=True,
+                    custom_columns=aligned_insertions.left_flank(batch_indices)
+                )
+            col += lf_maxlen
+            if add_block_sep:
+                out[:, col] = sep_val
+                col += 1
+
+        for rep_i in range(num_repeats):
             dh_batch, il_batch, is_batch, _, _ = meta_data.get_repeat_data(
-                i, batch_indices
+                rep_i, batch_indices
             )
 
             # One domain hit
-            alignment_block = self.get_alignment_block(
+            ab = self.get_alignment_block(
                 sequences=sequences,
                 consensus=dh_batch,
                 ins_len=il_batch,
-                ins_len_total=np.maximum(
-                    meta_data.insertion_lens_total,
-                    aligned_insertions.ext_insertions
-                )[i],
+                ins_len_total=_ins_lens_total_ext[rep_i],
                 ins_start=is_batch,
-                is_non_empty=is_non_empty_all[i],
-                custom_columns=aligned_insertions.insertion(batch_indices, i),
+                is_non_empty=is_non_empty_all[rep_i],
+                custom_columns=aligned_insertions.insertion(batch_indices, rep_i),
                 only_matches=only_matches
             )
-            blocks.append(alignment_block)
+            w = ab.shape[1]
+            out[:, col:col + w] = ab
+            col += w
 
             if add_block_sep:
-                blocks.append(sep)
+                out[:, col] = sep_val
+                col += 1
 
             # Unannotated segment (if there are more repeats to come)
-            if i < meta_data.num_repeats - 1 and not only_matches:
-                uns_l, uns_s = meta_data.get_unannotated_data(i, batch_indices)
-                unannotated_block = self.get_insertion_block(
-                    sequences,
-                    uns_l,
-                    np.maximum(
-                        meta_data.unannotated_segment_lens_total,
-                        aligned_insertions.ext_unannotated
-                    )[i],
-                    uns_s,
-                    custom_columns=aligned_insertions.unannotated_segment(
-                        batch_indices, i
+            if rep_i < num_repeats - 1 and not only_matches:
+                uns_l, uns_s = meta_data.get_unannotated_data(rep_i, batch_indices)
+                uns_maxlen = int(_uns_lens_total_ext[rep_i])
+                if uns_maxlen > 0:
+                    out[:, col:col + uns_maxlen] = self.get_insertion_block(
+                        sequences,
+                        uns_l,
+                        uns_maxlen,
+                        uns_s,
+                        custom_columns=aligned_insertions.unannotated_segment(
+                            batch_indices, rep_i
+                        )
                     )
-                )
-                blocks.append(unannotated_block)
+                col += uns_maxlen
                 if add_block_sep:
-                    blocks.append(sep)
+                    out[:, col] = sep_val
+                    col += 1
 
-        # Right flank
+        # ------ Right flank ------ #
         if not only_matches:
-            right_flank_block = self.get_insertion_block(
-                sequences,
-                meta_data.right_flank_len_for(batch_indices),
-                max(
-                    meta_data.right_flank_len_total,
-                    aligned_insertions.ext_right_flank
-                ),
-                meta_data.right_flank_start_for(batch_indices),
-                custom_columns=aligned_insertions.right_flank(batch_indices)
-            )
-            blocks.append(right_flank_block)
+            rf_maxlen = int(max(
+                meta_data.right_flank_len_total,
+                aligned_insertions.ext_right_flank
+            ))
+            if rf_maxlen > 0:
+                out[:, col:col + rf_maxlen] = self.get_insertion_block(
+                    sequences,
+                    meta_data.right_flank_len_for(batch_indices),
+                    rf_maxlen,
+                    meta_data.right_flank_start_for(batch_indices),
+                    custom_columns=aligned_insertions.right_flank(batch_indices)
+                )
+            col += rf_maxlen
 
-        batch_alignment = np.concatenate(blocks, axis=1)
-        return batch_alignment
+        return out
 
     def batch_to_string(
         self, batch_alignment: np.ndarray, output_alphabet: np.ndarray
@@ -791,28 +848,47 @@ class AlignmentModel():
         Returns:
         """
         n = sequences.shape[0]
-        A = np.arange(n)
         s = len(SequenceDataset._default_alphabet)
-        block = np.zeros((n, maxlen), dtype=np.uint8) + s - 1
+        gap_val = s - 1
+        seq_max = sequences.shape[1] - 1
+
+        if custom_columns is None:
+            # Fast vectorised path: build the full (n, maxlen) gather in one shot.
+            # col_idx shape: (1, maxlen); lens/starts shape: (n, 1) via broadcast.
+            col_idx = np.arange(maxlen, dtype=np.int32)[np.newaxis, :]  # (1, maxlen)
+            lens2d = np.asarray(lens, dtype=np.int32)[:, np.newaxis]   # (n, 1)
+            starts2d = np.asarray(starts, dtype=np.int32)[:, np.newaxis]  # (n, 1)
+
+            if adjust_to_right:
+                # Right-align: source index relative to start = col_j - (maxlen - lens[i])
+                src_i = col_idx - (maxlen - lens2d)   # (n, maxlen); negative means gap
+                valid = src_i >= 0
+                src_pos = np.clip(starts2d + src_i, 0, seq_max)
+            else:
+                valid = col_idx < lens2d              # (n, maxlen)
+                src_pos = np.clip(starts2d + col_idx, 0, seq_max)
+
+            row_idx = np.arange(n, dtype=np.int32)[:, np.newaxis]  # (n, 1)
+            gathered = sequences[row_idx, src_pos]   # (n, maxlen)
+            block = np.where(valid, gathered, gap_val).astype(np.uint8)
+            block += s  # lowercase offset
+            return block
+
+        # Slow path: custom column mapping (arbitrary scatter targets).
+        A = np.arange(n)
+        block = np.full((n, maxlen), gap_val, dtype=np.uint8)
+        columns = np.stack([np.arange(maxlen)] * n)
+        columns[:, :custom_columns.shape[1]] = custom_columns
         count_down_lens = np.copy(lens)
         active = count_down_lens > 0
         i = 0
-        columns = np.stack([np.arange(maxlen)]*n)
-        if custom_columns is not None:
-            columns[:, :custom_columns.shape[1]] = custom_columns
         while np.any(active):
             aa = sequences[A[active], starts[active] + i]
-            block[active, columns[active,i]] = aa
+            block[active, columns[active, i]] = aa
             count_down_lens -= 1
             active = count_down_lens > 0
             i += 1
-        if adjust_to_right and custom_columns is None:
-            block_right_aligned = np.zeros_like(block) + s - 1
-            for i in range(maxlen):
-
-                block_right_aligned[A, (maxlen-lens+i)%maxlen] = block[:, i]
-            block = block_right_aligned
-        block += s #lower case
+        block += s  # lowercase offset
         return block
 
 
@@ -837,48 +913,73 @@ class AlignmentModel():
         Returns:
              block: Shape (num_seq, block_length)
         """
-        A = np.arange(sequences.shape[0])
-        if only_matches:
-            length = consensus.shape[1]
+        n = sequences.shape[0]
+        s = len(SequenceDataset._default_alphabet)
+        gap_val = s - 1
+        num_match = consensus.shape[1]
+        A = np.arange(n)
+
+        # Determine which match columns to keep.
+        if is_non_empty is not None:
+            keep_match = is_non_empty.astype(bool)  # (num_match,)
         else:
-            length = consensus.shape[1] + np.sum(ins_len_total)
-        block = np.zeros((sequences.shape[0], length), dtype=np.uint8)
-        block += len(SequenceDataset._default_alphabet) - 1
-        i = 0
-        columns_to_remove = [] #track empty columns to be removed later
-        for c in range(consensus.shape[1]-1):
-            column = consensus[:,c]
-            ins_l = ins_len[:,c]
-            ins_l_total = ins_len_total[c]
-            ins_s = ins_start[:,c]
-            #one column
-            no_gap = column != -1
-            block[no_gap,i] = sequences[A[no_gap],column[no_gap]]
-            #is this column empty in ALL batches? if yes, mark for removal
-            if is_non_empty is not None and not is_non_empty[c]:
-                columns_to_remove.append(i)
-            i += 1
-            #insertion
-            if not only_matches:
-                if custom_columns is None:
-                    custom_column = None
-                else:
-                    custom_column = custom_columns[c]
-                block[:,i:i+ins_l_total] = cls.get_insertion_block(
-                    sequences,
-                    ins_l,
-                    ins_l_total,
-                    ins_s,
-                    custom_columns=custom_column
-                )
-                i += ins_l_total
-        #final column
-        no_gap = consensus[:,-1] != -1
-        block[no_gap,i] = sequences[A[no_gap],consensus[:,-1][no_gap]]
-        if is_non_empty is not None and not is_non_empty[-1]:
-            columns_to_remove.append(i)
-        #remove columns that are empty in ALL batches
-        block = np.delete(block, columns_to_remove, axis=1)
+            keep_match = np.ones(num_match, dtype=bool)
+
+        if only_matches:
+            # Fast path: no insertions, just gather match positions.
+            no_gap = consensus != -1                                  # (n, num_match)
+            pos_safe = np.where(no_gap, consensus.astype(np.int32), 0)
+            match_vals = np.where(
+                no_gap,
+                sequences[A[:, np.newaxis], pos_safe],
+                gap_val
+            ).astype(np.uint8)  # (n, num_match)
+            return match_vals[:, keep_match]
+
+        # Full path: match columns interleaved with insertion blocks.
+        # Pre-compute cumulative insertion widths to determine column offsets.
+        ins_len_total_arr = np.asarray(ins_len_total, dtype=np.int32)  # (num_match-1,)
+        cum_ins = np.concatenate([[0], np.cumsum(ins_len_total_arr[:-1])]) if num_match > 1 \
+            else np.zeros(0, dtype=np.int32)
+        # match column i sits at position i + sum(ins_len_total[:i])
+        match_col_offsets = (np.arange(num_match, dtype=np.int32) +
+                             np.concatenate([[0], np.cumsum(ins_len_total_arr)]))
+        total_width = num_match + int(np.sum(ins_len_total_arr))
+
+        block = np.full((n, total_width), gap_val, dtype=np.uint8)
+
+        # Scatter all match columns at once.
+        no_gap = consensus != -1                                      # (n, num_match)
+        pos_safe = np.where(no_gap, consensus.astype(np.int32), 0)
+        block[:, match_col_offsets] = np.where(
+            no_gap,
+            sequences[A[:, np.newaxis], pos_safe],
+            gap_val
+        ).astype(np.uint8)
+
+        # Fill insertion blocks.
+        for c in range(num_match - 1):
+            ins_l_total = int(ins_len_total_arr[c])
+            if ins_l_total == 0:
+                continue
+            ins_col_start = int(match_col_offsets[c]) + 1
+            if custom_columns is None:
+                custom_column = None
+            else:
+                custom_column = custom_columns[c]
+            block[:, ins_col_start:ins_col_start + ins_l_total] = cls.get_insertion_block(
+                sequences,
+                ins_len[:, c],
+                ins_l_total,
+                ins_start[:, c],
+                custom_columns=custom_column
+            )
+
+        # Remove globally-empty match columns using boolean indexing.
+        # Build a keep mask over all columns (match + insertion).
+        col_keep = np.ones(total_width, dtype=bool)
+        col_keep[match_col_offsets[~keep_match]] = False
+        block = block[:, col_keep]
         return block
 
     #computes an implicit alignment (without storing gaps)

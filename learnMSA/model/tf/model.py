@@ -575,11 +575,11 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             assert len(_models) == 1,\
                 "Decoding mode only supports a single model at a time."
 
-            # Decode mode: GPU-fused decode — count repeats per batch on GPU,
-            # run the repeat-specific compiled decode fn, accumulate raw numpy
-            # dicts, then concatenate and reorder on CPU after the loop.
+            # Fused GPU step: predict → count repeats → dynamic decode, all
+            # within one tf.function so R_max never leaves the GPU as a Python
+            # int (no CPU–GPU sync mid-batch).
             from learnMSA.align.tf.decode import (
-                _get_decode_batch_fn, _get_count_fn, decode_batch_to_arrays,
+                _get_dynamic_decode_fn, decode_batch_to_arrays,
                 reorder_decode_arrays,
             )
 
@@ -590,21 +590,32 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
 
             model_j = _models[0]
             c = int(self.phmm_layer.lengths[model_j])
-            count_fn = _get_count_fn(c, jit)
+            dynamic_decode_fn = _get_dynamic_decode_fn(c)
+            unann_state = tf.constant(2 * c, dtype=tf.int32)
+
+            def _fused_step(batch_data):
+                batch_pred_t, batch_j_t = predict_step_fn(batch_data)
+                ss_t = batch_pred_t[:, :, 0]
+                # Inline repeat count (same logic as _count_repeats_batch).
+                is_unann = tf.equal(ss_t, unann_state)
+                entries  = tf.logical_and(
+                    tf.logical_not(is_unann[:, :-1]),
+                    is_unann[:, 1:],
+                )
+                counts_t = tf.reduce_sum(tf.cast(entries, tf.int32), axis=1) + 1
+                R_max_t  = tf.reduce_max(counts_t)
+                # Dynamic decode: R_max_t stays on GPU, no CPU sync.
+                outputs_t = dynamic_decode_fn(ss_t, R_max_t)
+                return outputs_t, batch_j_t
+
+            fused_step_fn = tf.function(_fused_step, jit_compile=False)
 
             all_raw: list[dict] = []
             all_j: list[np.ndarray] = []
 
             for batch_data in ds.take(steps):
-                batch_pred_t, batch_j_t = predict_step_fn(batch_data)
+                outputs_t, batch_j_t = fused_step_fn(batch_data)
                 all_j.append(batch_j_t.numpy())
-                ss_t = batch_pred_t[:, :, 0]
-
-                counts_t = count_fn(ss_t)
-                R_max = int(tf.reduce_max(counts_t))
-
-                decode_fn = _get_decode_batch_fn(R_max, c, jit)
-                outputs_t = decode_fn(ss_t)
                 outputs_np = tuple(t.numpy() for t in outputs_t)
                 all_raw.append(decode_batch_to_arrays(outputs_np, c))
 
