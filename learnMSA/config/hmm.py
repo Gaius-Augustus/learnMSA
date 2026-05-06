@@ -31,7 +31,7 @@ class PHMMPriorConfig(BaseModel):
     alpha_flank_compl: float = 1.0
     """Complement parameter for alpha_flank."""
 
-    alpha_single_compl: float = 1.0
+    alpha_single_compl: float = 1e-3
     """Complement parameter for alpha_single."""
 
     alpha_global_compl: float = 1.0
