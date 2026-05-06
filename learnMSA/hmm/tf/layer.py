@@ -318,7 +318,7 @@ class PHMMLayer(tf.keras.Layer):
         if adds is not None:
             args += tuple(adds)
         args += (padding,)
-        return self.hmm(*args, mode=self._mode, output_dtype=tf.int16)
+        return self.hmm(*args, mode=self._mode, output_dtype=tf.int32)
 
     def prior_scores(self) -> tf.Tensor:
         """Calculates the prior scores for all parameters in the pHMM.
