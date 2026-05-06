@@ -1051,7 +1051,7 @@ class AlignmentModel():
                     AlignmentModel.decode(model_len, seqs[:,:,i])
                     for seqs, _ in state_seqs_max_lik
                 ]
-                all_idx = np.concat([idx for _, idx in state_seqs_max_lik])
+                all_idx = np.concatenate([idx for _, idx in state_seqs_max_lik])
                 meta_data = AlignmentMetaData.concat(meta_data_list)
                 meta_data.reorder(all_idx)
 
