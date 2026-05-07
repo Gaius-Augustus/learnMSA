@@ -1052,25 +1052,29 @@ class AlignmentModel():
 
             t = time.time()
 
-            for i,j in enumerate(models):
-                model_len = self.model.context.model_lengths[j]
-                meta_data_list = [
-                    AlignmentModel.decode(model_len, seqs[:,:,i])
-                    for seqs, _ in state_seqs_max_lik
-                ]
-                all_idx = np.concatenate([idx for _, idx in state_seqs_max_lik])
-                meta_data = AlignmentMetaData.concat(meta_data_list)
-                meta_data.reorder(all_idx)
+            all_meta_data = []
+            all_idx = []
+            while len(state_seqs_max_lik) > 0:
+                seqs, idx = state_seqs_max_lik.pop(0)
+                model_len = self.model.context.model_lengths[models[0]]
+                md = AlignmentModel.decode(model_len, seqs[:,:,0])
+                del seqs
+                all_meta_data.append(md)
+                all_idx.append(idx)
+            meta_data = AlignmentMetaData.concat(all_meta_data)
+            all_idx = np.concatenate(all_idx)
+            meta_data.reorder(all_idx)
 
-                if self.hit_alignment_mode == HitAlignmentMode.GREEDY_CONSENSUS:
-                    # Use occupancy (number of used match states) as hit score.
-                    occupancy = meta_data.occupancy_matrix()  # (R, N), -1 for empty
-                    meta_data = hit_alignment(
-                        meta_data, self.hit_alignment_mode, occupancy
-                    )
-                else:
-                    meta_data = hit_alignment(meta_data, self.hit_alignment_mode)
-                self.metadata[j] = meta_data
+            if self.hit_alignment_mode == HitAlignmentMode.GREEDY_CONSENSUS:
+                # Use occupancy (number of used match states) as hit score.
+                occupancy = meta_data.occupancy_matrix()  # (R, N), -1 for empty
+                meta_data = hit_alignment(
+                    meta_data, self.hit_alignment_mode, occupancy
+                )
+            else:
+                meta_data = hit_alignment(meta_data, self.hit_alignment_mode)
+
+            self.metadata[models[0]] = meta_data
 
         if self.model.context.config.input_output.verbose:
             print(
