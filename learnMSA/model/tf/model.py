@@ -601,9 +601,6 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             return accumulated_posteriors
 
         # Run a custom prediction loop with batching to collect all predictions
-        all_pred = []
-        all_idx = []
-
         if self._decode_msa:
             # only support single models
             assert len(_models) == 1,\
@@ -674,102 +671,161 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
 
         predict_batch = self.predict_step
         if self.use_jit_compile(steps):
-            predict_batch = tf.function(predict_batch, jit_compile=True)
+            predict_batch = tf.function(self.predict_step, jit_compile=True)
 
-        for batch_data in ds.take(steps):
-            batch_result = predict_batch(batch_data)
-            # Standard mode: collect predictions
-            if isinstance(batch_result, tuple) and len(batch_result) == 2:
-                batch_pred, batch_idx = batch_result
-                all_pred.append(batch_pred.numpy())
-                all_idx.append(batch_idx.numpy())
-            elif isinstance(batch_result, tf.Tensor):
-                all_pred.append(batch_result.numpy())
+        is_posterior = self.phmm_layer.is_posterior_mode()
+        is_decoding = self.phmm_layer.is_decoding_mode()
 
-        # Helper to replace -1 padding
         def _replace_padding(pred: np.ndarray) -> None:
-            if self.phmm_layer.is_posterior_mode():
+            if is_posterior:
                 pred[pred == -1] = 0
-            elif self.phmm_layer.is_decoding_mode():
-                for i,j in enumerate(_models):
+            elif is_decoding:
+                for i, j in enumerate(_models):
                     c = self.phmm_layer.lengths[j]
-                    pred[:,:,i][pred[:,:,i] == -1] = 2*c + 2
+                    pred[:, :, i][pred[:, :, i] == -1] = 2 * c + 2
 
-        if self.phmm_layer.is_posterior_mode()\
-                or self.phmm_layer.is_decoding_mode():
-
-            if ragged_output:
-                assert len(all_pred) == len(all_idx),\
-                    "Ragged output requires bucket indices for reordering."
-                assert len(all_pred) > 0,\
-                    "No predictions were made; cannot produce ragged output."
-
-                outputs_dict = {}
-                for i, (pred, idx) in enumerate(zip(all_pred, all_idx)):
-                    L1, L2 = outputs_dict.setdefault(pred.shape[1], ([], []))
-                    L1.append(pred)
-                    L2.append(idx)
-
-                outputs = []
-                # Concatenate per bucket
-                for L, (pred, idx) in outputs_dict.items():
-                    bucket_idx = np.concatenate(idx, axis=0)
-
-                    # Slice bucket padding
-                    # Use actual data max length (+1 for terminal), not bucket
-                    # boundary
-                    max_len = int(np.amax(
-                        data[0].seq_lens[indices[bucket_idx]]
-                    ) + 1)
-
-                    # Slice off bucket padding if prediction is too long
-                    if max_len < L:
-                        pred = [p[:, :max_len] for p in pred]
-                    bucket_pred = np.concatenate(pred, axis=0)
-
-                    _replace_padding(bucket_pred)
-
-                    outputs.append((bucket_pred, bucket_idx))
+        if ragged_output and (is_posterior or is_decoding):
+            # Ragged output: pre-allocate one output array per bucket
+            # (using the padded bucket length as the sequence dimension), write
+            # each batch directly into it, then trim to the true max sequence
+            # length in that bucket.  This avoids accumulating a list of batch
+            # arrays and the concatenation peak.
+            #
+            # TF pads all batches in bucket i to boundary[i], so padded_len is
+            # identical for every batch in the same bucket.  We pre-compute
+            # N_bucket from the sequence lengths and bucket boundaries so that
+            # the array can be allocated before iterating.
+            seq_lens_for_indices = data[0].seq_lens[indices]
+            finite_boundaries = np.array(
+                [int(b) for b in bucket_boundaries if not math.isinf(float(b))],
+                dtype=np.intp,
+            )
+            if len(finite_boundaries) > 0:
+                # Each sequence goes to the first bucket whose boundary >=
+                # seq_len (matches TF's side='left' assignment).
+                bucket_assign = np.searchsorted(
+                    finite_boundaries, seq_lens_for_indices, side='left'
+                )
+                bucket_counts_arr = np.bincount(
+                    bucket_assign, minlength=len(finite_boundaries) + 1
+                )
+                # boundary value → bucket assignment index, O(1) lookup
+                boundary_to_bucket: dict[int, int] = {
+                    int(finite_boundaries[i]): i
+                    for i in range(len(finite_boundaries))
+                }
             else:
-                max_len = int(np.amax(data[0].seq_lens[indices]) + 1)
-                # Process predictions: slice if too long, pad if needed
-                # (only in posterior/loglik modes)
-                processed_predictions = []
-                for pred in all_pred:
-                    # Slice off bucket padding if prediction is too long
-                    if pred.shape[1] > max_len:
-                        pred = pred[:, :max_len]
+                bucket_counts_arr = np.array([len(indices)])
+                boundary_to_bucket = {}
 
-                    # Pad if needed and in posterior/loglik mode
-                    if pred.shape[1] < max_len:
-                        if self.phmm_layer.is_posterior_mode():
-                            pad_value = 0
-                        else:
-                            pad_value = -1
-                        pad_width = [(0, 0)] * len(pred.shape)
-                        pad_width[1] = (0, max_len - pred.shape[1])
-                        pred = np.pad(
-                            pred, pad_width, constant_values=pad_value
+            # Per-bucket pre-allocated storage: (output_arr, idx_arr, offset)
+            bucket_storage: dict[int, tuple[np.ndarray, np.ndarray, int]] = {}
+            # Fallback for overflow batches (padded_len ≠ any finite boundary)
+            bucket_fallback: dict[int, tuple[list, list]] = {}
+
+            for batch_data in ds.take(steps):
+                batch_pred_t, batch_idx_t = predict_batch(batch_data)
+                batch_pred = batch_pred_t.numpy()
+                batch_idx = batch_idx_t.numpy()
+                del batch_pred_t, batch_idx_t  # release TF memory immediately
+
+                padded_len = batch_pred.shape[1]
+                B = batch_pred.shape[0]
+                b_assign = boundary_to_bucket.get(padded_len)
+
+                if b_assign is not None:
+                    # Known bucket: allocate on first encounter, then fill
+                    if padded_len not in bucket_storage:
+                        N_bucket = int(bucket_counts_arr[b_assign])
+                        tail = batch_pred.shape[2:]
+                        arr = np.empty(
+                            (N_bucket, padded_len) + tail,
+                            dtype=batch_pred.dtype,
                         )
-                        if self.phmm_layer.is_decoding_mode():
-                            for i, j in enumerate(_models):
-                                q = self.phmm_layer.states[j]
-                                pred[...,i][pred[...,i] == -1] = q
+                        idx_arr = np.empty((N_bucket,), dtype=np.intp)
+                        bucket_storage[padded_len] = (arr, idx_arr, 0)
 
-                    processed_predictions.append(pred)
-                outputs = np.concatenate(processed_predictions, axis=0)
-                _replace_padding(outputs)
+                    arr, idx_arr, offset = bucket_storage[padded_len]
+                    arr[offset:offset + B] = batch_pred
+                    idx_arr[offset:offset + B] = batch_idx
+                    bucket_storage[padded_len] = (arr, idx_arr, offset + B)
+                    del batch_pred  # copied into arr; free immediately
+                else:
+                    # Overflow bucket: variable padded_len per batch
+                    fb = bucket_fallback.setdefault(padded_len, ([], []))
+                    fb[0].append(batch_pred)
+                    fb[1].append(batch_idx)
+
+            outputs: np.ndarray | list = []
+            for padded_len, (arr, idx_arr, total) in bucket_storage.items():
+                bucket_idx = idx_arr[:total]
+                bucket_max_len = int(
+                    np.amax(data[0].seq_lens[indices[bucket_idx]]) + 1
+                )
+                L = min(padded_len, bucket_max_len)
+                bucket_pred = arr[:total, :L]
+                _replace_padding(bucket_pred)
+                outputs.append((bucket_pred, bucket_idx))
+
+            for padded_len, (preds, idxs) in bucket_fallback.items():
+                bucket_idx = np.concatenate(idxs, axis=0)
+                bucket_max_len = int(
+                    np.amax(data[0].seq_lens[indices[bucket_idx]]) + 1
+                )
+                L = min(padded_len, bucket_max_len)
+                bucket_pred = np.concatenate([p[:, :L] for p in preds], axis=0)
+                _replace_padding(bucket_pred)
+                outputs.append((bucket_pred, bucket_idx))
         else:
-            # In loglik mode, no slicing/padding needed
-            outputs = np.concatenate(all_pred, axis=0)
-            _replace_padding(outputs)
+            # Pre-allocate the full output array and write each batch directly
+            # at the original sequence positions (batch_idx = j from the
+            # bucketed dataset), eliminating list accumulation and the 2x
+            # peak-memory spike from a final concatenate call.
+            N = len(indices)
+            outputs_arr: np.ndarray | None = None
 
-        # If bucketing was used, reorder to original sequence order
-        if not ragged_output:
-            if all_idx:
-                bucket_indices = np.concatenate(all_idx, axis=0)
-                sorted_order = np.argsort(bucket_indices)
-                outputs = outputs[sorted_order]
+            if is_posterior or is_decoding:
+                max_len = int(np.amax(data[0].seq_lens[indices]) + 1)
+
+            for batch_data in ds.take(steps):
+                batch_pred_t, batch_idx_t = predict_batch(batch_data)
+                batch_pred = batch_pred_t.numpy()
+                batch_idx = batch_idx_t.numpy()
+                del batch_pred_t, batch_idx_t  # release TF memory immediately
+
+                if outputs_arr is None:
+                    # First batch: infer dtype and shape, then allocate once.
+                    if is_posterior or is_decoding:
+                        pad_val: float | int = -1.0 if is_posterior else -1
+                        tail = batch_pred.shape[2:]  # dims after (B, L)
+                        outputs_arr = np.full(
+                            (N, max_len) + tail, pad_val,
+                            dtype=batch_pred.dtype
+                        )
+                    else:
+                        # Loglik: (B, H) → allocate (N, H)
+                        outputs_arr = np.empty(
+                            (N,) + batch_pred.shape[1:],
+                            dtype=batch_pred.dtype
+                        )
+
+                assert outputs_arr is not None  # always set on first iteration
+
+                # Write directly to the original-order positions —
+                # no sort/reorder step needed afterwards.
+                if is_posterior or is_decoding:
+                    L = min(batch_pred.shape[1], max_len)
+                    outputs_arr[batch_idx, :L] = batch_pred[:, :L]
+                else:
+                    outputs_arr[batch_idx] = batch_pred
+
+                del batch_pred
+
+            if outputs_arr is None:
+                raise RuntimeError("No predictions were produced.")
+
+            _replace_padding(outputs_arr)
+            outputs = outputs_arr
 
         # Reset
         self.context.batch_gen.crop_long_seqs = old_crop_long_seqs
