@@ -672,9 +672,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             }
             return reorder_decode_arrays(concat_dict, sorted_order)
 
-        def predict_batch(batch_data):
-            return self.predict_step(batch_data)
-
+        predict_batch = self.predict_step
         if self.use_jit_compile(steps):
             predict_batch = tf.function(predict_batch, jit_compile=True)
 
@@ -688,18 +686,14 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             elif isinstance(batch_result, tf.Tensor):
                 all_pred.append(batch_result.numpy())
 
-        # Handle variable lengths - slice bucket padding and optionally pad
-        # Use actual data max length (+1 for terminal), not bucket padding
-        max_len = int(max(data[0].seq_lens[indices]) + 1)
-
         # Helper to replace -1 padding
         def _replace_padding(pred: np.ndarray) -> None:
             if self.phmm_layer.is_posterior_mode():
                 pred[pred == -1] = 0
             elif self.phmm_layer.is_decoding_mode():
                 for i,j in enumerate(_models):
-                    L = self.phmm_layer.lengths[j]
-                    pred[:,:,i][pred[:,:,i] == -1] = 2*L + 2
+                    c = self.phmm_layer.lengths[j]
+                    pred[:,:,i][pred[:,:,i] == -1] = 2*c + 2
 
         if self.phmm_layer.is_posterior_mode()\
                 or self.phmm_layer.is_decoding_mode():
@@ -712,24 +706,32 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
 
                 outputs_dict = {}
                 for i, (pred, idx) in enumerate(zip(all_pred, all_idx)):
-                    L = pred.shape[1]
-                    # Slice off bucket padding if prediction is too long
-                    if L > max_len:
-                        pred = pred[:, :max_len]
-                        L = max_len
-                    _replace_padding(pred)
-                    L1, L2 = outputs_dict.setdefault(L, ([], []))
+                    L1, L2 = outputs_dict.setdefault(pred.shape[1], ([], []))
                     L1.append(pred)
                     L2.append(idx)
 
                 outputs = []
-                # Concatenate predictions within each length group
-                for pred, idx in outputs_dict.values():
-                    outputs.append((
-                        np.concatenate(pred, axis=0),
-                        np.concatenate(idx, axis=0)
-                    ))
+                # Concatenate per bucket
+                for L, (pred, idx) in outputs_dict.items():
+                    bucket_idx = np.concatenate(idx, axis=0)
+
+                    # Slice bucket padding
+                    # Use actual data max length (+1 for terminal), not bucket
+                    # boundary
+                    max_len = int(np.amax(
+                        data[0].seq_lens[indices[bucket_idx]]
+                    ) + 1)
+
+                    # Slice off bucket padding if prediction is too long
+                    if max_len < L:
+                        pred = [p[:, :max_len] for p in pred]
+                    bucket_pred = np.concatenate(pred, axis=0)
+
+                    _replace_padding(bucket_pred)
+
+                    outputs.append((bucket_pred, bucket_idx))
             else:
+                max_len = int(np.amax(data[0].seq_lens[indices]) + 1)
                 # Process predictions: slice if too long, pad if needed
                 # (only in posterior/loglik modes)
                 processed_predictions = []

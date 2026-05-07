@@ -989,6 +989,13 @@ class AlignmentModel():
 
         assert len(models) == 1, "Not implemented for multiple models."
 
+        if self.model.context.config.input_output.verbose:
+            L = self.model.context.model_lengths[models[0]]
+            print(
+                f"Building alignment for a model of length {L} " +
+                f"with decoding mode {decoding_mode}..."
+            )
+
         if False: # NEW implementation
 
             if decoding_mode == AlignmentModel.DecodingMode.VITERBI:
@@ -1064,8 +1071,6 @@ class AlignmentModel():
                 else:
                     meta_data = hit_alignment(meta_data, self.hit_alignment_mode)
                 self.metadata[j] = meta_data
-
-
 
         if self.model.context.config.input_output.verbose:
             print(
