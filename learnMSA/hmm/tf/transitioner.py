@@ -15,9 +15,10 @@ from learnMSA.hmm.util.value_set import PHMMValueSet
 
 def logsumexp(x: T_TFTensor, y: T_TFTensor) -> T_TFTensor:
     """Compute log(exp(x) + exp(y)) in a numerically stable way."""
-    m = tf.maximum(x, y)
-    return m + tf.math.log(tf.exp(x - m) + tf.exp(y - m))
-
+    return tf.math.reduce_logsumexp(
+        tf.stack([x, y], axis=0),
+        axis=0
+    )
 
 class PHMMExplicitTransitioner(TFTransitioner):
     """A transitioner for explicit pHMMs with deletion states.
@@ -274,10 +275,47 @@ class PHMMTransitioner(TFTransitioner):
             start_dist = tf.where(start_dist > tiny(start_dist), 1., 0.)
 
         if TransitionMode.LOG_SUM_EXP in mode or TransitionMode.MAX in mode:
-            self._A_log = safe_log(self._A)
+            # Build _A_log directly from the log-space folded_transition_probs
+            self._A_log = self._build_folded_log_matrix(folded_transition_probs)
             self._A_log_T = tf.transpose(self._A_log, [0, 2, 1])
 
         return start_dist
+
+    def _build_folded_log_matrix(
+        self, folded_transition_log_probs: T_TFTensor
+    ) -> T_TFTensor:
+        """Build the folded transition matrix directly in log-space.
+
+        Identical to _build_folded_matrix but works in log-space throughout,
+        avoiding the exp→log roundtrip that loses precision for very small
+        probabilities (e.g. long deletion chains) under JIT/XLA FTZ mode.
+        """
+        log_matrix = shared_tensor(
+            indices=tf.constant(self.allow, dtype=tf.int64),
+            values=folded_transition_log_probs,
+            shape=tf.constant(
+                [self.heads, self.max_states, self.matrix_dim],
+                dtype=tf.int64,
+            ),
+            share=None,
+        )
+        if self.head_subset is not None:
+            log_matrix = tf.gather(log_matrix, self.head_subset, axis=0)
+            max_states_subset = max(
+                [self.hmm_config.states[h] for h in self.head_subset]
+            )
+            terminal_log_in = log_matrix[:, :max_states_subset, -1:]
+            # Terminal state emits to itself with probability 1 (log = 0)
+            terminal_log_out = safe_log(
+                tf.one_hot(
+                    [[max_states_subset]], depth=max_states_subset + 1,
+                    dtype=log_matrix.dtype,
+                )
+            )
+            log_matrix = log_matrix[:, :max_states_subset, :max_states_subset]
+            log_matrix = tf.concat([log_matrix, terminal_log_in], axis=2)
+            log_matrix = tf.concat([log_matrix, terminal_log_out], axis=1)
+        return log_matrix
 
     def _build_folded_matrix(
         self, folded_transition_probs: T_TFTensor

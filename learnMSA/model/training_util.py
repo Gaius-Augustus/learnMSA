@@ -4,7 +4,8 @@ import numpy as np
 from learnMSA.run.util import get_batch_multiplicator, get_avail_memory_bytes
 
 DEFAULT_IMPL_FACTOR = 0.25
-MAX_BATCH_SIZE = 2048
+MAX_BATCH_SIZE = 1_024
+MAX_TOKENS_PER_BATCH = 700_000
 MEMORY_DAMP = 0.5
 
 
@@ -114,6 +115,8 @@ def get_adaptive_batch_size(
     if denominator <= 0.0:
         return 1
     batch_size = int(np.floor(safety_margin * mem_avail / denominator))
+    max_batch_size_tokens_per_batch = max(1, MAX_TOKENS_PER_BATCH // seq_len)
+    max_batch_size = min(max_batch_size, max_batch_size_tokens_per_batch)
     return min(max(batch_size, 1), max_batch_size)
 
 def tokens_per_batch_to_batch_size(
@@ -131,6 +134,7 @@ def tokens_per_batch_to_batch_size(
         impl_factor: (float) An empirical factor to account for
             implementation-specific memory overhead.
     """
+    tokens_per_batch = min(tokens_per_batch, MAX_TOKENS_PER_BATCH)
     batch_size = tokens_per_batch /\
         (impl_factor * seq_len * DEFAULT_IMPL_FACTOR)
     batch_size = int(np.floor(batch_size))
