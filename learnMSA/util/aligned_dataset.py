@@ -15,7 +15,6 @@ class AlignedDataset(SequenceDataset):
             fmt: str = "fasta",
             sequences: list[tuple[str, str]] | None = None,
             indexed: bool = False,
-            single_seq_ok: bool = False,
             alphabet: str | None = None,
             gap_symbols: str = "-.",
             replace_with_x: str = "BZJ",
@@ -32,7 +31,6 @@ class AlignedDataset(SequenceDataset):
             replace_with_x=replace_with_x,
             validate_alphabet=validate_alphabet
         )
-        self._single_seq_ok = single_seq_ok
         self.validate_dataset()
 
         # Create MSA matrix
@@ -58,11 +56,11 @@ class AlignedDataset(SequenceDataset):
         self._starting_pos[0] = 0
         self._alignment_len = self._msa_matrix.shape[1]
 
-    def validate_dataset(self) -> None:
+    def validate_dataset(self, single_seq_ok: bool = False) -> None:
         """Raise an error if the MSA is not valid for processing.
         """
         super().validate_dataset(
-            single_seq_ok=self._single_seq_ok,
+            single_seq_ok=single_seq_ok,
             empty_seq_id_ok=False,
             dublicate_seq_id_ok=False
         )
@@ -129,3 +127,35 @@ class AlignedDataset(SequenceDataset):
         true_positives -= total_len
         sp = true_positives / max(1, ref_positives - total_len)
         return sp
+
+    def average_pairwise_identity(self) -> float:
+        """
+        Compute the average pairwise percentage identity (APID) of the
+        sequences in the alignment.
+
+        For each ordered pair (i, j) with i != j, the percentage identity is
+        defined as the number of identical residues in aligned columns divided
+        by the length of sequence i (i.e. its number of non-gap characters).
+        Both orderings (i, j) and (j, i) are included and each contributes
+        once. The result is averaged over all n*(n-1) ordered pairs.
+
+        Returns:
+            float: Average pairwise percentage identity in [0, 1].
+        """
+        if self.num_seq < 2:
+            return 0.0
+        gap_idx = self.alphabet.index('-')
+        not_gap = self._msa_matrix != gap_idx  # (num_seq, alignment_len)
+        total_psi = 0.0
+        for i in range(self.num_seq):
+            mask_i = not_gap[i]  # columns where seq i is not a gap
+            col_i = self._msa_matrix[i, mask_i]  # non-gap residues of seq i
+            msa_masked = self._msa_matrix[:, mask_i]  # all seqs at those cols
+            # matches[j] = number of positions where seq j has the same
+            # non-gap residue as seq i; col_i contains no gaps so equality
+            # implies seq j also has a non-gap residue at that position
+            matches = np.sum(msa_masked == col_i, axis=1)  # (num_seq,)
+            psi = matches / self.seq_lens[i]
+            total_psi += np.sum(psi) - psi[i]  # exclude self-comparison (i==i)
+        n = self.num_seq
+        return float(total_psi / (n * (n - 1)))
