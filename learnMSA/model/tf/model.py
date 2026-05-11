@@ -701,10 +701,11 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
                 dtype=np.intp,
             )
             if len(finite_boundaries) > 0:
-                # Each sequence goes to the first bucket whose boundary >=
-                # seq_len (matches TF's side='left' assignment).
+                # Each sequence goes to the first bucket whose boundary >
+                # seq_len (matches TF's Bucketize: boundaries[i-1] <= x <
+                # boundaries[i], equivalent to side='right').
                 bucket_assign = np.searchsorted(
-                    finite_boundaries, seq_lens_for_indices, side='left'
+                    finite_boundaries, seq_lens_for_indices, side='right'
                 )
                 bucket_counts_arr = np.bincount(
                     bucket_assign, minlength=len(finite_boundaries) + 1
