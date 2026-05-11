@@ -164,7 +164,7 @@ class LearnMSAContext:
         self.batch_gen = train.BatchGenerator()
         self.last_runtime_batch_size = None
         if data is not None and not self.config.training.skip_training:
-            self.sequence_weights, self.clusters = self._get_clustering(data)
+            self.sequence_weights, self.clusters, self.rep = self._get_clustering(data)
         else:
             if sequence_weights is None:
                 sequence_weights = np.ones((self.num_seq,), dtype=np.float32)
@@ -178,6 +178,7 @@ class LearnMSAContext:
                 )
             self.sequence_weights = sequence_weights
             self.clusters = clusters
+            self.rep = None
 
         # If required, find indices of sequences for a subset
         if data is not None and config.input_output.subset_ids:
@@ -458,7 +459,7 @@ class LearnMSAContext:
 
     def _get_clustering(
         self, data: SequenceDataset
-    ) -> tuple[np.ndarray | None, Any]:
+    ) -> tuple[np.ndarray | None, np.ndarray | None, np.ndarray | None]:
         from ..util import SequenceDataset
         if not self.config.training.no_sequence_weights:
             os.makedirs(self.config.input_output.work_dir, exist_ok=True)
@@ -486,7 +487,7 @@ class LearnMSAContext:
                         self.config.input_output.input_format
                     ) as data:
                         data.write(cluster_file, "fasta")
-                sequence_weights, clusters = clustering.compute_sequence_weights(
+                weights, clusters, rep = clustering.compute_sequence_weights(
                     cluster_file,
                     self.config.input_output.work_dir,
                     self.config.training.cluster_seq_id,
@@ -498,5 +499,5 @@ class LearnMSAContext:
                     "Error while computing sequence weights."
                 ) from e
         else:
-            sequence_weights, clusters = None, None
-        return sequence_weights, clusters
+            weights, clusters, rep = None, None, None
+        return weights, clusters, rep

@@ -88,7 +88,7 @@ class TrainingConfig(BaseModel):
     skip_training: bool = False
     """Only decode an alignment from the provided model."""
 
-    cluster_seq_id: float = 0.9
+    cluster_seq_id: float = 0.7
     """Sequence identity for computing sequence weights."""
 
     use_prior: bool = True

@@ -162,10 +162,11 @@ def _fit_and_align(
         _dataset_messages(data[0])
 
     # Roughly estimate the full length of a protein
-    full_length_estimate = training_util.get_full_length_estimate(
+    full_length_estimate = training_util.get_backbone(
         data[0].seq_lens,
         config.training.surgery_quantile,
-        config.training.min_surgery_seqs
+        config.training.min_surgery_seqs,
+        context.rep,
     )
 
     if config.input_output.load_model:

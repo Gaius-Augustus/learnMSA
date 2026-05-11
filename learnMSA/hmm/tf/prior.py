@@ -273,7 +273,7 @@ class TFPHMMTransitionPrior(TFPrior):
             log_enex = safe_log(tf.maximum(e, 1.0 - enex))
             log_enex_compl = safe_log(tf.maximum(e, enex))
 
-            # Compute global prior (exclude the [0, -1] element)
+            # Compute global prior over all profile entry-exit pairs
             glob = (self.prior_config.alpha_global - 1) * (
                 tf.reduce_sum(log_enex) - log_enex[0, -1]
             )

@@ -57,12 +57,17 @@ def compute_sequence_weights(fasta_filename, directory, cluster_seq_id=0.5, retu
                 clustering.loc[ids].weight,
                 dtype=np.float32
             )
+            id_to_index = {seq_id: i for i, seq_id in enumerate(ids)}
         if return_clusters:
             clusters = np.array(
                 clustering.loc[ids].cluster_index,
                 dtype=np.int32
             )
-            return sequence_weights, clusters
+            representative_indices = np.array(
+                [id_to_index[rep] for rep in clustering.loc[ids].representative],
+                dtype=np.int32
+            )
+            return sequence_weights, clusters, representative_indices
         else:
             return sequence_weights
 

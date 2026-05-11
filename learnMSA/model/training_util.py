@@ -44,24 +44,37 @@ def get_initial_model_lengths(
         return np.array([int(model_length)] * num_models, dtype=np.int32)
 
 
-def get_full_length_estimate(
+def get_backbone(
     seq_lens: np.ndarray,
     quantile: float,
     min_seqs: int,
+    representatives: np.ndarray | None = None,
 ) -> np.ndarray:
     """
     Returns a subset of the indices [0, ..., data.num_seq-1] corresponding to
-    sequences that are likely to be full-length based on a simple heuristic.
+    sequences that sufficiently represent the full family.
     """
     num_seq = len(seq_lens)
-    #ignore short sequences for all surgery iterations except the last
+
+    backbone = []
+
+    # If available, include all representatives of clusters
+    if representatives is not None:
+        backbone.append(representatives)
+
     k = int(min(num_seq*quantile, max(0, num_seq-min_seqs)))
-    #a rough estimate of a set of only full-length sequences
+
+    # rough estimate of a set of only full-length sequences
     sorted_indices = np.array([
         i for l,i in sorted(zip(seq_lens, range(num_seq)))
     ])
     full_length_estimate = sorted_indices[k:]
-    return full_length_estimate
+    backbone.append(full_length_estimate)
+
+    backbone = np.concatenate(backbone)
+    backbone = np.unique(backbone)
+
+    return backbone
 
 
 def get_low_seq_num_batch_size(num_seq: int) -> int:
