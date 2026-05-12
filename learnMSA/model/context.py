@@ -118,7 +118,23 @@ class LearnMSAContext:
 
         # Set up initializers
         if self.config.init_msa.from_msa is not None:
-            model_len_cb, self.init_msa_values = self._setup_init_msa()
+            model_len_cb, self.init_msa_values = self._setup_init_msa(
+                msa_file=self.config.init_msa.from_msa
+            )
+        elif self.config.init_msa.seeded and data is not None:
+            from learnMSA.util.famsa_align import align_with_famsa
+
+            wd = self.config.input_output.work_dir
+            out_file = Path(wd) / "famsa_init.fasta"
+            align_with_famsa(
+                fasta=data.filepath,
+                output=out_file,
+                threads=self.config.advanced.aligner_threads,
+            )
+            model_len_cb, self.init_msa_values = self._setup_init_msa(
+                msa_file=out_file
+            )
+
         self._setup_visualization()
 
         self.model_lengths_cb = model_len_cb
@@ -274,10 +290,11 @@ class LearnMSAContext:
         return context
 
     def _setup_init_msa(
-        self
+        self,
+        msa_file: Path | None = None,
+        msa_sequences: Sequence[tuple[str, str]] | None = None
     ) -> tuple[ModelLengthsCallback, Sequence[PHMMValueSet]]:
         """Set up model initializers based on configuration."""
-        from_msa = self.config.init_msa.from_msa
         if self.config.init_msa.pseudocounts:
             # Infer meaningful pseudocounts from Dirichlet priors
             # Get amino acid pseudocounts
@@ -313,7 +330,7 @@ class LearnMSAContext:
             del_psc = 1e-2
 
         # Load the MSA and count
-        with AlignedDataset(from_msa, "fasta") as input_msa:
+        with AlignedDataset(msa_file, "fasta") as input_msa:
             values = PHMMValueSet.from_msa(
                 input_msa,
                 match_threshold=self.config.init_msa.match_threshold,
@@ -338,7 +355,7 @@ class LearnMSAContext:
             np.array([values.matches()]*n)
         if self.config.input_output.verbose:
             print(
-                f"Initialized from MSA '{self.config.init_msa.from_msa}' with "
+                f"Initialized from MSA '{msa_file}' with "
                 f"{values.matches()} match states."
             )
 

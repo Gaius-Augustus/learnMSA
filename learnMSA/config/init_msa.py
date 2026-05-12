@@ -27,6 +27,11 @@ class InitMSAConfig(BaseModel):
     added on state transition and emissions counted in the MSA
     input via --from_msa."""
 
+    seeded: bool = False
+    """If set and --from_msa is not set, a quick MSA will be constructed
+    with FAMSA and used for initialization if the number of sequences is
+    below a certain threshold (default: 500)."""
+
     @field_validator("match_threshold", "global_factor")
     def validate_quantiles(cls, v: float, info) -> float:
         if not 0 <= v <= 1:

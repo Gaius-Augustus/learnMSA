@@ -97,6 +97,7 @@ def args_to_config(args: Namespace, base_config: Configuration | None = None) ->
     im["match_threshold"] = args.match_threshold
     im["global_factor"] = args.global_factor
     im["pseudocounts"] = args.pseudocounts
+    im["seeded"] = args.seeded
 
     # --- Language model ---
     lm["use_language_model"] = args.use_language_model or args.emb_file is not None

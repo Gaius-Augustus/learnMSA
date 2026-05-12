@@ -91,13 +91,16 @@ class BatchGenerator():
 
         # Assume sequence lengths are identical across datasets.
         if self.static_shape_mode:
-            max_len = min(self.data[0].max_len, int(self.crop_long_seqs))
+            max_len = min(self.data[0].max_len, int(self.crop_long_seqs)) + 1
         else:
             max_len = np.max(self.data[0].seq_lens[permutated_indices])
-            max_len = min(max_len, self.crop_long_seqs)
+            max_len = min(max_len, self.crop_long_seqs) + 1
 
-            # When JIT compiling with bucketing, pad to bucket boundary for
-            # consistent shapes
+            # Pad to bucket boundary for consistent shapes (avoids retracing).
+            # TF places seq_len into bucket i where boundary[i-1] <= seq_len
+            # < boundary[i], so max_raw <= boundary[i]-1 and
+            # max_len = max_raw+1 <= boundary[i].  Using <= here ensures every
+            # batch in TF bucket i gets the same padded_len = boundary[i].
             if self.bucket_boundaries is not None:
                 # Find which bucket this batch belongs to
                 for boundary in self.bucket_boundaries:
@@ -110,7 +113,7 @@ class BatchGenerator():
         batch_dtypes = [dataset.get_dtype() for dataset in self.data]
         batches = [
             dataset.empty(
-                (indices.shape[0], max_len + 1, self.num_models),
+                (indices.shape[0], max_len, self.num_models),
                 dtype=cast(Any, dtype),
             )
             for dataset, dtype in zip(self.data, batch_dtypes)
@@ -461,11 +464,27 @@ def make_default_bucket_scheme(
     else:
         q = np.array([], dtype=float)
     quantiles = np.quantile(seq_lens, q=q).astype(int)
-    bucket_boundaries = np.unique(quantiles).tolist()
+
+    # Compute an adaptive minimum gap between boundaries. Otherwise bucket
+    # boundaries can be very close together if the sequences are homogeneous
+    # in length.
+    min_seq_len = int(np.min(seq_lens))
+    max_seq_len = int(np.max(seq_lens))
+    length_range = max_seq_len - min_seq_len
+    min_gap = max(10, length_range // (max_num_buckets + 1))
+
+    # Greedy filter: keep a quantile boundary only if it is more than min_gap
+    # away from the previous kept boundary.
+    filtered: list[int] = []
+    prev = min_seq_len
+    for v in np.unique(quantiles).tolist():
+        if v - prev > min_gap:
+            filtered.append(v)
+            prev = v
+    bucket_boundaries = filtered
 
     # pad_to_bucket_boundary=True requires every sequence length to be
     # strictly smaller than max(bucket_boundaries).
-    max_seq_len = int(np.max(seq_lens))
     if len(bucket_boundaries) == 0 or bucket_boundaries[-1] <= max_seq_len:
         bucket_boundaries.append(max_seq_len + 1)
 

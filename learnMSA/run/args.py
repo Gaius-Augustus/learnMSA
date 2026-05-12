@@ -433,6 +433,13 @@ def parse_args(
             "added on state transition and emissions counted in the MSA "\
             "input via --from_msa."
     )
+    init_msa_group.add_argument(
+        "--seeded",
+        dest="seeded",
+        action="store_true",
+        help="Computes an initial MSA with the tool FAMSA. Useful for aligning" \
+        " low numbers of sequences without providing an initial MSA."
+    )
 
     plm_group = parser.add_argument_group("Protein language model integration")
     plm_group.add_argument(

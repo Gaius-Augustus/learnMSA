@@ -685,44 +685,16 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
                     pred[:, :, i][pred[:, :, i] == -1] = 2 * c + 2
 
         if ragged_output and (is_posterior or is_decoding):
-            # Ragged output: pre-allocate one output array per bucket
-            # (using the padded bucket length as the sequence dimension), write
-            # each batch directly into it, then trim to the true max sequence
-            # length in that bucket.  This avoids accumulating a list of batch
-            # arrays and the concatenation peak.
+            # Ragged output: accumulate batches per padded_len, then trim and
+            # concatenate each group.
             #
-            # TF pads all batches in bucket i to boundary[i], so padded_len is
-            # identical for every batch in the same bucket.  We pre-compute
-            # N_bucket from the sequence lengths and bucket boundaries so that
-            # the array can be allocated before iterating.
-            seq_lens_for_indices = data[0].seq_lens[indices]
-            finite_boundaries = np.array(
-                [int(b) for b in bucket_boundaries if not math.isinf(float(b))],
-                dtype=np.intp,
-            )
-            if len(finite_boundaries) > 0:
-                # Each sequence goes to the first bucket whose boundary >
-                # seq_len (matches TF's Bucketize: boundaries[i-1] <= x <
-                # boundaries[i], equivalent to side='right').
-                bucket_assign = np.searchsorted(
-                    finite_boundaries, seq_lens_for_indices, side='right'
-                )
-                bucket_counts_arr = np.bincount(
-                    bucket_assign, minlength=len(finite_boundaries) + 1
-                )
-                # boundary value → bucket assignment index, O(1) lookup
-                boundary_to_bucket: dict[int, int] = {
-                    int(finite_boundaries[i]): i
-                    for i in range(len(finite_boundaries))
-                }
-            else:
-                bucket_counts_arr = np.array([len(indices)])
-                boundary_to_bucket = {}
-
-            # Per-bucket pre-allocated storage: (output_arr, idx_arr, offset)
-            bucket_storage: dict[int, tuple[np.ndarray, np.ndarray, int]] = {}
-            # Fallback for overflow batches (padded_len ≠ any finite boundary)
-            bucket_fallback: dict[int, tuple[list, list]] = {}
+            # A single TF bucket can produce batches with different padded_len
+            # values (the BatchGenerator snaps max_raw+1 up to the next
+            # boundary, so batches whose max_raw+1 falls between two adjacent
+            # boundaries land in different padded_len groups).  Pre-allocating
+            # a fixed-size array per bucket is therefore unreliable; we simply
+            # collect lists and concatenate at the end.
+            bucket_preds: dict[int, tuple[list, list]] = {}
 
             for batch_data in ds.take(steps):
                 batch_pred_t, batch_idx_t = predict_batch(batch_data)
@@ -731,44 +703,12 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
                 del batch_pred_t, batch_idx_t  # release TF memory immediately
 
                 padded_len = batch_pred.shape[1]
-                B = batch_pred.shape[0]
-                b_assign = boundary_to_bucket.get(padded_len)
-
-                if b_assign is not None:
-                    # Known bucket: allocate on first encounter, then fill
-                    if padded_len not in bucket_storage:
-                        N_bucket = int(bucket_counts_arr[b_assign])
-                        tail = batch_pred.shape[2:]
-                        arr = np.empty(
-                            (N_bucket, padded_len) + tail,
-                            dtype=batch_pred.dtype,
-                        )
-                        idx_arr = np.empty((N_bucket,), dtype=np.intp)
-                        bucket_storage[padded_len] = (arr, idx_arr, 0)
-
-                    arr, idx_arr, offset = bucket_storage[padded_len]
-                    arr[offset:offset + B] = batch_pred
-                    idx_arr[offset:offset + B] = batch_idx
-                    bucket_storage[padded_len] = (arr, idx_arr, offset + B)
-                    del batch_pred  # copied into arr; free immediately
-                else:
-                    # Overflow bucket: variable padded_len per batch
-                    fb = bucket_fallback.setdefault(padded_len, ([], []))
-                    fb[0].append(batch_pred)
-                    fb[1].append(batch_idx)
+                acc = bucket_preds.setdefault(padded_len, ([], []))
+                acc[0].append(batch_pred)
+                acc[1].append(batch_idx)
 
             outputs: np.ndarray | list = []
-            for padded_len, (arr, idx_arr, total) in bucket_storage.items():
-                bucket_idx = idx_arr[:total]
-                bucket_max_len = int(
-                    np.amax(data[0].seq_lens[indices[bucket_idx]]) + 1
-                )
-                L = min(padded_len, bucket_max_len)
-                bucket_pred = arr[:total, :L]
-                _replace_padding(bucket_pred)
-                outputs.append((bucket_pred, bucket_idx))
-
-            for padded_len, (preds, idxs) in bucket_fallback.items():
+            for padded_len, (preds, idxs) in bucket_preds.items():
                 bucket_idx = np.concatenate(idxs, axis=0)
                 bucket_max_len = int(
                     np.amax(data[0].seq_lens[indices[bucket_idx]]) + 1
