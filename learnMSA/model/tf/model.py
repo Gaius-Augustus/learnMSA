@@ -409,7 +409,11 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             log_prior: Tensor of shape (num_models,) with the log prior values.
         """
         if self.context.sequence_weights is not None:
-            S = self.context.sequence_weights.sum()
+            num_cluster = self.context.sequence_weights.sum()
+            # Use a geometric interpolation between the number of clusters
+            # and the actual sequence count to be more stable; because the
+            # former can be small
+            S = math.sqrt(num_cluster * self.context.num_seq)
         else:
             S = self.context.num_seq
         log_prior = self.phmm_layer.prior_scores()

@@ -125,9 +125,11 @@ def test_compute_loss_amino_acid(context_amino_acid: LearnMSAContext) -> None:
         / weights.sum()
     loss_log_lik = loss_log_lik_per_head.mean()
 
-    assert context_amino_acid.sequence_weights is not None
+    w = context_amino_acid.sequence_weights
+    n = context_amino_acid.num_seq
+    assert w is not None
     loss_log_prior = -model.phmm_layer.prior_scores().numpy().mean()\
-        / context_amino_acid.sequence_weights.sum()
+        / np.sqrt(w.sum() * n)
 
     np.testing.assert_allclose(loss.numpy(), loss_log_lik + loss_log_prior)
 
@@ -193,9 +195,11 @@ def test_compute_loss_binary(context_binary: LearnMSAContext) -> None:
     # The loss per head is a weighted average and all batch elements have
     # the same likelihood
     loss_log_lik = -np.log(ref.likelihoods).mean()
-    assert context_binary.sequence_weights is not None
+    w = context_binary.sequence_weights
+    n = context_binary.num_seq
+    assert w is not None
     loss_log_prior = -model.phmm_layer.prior_scores().numpy().mean()\
-        / context_binary.sequence_weights.sum()
+        / np.sqrt(w.sum() * n)
 
     np.testing.assert_allclose(loss.numpy(), loss_log_lik + loss_log_prior)
 
@@ -436,9 +440,11 @@ def test_evaluate(context_binary: LearnMSAContext) -> None:
 
     expected_loglik = np.log(ref.likelihoods)
 
-    assert context_binary.sequence_weights is not None
+    w = context_binary.sequence_weights
+    n = context_binary.num_seq
+    assert w is not None
     expected_prior = model.phmm_layer.prior_scores().numpy() \
-        / context_binary.sequence_weights.sum()
+        / np.sqrt(w.sum() * n)
 
     expected_loss = -expected_loglik - expected_prior
 

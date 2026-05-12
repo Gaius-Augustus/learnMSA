@@ -209,6 +209,9 @@ class AncProbsLayer(tf.keras.layers.Layer):
             nd_indices = tf.stack([subset, h_indices], axis=-1)  # (B, H, 2)
             tau = tf.gather_nd(tau, nd_indices)  # (B, H, I)
 
+        # Clamp kernel to prevent NaN during training.
+        tau = tf.clip_by_value(tau, -80.0, 80.0)
+
         return backend.make_branch_lengths(tau)
 
     def _compute_anc_probs(

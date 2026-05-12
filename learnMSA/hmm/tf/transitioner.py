@@ -124,9 +124,11 @@ class PHMMExplicitTransitioner(TFTransitioner):
             kernel = self.kernel + transition_delta
         else:
             kernel = self.kernel
-        # Add epsilon in probability space to ensure that no allowed
+        # Clip by epsilon in probability space to ensure that no allowed
         # transition has vanishing probability
-        kernel = tf.math.log(tf.math.exp(kernel) + 1e-16)
+        kernel = tf.math.maximum(
+            kernel, tf.cast(tf.math.log(1e-16), kernel.dtype)
+        )
         dense_tensor = shared_tensor(
             indices=self.allow, # type: ignore
             values=kernel,
