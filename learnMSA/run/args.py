@@ -692,6 +692,12 @@ def parse_args(
         help=argparse.SUPPRESS
     )
     parser.add_argument(
+        "--trainable_rate_matrices",
+        dest="trainable_rate_matrices",
+        action="store_true",
+        help=argparse.SUPPRESS
+    )
+    parser.add_argument(
         "--initial_distance",
         dest="initial_distance",
         type=float,

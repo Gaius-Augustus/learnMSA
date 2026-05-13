@@ -60,7 +60,9 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
                 rate_init=context.encoder_initializer[0],
                 exchangeability_init=context.encoder_initializer[1],
                 trainable_distances=train_cfg.trainable_distances,
-                clusters=context.clusters
+                trainable_rate_matrices=train_cfg.trainable_rate_matrices,
+                clusters=context.clusters,
+                time_reversed=train_cfg.trainable_rate_matrices,
             )
 
         self.phmm_layer = PHMMLayer(

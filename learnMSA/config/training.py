@@ -103,6 +103,9 @@ class TrainingConfig(BaseModel):
     trainable_distances: bool = True
     """Whether distances are trainable."""
 
+    trainable_rate_matrices: bool = False
+    """Whether rate matrices are trainable."""
+
     only_matches: bool = False
     """Omit all insertions in the output and write only those amino
         acids that are assigned to match states."""

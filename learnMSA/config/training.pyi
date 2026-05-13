@@ -32,6 +32,7 @@ class TrainingConfig(BaseModel):
     dirichlet_mix_comp_count: int
     use_anc_probs: bool
     trainable_distances: bool
+    trainable_rate_matrices: bool
     only_matches: bool
     surgery_checkpoints: bool
     pre_training_checkpoint: bool
@@ -72,6 +73,7 @@ class TrainingConfig(BaseModel):
         dirichlet_mix_comp_count: int = 1,
         use_anc_probs: bool = False,
         trainable_distances: bool = True,
+        trainable_rate_matrices: bool = False,
         only_matches: bool = False,
         surgery_checkpoints: bool = True,
         pre_training_checkpoint: bool = False,

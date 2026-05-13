@@ -29,6 +29,10 @@ class AncProbsLayer(tf.keras.layers.Layer):
         rate_init: Initializer for the rates.
         trainable_distances: Flag that can prevent learning the evolutionary
             times.
+        trainable_rate_matrices: Flag that can prevent learning the rate
+            matrices. If False, the GTR eigendecomposition is precomputed and
+            stored as a constant tensor to optimize computation. If True,
+            time_reversed should also be True.
         clusters: An optional vector that assigns each sequence to a cluster.
             If provided, the evolutionary time is learned per cluster.
         alphabet_size: The size of the alphabet underlying the substitution
@@ -50,6 +54,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
         exchangeability_init: tf.keras.initializers.Initializer,
         rate_init: tf.keras.initializers.Initializer,
         trainable_distances: bool=True,
+        trainable_rate_matrices: bool=False,
         clusters: np.ndarray|None=None,
         alphabet_size: int=20,
         time_reversed: bool=False,
@@ -63,6 +68,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
         self.equilibrium_init = equilibrium_init
         self.exchangeability_init = exchangeability_init
         self.trainable_distances = trainable_distances
+        self.trainable_rate_matrices = trainable_rate_matrices
         self.clusters = clusters
         self.alphabet_size = alphabet_size
         self.time_reversed = time_reversed
@@ -72,6 +78,12 @@ class AncProbsLayer(tf.keras.layers.Layer):
             self.num_clusters = np.max(clusters) + 1
         self._head_subset = None
         self._gtr_decomp = None
+        if self.trainable_rate_matrices and not self.time_reversed:
+            raise ValueError(
+                "If trainable_rate_matrices is True, time_reversed must also" \
+                "be True. Otherwise no meaningful model can be learned, since " \
+                "Q can arbitrarily change residues to maximize HMM likelihood."
+            )
 
     @property
     def head_subset(self):
@@ -105,14 +117,14 @@ class AncProbsLayer(tf.keras.layers.Layer):
             ],
             name="exchangeability_kernel",
             initializer=self.exchangeability_init,
-            trainable=False
+            trainable=self.trainable_rate_matrices
         )
 
         self.equilibrium_kernel = self.add_weight(
             shape=[self.heads, self.input_tracks, self.alphabet_size],
             name="equilibrium_kernel",
             initializer=self.equilibrium_init,
-            trainable=False
+            trainable=self.trainable_rate_matrices
         )
 
         self._precompute_gtr_decomposition()
@@ -123,6 +135,9 @@ class AncProbsLayer(tf.keras.layers.Layer):
         """Precompute GTR eigendecomposition for non-trainable rate matrices.
         Stores the result as a constant tensor to optimize computation.
         """
+        if self.trainable_rate_matrices:
+            self._gtr_decomp = None
+            return
         # Compute rate matrices
         R, p = self.make_R(), self.make_p()
 
