@@ -143,7 +143,8 @@ def get_test_configs(sequences : np.ndarray) -> list[dict]:
 def make_anc_probs_layer(
     config : Configuration,
     enc_init : list[tf.keras.initializers.Initializer],
-    num_rates: int
+    num_rates: int,
+    time_reversed: bool=False
 ) -> AncProbsLayer:
     return AncProbsLayer(
         heads = config.training.num_model,
@@ -154,6 +155,7 @@ def make_anc_probs_layer(
         exchangeability_init=enc_init[1],
         trainable_distances=config.training.trainable_distances,
         alphabet_size=20,
+        time_reversed=time_reversed,
     )
 
 
@@ -274,3 +276,40 @@ def test_encoder_model() -> None:
                 )
             else:
                 assert_anc_probs(anc_prob_seqs, case["expected_freq"])
+
+def test_time_reversed() -> None:
+    # Set up a layer with default initialization and time_reversed=True
+    config = Configuration()
+    config.training.num_model = 1
+    encoder_initializer = Initializers.make_default_anc_probs_init(1)
+    anc_probs_layer = make_anc_probs_layer(
+        config,
+        Initializers.make_default_anc_probs_init(1),
+        num_rates=1,
+        time_reversed=True,
+    )
+
+    # Get sequence data
+    filename = os.path.dirname(__file__) + "/../tests/data/simple.fa"
+    with SequenceDataset(filename) as data:
+        sequences = get_simple_seq(data)  # Shape: (b, L, num_model)
+    n = sequences.shape[0]
+    L = sequences.shape[1]
+    # Convert to one-hot: (b, L, num_model, 20)
+    sequences_onehot = tf.one_hot(sequences, depth=20, dtype=tf.float32).numpy()
+    rate_indices = np.arange(n)[:, np.newaxis]
+
+    anc_probs = anc_probs_layer(
+        sequences_onehot, rate_indices=rate_indices # type: ignore
+    ).numpy()
+
+    # Compute the expected output by gathering columns of P
+    # shape P: (n, 1, 1, 20, 20)
+    P = anc_probs_layer.make_P(anc_probs_layer.make_tau(rate_indices)).numpy()
+    ref_anc_probs = np.empty((n, L, 1, 20), dtype=np.float32)
+    for i in range(n):
+        for j in range(L):
+            for k in range(20):
+                ref_anc_probs[i, j, 0, k] = P[i, 0, 0, sequences[i, j, 0], k]
+
+    assert_vec(anc_probs, ref_anc_probs, almost=True)

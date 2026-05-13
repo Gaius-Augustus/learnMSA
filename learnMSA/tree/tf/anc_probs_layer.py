@@ -33,6 +33,12 @@ class AncProbsLayer(tf.keras.layers.Layer):
             If provided, the evolutionary time is learned per cluster.
         alphabet_size: The size of the alphabet underlying the substitution
             models.
+        time_reversed: If False, the layer returns the conditional distribution
+            P(S_i^tau | S_i^0; Q) of the amino acid at position i after
+            continuous time tau given rate matrix Q. If True, the layer returns
+            P(S_i | A; tau, Q, pi) instead (how likely is the observation S_i
+            if the substituted amino acid at the root is A after time tau given
+            rate matrix Q and equilibrium distribution pi).
     """
 
     def __init__(
@@ -46,6 +52,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
         trainable_distances: bool=True,
         clusters: np.ndarray|None=None,
         alphabet_size: int=20,
+        time_reversed: bool=False,
         **kwargs
     ):
         super(AncProbsLayer, self).__init__(**kwargs)
@@ -58,6 +65,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
         self.trainable_distances = trainable_distances
         self.clusters = clusters
         self.alphabet_size = alphabet_size
+        self.time_reversed = time_reversed
         if clusters is None:
             self.num_clusters = self.rates
         else:
@@ -214,6 +222,35 @@ class AncProbsLayer(tf.keras.layers.Layer):
 
         return backend.make_branch_lengths(tau)
 
+    def make_P(self, tau: tf.Tensor) -> tf.Tensor:
+        """Computes the transition matrices P for all models and
+        sequences given the evolutionary times tau. Takes the time_reversed
+        argument of the layer into account.
+
+        Args:
+            tau: A tensor of shape (B, H, I) containing the evolutionary times.
+
+        Returns:
+            A tensor of shape (B, H, I, D, D) containing the transition
+            matrices for all models and sequences.
+        """
+        # Compute probability matrices
+        if self._gtr_decomp is not None:
+            # (B, H, I, D, D)
+            P = expm_gtr_from_decomp(self._gtr_decomp, tau)
+        else:
+            R = self.make_R()  # (H, I, D, D)
+            p = self.make_p()  # (H, I, D)
+            Q = backend.make_rate_matrix(R, p)
+            Q = tf.expand_dims(Q, 0)  # Add batch dimension (1, H, I, D, D)
+
+            # (B, H, I, D, D)
+            P = expm_gtr(Q, tau, p)
+        if self.time_reversed:
+            # Transpose the last two dimensions to reverse time direction
+            P = tf.transpose(P, perm=[0, 1, 2, 4, 3])
+        return P
+
     def _compute_anc_probs(
         self, sequences: tf.Tensor, tau: tf.Tensor
     ) -> tf.Tensor:
@@ -229,18 +266,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
         Returns:
             Ancestral probabilities. Shape: (B, L, H, I, D)
         """
-        # Compute probability matrices
-        if self._gtr_decomp is not None:
-            # (B, H, I, D, D)
-            P = expm_gtr_from_decomp(self._gtr_decomp, tau)
-        else:
-            R = self.make_R()  # (H, I, D, D)
-            p = self.make_p()  # (H, I, D)
-            Q = backend.make_rate_matrix(R, p)
-            Q = tf.expand_dims(Q, 0)  # Add batch dimension (1, H, I, D, D)
-
-            # (B, H, I, D, D)
-            P = expm_gtr(Q, tau, p)
+        P = self.make_P(tau)  # (B, H, I, D, D)
 
         # Compute ancestral probabilities using einsum
         # Sequences might require broadcasting to the number of heads
