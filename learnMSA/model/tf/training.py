@@ -465,28 +465,32 @@ def make_default_bucket_scheme(
         q = np.array([], dtype=float)
     quantiles = np.quantile(seq_lens, q=q).astype(int)
 
+    min_seq_len = int(np.min(seq_lens))
+    max_seq_len = int(np.max(seq_lens))
+
+    bucket_boundaries = np.unique(quantiles).tolist()
+
+    # Inlude a final bucket boundary above the maximum sequence length
+    # (pad_to_bucket_boundary=True requires every sequence length to be
+    # strictly smaller than max(quantiles))
+    if len(bucket_boundaries) == 0 or bucket_boundaries[-1] <= max_seq_len:
+        bucket_boundaries.append(max_seq_len + 1)
+
     # Compute an adaptive minimum gap between boundaries. Otherwise bucket
     # boundaries can be very close together if the sequences are homogeneous
     # in length.
-    min_seq_len = int(np.min(seq_lens))
-    max_seq_len = int(np.max(seq_lens))
     length_range = max_seq_len - min_seq_len
     min_gap = max(10, length_range // (max_num_buckets + 1))
 
     # Greedy filter: keep a quantile boundary only if it is more than min_gap
     # away from the previous kept boundary.
-    filtered: list[int] = []
-    prev = min_seq_len
-    for v in np.unique(quantiles).tolist():
-        if v - prev > min_gap:
+    filtered: list[int] = [bucket_boundaries[-1]]
+    prev = filtered[0]
+    for v in bucket_boundaries[:-1][::-1]:  # iterate from largest to smallest
+        if prev - v > min_gap:
             filtered.append(v)
             prev = v
-    bucket_boundaries = filtered
-
-    # pad_to_bucket_boundary=True requires every sequence length to be
-    # strictly smaller than max(bucket_boundaries).
-    if len(bucket_boundaries) == 0 or bucket_boundaries[-1] <= max_seq_len:
-        bucket_boundaries.append(max_seq_len + 1)
+    bucket_boundaries = filtered[::-1]
 
     adaptive_batch = partial(
         training_util.get_adaptive_batch_size,
