@@ -28,7 +28,8 @@ class ConstantInitializer(tf.keras.initializers.Constant):
 
 
 def make_default_anc_probs_init(
-    num_models: int
+    num_models: int,
+    num_components: int = 1,
 ) -> list[tf.keras.initializers.Initializer]:
     R, p = LG(SequenceDataset._default_alphabet[:20])# (D, D), (D,)
     exchangeability_init = inverse_softplus(R + 1e-32).numpy()
@@ -37,9 +38,14 @@ def make_default_anc_probs_init(
     exchangeability_stack = np.stack([exchangeability_init]*num_models, axis=0)
     log_p_stack = np.stack([np.log(p)]*num_models, axis=0)
 
-    # Expand to (H, 1, D, D), (H, 1, D) for broadcasting in the layer
-    exchangeability_stack = np.expand_dims(exchangeability_stack, axis=1)
-    log_p_stack = np.expand_dims(log_p_stack, axis=1)
+    # Expand to (H, 1, 1, D, D), (H, 1, 1, D) — add I=1 and K=1 dims
+    exchangeability_stack = np.expand_dims(np.expand_dims(exchangeability_stack, axis=1), axis=2)
+    log_p_stack = np.expand_dims(np.expand_dims(log_p_stack, axis=1), axis=2)
+
+    # Tile to K components (each initialized to the same LG model)
+    if num_components > 1:
+        exchangeability_stack = np.tile(exchangeability_stack, (1, 1, num_components, 1, 1))
+        log_p_stack = np.tile(log_p_stack, (1, 1, num_components, 1))
 
     return [ConstantInitializer(-3),
             ConstantInitializer(exchangeability_stack),

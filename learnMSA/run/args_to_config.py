@@ -72,6 +72,7 @@ def args_to_config(args: Namespace, base_config: Configuration | None = None) ->
     tr["skip_training"] = args.skip_training
     tr["trainable_distances"] = not args.frozen_distances
     tr["trainable_rate_matrices"] = args.trainable_rate_matrices
+    tr["num_anc_probs_components"] = args.num_anc_probs_components
     tr["only_matches"] = args.only_matches
     tr["use_noise"] = not args.no_noise
     tr["no_aa"] = args.no_aa

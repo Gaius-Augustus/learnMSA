@@ -43,6 +43,12 @@ class AncProbsLayer(tf.keras.layers.Layer):
             P(S_i | A; tau, Q, pi) instead (how likely is the observation S_i
             if the substituted amino acid at the root is A after time tau given
             rate matrix Q and equilibrium distribution pi).
+        num_components: The number of mixture components K. If > 1, the layer
+            learns a mixture of K independent GTR models per head and track,
+            sharing branch lengths across components. Defaults to 1.
+        mixture_init: Initializer for the mixture logit weights of shape
+            (H, I, K). Defaults to RandomNormal(stddev=0.1) to break symmetry
+            while keeping initial weights close to uniform.
     """
 
     def __init__(
@@ -58,6 +64,8 @@ class AncProbsLayer(tf.keras.layers.Layer):
         clusters: np.ndarray|None=None,
         alphabet_size: int=20,
         time_reversed: bool=False,
+        num_components: int=1,
+        mixture_init: tf.keras.initializers.Initializer|None=None,
         **kwargs
     ):
         super(AncProbsLayer, self).__init__(**kwargs)
@@ -72,6 +80,11 @@ class AncProbsLayer(tf.keras.layers.Layer):
         self.clusters = clusters
         self.alphabet_size = alphabet_size
         self.time_reversed = time_reversed
+        self.num_components = num_components
+        if mixture_init is None:
+            self.mixture_init = tf.keras.initializers.RandomNormal(stddev=0.1)
+        else:
+            self.mixture_init = mixture_init
         if clusters is None:
             self.num_clusters = self.rates
         else:
@@ -112,6 +125,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
             shape=[
                 self.heads,
                 self.input_tracks,
+                self.num_components,
                 self.alphabet_size,
                 self.alphabet_size
             ],
@@ -121,11 +135,24 @@ class AncProbsLayer(tf.keras.layers.Layer):
         )
 
         self.equilibrium_kernel = self.add_weight(
-            shape=[self.heads, self.input_tracks, self.alphabet_size],
+            shape=[
+                self.heads,
+                self.input_tracks,
+                self.num_components,
+                self.alphabet_size
+            ],
             name="equilibrium_kernel",
             initializer=self.equilibrium_init,
             trainable=self.trainable_rate_matrices
         )
+
+        if self.num_components > 1:
+            self.mixture_kernel = self.add_weight(
+                shape=[self.heads, self.input_tracks, self.num_components],
+                name="mixture_kernel",
+                initializer=self.mixture_init,
+                trainable=True,
+            )
 
         self._precompute_gtr_decomposition()
 
@@ -146,17 +173,19 @@ class AncProbsLayer(tf.keras.layers.Layer):
         else:
             heads = len(self._head_subset)
 
-        R_flat = tf.reshape(R, (-1, 20, 20))
-        p_flat = tf.reshape(p, (-1, 20))
+        IK = self.input_tracks * self.num_components
+        R_flat = tf.reshape(R, (-1, self.alphabet_size, self.alphabet_size))
+        p_flat = tf.reshape(p, (-1, self.alphabet_size))
         Q = backend.make_rate_matrix(R_flat, p_flat)
         Q = tf.reshape(
             Q,
-            (heads, self.input_tracks, self.alphabet_size, self.alphabet_size)
+            (heads, IK, self.alphabet_size, self.alphabet_size)
         )
+        p_IK = tf.reshape(p, (heads, IK, self.alphabet_size))
 
         # Add batch dimension for compatibility with _compute_anc_probs
-        Q_exp = tf.expand_dims(Q, 0)  # (1, heads, input_tracks, a, a)
-        p_exp = tf.expand_dims(p, 0)  # (1, heads, input_tracks, a)
+        Q_exp = tf.expand_dims(Q, 0)  # (1, heads, input_tracks*K, a, a)
+        p_exp = tf.expand_dims(p_IK, 0)  # (1, heads, input_tracks*K, a)
 
         # Precompute GTR decomposition
         decomp = precompute_gtr(Q_exp, p_exp)
@@ -173,7 +202,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
         """Computes the exchangeability matrices R for all models.
 
         Returns:
-            A tensor of shape (H, I, D, D).
+            A tensor of shape (H, I, K, D, D).
         """
         if kernel is None:
             kernel = self.exchangeability_kernel
@@ -185,22 +214,41 @@ class AncProbsLayer(tf.keras.layers.Layer):
         """Computes the equilibrium distributions p for all models.
 
         Returns:
-            A tensor of shape (H, I, D).
+            A tensor of shape (H, I, K, D).
         """
         kernel = self.equilibrium_kernel
         if self._head_subset is not None:
             kernel = tf.gather(kernel, self._head_subset, axis=0)
         return backend.make_equilibrium(kernel)
 
-    def make_Q(self) -> tf.Tensor:
-        """Computes the rate matrices Q for all models.
+    def make_w(self) -> tf.Tensor:
+        """Computes the mixture weights for all models.
 
         Returns:
-            A tensor of shape (H, I, D, D).
+            A tensor of shape (H, I, K) that sums to 1 along the K axis.
         """
-        R, p = self.make_R(), self.make_p()
-        Q = backend.make_rate_matrix(R, p)
-        return Q
+        if self.num_components == 1:
+            if self._head_subset is None:
+                H_active = self.heads
+            else:
+                H_active = len(self._head_subset)
+            return tf.ones((H_active, self.input_tracks, 1))
+        kernel = self.mixture_kernel
+        if self._head_subset is not None:
+            kernel = tf.gather(kernel, self._head_subset, axis=0)
+        return tf.nn.softmax(kernel, axis=-1)
+
+    def make_Q(self) -> tf.Tensor:
+        """Computes the rate matrices Q for all models and mixture components.
+
+        Returns:
+            A tensor of shape (H, I, K, D, D).
+        """
+        R, p = self.make_R(), self.make_p()  # (H, I, K, D, D), (H, I, K, D)
+        R_flat = tf.reshape(R, (-1, self.alphabet_size, self.alphabet_size))
+        p_flat = tf.reshape(p, (-1, self.alphabet_size))
+        Q_flat = backend.make_rate_matrix(R_flat, p_flat)
+        return tf.reshape(Q_flat, tf.shape(R))
 
     def make_tau(self, subset: tf.Tensor | None = None) -> tf.Tensor:
         """
@@ -249,18 +297,40 @@ class AncProbsLayer(tf.keras.layers.Layer):
             A tensor of shape (B, H, I, D, D) containing the transition
             matrices for all models and sequences.
         """
-        # Compute probability matrices
-        if self._gtr_decomp is not None:
-            # (B, H, I, D, D)
-            P = expm_gtr_from_decomp(self._gtr_decomp, tau)
+        if self._head_subset is None:
+            H_active = self.heads
         else:
-            R = self.make_R()  # (H, I, D, D)
-            p = self.make_p()  # (H, I, D)
-            Q = backend.make_rate_matrix(R, p)
-            Q = tf.expand_dims(Q, 0)  # Add batch dimension (1, H, I, D, D)
+            H_active = len(self._head_subset)
+        IK = self.input_tracks * self.num_components
 
-            # (B, H, I, D, D)
-            P = expm_gtr(Q, tau, p)
+        # Expand tau from (B, H, I) to (B, H, I*K) by repeating for each component
+        tau_expanded = tf.repeat(tau, self.num_components, axis=-1)  # (B, H, I*K)
+
+        # Compute probability matrices for all mixture components
+        if self._gtr_decomp is not None:
+            P_all = expm_gtr_from_decomp(self._gtr_decomp, tau_expanded)  # (B, H, I*K, D, D)
+        else:
+            R = self.make_R()  # (H, I, K, D, D)
+            p = self.make_p()  # (H, I, K, D)
+            R_flat = tf.reshape(R, (-1, self.alphabet_size, self.alphabet_size))
+            p_flat = tf.reshape(p, (-1, self.alphabet_size))
+            Q = backend.make_rate_matrix(R_flat, p_flat)  # (H*I*K, D, D)
+            Q = tf.reshape(Q, (H_active, IK, self.alphabet_size, self.alphabet_size))
+            Q = tf.expand_dims(Q, 0)  # (1, H, I*K, D, D)
+            p_IK = tf.reshape(p, (H_active, IK, self.alphabet_size))
+            p_IK = tf.expand_dims(p_IK, 0)  # (1, H, I*K, D)
+            P_all = expm_gtr(Q, tau_expanded, p_IK)  # (B, H, I*K, D, D)
+
+        # Reshape to (B, H, I, K, D, D) and compute the weighted mixture
+        P_all = tf.reshape(
+            P_all,
+            [-1, H_active, self.input_tracks, self.num_components,
+             self.alphabet_size, self.alphabet_size]
+        )
+        w = self.make_w()  # (H, I, K)
+        w = w[tf.newaxis, :, :, :, tf.newaxis, tf.newaxis]  # (1, H, I, K, 1, 1)
+        P = tf.reduce_sum(w * P_all, axis=3)  # (B, H, I, D, D)
+
         if self.time_reversed:
             # Transpose the last two dimensions to reverse time direction
             P = tf.transpose(P, perm=[0, 1, 2, 4, 3])
@@ -357,7 +427,12 @@ class AncProbsLayer(tf.keras.layers.Layer):
             "trainable_distances": self.trainable_distances,
             "clusters": self.clusters,
             "alphabet_size": self.alphabet_size,
+            "num_components": self.num_components,
         })
+        if self.num_components > 1:
+            config["mixture_init"] = initializer.ConstantInitializer(
+                self.mixture_kernel.numpy()
+            )
         return config
 
     @classmethod

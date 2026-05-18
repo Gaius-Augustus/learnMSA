@@ -80,14 +80,17 @@ def assert_anc_probs_layer(
     assert R.shape[1] == 1
     assert Q.shape[1] == 1
     for model_equi in p:
-        for equi in model_equi:
-            assert_equilibrium(equi)
+        for equi_tracks in model_equi:
+            for equi in equi_tracks:
+                assert_equilibrium(equi)
     for model_exchange in R:
-        for exchange in model_exchange:
-            assert_symmetric(exchange)
+        for exchange_tracks in model_exchange:
+            for exchange in exchange_tracks:
+                assert_symmetric(exchange)
     for model_rate, model_equi in zip(Q, p):
-        for rate, equi in zip(model_rate, model_equi):
-            assert_rate_matrix(rate, equi)
+        for rate_tracks, equi_tracks in zip(model_rate, model_equi):
+            for rate, equi in zip(rate_tracks, equi_tracks):
+                assert_rate_matrix(rate, equi)
 
 
 def get_test_configs(sequences : np.ndarray) -> list[dict]:
@@ -99,8 +102,8 @@ def get_test_configs(sequences : np.ndarray) -> list[dict]:
     # Assuming sequences only contain the 20 standard AAs
     oh_sequences = tf.one_hot(sequences, 20)
     anc_probs_init = Initializers.make_default_anc_probs_init(1)
-    inv_sp_R = anc_probs_init[1]((1, 1, 20, 20))
-    log_p = anc_probs_init[2]((1, 1, 20))
+    inv_sp_R = anc_probs_init[1]((1, 1, 1, 20, 20))
+    log_p = anc_probs_init[2]((1, 1, 1, 20))
     p = tf.nn.softmax(log_p)
     cases = []
     for rate_init in [-100., -3., 100.]:
@@ -313,3 +316,51 @@ def test_time_reversed() -> None:
                 ref_anc_probs[i, j, 0, k] = P[i, 0, 0, sequences[i, j, 0], k]
 
     assert_vec(anc_probs, ref_anc_probs, almost=True)
+
+
+def test_mixture_model() -> None:
+    """Test AncProbsLayer with num_components > 1 (mixture of GTR models)."""
+    config = Configuration()
+    config.training.num_model = 2
+    num_components = 3
+    enc_init = Initializers.make_default_anc_probs_init(
+        config.training.num_model, num_components=num_components
+    )
+
+    # Get sequence data
+    filename = os.path.dirname(__file__) + "/../tests/data/simple.fa"
+    with SequenceDataset(filename) as data:
+        sequences = get_simple_seq(data)
+    n = sequences.shape[0]
+    rate_indices = np.arange(n)[:, np.newaxis]
+    sequences_onehot = tf.one_hot(sequences, depth=20, dtype=tf.float32).numpy()
+
+    layer = AncProbsLayer(
+        heads=config.training.num_model,
+        rates=n,
+        input_tracks=1,
+        equilibrium_init=enc_init[2],
+        rate_init=enc_init[0],
+        exchangeability_init=enc_init[1],
+        num_components=num_components,
+    )
+    layer.build()
+
+    # Verify mixture weights sum to 1
+    w = layer.make_w().numpy()
+    assert w.shape == (config.training.num_model, 1, num_components)
+    np.testing.assert_allclose(w.sum(axis=-1), 1.0, atol=1e-6)
+
+    # Verify P is a valid stochastic matrix (rows sum to 1)
+    tau = layer.make_tau(rate_indices)
+    P = layer.make_P(tau).numpy()
+    assert P.shape == (n, config.training.num_model, 1, 20, 20)
+    np.testing.assert_allclose(P.sum(axis=-1), 1.0, atol=1e-5)
+
+    # Verify Q and p shapes include K
+    assert layer.make_Q().shape == (config.training.num_model, 1, num_components, 20, 20)
+    assert layer.make_p().shape == (config.training.num_model, 1, num_components, 20)
+
+    # Verify call output shape is unchanged (same as K=1)
+    out = layer(sequences_onehot, rate_indices=rate_indices)
+    assert out.shape == (n, sequences.shape[1], config.training.num_model, 20)

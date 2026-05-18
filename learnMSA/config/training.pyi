@@ -33,6 +33,7 @@ class TrainingConfig(BaseModel):
     use_anc_probs: bool
     trainable_distances: bool
     trainable_rate_matrices: bool
+    num_anc_probs_components: int
     only_matches: bool
     surgery_checkpoints: bool
     pre_training_checkpoint: bool
@@ -74,6 +75,7 @@ class TrainingConfig(BaseModel):
         use_anc_probs: bool = False,
         trainable_distances: bool = True,
         trainable_rate_matrices: bool = False,
+        num_anc_probs_components: int = 1,
         only_matches: bool = False,
         surgery_checkpoints: bool = True,
         pre_training_checkpoint: bool = False,

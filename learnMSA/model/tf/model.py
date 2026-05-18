@@ -63,6 +63,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
                 trainable_rate_matrices=train_cfg.trainable_rate_matrices,
                 clusters=context.clusters,
                 time_reversed=train_cfg.trainable_rate_matrices,
+                num_components=train_cfg.num_anc_probs_components,
             )
 
         self.phmm_layer = PHMMLayer(
@@ -258,6 +259,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             optimizer=optimizer,
             jit_compile=self.use_jit_compile(total_steps),
         )
+        self.summary()
 
     @override
     def fit(

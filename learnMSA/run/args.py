@@ -381,6 +381,14 @@ def parse_args(
             " In general not recommended."
     )
     train_group.add_argument(
+        "--num_anc_probs_components",
+        dest="num_anc_probs_components",
+        type=int,
+        default=tr.num_anc_probs_components,
+        help="Number of mixture components in the substitution model. "
+            "(default: %(default)s)"
+    )
+    train_group.add_argument(
         "--skip_training",
         dest="skip_training",
         action="store_true",

@@ -88,7 +88,7 @@ class TrainingConfig(BaseModel):
     skip_training: bool = False
     """Only decode an alignment from the provided model."""
 
-    cluster_seq_id: float = 0.7
+    cluster_seq_id: float = 0.5
     """Sequence identity for computing sequence weights."""
 
     use_prior: bool = True
@@ -105,6 +105,9 @@ class TrainingConfig(BaseModel):
 
     trainable_rate_matrices: bool = False
     """Whether rate matrices are trainable."""
+
+    num_anc_probs_components: int = 1
+    """Number of mixture components in the ancestral probabilities layer."""
 
     only_matches: bool = False
     """Omit all insertions in the output and write only those amino
