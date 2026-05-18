@@ -163,7 +163,10 @@ class LearnMSAContext:
 
         # Set up encoder initialization
         self.encoder_initializer = initializers.make_default_anc_probs_init(
-            self.config.training.num_model
+            self.config.training.num_model,
+            num_components=self.config.training.num_anc_probs_components,
+            exchangeability_noise_std=self.config.training.exchangeability_noise_std,
+            equilibrium_noise_std=self.config.training.equilibrium_noise_std,
         )
         self.encoder_weight_extractor = None
         self.encoder_initializer[0] = ConstantInitializer(

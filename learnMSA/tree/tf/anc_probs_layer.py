@@ -29,10 +29,16 @@ class AncProbsLayer(tf.keras.layers.Layer):
         rate_init: Initializer for the rates.
         trainable_distances: Flag that can prevent learning the evolutionary
             times.
-        trainable_rate_matrices: Flag that can prevent learning the rate
-            matrices. If False, the GTR eigendecomposition is precomputed and
-            stored as a constant tensor to optimize computation. If True,
-            time_reversed should also be True.
+        trainable_exchangeabilities: Flag that controls whether the
+            exchangeability matrices are trainable. Defaults to True.
+        trainable_equilibrium: Flag that controls whether the equilibrium
+            distributions are trainable. Defaults to False.
+        shared_equilibrium: If True, all mixture components share a single
+            equilibrium distribution. Defaults to False. If False, the GTR
+            eigendecomposition is precomputed and stored as a constant tensor
+            when neither trainable_exchangeabilities nor trainable_equilibrium
+            is True. If trainable_exchangeabilities or trainable_equilibrium
+            is True, time_reversed should also be True.
         clusters: An optional vector that assigns each sequence to a cluster.
             If provided, the evolutionary time is learned per cluster.
         alphabet_size: The size of the alphabet underlying the substitution
@@ -60,7 +66,9 @@ class AncProbsLayer(tf.keras.layers.Layer):
         exchangeability_init: tf.keras.initializers.Initializer,
         rate_init: tf.keras.initializers.Initializer,
         trainable_distances: bool=True,
-        trainable_rate_matrices: bool=False,
+        trainable_exchangeabilities: bool=False,
+        trainable_equilibrium: bool=False,
+        shared_equilibrium: bool=True,
         clusters: np.ndarray|None=None,
         alphabet_size: int=20,
         time_reversed: bool=False,
@@ -76,7 +84,9 @@ class AncProbsLayer(tf.keras.layers.Layer):
         self.equilibrium_init = equilibrium_init
         self.exchangeability_init = exchangeability_init
         self.trainable_distances = trainable_distances
-        self.trainable_rate_matrices = trainable_rate_matrices
+        self.trainable_exchangeabilities = trainable_exchangeabilities
+        self.trainable_equilibrium = trainable_equilibrium
+        self.shared_equilibrium = shared_equilibrium
         self.clusters = clusters
         self.alphabet_size = alphabet_size
         self.time_reversed = time_reversed
@@ -91,11 +101,13 @@ class AncProbsLayer(tf.keras.layers.Layer):
             self.num_clusters = np.max(clusters) + 1
         self._head_subset = None
         self._gtr_decomp = None
-        if self.trainable_rate_matrices and not self.time_reversed:
+        if (self.trainable_exchangeabilities or self.trainable_equilibrium) \
+                and not self.time_reversed:
             raise ValueError(
-                "If trainable_rate_matrices is True, time_reversed must also" \
-                "be True. Otherwise no meaningful model can be learned, since " \
-                "Q can arbitrarily change residues to maximize HMM likelihood."
+                "If trainable_exchangeabilities or trainable_equilibrium is "
+                "True, time_reversed must also be True. Otherwise no meaningful "
+                "model can be learned, since Q can arbitrarily change residues "
+                "to maximize HMM likelihood."
             )
 
     @property
@@ -131,19 +143,19 @@ class AncProbsLayer(tf.keras.layers.Layer):
             ],
             name="exchangeability_kernel",
             initializer=self.exchangeability_init,
-            trainable=self.trainable_rate_matrices
+            trainable=self.trainable_exchangeabilities
         )
 
         self.equilibrium_kernel = self.add_weight(
             shape=[
                 self.heads,
                 self.input_tracks,
-                self.num_components,
+                1 if self.shared_equilibrium else self.num_components,
                 self.alphabet_size
             ],
             name="equilibrium_kernel",
             initializer=self.equilibrium_init,
-            trainable=self.trainable_rate_matrices
+            trainable=self.trainable_equilibrium
         )
 
         if self.num_components > 1:
@@ -162,7 +174,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
         """Precompute GTR eigendecomposition for non-trainable rate matrices.
         Stores the result as a constant tensor to optimize computation.
         """
-        if self.trainable_rate_matrices:
+        if self.trainable_exchangeabilities or self.trainable_equilibrium:
             self._gtr_decomp = None
             return
         # Compute rate matrices
@@ -219,7 +231,10 @@ class AncProbsLayer(tf.keras.layers.Layer):
         kernel = self.equilibrium_kernel
         if self._head_subset is not None:
             kernel = tf.gather(kernel, self._head_subset, axis=0)
-        return backend.make_equilibrium(kernel)
+        p = backend.make_equilibrium(kernel)
+        if self.shared_equilibrium and self.num_components > 1:
+            p = tf.tile(p, [1, 1, self.num_components, 1])
+        return p
 
     def make_w(self) -> tf.Tensor:
         """Computes the mixture weights for all models.
@@ -425,6 +440,9 @@ class AncProbsLayer(tf.keras.layers.Layer):
             "exchangeability_init": initializer.ConstantInitializer(self.exchangeability_kernel.numpy()),
             "rate_init": initializer.ConstantInitializer(self.tau_kernel.numpy()),
             "trainable_distances": self.trainable_distances,
+            "trainable_exchangeabilities": self.trainable_exchangeabilities,
+            "trainable_equilibrium": self.trainable_equilibrium,
+            "shared_equilibrium": self.shared_equilibrium,
             "clusters": self.clusters,
             "alphabet_size": self.alphabet_size,
             "num_components": self.num_components,

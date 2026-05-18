@@ -340,8 +340,9 @@ def test_mixture_model() -> None:
         rates=n,
         input_tracks=1,
         equilibrium_init=enc_init[2],
-        rate_init=enc_init[0],
+        rate_init=Initializers.ConstantInitializer(0.0),
         exchangeability_init=enc_init[1],
+        mixture_init=enc_init[0],
         num_components=num_components,
     )
     layer.build()
@@ -362,5 +363,62 @@ def test_mixture_model() -> None:
     assert layer.make_p().shape == (config.training.num_model, 1, num_components, 20)
 
     # Verify call output shape is unchanged (same as K=1)
+    out = layer(sequences_onehot, rate_indices=rate_indices)
+    assert out.shape == (n, sequences.shape[1], config.training.num_model, 20)
+
+
+def test_shared_equilibrium() -> None:
+    """Test AncProbsLayer with shared_equilibrium=True.
+
+    All mixture components should share a single equilibrium distribution,
+    so the equilibrium kernel has shape (H, I, 1, D) while make_p() tiles
+    it to (H, I, K, D).
+    """
+    config = Configuration()
+    config.training.num_model = 2
+    num_components = 3
+    enc_init = Initializers.make_default_anc_probs_init(
+        config.training.num_model, num_components=num_components
+    )
+
+    filename = os.path.dirname(__file__) + "/../tests/data/simple.fa"
+    with SequenceDataset(filename) as data:
+        sequences = get_simple_seq(data)
+    n = sequences.shape[0]
+    rate_indices = np.arange(n)[:, np.newaxis]
+    sequences_onehot = tf.one_hot(sequences, depth=20, dtype=tf.float32).numpy()
+
+    layer = AncProbsLayer(
+        heads=config.training.num_model,
+        rates=n,
+        input_tracks=1,
+        equilibrium_init=enc_init[2],
+        rate_init=Initializers.ConstantInitializer(0.0),
+        exchangeability_init=enc_init[1],
+        mixture_init=enc_init[0],
+        num_components=num_components,
+        shared_equilibrium=True,
+    )
+    layer.build()
+
+    # Equilibrium kernel stores only one set of frequencies per (H, I)
+    assert layer.equilibrium_kernel.shape == (config.training.num_model, 1, 1, 20)
+
+    # make_p() tiles to K components; all components must be identical
+    p = layer.make_p().numpy()
+    assert p.shape == (config.training.num_model, 1, num_components, 20)
+    for k in range(1, num_components):
+        np.testing.assert_array_equal(p[:, :, 0, :], p[:, :, k, :])
+
+    # Each equilibrium distribution must sum to 1
+    np.testing.assert_allclose(p.sum(axis=-1), 1.0, atol=1e-6)
+
+    # P must be a valid stochastic matrix
+    tau = layer.make_tau(rate_indices)
+    P = layer.make_P(tau).numpy()
+    assert P.shape == (n, config.training.num_model, 1, 20, 20)
+    np.testing.assert_allclose(P.sum(axis=-1), 1.0, atol=1e-5)
+
+    # Call output shape must match the K=1 case
     out = layer(sequences_onehot, rate_indices=rate_indices)
     assert out.shape == (n, sequences.shape[1], config.training.num_model, 20)

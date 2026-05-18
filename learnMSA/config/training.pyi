@@ -32,7 +32,10 @@ class TrainingConfig(BaseModel):
     dirichlet_mix_comp_count: int
     use_anc_probs: bool
     trainable_distances: bool
-    trainable_rate_matrices: bool
+    trainable_exchangeabilities: bool
+    trainable_equilibrium: bool
+    exchangeability_noise_std: float
+    equilibrium_noise_std: float
     num_anc_probs_components: int
     only_matches: bool
     surgery_checkpoints: bool
@@ -74,7 +77,10 @@ class TrainingConfig(BaseModel):
         dirichlet_mix_comp_count: int = 1,
         use_anc_probs: bool = False,
         trainable_distances: bool = True,
-        trainable_rate_matrices: bool = False,
+        trainable_exchangeabilities: bool = False,
+        trainable_equilibrium: bool = False,
+        exchangeability_noise_std: float = 0.05,
+        equilibrium_noise_std: float = 0.01,
         num_anc_probs_components: int = 1,
         only_matches: bool = False,
         surgery_checkpoints: bool = True,

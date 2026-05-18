@@ -700,8 +700,14 @@ def parse_args(
         help=argparse.SUPPRESS
     )
     parser.add_argument(
-        "--trainable_rate_matrices",
-        dest="trainable_rate_matrices",
+        "--trainable_exchangeabilities",
+        dest="trainable_exchangeabilities",
+        action="store_true",
+        help=argparse.SUPPRESS
+    )
+    parser.add_argument(
+        "--trainable_equilibrium",
+        dest="trainable_equilibrium",
         action="store_true",
         help=argparse.SUPPRESS
     )

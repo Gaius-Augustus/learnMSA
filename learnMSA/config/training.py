@@ -103,8 +103,17 @@ class TrainingConfig(BaseModel):
     trainable_distances: bool = True
     """Whether distances are trainable."""
 
-    trainable_rate_matrices: bool = False
-    """Whether rate matrices are trainable."""
+    trainable_exchangeabilities: bool = False
+    """Whether exchangeability matrices are trainable."""
+
+    trainable_equilibrium: bool = False
+    """Whether equilibrium distributions are trainable."""
+
+    exchangeability_noise_std: float = 0.05
+    """Noise std for exchangeability matrix perturbation in LG initialization."""
+
+    equilibrium_noise_std: float = 0.01
+    """Noise std for equilibrium distribution perturbation in LG initialization."""
 
     num_anc_probs_components: int = 1
     """Number of mixture components in the ancestral probabilities layer."""
