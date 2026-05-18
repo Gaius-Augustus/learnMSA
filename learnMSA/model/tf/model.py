@@ -259,7 +259,6 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             optimizer=optimizer,
             jit_compile=self.use_jit_compile(total_steps),
         )
-        self.summary()
 
     @override
     def fit(
