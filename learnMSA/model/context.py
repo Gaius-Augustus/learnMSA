@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any, Callable, Sequence
 
 import numpy as np
+import tensorflow as tf
 
 import learnMSA.model.tf.training as train
 import learnMSA.model.training_util as training_util
@@ -53,6 +54,10 @@ class LearnMSAContext:
     clusters: Any
     subset: np.ndarray
     init_msa_values: Sequence[PHMMValueSet] | None
+    R_init: tf.keras.initializers.Initializer
+    p_init: tf.keras.initializers.Initializer
+    t_init: tf.keras.initializers.Initializer
+    mix_init: tf.keras.initializers.Initializer
 
     """
     Is created from a Configuration and a SequenceDataset to hold all relevant
@@ -162,18 +167,18 @@ class LearnMSAContext:
             self._setup_language_model_specific_settings()
 
         # Set up encoder initialization
-        self.encoder_initializer = initializers.make_default_anc_probs_init(
+        self.R_init, self.p_init = initializers.make_default_anc_probs_init(
             self.config.training.num_model,
             num_components=self.config.training.num_anc_probs_components,
             exchangeability_noise_std=self.config.training.exchangeability_noise_std,
             equilibrium_noise_std=self.config.training.equilibrium_noise_std,
         )
-        self.encoder_weight_extractor = None
-        self.encoder_initializer[0] = ConstantInitializer(
+        self.t_init = ConstantInitializer(
             inverse_softplus(
                 np.array(self.config.advanced.initial_distance) + 1e-8
             ).numpy()
         )
+        self.mix_init = tf.keras.initializers.RandomNormal(stddev=0.1)
 
         # Adjust training settings automatically if skip_training is set
         if self.config.training.skip_training:

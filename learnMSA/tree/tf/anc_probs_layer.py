@@ -164,6 +164,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
                 name="mixture_kernel",
                 initializer=self.mixture_init,
                 trainable=True,
+                regularizer=tf.keras.regularizers.L2(1e-4)
             )
 
         self._precompute_gtr_decomposition()

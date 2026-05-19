@@ -114,8 +114,10 @@ def test_encoder_initializer_setup(
     """Test encoder initializer is properly configured."""
     context = LearnMSAContext(config=config, data=simple_data)
 
-    assert context.encoder_initializer is not None
-    assert len(context.encoder_initializer) == 3
+    assert context.p_init is not None
+    assert context.R_init is not None
+    assert context.t_init is not None
+    assert context.mix_init is not None
 
 def test_with_subset_ids(
     simple_data: SequenceDataset, config: Configuration

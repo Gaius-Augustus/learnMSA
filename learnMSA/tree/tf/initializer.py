@@ -1,5 +1,6 @@
 import numpy as np
 import tensorflow as tf
+import scipy
 
 from learnMSA.tree.tf.util import inverse_softplus
 from learnMSA.util.sequence_dataset import SequenceDataset
@@ -34,7 +35,7 @@ def make_default_anc_probs_init(
     exchangeability_noise_std: float = 0.05,
     equilibrium_noise_std: float = 0.01,
     seed: int | None = None,
-) -> list[tf.keras.initializers.Initializer]:
+) -> tuple[ConstantInitializer, ConstantInitializer]:
 
     rng = np.random.default_rng(seed)
 
@@ -177,19 +178,7 @@ def make_default_anc_probs_init(
             axis=1,
         )  # (H, 1, K, D)
 
-    # ------------------------------------------------------------------
-    # Mixture logits
-    # Slight random asymmetry around uniform
-    # ------------------------------------------------------------------
-
-    mixture_logits = rng.normal(
-        loc=0.0,
-        scale=0.1,
-        size=(num_models, 1, num_components),
-    )
-
-    return [
-        ConstantInitializer(mixture_logits),
+    return (
         ConstantInitializer(exchangeability_stack),
         ConstantInitializer(log_p_stack),
-    ]
+    )

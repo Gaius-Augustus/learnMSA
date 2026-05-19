@@ -56,15 +56,16 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
                 heads=train_cfg.num_model,
                 rates=context.num_seq,
                 input_tracks=1,
-                equilibrium_init=context.encoder_initializer[2],
-                rate_init=context.encoder_initializer[0],
-                exchangeability_init=context.encoder_initializer[1],
+                equilibrium_init=context.p_init,
+                rate_init=context.t_init,
+                exchangeability_init=context.R_init,
                 trainable_distances=train_cfg.trainable_distances,
                 trainable_exchangeabilities=train_cfg.trainable_exchangeabilities,
                 trainable_equilibrium=train_cfg.trainable_equilibrium,
                 clusters=context.clusters,
                 time_reversed=train_cfg.trainable_exchangeabilities or train_cfg.trainable_equilibrium,
                 num_components=train_cfg.num_anc_probs_components,
+                mixture_init=context.mix_init,
             )
 
         self.phmm_layer = PHMMLayer(

@@ -99,13 +99,21 @@ def parse_mat3di(path: Path | str) -> tuple[np.ndarray, np.ndarray, list[str]]:
         for j, orig_j in enumerate(orig_indices):
             score_matrix[i, j] = row[orig_j]
 
-    # Convert scores to exchangeabilities: R(i,j) = 2^(lambda * S(i,j) / 2)
-    exchangeabilities = np.exp(
-        lambda_val * score_matrix * (np.log(2) / 2)
-    ).astype(np.float32)
-    np.fill_diagonal(exchangeabilities, 0.0)
+    # Convert scores to exchangeabilities: R(i,j) = 2^(lambda * S(i,j))
+    exchangeabilities = np.exp(lambda_val * score_matrix).astype(np.float32)
 
     return exchangeabilities, equilibrium, alphabet_clean
+
+
+def exchangeabilities_from_rates(Qt: np.ndarray, pi: np.ndarray) -> np.ndarray:
+    """Recover exchangeabilities from a rate matrix and equilibrium.
+
+    Inverse of make_rate_matrix(..., normalized=False):
+        R[i,j] = Qt[i,j] / pi[j]  for i != j
+    """
+    R = Qt / pi          # broadcast: divides each column j by pi[j]
+    np.fill_diagonal(R, 0.0)
+    return R
 
 
 def main() -> None:

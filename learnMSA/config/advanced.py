@@ -19,6 +19,9 @@ class AdvancedConfig(BaseModel):
     jit_compile: bool = True
     """Enable XLA JIT compilation in TensorFlow."""
 
+    reset_encoder_weights: bool = False
+    """Whether to reset the encoder weights before training."""
+
     @field_validator(
         "initial_distance",
     )

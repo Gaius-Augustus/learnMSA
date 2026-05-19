@@ -101,9 +101,9 @@ def get_test_configs(sequences : np.ndarray) -> list[dict]:
     """
     # Assuming sequences only contain the 20 standard AAs
     oh_sequences = tf.one_hot(sequences, 20)
-    anc_probs_init = Initializers.make_default_anc_probs_init(1)
-    inv_sp_R = anc_probs_init[1]((1, 1, 1, 20, 20))
-    log_p = anc_probs_init[2]((1, 1, 1, 20))
+    R_init, p_init = Initializers.make_default_anc_probs_init(1)
+    inv_sp_R = R_init((1, 1, 1, 20, 20))
+    log_p = p_init((1, 1, 1, 20))
     p = tf.nn.softmax(log_p)
     cases = []
     for rate_init in [-100., -3., 100.]:
@@ -115,12 +115,10 @@ def get_test_configs(sequences : np.ndarray) -> list[dict]:
             config.training.no_sequence_weights = True
             case["config"] = config
 
-            encoder_initializer = Initializers.make_default_anc_probs_init(n)
-            encoder_initializer = (
-                [Initializers.ConstantInitializer(rate_init)] +
-                encoder_initializer[1:]
-            )
-            case["encoder_initializer"] = encoder_initializer
+            R_init, p_init = Initializers.make_default_anc_probs_init(n)
+            case["R_init"] = R_init
+            case["p_init"] = p_init
+            case["t_init"] = Initializers.ConstantInitializer(rate_init)
 
             if rate_init == -100.:
                 expected_anc_probs = tf.one_hot(sequences, 20).numpy()
@@ -145,7 +143,9 @@ def get_test_configs(sequences : np.ndarray) -> list[dict]:
 
 def make_anc_probs_layer(
     config : Configuration,
-    enc_init : list[tf.keras.initializers.Initializer],
+    R_init : tf.keras.initializers.Initializer,
+    p_init : tf.keras.initializers.Initializer,
+    t_init : tf.keras.initializers.Initializer,
     num_rates: int,
     time_reversed: bool=False
 ) -> AncProbsLayer:
@@ -153,9 +153,9 @@ def make_anc_probs_layer(
         heads = config.training.num_model,
         rates = num_rates,
         input_tracks = 1,
-        equilibrium_init=enc_init[2],
-        rate_init=enc_init[0],
-        exchangeability_init=enc_init[1],
+        equilibrium_init=p_init,
+        rate_init=t_init,
+        exchangeability_init=R_init,
         trainable_distances=config.training.trainable_distances,
         alphabet_size=20,
         time_reversed=time_reversed,
@@ -196,7 +196,7 @@ def test_anc_probs_layer() -> None:
 
     for case in get_test_configs(sequences):
         anc_probs_layer = make_anc_probs_layer(
-            case["config"], case["encoder_initializer"], n
+            case["config"], case["R_init"], case["p_init"], case["t_init"], n
         )
         assert_anc_probs_layer(anc_probs_layer, case["config"])
         anc_prob_seqs = anc_probs_layer(
@@ -242,7 +242,9 @@ def test_encoder_model() -> None:
             config: Configuration = case["config"]
             config.input_output.verbose = False
             context = LearnMSAContext(config, data)
-            context.encoder_initializer = case["encoder_initializer"]
+            context.R_init = case["R_init"]
+            context.p_init = case["p_init"]
+            context.t_init = case["t_init"]
             context.effective_num_seq = n
             model = LearnMSAModel(context)
             assert_anc_probs_layer(model.anc_probs_layer, config)
@@ -284,10 +286,12 @@ def test_time_reversed() -> None:
     # Set up a layer with default initialization and time_reversed=True
     config = Configuration()
     config.training.num_model = 1
-    encoder_initializer = Initializers.make_default_anc_probs_init(1)
+    R_init, p_init = Initializers.make_default_anc_probs_init(1)
     anc_probs_layer = make_anc_probs_layer(
         config,
-        Initializers.make_default_anc_probs_init(1),
+        R_init=R_init,
+        p_init=p_init,
+        t_init=Initializers.ConstantInitializer(-3.0),
         num_rates=1,
         time_reversed=True,
     )
@@ -323,7 +327,7 @@ def test_mixture_model() -> None:
     config = Configuration()
     config.training.num_model = 2
     num_components = 3
-    enc_init = Initializers.make_default_anc_probs_init(
+    R_init, p_init = Initializers.make_default_anc_probs_init(
         config.training.num_model, num_components=num_components
     )
 
@@ -339,10 +343,9 @@ def test_mixture_model() -> None:
         heads=config.training.num_model,
         rates=n,
         input_tracks=1,
-        equilibrium_init=enc_init[2],
+        equilibrium_init=p_init,
         rate_init=Initializers.ConstantInitializer(0.0),
-        exchangeability_init=enc_init[1],
-        mixture_init=enc_init[0],
+        exchangeability_init=R_init,
         num_components=num_components,
     )
     layer.build()
@@ -377,7 +380,7 @@ def test_shared_equilibrium() -> None:
     config = Configuration()
     config.training.num_model = 2
     num_components = 3
-    enc_init = Initializers.make_default_anc_probs_init(
+    R_init, p_init = Initializers.make_default_anc_probs_init(
         config.training.num_model, num_components=num_components
     )
 
@@ -392,10 +395,9 @@ def test_shared_equilibrium() -> None:
         heads=config.training.num_model,
         rates=n,
         input_tracks=1,
-        equilibrium_init=enc_init[2],
+        equilibrium_init=p_init,
         rate_init=Initializers.ConstantInitializer(0.0),
-        exchangeability_init=enc_init[1],
-        mixture_init=enc_init[0],
+        exchangeability_init=R_init,
         num_components=num_components,
         shared_equilibrium=True,
     )
