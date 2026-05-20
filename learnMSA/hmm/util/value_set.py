@@ -193,9 +193,11 @@ class PHMMValueSet:
         # Terminal self-loop
         transitions[ind.terminal[0, 0], ind.terminal[0, 1]] = 1.0
 
-        # Check that all transition values are in [0, 1]
-        if np.any((transitions < 0) | (transitions > 1)):
-            invalid_mask = (transitions < 0) | (transitions > 1)
+        # Check that all transition values are in [0, 1], with tolerance for
+        # floating-point rounding errors (e.g. from float32 surgery parameters)
+        tol = 1e-6
+        if np.any((transitions < -tol) | (transitions > 1 + tol)):
+            invalid_mask = (transitions < -tol) | (transitions > 1 + tol)
             invalid_indices = np.argwhere(invalid_mask)
             if len(invalid_indices) > 0:
                 i, j = invalid_indices[0]
@@ -205,6 +207,8 @@ class PHMMValueSet:
                     f"is {transitions[i, j]}, which is outside the "
                     "range [0, 1]"
                 )
+        # Clip any floating-point rounding errors at the [0, 1] boundaries
+        transitions = np.clip(transitions, 0.0, 1.0)
 
         # Check for that transitions is stochastic
         row_sums = np.sum(transitions, axis=-1)

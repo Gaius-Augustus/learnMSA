@@ -276,20 +276,21 @@ def _fit_and_align(
         if surgery_result.structural_config is not None:
             context.config.structure = surgery_result.structural_config
         surgery_converged = surgery_result.surgery_converged
-        if not context.config.advanced.reset_encoder_weights\
-                and model.anc_probs_layer is not None:
-            context.R_init = ConstantInitializer(
-                model.anc_probs_layer.exchangeability_kernel.numpy()
-            )
-            context.p_init = ConstantInitializer(
-                model.anc_probs_layer.equilibrium_kernel.numpy()
-            )
-            context.t_init = ConstantInitializer(
-                model.anc_probs_layer.tau_kernel.numpy()
-            )
-            if model.anc_probs_layer.num_components > 1:
-                context.mix_init = ConstantInitializer(
-                    model.anc_probs_layer.mixture_kernel.numpy()
+        if model.anc_probs_layer is not None:
+            if not context.config.advanced.reset_evo_model:
+                context.R_init = ConstantInitializer(
+                    model.anc_probs_layer.exchangeability_kernel.numpy()
+                )
+                context.p_init = ConstantInitializer(
+                    model.anc_probs_layer.equilibrium_kernel.numpy()
+                )
+                if model.anc_probs_layer.num_components > 1:
+                    context.mix_init = ConstantInitializer(
+                        model.anc_probs_layer.mixture_kernel.numpy()
+                    )
+            if not context.config.advanced.reset_branch_lengths:
+                context.t_init = ConstantInitializer(
+                    model.anc_probs_layer.tau_kernel.numpy()
                 )
 
         if config.input_output.verbose:

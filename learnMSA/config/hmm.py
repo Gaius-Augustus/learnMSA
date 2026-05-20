@@ -28,13 +28,13 @@ class PHMMPriorConfig(BaseModel):
     """Alpha parameter for global prior. Favors models with high prob. to
     enter at the first match and exit after the last match."""
 
-    alpha_flank_compl: float = 1.0
+    alpha_flank_compl: float = 1e-2
     """Complement parameter for alpha_flank."""
 
     alpha_single_compl: float = 1e-3
     """Complement parameter for alpha_single."""
 
-    alpha_global_compl: float = 1.0
+    alpha_global_compl: float = 1e-2
     """Complement parameter for alpha_global."""
 
     epsilon: float = 1e-16
