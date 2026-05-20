@@ -25,10 +25,9 @@ USE_VITERBI_SURGERY = False
 if USE_VITERBI_SURGERY:
     from learnMSA.msa_hmm.Viterbi import get_state_seqs_max_lik
 
-try:
+_np_version = tuple(int(x) for x in np.__version__.split('.')[:2])
+if _np_version >= (2, 0):
     np.set_printoptions(legacy='1.25')
-except TypeError:
-    pass
 
 
 def get_initial_model_lengths(data : SequenceDataset, config, random=True):
