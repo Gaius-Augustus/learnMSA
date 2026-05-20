@@ -43,7 +43,7 @@ class TestArgsToConfig:
         assert config.visualization.plot == ""
         assert config.hmm_prior.alpha_flank == 7000
         assert config.training.use_noise is True
-        assert config.hmm.noise_concentration == 100.0
+        assert config.hmm.noise_concentration == 200.0
 
     def test_args_to_config_with_training_args(self):
         """Test conversion with training-related arguments."""
@@ -769,7 +769,7 @@ class TestArgsToConfig:
         assert config.hmm.noise_concentration == 50.0
 
     def test_noise_concentration_default(self):
-        """Test: noise_concentration defaults to 100.0."""
+        """Test: noise_concentration defaults to 200.0."""
         parser = parse_args("test_version")
         args = parser.parse_args([
             "-i", "input.fasta",
@@ -778,5 +778,4 @@ class TestArgsToConfig:
 
         config = args_to_config(args)
 
-        assert config.hmm.noise_concentration == 100.0
-
+        assert config.hmm.noise_concentration == 200.0

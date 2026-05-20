@@ -195,7 +195,7 @@ class PHMMConfig(BaseModel):
     use_noise: bool = False
     """Whether to add Dirichlet noise during HMM initialization."""
 
-    noise_concentration: float = 100.0
+    noise_concentration: float = 200.0
     """Concentration of Dirichlet noise added during HMM initialization."""
 
     shared_flank_transitions: bool = True

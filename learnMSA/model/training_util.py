@@ -34,7 +34,7 @@ def get_initial_model_lengths(
     model_length *= len_mul
     model_length = max(3., model_length)
     if random:
-        scale = (1 + model_length/50.)
+        scale = model_length/50.
         lens = np.round(np.random.normal(
             loc=model_length, scale=scale, size=num_models
         )).astype(np.int32)
