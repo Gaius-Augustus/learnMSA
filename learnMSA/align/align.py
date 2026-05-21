@@ -288,15 +288,16 @@ def _fit_and_align(
                     context.mix_init = ConstantInitializer(
                         model.anc_probs_layer.mixture_kernel.numpy()
                     )
+                    context.scale_init = ConstantInitializer(
+                        model.anc_probs_layer.scale_kernel.numpy()
+                    )
             if not context.config.advanced.reset_branch_lengths:
                 context.t_init = ConstantInitializer(
                     model.anc_probs_layer.tau_kernel.numpy()
                 )
 
-        if config.input_output.verbose:
-            print("Re-initialized the encoder parameters.")
-            if surgery_converged:
-                print("Surgery converged.")
+        if config.input_output.verbose and surgery_converged:
+            print("Surgery converged.")
 
         last_iteration = surgery_converged\
             or (i == config.training.max_iterations-2)

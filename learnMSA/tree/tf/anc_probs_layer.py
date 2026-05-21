@@ -74,6 +74,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
         time_reversed: bool=False,
         num_components: int=1,
         mixture_init: tf.keras.initializers.Initializer|None=None,
+        scale_init: tf.keras.initializers.Initializer|None=None,
         **kwargs
     ):
         super(AncProbsLayer, self).__init__(**kwargs)
@@ -95,6 +96,13 @@ class AncProbsLayer(tf.keras.layers.Layer):
             self.mixture_init = tf.keras.initializers.RandomNormal(stddev=0.1)
         else:
             self.mixture_init = mixture_init
+        if scale_init is None:
+            # inverse_softplus(1.0) = log(exp(1) - 1) ≈ 0.5413 → softplus gives 1.0 (neutral)
+            self.scale_init = tf.keras.initializers.Constant(
+                np.log(np.exp(1.0) - 1.0)
+            )
+        else:
+            self.scale_init = scale_init
         if clusters is None:
             self.num_clusters = self.rates
         else:
@@ -163,8 +171,14 @@ class AncProbsLayer(tf.keras.layers.Layer):
                 shape=[self.heads, self.input_tracks, self.num_components],
                 name="mixture_kernel",
                 initializer=self.mixture_init,
-                trainable=True,
-                regularizer=tf.keras.regularizers.L2(1e-4)
+                trainable=self.trainable_exchangeabilities,
+                regularizer=tf.keras.regularizers.L2(5e-4 / self.heads)
+            )
+            self.scale_kernel = self.add_weight(
+                shape=[self.heads, self.input_tracks, self.num_components],
+                name="scale_kernel",
+                initializer=self.scale_init,
+                trainable=self.trainable_exchangeabilities,
             )
 
         self._precompute_gtr_decomposition()
@@ -254,6 +268,23 @@ class AncProbsLayer(tf.keras.layers.Layer):
             kernel = tf.gather(kernel, self._head_subset, axis=0)
         return tf.nn.softmax(kernel, axis=-1)
 
+    def make_scale(self) -> tf.Tensor:
+        """Computes the per-component rate matrix scale factors for all models.
+
+        Returns:
+            A tensor of shape (H, I, K) with positive values (via softplus).
+        """
+        if self.num_components == 1:
+            if self._head_subset is None:
+                H_active = self.heads
+            else:
+                H_active = len(self._head_subset)
+            return tf.ones((H_active, self.input_tracks, 1))
+        kernel = self.scale_kernel
+        if self._head_subset is not None:
+            kernel = tf.gather(kernel, self._head_subset, axis=0)
+        return backend.make_branch_lengths(kernel)
+
     def make_Q(self) -> tf.Tensor:
         """Computes the rate matrices Q for all models and mixture components.
 
@@ -321,6 +352,11 @@ class AncProbsLayer(tf.keras.layers.Layer):
 
         # Expand tau from (B, H, I) to (B, H, I*K) by repeating for each component
         tau_expanded = tf.repeat(tau, self.num_components, axis=-1)  # (B, H, I*K)
+
+        # Scale tau per component (equivalent to scaling Q_k by s_k independently of branch lengths)
+        s = self.make_scale()  # (H_active, I, K)
+        s_flat = tf.reshape(s, [H_active, IK])  # (H_active, I*K)
+        tau_expanded = tau_expanded * s_flat[tf.newaxis]  # (B, H_active, I*K)
 
         # Compute probability matrices for all mixture components
         if self._gtr_decomp is not None:
@@ -451,6 +487,9 @@ class AncProbsLayer(tf.keras.layers.Layer):
         if self.num_components > 1:
             config["mixture_init"] = initializer.ConstantInitializer(
                 self.mixture_kernel.numpy()
+            )
+            config["scale_init"] = initializer.ConstantInitializer(
+                self.scale_kernel.numpy()
             )
         return config
 

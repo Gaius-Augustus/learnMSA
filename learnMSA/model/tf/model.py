@@ -66,6 +66,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
                 time_reversed=train_cfg.trainable_exchangeabilities or train_cfg.trainable_equilibrium,
                 num_components=train_cfg.num_anc_probs_components,
                 mixture_init=context.mix_init,
+                scale_init=context.scale_init,
             )
 
         self.phmm_layer = PHMMLayer(

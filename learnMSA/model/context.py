@@ -189,6 +189,9 @@ class LearnMSAContext:
             inverse_softplus(np.array(d) + 1e-8).numpy()
         )
         self.mix_init = tf.keras.initializers.RandomNormal(stddev=0.1)
+        self.scale_init = tf.keras.initializers.Constant(
+            float(inverse_softplus(np.array(1.0)).numpy())
+        )
 
         # Adjust training settings automatically if skip_training is set
         if self.config.training.skip_training:
