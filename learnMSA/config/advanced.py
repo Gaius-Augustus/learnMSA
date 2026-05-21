@@ -8,7 +8,9 @@ class AdvancedConfig(BaseModel):
     """Distribution output file."""
 
     initial_distance: float = 0.05
-    """Initial distance value."""
+    """Initial distance value. Is only used when not using sequence weights.
+    If weights are used, the initial distance is calculated from the cluster
+    sequence identity."""
 
     insertion_aligner: str = "famsa"
     """Insertion aligner to use."""

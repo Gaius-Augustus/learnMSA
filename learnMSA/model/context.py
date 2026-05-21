@@ -181,10 +181,12 @@ class LearnMSAContext:
             exchangeability_noise_std=R_noise_std,
             equilibrium_noise_std=p_noise_std,
         )
+        if self.config.training.no_sequence_weights:
+            d = self.config.advanced.initial_distance
+        else:
+            d = self.config.training.cluster_seq_id / 2
         self.t_init = ConstantInitializer(
-            inverse_softplus(
-                np.array(self.config.advanced.initial_distance) + 1e-8
-            ).numpy()
+            inverse_softplus(np.array(d) + 1e-8).numpy()
         )
         self.mix_init = tf.keras.initializers.RandomNormal(stddev=0.1)
 
