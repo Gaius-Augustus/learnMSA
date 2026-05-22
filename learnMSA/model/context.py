@@ -184,7 +184,7 @@ class LearnMSAContext:
         if self.config.training.no_sequence_weights:
             d = self.config.advanced.initial_distance
         else:
-            d = self.config.training.cluster_seq_id / 2
+            d = (1. - self.config.training.cluster_seq_id) / 2
         self.t_init = ConstantInitializer(
             inverse_softplus(np.array(d) + 1e-8).numpy()
         )
