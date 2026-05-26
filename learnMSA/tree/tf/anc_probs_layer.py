@@ -14,6 +14,11 @@ class AncProbsLayer(tf.keras.layers.Layer):
         It learns per-sequence continuous evolutionary times and computes
         substitution probabilities under a fixed substitution model.
 
+        Notes: Provides parameters for detailed control of what parameters
+        of the evolutionary model can be trained or not. If nothing except the
+        per-sequence rates are trained, the GTR eigendecomposition is
+        precomputed for faster training.
+
     Args:
         heads: The number of independently trained models. The layer will create
             a separate rate matrix for each head.
@@ -26,19 +31,24 @@ class AncProbsLayer(tf.keras.layers.Layer):
         exchangeability_init: Initializer for the exchangeability matrices.
             Usually inverse_softplus should be used on the initial matrix by
             the user.
-        rate_init: Initializer for the rates.
-        trainable_distances: Flag that can prevent learning the evolutionary
-            times.
-        trainable_exchangeabilities: Flag that controls whether the
-            exchangeability matrices are trainable. Defaults to True.
+        rate_init: Initializer for the per-sequence rates.
+        mixture_init: Initializer for the mixture logit weights of shape
+            (H, I, K). Defaults to RandomNormal(stddev=0.1) to break symmetry
+            while keeping initial weights close to uniform.
+        scale_init: Initializer for the per-component rate matrix scale factors
+            of shape (H, I, K). Defaults so that initial scale is 1.0.
         trainable_equilibrium: Flag that controls whether the equilibrium
             distributions are trainable. Defaults to False.
+        trainable_exchangeabilities: Flag that controls whether the
+            exchangeability matrices are trainable. Defaults to True.
+        trainable_rates: Flag that can prevent learning the evolutionary
+            times.
+        trainable_scale: Flag that can prevent learning the per-component rate
+            matrix scale factors.
         shared_equilibrium: If True, all mixture components share a single
-            equilibrium distribution. Defaults to False. If False, the GTR
-            eigendecomposition is precomputed and stored as a constant tensor
-            when neither trainable_exchangeabilities nor trainable_equilibrium
-            is True. If trainable_exchangeabilities or trainable_equilibrium
-            is True, time_reversed should also be True.
+            equilibrium distribution. Defaults to False.
+        shared_exchangeabilities: If True, all mixture components share a single
+            exchangeability matrix. Defaults to False.
         clusters: An optional vector that assigns each sequence to a cluster.
             If provided, the evolutionary time is learned per cluster.
         alphabet_size: The size of the alphabet underlying the substitution
@@ -52,9 +62,6 @@ class AncProbsLayer(tf.keras.layers.Layer):
         num_components: The number of mixture components K. If > 1, the layer
             learns a mixture of K independent GTR models per head and track,
             sharing branch lengths across components. Defaults to 1.
-        mixture_init: Initializer for the mixture logit weights of shape
-            (H, I, K). Defaults to RandomNormal(stddev=0.1) to break symmetry
-            while keeping initial weights close to uniform.
     """
 
     def __init__(
@@ -65,29 +72,36 @@ class AncProbsLayer(tf.keras.layers.Layer):
         equilibrium_init: tf.keras.initializers.Initializer,
         exchangeability_init: tf.keras.initializers.Initializer,
         rate_init: tf.keras.initializers.Initializer,
-        trainable_distances: bool=True,
-        trainable_exchangeabilities: bool=False,
+        mixture_init: tf.keras.initializers.Initializer|None=None,
+        scale_init: tf.keras.initializers.Initializer|None=None,
         trainable_equilibrium: bool=False,
+        trainable_exchangeabilities: bool=False,
+        trainable_rates: bool=True,
+        trainable_scale: bool=True,
         shared_equilibrium: bool=True,
+        shared_exchangeabilities: bool=False,
         clusters: np.ndarray|None=None,
         alphabet_size: int=20,
         time_reversed: bool=False,
         num_components: int=1,
-        mixture_init: tf.keras.initializers.Initializer|None=None,
-        scale_init: tf.keras.initializers.Initializer|None=None,
         **kwargs
     ):
         super(AncProbsLayer, self).__init__(**kwargs)
         self.heads = heads
         self.rates = rates
         self.input_tracks = input_tracks
+
         self.rate_init = rate_init
         self.equilibrium_init = equilibrium_init
         self.exchangeability_init = exchangeability_init
-        self.trainable_distances = trainable_distances
-        self.trainable_exchangeabilities = trainable_exchangeabilities
+
         self.trainable_equilibrium = trainable_equilibrium
+        self.trainable_exchangeabilities = trainable_exchangeabilities
+        self.trainable_rates = trainable_rates
+        self.trainable_scale = trainable_scale
+
         self.shared_equilibrium = shared_equilibrium
+        self.shared_exchangeabilities = shared_exchangeabilities
         self.clusters = clusters
         self.alphabet_size = alphabet_size
         self.time_reversed = time_reversed
@@ -138,14 +152,14 @@ class AncProbsLayer(tf.keras.layers.Layer):
             shape=[self.num_clusters, self.heads, self.input_tracks],
             name="tau_kernel",
             initializer=self.rate_init,
-            trainable=self.trainable_distances,
+            trainable=self.trainable_rates,
         )
 
         self.exchangeability_kernel = self.add_weight(
             shape=[
                 self.heads,
                 self.input_tracks,
-                self.num_components,
+                1 if self.shared_exchangeabilities else self.num_components,
                 self.alphabet_size,
                 self.alphabet_size
             ],
@@ -178,7 +192,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
                 shape=[self.heads, self.input_tracks, self.num_components],
                 name="scale_kernel",
                 initializer=self.scale_init,
-                trainable=self.trainable_exchangeabilities,
+                trainable=self.trainable_scale,
             )
 
         self._precompute_gtr_decomposition()
@@ -235,7 +249,10 @@ class AncProbsLayer(tf.keras.layers.Layer):
             kernel = self.exchangeability_kernel
             if self._head_subset is not None:
                 kernel = tf.gather(kernel, self._head_subset, axis=0)
-        return backend.make_symmetric_pos_semidefinite(kernel)
+        R = backend.make_symmetric_pos_semidefinite(kernel)
+        if self.shared_exchangeabilities and self.num_components > 1:
+            R = tf.tile(R, [1, 1, self.num_components, 1, 1])
+        return R
 
     def make_p(self) -> tf.Tensor:
         """Computes the equilibrium distributions p for all models.
@@ -476,12 +493,15 @@ class AncProbsLayer(tf.keras.layers.Layer):
             "equilibrium_init": initializer.ConstantInitializer(self.equilibrium_kernel.numpy()),
             "exchangeability_init": initializer.ConstantInitializer(self.exchangeability_kernel.numpy()),
             "rate_init": initializer.ConstantInitializer(self.tau_kernel.numpy()),
-            "trainable_distances": self.trainable_distances,
-            "trainable_exchangeabilities": self.trainable_exchangeabilities,
             "trainable_equilibrium": self.trainable_equilibrium,
+            "trainable_exchangeabilities": self.trainable_exchangeabilities,
+            "trainable_rates": self.trainable_rates,
+            "trainable_scale": self.trainable_scale,
             "shared_equilibrium": self.shared_equilibrium,
+            "shared_exchangeabilities": self.shared_exchangeabilities,
             "clusters": self.clusters,
             "alphabet_size": self.alphabet_size,
+            "time_reversed": self.time_reversed,
             "num_components": self.num_components,
         })
         if self.num_components > 1:

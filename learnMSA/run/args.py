@@ -694,8 +694,8 @@ def parse_args(
         help=argparse.SUPPRESS
     )
     parser.add_argument(
-        "--frozen_distances",
-        dest="frozen_distances",
+        "--frozen_rates",
+        dest="frozen_rates",
         action="store_true",
         help=argparse.SUPPRESS
     )

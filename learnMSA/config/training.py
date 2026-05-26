@@ -100,8 +100,8 @@ class TrainingConfig(BaseModel):
     use_anc_probs: bool = True
     """Whether to use ancestral state probabilities."""
 
-    trainable_distances: bool = True
-    """Whether distances are trainable."""
+    trainable_rates: bool = True
+    """Whether the per-sequence rates are trainable."""
 
     trainable_exchangeabilities: bool = False
     """Whether exchangeability matrices are trainable."""

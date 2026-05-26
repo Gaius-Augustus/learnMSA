@@ -174,7 +174,7 @@ class TestArgsToConfig:
         assert config.language_model.embedding_prior_components == 64
         assert config.language_model.inverse_gamma_alpha == 2.0
         assert config.language_model.inverse_gamma_beta == 1.0
-        assert config.training.trainable_distances is True
+        assert config.training.trainable_rates is True
 
     def test_args_to_config_with_structure_args(self):
         """Test conversion with structure-related arguments."""
@@ -237,7 +237,7 @@ class TestArgsToConfig:
             "--alpha_global_compl", "4",
             "--inverse_gamma_alpha", "2.0",
             "--inverse_gamma_beta", "1.0",
-            "--frozen_distances",
+            "--frozen_rates",
             "--initial_distance", "0.1",
         ])
 
@@ -253,7 +253,7 @@ class TestArgsToConfig:
         assert config.language_model.inverse_gamma_alpha == 2.0
         assert config.language_model.inverse_gamma_beta == 1.0
         assert config.advanced.initial_distance == 0.1
-        assert config.training.trainable_distances is False
+        assert config.training.trainable_rates is False
 
     def test_args_to_config_num_model_from_length_init(self):
         """Test that num_model is computed from length_init when provided."""
@@ -331,7 +331,7 @@ class TestArgsToConfig:
             "--pseudocounts",
             "--use_language_model",
             "--use_L2",
-            "--frozen_distances",
+            "--frozen_rates",
         ])
 
         config = args_to_config(args)
@@ -344,7 +344,7 @@ class TestArgsToConfig:
         assert config.init_msa.pseudocounts is True
         assert config.language_model.use_language_model is True
         assert config.language_model.use_L2 is True
-        assert config.training.trainable_distances is False
+        assert config.training.trainable_rates is False
         assert config.training.use_noise is True
 
     def test_args_to_config_short_options(self):

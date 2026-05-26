@@ -31,7 +31,7 @@ class TrainingConfig(BaseModel):
     use_prior: bool
     dirichlet_mix_comp_count: int
     use_anc_probs: bool
-    trainable_distances: bool
+    trainable_rates: bool
     trainable_exchangeabilities: bool
     trainable_equilibrium: bool
     exchangeability_noise_std: float
@@ -76,7 +76,7 @@ class TrainingConfig(BaseModel):
         use_prior: bool = True,
         dirichlet_mix_comp_count: int = 1,
         use_anc_probs: bool = False,
-        trainable_distances: bool = True,
+        trainable_rates: bool = True,
         trainable_exchangeabilities: bool = False,
         trainable_equilibrium: bool = False,
         exchangeability_noise_std: float = 0.05,
