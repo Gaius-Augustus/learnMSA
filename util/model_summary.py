@@ -110,7 +110,7 @@ def main() -> None:
 	print(f"batch model-index mapping shape: {batch_indices.shape}")
 	print(batch_indices)
 
-	encoded = model.encode_batch(seq_batch)
+	encoded = model.encode_batch(seq_batch)[0].numpy()
 	print(f"encoded batch shape: {encoded.shape}")
 	print(encoded.numpy())
 

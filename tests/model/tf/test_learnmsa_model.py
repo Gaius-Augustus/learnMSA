@@ -112,7 +112,7 @@ def test_compute_loss_amino_acid(context_amino_acid: LearnMSAContext) -> None:
     assert isinstance(loss, tf.Tensor)
 
     # Assume that hidten computes likelihoods correctly
-    encoded_seqs = model.encode_batch((seqs, indices))
+    encoded_seqs = model.encode_batch((seqs, indices))[0].numpy()
 
     padding = 1 - encoded_seqs[:, :, :, -1:]
     encoded_seqs = encoded_seqs[:, :, :, :-1]
@@ -156,7 +156,7 @@ def test_compute_loss_amino_acid_no_prior(
     assert isinstance(loss, tf.Tensor)
 
     # Assume that hidten computes likelihoods correctly
-    encoded_seqs = model.encode_batch((seqs, indices))
+    encoded_seqs = model.encode_batch((seqs, indices))[0]
 
     padding = 1 - encoded_seqs[:, :, :, -1:]
     encoded_seqs = encoded_seqs[:, :, :, :-1]

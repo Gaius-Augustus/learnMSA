@@ -56,7 +56,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             self.anc_probs_layer = AncProbsLayer(
                 heads=train_cfg.num_model,
                 rates=context.num_seq,
-                input_tracks=1,
+                input_tracks=2 if context.config.structure.use_structure else 1,
                 equilibrium_init=context.p_init,
                 rate_init=context.t_init,
                 exchangeability_init=context.R_init,
@@ -128,7 +128,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             raise ValueError(
                 "inputs must contain at least sequences and indices"
             )
-        sequences, *adds, _indices = inputs
+        sequences, *_ = inputs
 
         # Keep track of the runtime batch sizes for more verbose OOM error
         # handling
@@ -142,7 +142,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             self.context.last_runtime_batch_size = int(sequences.shape[0])
 
         # Pass through encoder layers
-        forward_seq = self.encode_batch(inputs, training=training)
+        forward_seq, *adds = self.encode_batch(inputs, training=training)
 
         padding = 1 - forward_seq[:, :, :, -1:]
         forward_seq = forward_seq[:, :, :, :-1]
@@ -158,7 +158,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         self,
         inputs: tuple[tf.Tensor | np.ndarray, ...],
         training: bool|None=None,
-    ) -> tf.Tensor:
+    ) -> tuple[tf.Tensor | np.ndarray, ...]:
         """
         Encodes a batch of sequences with the ancestral probabilities layer.
 
@@ -178,7 +178,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             raise ValueError(
                 "inputs must contain at least sequences and indices"
             )
-        sequences, *_adds, indices = inputs
+        sequences, *adds, indices = inputs
 
         # Broadcast in the number of heads if necessary
         if self.phmm_layer.head_subset is not None:
@@ -195,6 +195,11 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             depth=self.context.config.hmm.alphabet_size+1, # including terminal
             dtype=self.phmm_layer.dtype
         )
+        anc_prob_inputs = [sequences_onehot]
+
+        if self.context.config.structure.use_structure:
+            struct_inputs = adds[-1]
+            anc_prob_inputs.append(struct_inputs)
 
         if self.context.config.tree.use_anc_probs\
                 and not self.context.config.training.no_aa\
@@ -202,12 +207,18 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             # AncProbsLayer accepts (batch, L, num_models, 20) and returns
             # (batch, L, num_models, num_matrices*20)
             encoded_seq = self.anc_probs_layer(
-                sequences_onehot, rate_indices=indices, training=training # type: ignore
+                *anc_prob_inputs, rate_indices=indices, training=training # type: ignore
             )
+            if self.context.config.structure.use_structure:
+                encoded_struct = encoded_seq[1]
+                encoded_seq = encoded_seq[0]
+                adds = (*adds[:-1], encoded_struct)
         else:
             encoded_seq = sequences_onehot
+            # keep original adds, as structural track uses
+            # encode_as_one_hot=True in its SequenceDataset
 
-        return encoded_seq
+        return encoded_seq, *adds
 
     @override
     def build(

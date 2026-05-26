@@ -256,7 +256,7 @@ def test_encoder_model() -> None:
             )
             for x, _ in ds.take(1):
                 # encode_batch now returns (b, L, num_model, features)
-                anc_prob_seqs = model.encode_batch(x).numpy()
+                anc_prob_seqs = model.encode_batch(x)[0].numpy()
 
                 # Trim to the original sequence length (remove padding positions)
                 L = sequences.shape[1]  # L is at index 1
@@ -422,3 +422,60 @@ def test_shared_equilibrium() -> None:
     # Call output shape must match the K=1 case
     out = layer(sequences_onehot, rate_indices=rate_indices)
     assert out.shape == (n, sequences.shape[1], config.training.num_model, 20)
+
+
+def test_two_input_tracks() -> None:
+    """Test AncProbsLayer with input_tracks=2.
+
+    Passes original sequences as track 0 and a batch-permuted copy as track 1.
+    With a single rate cluster (rates=1) all sequences share the same branch
+    length, and the default neutral tau_track_kernel (softplus → 1.0) makes
+    both tracks use identical effective branch lengths. Under these conditions
+    the output of track 1 must equal the output of track 0 reindexed by the
+    same permutation.
+    """
+    filename = os.path.dirname(__file__) + "/../tests/data/simple.fa"
+    with SequenceDataset(filename) as data:
+        sequences = get_simple_seq(data)  # (B, L, 1) integer indices
+    n = sequences.shape[0]
+    rng = np.random.default_rng(42)
+    perm = rng.permutation(n)
+
+    H = 1
+    R_init, p_init = Initializers.make_substitution_model_init(H)
+
+    layer = AncProbsLayer(
+        heads=H,
+        rates=1,           # single branch-length cluster shared by all sequences
+        input_tracks=2,
+        equilibrium_init=Initializers.ConstantInitializer(p_init),
+        rate_init=Initializers.ConstantInitializer(-3.0),
+        exchangeability_init=Initializers.ConstantInitializer(R_init),
+        alphabet_size=20,
+    )
+    layer.build()
+
+    # Verify the new kernel shapes introduced by the refactor
+    assert layer.tau_kernel.shape == (1, H)
+    assert layer.tau_track_kernel.shape == (H, 2)
+
+    # All sequences map to the single rate cluster
+    rate_indices = np.zeros((n, H), dtype=np.int32)
+
+    sequences_onehot = tf.one_hot(sequences, depth=20, dtype=tf.float32).numpy()
+    sequences_perm_onehot = sequences_onehot[perm]  # batch-permuted copy
+
+    out_0, out_1 = layer(
+        sequences_onehot, sequences_perm_onehot,
+        rate_indices=rate_indices,
+    )  # each (B, L, H=1, 20)
+    out_0 = out_0.numpy()
+    out_1 = out_1.numpy()
+
+    # Both outputs must be valid probability distributions
+    np.testing.assert_allclose(out_0.sum(axis=-1), 1.0, atol=1e-5)
+    np.testing.assert_allclose(out_1.sum(axis=-1), 1.0, atol=1e-5)
+
+    # With equal per-track conversion rates and a shared branch length,
+    # out_1[i] = anc_probs(sequences[perm[i]], tau_0) = out_0[perm[i]]
+    np.testing.assert_allclose(out_1, out_0[perm], rtol=1e-5, atol=1e-5)

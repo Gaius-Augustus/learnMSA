@@ -38,6 +38,9 @@ class AncProbsLayer(tf.keras.layers.Layer):
             while keeping initial weights close to uniform.
         scale_init: Initializer for the per-component rate matrix scale factors
             of shape (H, I, K). Defaults so that initial scale is 1.0.
+        tau_track_init: Initializer for the per-head and per-track conversion rate
+            kernels of shape (H, I). Only used when input_tracks > 1.
+            Defaults so that initial conversion rate is 1.0.
         trainable_equilibrium: Flag that controls whether the equilibrium
             distributions are trainable.
         trainable_exchangeabilities: Flag that controls whether the
@@ -79,6 +82,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
         rate_init: tf.keras.initializers.Initializer,
         mixture_init: tf.keras.initializers.Initializer|None=None,
         scale_init: tf.keras.initializers.Initializer|None=None,
+        tau_track_init: tf.keras.initializers.Initializer|None=None,
         trainable_equilibrium: bool=False,
         trainable_exchangeabilities: bool=False,
         trainable_rates: bool=True,
@@ -124,6 +128,13 @@ class AncProbsLayer(tf.keras.layers.Layer):
             )
         else:
             self.scale_init = scale_init
+        if tau_track_init is None:
+            # inverse_softplus(1.0) → initial conversion rate is 1.0 (neutral)
+            self.tau_track_init = tf.keras.initializers.Constant(
+                np.log(np.exp(1.0) - 1.0)
+            )
+        else:
+            self.tau_track_init = tau_track_init
         if clusters is None:
             self.num_clusters = self.rates
         else:
@@ -156,11 +167,19 @@ class AncProbsLayer(tf.keras.layers.Layer):
             return
 
         self.tau_kernel = self.add_weight(
-            shape=[self.num_clusters, self.heads, self.input_tracks],
+            shape=[self.num_clusters, self.heads],
             name="tau_kernel",
             initializer=self.rate_init,
             trainable=self.trainable_rates,
         )
+
+        if self.input_tracks > 1:
+            self.tau_track_kernel = self.add_weight(
+                shape=[self.heads, self.input_tracks],
+                name="tau_track_kernel",
+                initializer=self.tau_track_init,
+                trainable=self.trainable_rates,
+            )
 
         self.exchangeability_kernel = self.add_weight(
             shape=[
@@ -363,7 +382,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
             A tensor of shape (B, H, I) containing the evolutionary times for
             the specified subset of sequences.
         """
-        tau = self.tau_kernel # (num_clusters, H, I)
+        tau = self.tau_kernel  # (num_clusters, H)
 
         if self._head_subset is not None:
             tau = tf.gather(tau, self._head_subset, axis=1)
@@ -376,12 +395,23 @@ class AncProbsLayer(tf.keras.layers.Layer):
             h_range = tf.range(H, dtype=subset.dtype)[tf.newaxis, :]
             h_indices = tf.tile(h_range, [B, 1])  # (B, H)
             nd_indices = tf.stack([subset, h_indices], axis=-1)  # (B, H, 2)
-            tau = tf.gather_nd(tau, nd_indices)  # (B, H, I)
+            tau = tf.gather_nd(tau, nd_indices)  # (B, H)
 
         # Clamp kernel to prevent NaN during training.
         tau = tf.clip_by_value(tau, -80.0, 80.0)
+        tau = backend.make_branch_lengths(tau)  # (..., H)
 
-        return backend.make_branch_lengths(tau)
+        if self.input_tracks > 1:
+            # Apply cluster/data-independent per-head and per-track conversion rates
+            track_kernel = self.tau_track_kernel  # (H, I)
+            if self._head_subset is not None:
+                track_kernel = tf.gather(track_kernel, self._head_subset, axis=0)
+            conversion = backend.make_branch_lengths(track_kernel)  # (H_active, I)
+            tau = tau[..., tf.newaxis] * conversion[tf.newaxis]  # (..., H, I)
+        else:
+            tau = tau[..., tf.newaxis]  # (..., H, 1)
+
+        return tau
 
     def make_P(self, tau: tf.Tensor, subset: tf.Tensor | None = None) -> tf.Tensor:
         """Computes the transition matrices P for all models and
@@ -562,6 +592,10 @@ class AncProbsLayer(tf.keras.layers.Layer):
             )
             config["scale_init"] = initializer.ConstantInitializer(
                 self.scale_kernel.numpy()
+            )
+        if self.input_tracks > 1:
+            config["tau_track_init"] = initializer.ConstantInitializer(
+                self.tau_track_kernel.numpy()
             )
         return config
 
