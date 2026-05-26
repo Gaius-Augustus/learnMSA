@@ -39,17 +39,17 @@ class AncProbsLayer(tf.keras.layers.Layer):
         scale_init: Initializer for the per-component rate matrix scale factors
             of shape (H, I, K). Defaults so that initial scale is 1.0.
         trainable_equilibrium: Flag that controls whether the equilibrium
-            distributions are trainable. Defaults to False.
+            distributions are trainable.
         trainable_exchangeabilities: Flag that controls whether the
-            exchangeability matrices are trainable. Defaults to True.
+            exchangeability matrices are trainable.
         trainable_rates: Flag that can prevent learning the evolutionary
             times.
         trainable_scale: Flag that can prevent learning the per-component rate
             matrix scale factors.
         shared_equilibrium: If True, all mixture components share a single
-            equilibrium distribution. Defaults to False.
+            equilibrium distribution.
         shared_exchangeabilities: If True, all mixture components share a single
-            exchangeability matrix. Defaults to False.
+            exchangeability matrix.
         clusters: An optional vector that assigns each sequence to a cluster.
             If provided, the evolutionary time is learned per cluster.
         alphabet_size: The size of the alphabet underlying the substitution
@@ -62,7 +62,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
             rate matrix Q and equilibrium distribution pi).
         num_components: The number of mixture components K. If > 1, the layer
             learns a mixture of K independent GTR models per head and track,
-            sharing branch lengths across components. Defaults to 1.
+            sharing branch lengths across components.
         input_dependent_weights: If True (default), the mixture weights depend
             on the sequence cluster/rate index. The mixture_kernel gains a
             leading num_clusters dimension and make_P requires a subset

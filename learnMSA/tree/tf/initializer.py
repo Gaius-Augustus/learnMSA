@@ -5,7 +5,7 @@ import scipy
 from learnMSA.tree.tf.util import inverse_softplus
 from learnMSA.util.sequence_dataset import SequenceDataset
 
-from evoten.substitution_models import LG
+from evoten.substitution_models import LG, foldseek_3Di
 
 class ConstantInitializer(tf.keras.initializers.Constant):
 
@@ -32,18 +32,32 @@ class ConstantInitializer(tf.keras.initializers.Constant):
         return cls(np.array(config["value"]))
 
 
-def make_default_anc_probs_init(
+def make_substitution_model_init(
     num_models: int,
+    type: str = "LG",
     num_components: int = 1,
     shared_equilibrium: bool = True,
     shared_exchangeabilities: bool = True,
     exchangeability_noise_std: float = 0.05,
     equilibrium_noise_std: float = 0.01,
+    alphabet: str = SequenceDataset._default_alphabet[:20],
     seed: int | None = None,
-) -> tuple[ConstantInitializer, ConstantInitializer]:
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Constructs initializers for exchangeabilities and equilibrium frequencies
+    based on an existing substitution model, with optional noise for
+    perturbation.
+    """
 
     rng = np.random.default_rng(seed)
-    R, p = LG(SequenceDataset._default_alphabet[:20])  # (D, D), (D,)
+
+    # (D, D), (D,)
+    if type == "LG":
+        R, p = LG(alphabet)
+    elif type == "foldseek_3Di":
+        R, p = foldseek_3Di(alphabet)
+    else:
+        raise ValueError(f"Unknown substitution model type: {type}")
     D = R.shape[0]
 
     # Build exchangeability initializer: (H, 1, K_R, D, D)
@@ -79,7 +93,4 @@ def make_default_anc_probs_init(
         )
         log_p_stack = perturbed_log_p[:, None]  # (H, 1, K, D)
 
-    return (
-        ConstantInitializer(exchangeability_stack),
-        ConstantInitializer(log_p_stack),
-    )
+    return exchangeability_stack, log_p_stack

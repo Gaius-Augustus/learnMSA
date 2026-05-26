@@ -175,7 +175,7 @@ class LearnMSAContext:
         if K == 1 or not(train_R or train_p):
             R_noise_std = 0.0
             p_noise_std = 0.0
-        self.R_init, self.p_init = initializers.make_default_anc_probs_init(
+        R_aa_init, p_aa_init = initializers.make_substitution_model_init(
             self.config.training.num_model,
             num_components=K,
             shared_equilibrium=self.config.tree.shared_equilibrium,
@@ -183,6 +183,27 @@ class LearnMSAContext:
             exchangeability_noise_std=R_noise_std,
             equilibrium_noise_std=p_noise_std,
         )
+        if self.config.structure.use_structure:
+            R_st_init, p_st_init = initializers.make_substitution_model_init(
+                self.config.training.num_model,
+                type="foldseek_3Di",
+                num_components=K,
+                shared_equilibrium=self.config.tree.shared_equilibrium,
+                shared_exchangeabilities=self.config.tree.shared_exchangeabilities,
+                exchangeability_noise_std=R_noise_std,
+                equilibrium_noise_std=p_noise_std,
+                alphabet=self.config.structure.structural_alphabet,
+            )
+            self.R_init = ConstantInitializer(
+                np.concatenate([R_aa_init, R_st_init], axis=1)
+            )
+            self.p_init = ConstantInitializer(
+                np.concatenate([p_aa_init, p_st_init], axis=1)
+            )
+        else:
+            self.R_init = ConstantInitializer(R_aa_init)
+            self.p_init = ConstantInitializer(p_aa_init)
+
         if self.config.training.no_sequence_weights:
             d = self.config.advanced.initial_distance
         else:
