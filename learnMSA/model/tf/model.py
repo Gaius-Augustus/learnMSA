@@ -1271,7 +1271,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         terminate_on_nan = TerminateOnNaNWithCheckpoint(
             self, self.context.config.input_output.work_dir
         )
-        early_stopping = tf.keras.callbacks.EarlyStopping("loss", patience=2)
+        early_stopping = tf.keras.callbacks.EarlyStopping("loss", patience=1)
         return [terminate_on_nan, early_stopping]
 
     def use_jit_compile(self, total_steps: int | None = None) -> bool:

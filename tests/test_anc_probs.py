@@ -351,13 +351,13 @@ def test_mixture_model() -> None:
     layer.build()
 
     # Verify mixture weights sum to 1
-    w = layer.make_w().numpy()
-    assert w.shape == (config.training.num_model, 1, num_components)
+    w = layer.make_w(rate_indices).numpy()
+    assert w.shape == (n, rate_indices.shape[1], 1, num_components)
     np.testing.assert_allclose(w.sum(axis=-1), 1.0, atol=1e-6)
 
     # Verify P is a valid stochastic matrix (rows sum to 1)
     tau = layer.make_tau(rate_indices)
-    P = layer.make_P(tau).numpy()
+    P = layer.make_P(tau, subset=rate_indices).numpy()
     assert P.shape == (n, config.training.num_model, 1, 20, 20)
     np.testing.assert_allclose(P.sum(axis=-1), 1.0, atol=1e-5)
 
@@ -417,7 +417,7 @@ def test_shared_equilibrium() -> None:
 
     # P must be a valid stochastic matrix
     tau = layer.make_tau(rate_indices)
-    P = layer.make_P(tau).numpy()
+    P = layer.make_P(tau, subset=rate_indices).numpy()
     assert P.shape == (n, config.training.num_model, 1, 20, 20)
     np.testing.assert_allclose(P.sum(axis=-1), 1.0, atol=1e-5)
 

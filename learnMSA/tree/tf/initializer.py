@@ -47,7 +47,7 @@ def make_default_anc_probs_init(
     D = R.shape[0]
 
     # Build exchangeability initializer: (H, 1, K_R, D, D)
-    if shared_exchangeabilities:
+    if shared_exchangeabilities or num_components == 1:
         R_init = inverse_softplus(R + 1e-32).numpy()
         exchangeability_stack = np.tile(
             R_init[None, None, None], [num_models, 1, 1, 1, 1]
@@ -66,7 +66,7 @@ def make_default_anc_probs_init(
 
     # Build equilibrium initializer: (H, 1, K_p, D)
     log_p = np.log(p)
-    if shared_equilibrium:
+    if shared_equilibrium or num_components == 1:
         # (H, 1, 1, D)
         log_p_stack = np.tile(log_p[None, None, None], [num_models, 1, 1, 1])
     else:
