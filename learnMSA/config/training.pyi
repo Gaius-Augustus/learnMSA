@@ -30,13 +30,6 @@ class TrainingConfig(BaseModel):
     cluster_seq_id: float
     use_prior: bool
     dirichlet_mix_comp_count: int
-    use_anc_probs: bool
-    trainable_rates: bool
-    trainable_exchangeabilities: bool
-    trainable_equilibrium: bool
-    exchangeability_noise_std: float
-    equilibrium_noise_std: float
-    num_anc_probs_components: int
     only_matches: bool
     surgery_checkpoints: bool
     pre_training_checkpoint: bool
@@ -75,13 +68,6 @@ class TrainingConfig(BaseModel):
         cluster_seq_id: float = 0.9,
         use_prior: bool = True,
         dirichlet_mix_comp_count: int = 1,
-        use_anc_probs: bool = False,
-        trainable_rates: bool = True,
-        trainable_exchangeabilities: bool = False,
-        trainable_equilibrium: bool = False,
-        exchangeability_noise_std: float = 0.05,
-        equilibrium_noise_std: float = 0.01,
-        num_anc_probs_components: int = 1,
         only_matches: bool = False,
         surgery_checkpoints: bool = True,
         pre_training_checkpoint: bool = False,

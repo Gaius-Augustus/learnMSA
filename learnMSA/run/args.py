@@ -20,6 +20,7 @@ def parse_args(
 
     io = config.input_output
     tr = config.training
+    tree = config.tree
     lm = config.language_model
     im = config.init_msa
     vis = config.visualization
@@ -384,7 +385,7 @@ def parse_args(
         "--num_anc_probs_components",
         dest="num_anc_probs_components",
         type=int,
-        default=tr.num_anc_probs_components,
+        default=tree.num_anc_probs_components,
         help="Number of mixture components in the substitution model. "
             "(default: %(default)s)"
     )

@@ -79,7 +79,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
         trainable_rates: bool=True,
         trainable_scale: bool=True,
         shared_equilibrium: bool=True,
-        shared_exchangeabilities: bool=False,
+        shared_exchangeabilities: bool=True,
         clusters: np.ndarray|None=None,
         alphabet_size: int=20,
         time_reversed: bool=False,
@@ -181,12 +181,14 @@ class AncProbsLayer(tf.keras.layers.Layer):
         )
 
         if self.num_components > 1:
+            trainable_mixture = (self.trainable_exchangeabilities
+                or self.trainable_scale or self.trainable_equilibrium)
             self.mixture_kernel = self.add_weight(
                 shape=[self.heads, self.input_tracks, self.num_components],
                 name="mixture_kernel",
                 initializer=self.mixture_init,
-                trainable=self.trainable_exchangeabilities,
-                regularizer=tf.keras.regularizers.L2(5e-4 / self.heads)
+                trainable=trainable_mixture,
+                regularizer=tf.keras.regularizers.L2(5e-5 / self.heads)
             )
             self.scale_kernel = self.add_weight(
                 shape=[self.heads, self.input_tracks, self.num_components],

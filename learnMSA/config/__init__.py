@@ -1,6 +1,7 @@
 """Configuration modules for learnMSA."""
 
 from .training import TrainingConfig
+from .tree import TreeConfig
 from .init_msa import InitMSAConfig
 from .language_model import LanguageModelConfig
 from .visualization import VisualizationConfig
@@ -12,6 +13,7 @@ from .config import Configuration
 
 __all__ = [
     "TrainingConfig",
+    "TreeConfig",
     "InitMSAConfig",
     "LanguageModelConfig",
     "VisualizationConfig",

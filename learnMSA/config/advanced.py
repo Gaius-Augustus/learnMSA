@@ -24,7 +24,7 @@ class AdvancedConfig(BaseModel):
     reset_branch_lengths: bool = True
     """Whether to reset the branch lengths (tau) before training."""
 
-    reset_evo_model: bool = False
+    reset_evo_model: bool = True
     """Whether to reset the evolutionary model parameters (exchangeabilities, equilibrium, and mixture) before training."""
 
     @field_validator(

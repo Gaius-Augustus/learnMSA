@@ -5,7 +5,7 @@ from pathlib import Path
 
 import learnMSA.model.training_util as training_util
 import tests.hmm.ref as ref
-from learnMSA.config import Configuration, TrainingConfig
+from learnMSA.config import Configuration, TrainingConfig, TreeConfig
 from learnMSA.config.hmm import PHMMPriorConfig
 from learnMSA.model.tf.model import LearnMSAModel
 from learnMSA.model.context import LearnMSAContext
@@ -22,6 +22,8 @@ def config_binary() -> Configuration:
     return Configuration(
         training=TrainingConfig(
             length_init=[4, 3],
+        ),
+        tree=TreeConfig(
             use_anc_probs=False,
         ),
         hmm=hmm_config,

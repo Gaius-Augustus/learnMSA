@@ -36,7 +36,7 @@ def make_default_anc_probs_init(
     num_models: int,
     num_components: int = 1,
     shared_equilibrium: bool = True,
-    shared_exchangeabilities: bool = False,
+    shared_exchangeabilities: bool = True,
     exchangeability_noise_std: float = 0.05,
     equilibrium_noise_std: float = 0.01,
     seed: int | None = None,

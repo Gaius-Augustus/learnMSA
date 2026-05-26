@@ -36,7 +36,7 @@ class TestArgsToConfig:
         assert config.training.batch_size == -1
         assert config.training.tokens_per_batch == -1
         assert config.training.learning_rate == 0.1
-        assert config.training.epochs == [10, 2, 10]
+        assert config.training.epochs == [20, 10, 20]
         assert config.training.auto_crop is True
         assert config.init_msa.from_msa is None
         assert config.language_model.use_language_model is False
@@ -174,7 +174,7 @@ class TestArgsToConfig:
         assert config.language_model.embedding_prior_components == 64
         assert config.language_model.inverse_gamma_alpha == 2.0
         assert config.language_model.inverse_gamma_beta == 1.0
-        assert config.training.trainable_rates is True
+        assert config.tree.trainable_rates is True
 
     def test_args_to_config_with_structure_args(self):
         """Test conversion with structure-related arguments."""
@@ -253,7 +253,7 @@ class TestArgsToConfig:
         assert config.language_model.inverse_gamma_alpha == 2.0
         assert config.language_model.inverse_gamma_beta == 1.0
         assert config.advanced.initial_distance == 0.1
-        assert config.training.trainable_rates is False
+        assert config.tree.trainable_rates is False
 
     def test_args_to_config_num_model_from_length_init(self):
         """Test that num_model is computed from length_init when provided."""
@@ -344,7 +344,7 @@ class TestArgsToConfig:
         assert config.init_msa.pseudocounts is True
         assert config.language_model.use_language_model is True
         assert config.language_model.use_L2 is True
-        assert config.training.trainable_rates is False
+        assert config.tree.trainable_rates is False
         assert config.training.use_noise is True
 
     def test_args_to_config_short_options(self):

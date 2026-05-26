@@ -26,7 +26,7 @@ class TrainingConfig(BaseModel):
     learning_rate: float = 0.1
     """Learning rate for gradient descent."""
 
-    epochs: Sequence[int] = [10, 2, 10]
+    epochs: Sequence[int] = [20, 10, 20]
     """Number of training epochs."""
 
     max_iterations: int = 2
@@ -96,27 +96,6 @@ class TrainingConfig(BaseModel):
 
     dirichlet_mix_comp_count: int = 1
     """Number of components for Dirichlet mixture prior."""
-
-    use_anc_probs: bool = True
-    """Whether to use ancestral state probabilities."""
-
-    trainable_rates: bool = True
-    """Whether the per-sequence rates are trainable."""
-
-    trainable_exchangeabilities: bool = False
-    """Whether exchangeability matrices are trainable."""
-
-    trainable_equilibrium: bool = False
-    """Whether equilibrium distributions are trainable."""
-
-    exchangeability_noise_std: float = 0.05
-    """Noise std for exchangeability matrix perturbation in LG initialization."""
-
-    equilibrium_noise_std: float = 0.01
-    """Noise std for equilibrium distribution perturbation in LG initialization."""
-
-    num_anc_probs_components: int = 1
-    """Number of mixture components in the ancestral probabilities layer."""
 
     only_matches: bool = False
     """Omit all insertions in the output and write only those amino

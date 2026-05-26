@@ -7,6 +7,7 @@ from .init_msa import InitMSAConfig
 from .input_output import InputOutputConfig
 from .language_model import LanguageModelConfig
 from .training import TrainingConfig
+from .tree import TreeConfig
 from .visualization import VisualizationConfig
 from .hmm import PHMMConfig, PHMMPriorConfig
 from .structure import StructureConfig
@@ -26,6 +27,9 @@ class Configuration(BaseModel):
 
     training: TrainingConfig = TrainingConfig()
     """Training parameters."""
+
+    tree: TreeConfig = TreeConfig()
+    """Ancestral probabilities (tree) layer parameters."""
 
     hmm: PHMMConfig = PHMMConfig()
     """HMM parameters."""

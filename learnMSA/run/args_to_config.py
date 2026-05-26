@@ -24,6 +24,7 @@ def args_to_config(args: Namespace, base_config: Configuration | None = None) ->
     data = base_config.model_dump(mode="json")
     io = data["input_output"]
     tr = data["training"]
+    tree = data["tree"]
     im = data["init_msa"]
     lm = data["language_model"]
     vis = data["visualization"]
@@ -70,10 +71,6 @@ def args_to_config(args: Namespace, base_config: Configuration | None = None) ->
     tr["trainable_insertions"] = args.trainable_insertions
     tr["no_sequence_weights"] = args.no_sequence_weights
     tr["skip_training"] = args.skip_training
-    tr["trainable_rates"] = not args.frozen_rates
-    tr["trainable_exchangeabilities"] = args.trainable_exchangeabilities
-    tr["trainable_equilibrium"] = args.trainable_equilibrium
-    tr["num_anc_probs_components"] = args.num_anc_probs_components
     tr["only_matches"] = args.only_matches
     tr["use_noise"] = not args.no_noise
     tr["no_aa"] = args.no_aa
@@ -82,6 +79,12 @@ def args_to_config(args: Namespace, base_config: Configuration | None = None) ->
     tr["reset_transitions_after_surgery"] = args.reset_transitions_after_surgery
     tr["decoding_mode"] = args.decoding_mode
     tr["hit_alignment_mode"] = args.align_hits
+
+    # --- Tree ---
+    tree["trainable_rates"] = not args.frozen_rates
+    tree["trainable_exchangeabilities"] = args.trainable_exchangeabilities
+    tree["trainable_equilibrium"] = args.trainable_equilibrium
+    tree["num_anc_probs_components"] = args.num_anc_probs_components
 
     # Crop: decode the argparser string representation into config fields.
     tr["auto_crop"] = args.crop == "auto"

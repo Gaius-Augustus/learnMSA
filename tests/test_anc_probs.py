@@ -156,7 +156,7 @@ def make_anc_probs_layer(
         equilibrium_init=p_init,
         rate_init=t_init,
         exchangeability_init=R_init,
-        trainable_rates=config.training.trainable_rates,
+        trainable_rates=config.tree.trainable_rates,
         alphabet_size=20,
         time_reversed=time_reversed,
     )

@@ -49,9 +49,10 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
 
         self.context = context
         train_cfg = context.config.training
+        tree_cfg = context.config.tree
 
         # Create the ancestral probabilities layer
-        if train_cfg.use_anc_probs and not train_cfg.no_aa:
+        if tree_cfg.use_anc_probs and not train_cfg.no_aa:
             self.anc_probs_layer = AncProbsLayer(
                 heads=train_cfg.num_model,
                 rates=context.num_seq,
@@ -59,12 +60,14 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
                 equilibrium_init=context.p_init,
                 rate_init=context.t_init,
                 exchangeability_init=context.R_init,
-                trainable_equilibrium=train_cfg.trainable_equilibrium,
-                trainable_exchangeabilities=train_cfg.trainable_exchangeabilities,
-                trainable_rates=train_cfg.trainable_rates,
+                trainable_equilibrium=tree_cfg.trainable_equilibrium,
+                trainable_exchangeabilities=tree_cfg.trainable_exchangeabilities,
+                trainable_rates=tree_cfg.trainable_rates,
+                shared_equilibrium=tree_cfg.shared_equilibrium,
+                shared_exchangeabilities=tree_cfg.shared_exchangeabilities,
                 clusters=context.clusters,
-                time_reversed=train_cfg.trainable_exchangeabilities or train_cfg.trainable_equilibrium,
-                num_components=train_cfg.num_anc_probs_components,
+                time_reversed=tree_cfg.trainable_exchangeabilities or tree_cfg.trainable_equilibrium,
+                num_components=tree_cfg.num_anc_probs_components,
                 mixture_init=context.mix_init,
                 scale_init=context.scale_init,
             )
@@ -98,7 +101,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         ]
         self._eval_mode = False
 
-        self.encode_hmm_inputs = train_cfg.use_anc_probs
+        self.encode_hmm_inputs = tree_cfg.use_anc_probs
 
     def call(
         self,
@@ -193,7 +196,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             dtype=self.phmm_layer.dtype
         )
 
-        if self.context.config.training.use_anc_probs\
+        if self.context.config.tree.use_anc_probs\
                 and not self.context.config.training.no_aa\
                 and self.encode_hmm_inputs:
             # AncProbsLayer accepts (batch, L, num_models, 20) and returns
@@ -1268,7 +1271,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         terminate_on_nan = TerminateOnNaNWithCheckpoint(
             self, self.context.config.input_output.work_dir
         )
-        early_stopping = tf.keras.callbacks.EarlyStopping("loss", patience=1)
+        early_stopping = tf.keras.callbacks.EarlyStopping("loss", patience=2)
         return [terminate_on_nan, early_stopping]
 
     def use_jit_compile(self, total_steps: int | None = None) -> bool:
