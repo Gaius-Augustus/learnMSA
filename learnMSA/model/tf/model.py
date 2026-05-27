@@ -66,7 +66,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
                 shared_equilibrium=tree_cfg.shared_equilibrium,
                 shared_exchangeabilities=tree_cfg.shared_exchangeabilities,
                 clusters=context.clusters,
-                time_reversed=tree_cfg.trainable_exchangeabilities or tree_cfg.trainable_equilibrium,
+                time_reversed=True,
                 num_components=tree_cfg.num_anc_probs_components,
                 mixture_init=context.mix_init,
                 scale_init=context.scale_init,

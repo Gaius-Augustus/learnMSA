@@ -88,7 +88,7 @@ class TestTrainingConfig:
         assert config.batch_size == -1
         assert config.tokens_per_batch == -1
         assert config.learning_rate == 0.1
-        assert config.epochs == [20, 10, 20]
+        assert config.epochs == [10, 2, 10]
         assert config.max_iterations == 2
         assert config.length_init is None
 

@@ -36,7 +36,7 @@ class TestArgsToConfig:
         assert config.training.batch_size == -1
         assert config.training.tokens_per_batch == -1
         assert config.training.learning_rate == 0.1
-        assert config.training.epochs == [20, 10, 20]
+        assert config.training.epochs == [10, 2, 10]
         assert config.training.auto_crop is True
         assert config.init_msa.from_msa is None
         assert config.language_model.use_language_model is False

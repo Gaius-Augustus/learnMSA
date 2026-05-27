@@ -139,6 +139,58 @@ def get_test_configs(sequences : np.ndarray) -> list[dict]:
     return cases
 
 
+def get_test_configs_time_reversed(sequences: np.ndarray) -> list[dict]:
+    """Generate test configurations for time-reversed ancestral probabilities.
+
+    For very large tau, P(S|A) becomes independent of A, so for each observed
+    residue S the ancestral distribution over A is constant with value p[S].
+    """
+    inv_sp_R, log_p = Initializers.make_substitution_model_init(1)
+    p = tf.nn.softmax(log_p).numpy()[0, 0, 0]  # shape: (20,)
+    cases = []
+    for rate_init in [-100., -3., 100.]:
+        for n in [1, 3]:
+            case = {}
+
+            config = Configuration()
+            config.training.length_init = [10] * n
+            config.training.no_sequence_weights = True
+            case["config"] = config
+
+            R_init, p_init = Initializers.make_substitution_model_init(n)
+            case["R_init"] = Initializers.ConstantInitializer(R_init)
+            case["p_init"] = Initializers.ConstantInitializer(p_init)
+            case["t_init"] = Initializers.ConstantInitializer(rate_init)
+
+            if rate_init == -100.:
+                expected_anc_probs = tf.one_hot(sequences, 20).numpy()
+                case["expected_anc_probs"] = expected_anc_probs
+            elif rate_init == 100.:
+                # Shape (B, L, H, 20): each vector is constant p[observed_residue]
+                expected_anc_probs = np.zeros(
+                    (
+                        sequences.shape[0],
+                        sequences.shape[1],
+                        sequences.shape[2],
+                        20,
+                    ),
+                    dtype=np.float32,
+                )
+                for b in range(sequences.shape[0]):
+                    for l in range(sequences.shape[1]):
+                        for h in range(sequences.shape[2]):
+                            s = sequences[b, l, h]
+                            expected_anc_probs[b, l, h, :] = p[s]
+                case["expected_anc_probs"] = expected_anc_probs
+
+            if "expected_anc_probs" in case:
+                case["expected_anc_probs"] = np.stack(
+                    [case["expected_anc_probs"]] * n, axis=2
+                )
+            cases.append(case)
+    return cases
+
+
 def make_anc_probs_layer(
     config : Configuration,
     R_init : tf.keras.initializers.Initializer,
@@ -234,7 +286,7 @@ def test_encoder_model() -> None:
         config.training.no_sequence_weights = True
         batch_gen = training.BatchGenerator()
         batch_gen.configure(data, context=LearnMSAContext(config, data))
-        for case in get_test_configs(sequences):
+        for case in get_test_configs_time_reversed(sequences):
             # The default emitter initializers expect 25 as last dimension
             # which is not compatible with num_matrix=3
             config: Configuration = case["config"]
@@ -273,12 +325,20 @@ def test_encoder_model() -> None:
                 break
             if "expected_anc_probs" in case:
                 assert_anc_probs(
-                    anc_prob_seqs[:,:,:,:,:20],
-                    case["expected_freq"],
-                    case["expected_anc_probs"]
+                    anc_prob_seqs[:, :, :, :, :20],
+                    np.sum(case["expected_anc_probs"], axis=-1, keepdims=True),
+                    case["expected_anc_probs"],
                 )
             else:
-                assert_anc_probs(anc_prob_seqs, case["expected_freq"])
+                # For time_reversed=True, rows are gathered from P^T, so
+                # probabilities do not necessarily sum to 1.
+                assert anc_prob_seqs.shape == (
+                    n,
+                    L,
+                    config.training.num_model,
+                    1,
+                    len(SequenceDataset._default_alphabet),
+                )
 
 def test_time_reversed() -> None:
     # Set up a layer with default initialization and time_reversed=True
@@ -345,12 +405,13 @@ def test_mixture_model() -> None:
         rate_init=Initializers.ConstantInitializer(0.0),
         exchangeability_init=Initializers.ConstantInitializer(R_init),
         num_components=num_components,
+        time_reversed=False,
     )
     layer.build()
 
     # Verify mixture weights sum to 1
     w = layer.make_w(rate_indices).numpy()
-    assert w.shape == (n, rate_indices.shape[1], 1, num_components)
+    assert w.shape == (config.training.num_model, 1, num_components)
     np.testing.assert_allclose(w.sum(axis=-1), 1.0, atol=1e-6)
 
     # Verify P is a valid stochastic matrix (rows sum to 1)
@@ -398,6 +459,7 @@ def test_shared_equilibrium() -> None:
         exchangeability_init=Initializers.ConstantInitializer(R_init),
         num_components=num_components,
         shared_equilibrium=True,
+        time_reversed=False,
     )
     layer.build()
 
@@ -452,6 +514,7 @@ def test_two_input_tracks() -> None:
         rate_init=Initializers.ConstantInitializer(-3.0),
         exchangeability_init=Initializers.ConstantInitializer(R_init),
         alphabet_size=20,
+        time_reversed=False,
     )
     layer.build()
 

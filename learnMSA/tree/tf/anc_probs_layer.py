@@ -91,7 +91,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
         shared_exchangeabilities: bool=True,
         clusters: np.ndarray|None=None,
         alphabet_size: int=20,
-        time_reversed: bool=False,
+        time_reversed: bool=True,
         num_components: int=1,
         input_dependent_weights: bool=False,
         **kwargs
