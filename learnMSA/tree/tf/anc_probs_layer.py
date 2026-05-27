@@ -66,7 +66,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
         num_components: The number of mixture components K. If > 1, the layer
             learns a mixture of K independent GTR models per head and track,
             sharing branch lengths across components.
-        input_dependent_weights: If True (default), the mixture weights depend
+        input_dependent_weights: If True, the mixture weights depend
             on the sequence cluster/rate index. The mixture_kernel gains a
             leading num_clusters dimension and make_P requires a subset
             argument. If False, all sequences share the same mixture weights.
@@ -93,7 +93,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
         alphabet_size: int=20,
         time_reversed: bool=False,
         num_components: int=1,
-        input_dependent_weights: bool=True,
+        input_dependent_weights: bool=False,
         **kwargs
     ):
         super(AncProbsLayer, self).__init__(**kwargs)
