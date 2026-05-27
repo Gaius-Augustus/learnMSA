@@ -26,7 +26,7 @@ class TrainingConfig(BaseModel):
     learning_rate: float = 0.1
     """Learning rate for gradient descent."""
 
-    epochs: Sequence[int] = [20, 10, 20]
+    epochs: Sequence[int] = [10, 2, 10]
     """Number of training epochs."""
 
     max_iterations: int = 2
