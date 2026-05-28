@@ -88,6 +88,21 @@ class Dataset(ABC):
     def reorder(self, permutation: list[int] | np.ndarray) -> None:
         """Reorder sequences in-place using a permutation of sequence indices."""
 
+    def adapt_order(self, other_dataset: 'Dataset') -> None:
+        """
+        Reorder the sequences in-place to match the order of another dataset.
+
+        Args:
+            other_dataset: The dataset to match the order of. Must contain the
+                same sequence IDs as this dataset.
+        """
+        if set(self.seq_ids) != set(other_dataset.seq_ids):
+            raise ValueError(
+                "The sequence IDs in the two datasets do not match."
+            )
+        perm = [self.seq_ids.index(seq_id) for seq_id in other_dataset.seq_ids]
+        self.reorder(perm)
+
     @abstractmethod
     def get_dtype(self) -> type[np.integer | np.floating]:
         """Return the dtype of the encoded sequences."""

@@ -131,3 +131,56 @@ def test_make_dataset_aa_plus_embedding(
     assert s.shape == (3, 18, 4)
     assert e.shape == (3, 18, 4, 8)
     assert i.shape == (3, 4)
+
+
+def test_reorder_embedding_dataset(embedding_dataset: EmbeddingDataset) -> None:
+    """reorder must update seq_ids, seq_lens and route get_encoded_seq correctly."""
+    perm = [2, 0, 4, 1, 3]
+    original_ids = list(embedding_dataset.seq_ids)
+    original_lens = embedding_dataset.seq_lens.copy()
+
+    embedding_dataset.reorder(perm)
+
+    assert embedding_dataset.seq_ids == [original_ids[i] for i in perm]
+    np.testing.assert_array_equal(embedding_dataset.seq_lens, original_lens[perm])
+    # Sequence i originally had a constant embedding value of (i + 1)
+    for new_i, old_i in enumerate(perm):
+        emb = embedding_dataset.get_encoded_seq(new_i)
+        np.testing.assert_array_equal(emb, np.full_like(emb, old_i + 1))
+
+
+def test_adapt_order_sequence_dataset() -> None:
+    """adapt_order must produce matching seq_ids, seq_lens and encoded sequences."""
+    seqs = [("a", "ACDE"), ("b", "GHIL"), ("c", "MNPQ")]
+    ds_ref = SequenceDataset(sequences=seqs)
+    ds = SequenceDataset(sequences=[seqs[1], seqs[2], seqs[0]])
+
+    ds.adapt_order(ds_ref)
+
+    assert ds.seq_ids == ds_ref.seq_ids
+    np.testing.assert_array_equal(ds.seq_lens, ds_ref.seq_lens)
+    for i in range(len(seqs)):
+        np.testing.assert_array_equal(ds.get_encoded_seq(i), ds_ref.get_encoded_seq(i))
+
+
+def test_adapt_order_embedding_dataset(embedding_dataset: EmbeddingDataset) -> None:
+    """adapt_order must align seq_ids, seq_lens and embeddings with a reference."""
+    # Build a reference dataset with the sequences in reversed order
+    n = embedding_dataset.num_seq
+    rev_ids = list(reversed(embedding_dataset.seq_ids))
+    rev_lens = embedding_dataset.seq_lens[::-1].copy()
+    dim = embedding_dataset._embedding_cache.dim
+    # Original seq_i has constant embedding value (i + 1); reversed index k
+    # maps to original index (n - 1 - k), so value = (n - k).
+    rows = [np.full((rev_lens[k], dim), n - k, dtype=np.float32) for k in range(n)]
+    ref_cache = EmbeddingCache(rev_lens, dim, cache=np.concatenate(rows))
+    ref = EmbeddingDataset(embedding_cache=ref_cache, seq_ids=rev_ids)
+
+    embedding_dataset.adapt_order(ref)
+
+    assert embedding_dataset.seq_ids == ref.seq_ids
+    np.testing.assert_array_equal(embedding_dataset.seq_lens, ref.seq_lens)
+    for i in range(n):
+        np.testing.assert_array_equal(
+            embedding_dataset.get_encoded_seq(i), ref.get_encoded_seq(i)
+        )

@@ -265,20 +265,24 @@ def merge_config_file(
 
 
 def load_struct_data(
-    config: Configuration, data: "SequenceDataset", stack: ExitStack
+    config: Configuration,
+    data: "SequenceDataset",
+    stack: ExitStack | None = None,
 ) -> "SequenceDataset | None":
     if config.input_output.struct_file is not None:
         from learnMSA.util import SequenceDataset
-        struct_data = stack.enter_context(
-            SequenceDataset(
-                config.input_output.struct_file,
-                "fasta",
-                indexed=config.training.indexed_data,
-                alphabet=config.structure.structural_alphabet,
-                replace_with_x="",
-                encode_as_one_hot=True,
-            )
+        dataset = SequenceDataset(
+            config.input_output.struct_file,
+            "fasta",
+            indexed=config.training.indexed_data,
+            alphabet=config.structure.structural_alphabet,
+            replace_with_x="",
+            encode_as_one_hot=True,
         )
+        if stack is None:
+            struct_data = dataset
+        else:
+            struct_data = stack.enter_context(dataset)
 
         # Check if the data is valid
         struct_data.validate_dataset()
@@ -287,22 +291,23 @@ def load_struct_data(
                 "The sequence IDs in the structural dataset do not match "\
                 "those in the input dataset."
             )
-        struct_perm = [
-            struct_data.seq_ids.index(seq_id) for seq_id in data.seq_ids
-        ]
-        struct_data.reorder(struct_perm)
+        struct_data.adapt_order(data)
 
         return struct_data
     return None
 
 def load_emb_data(
-    config: Configuration, data: "SequenceDataset", stack: ExitStack
+    config: Configuration,
+    data: "SequenceDataset",
+    stack: ExitStack | None = None,
 ) -> "EmbeddingDataset | None":
     if config.input_output.emb_file is not None:
         from learnMSA.util import EmbeddingDataset
-        emb_data = stack.enter_context(
-            EmbeddingDataset(config.input_output.emb_file)
-        )
+        dataset = EmbeddingDataset(config.input_output.emb_file)
+        if stack is None:
+            emb_data = dataset
+        else:
+            emb_data = stack.enter_context(dataset)
         # Reorder such that the embedding dataset has the same order of
         # sequences as the amino acid dataset
         emb_perm = [

@@ -108,7 +108,7 @@ class EmbeddingDataset(Dataset):
         np.savez(
             filepath,
             cache=self._embedding_cache.cache,
-            seq_lens=self.seq_lens,
+            seq_lens=self._embedding_cache.seq_lens,
             seq_ids=np.array(self.seq_ids, dtype=str),
             permutation=self._permutation,
             dim=np.array([self._embedding_cache.dim]),
@@ -122,7 +122,10 @@ class EmbeddingDataset(Dataset):
             permutation: A 1D permutation containing each index in
                 [0, num_seq - 1] exactly once.
         """
-        self._permutation = np.array(permutation)
+        perm = np.asarray(permutation, dtype=np.int64)
+        self.seq_ids = [self.seq_ids[i] for i in perm]
+        self.seq_lens = self.seq_lens[perm]
+        self._permutation = self._permutation[perm]
 
     def get_dtype(self) -> type[np.integer | np.floating]:
         """Return the dtype of the encoded sequences."""
@@ -155,7 +158,7 @@ class EmbeddingDataset(Dataset):
         dim = int(data["dim"][0])
         cache_array = data["cache"]
         self.seq_ids = data["seq_ids"].tolist()
-        self.seq_lens = seq_lens
-        self._embedding_cache = EmbeddingCache(seq_lens, dim, cache=cache_array)
         self._permutation = data["permutation"]
+        self._embedding_cache = EmbeddingCache(seq_lens, dim, cache=cache_array)
+        self.seq_lens = seq_lens[self._permutation]
         self.parsing_ok = True
