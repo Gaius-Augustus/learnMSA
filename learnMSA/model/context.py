@@ -186,7 +186,7 @@ class LearnMSAContext:
         if self.config.structure.use_structure:
             R_st_init, p_st_init = initializers.make_substitution_model_init(
                 self.config.training.num_model,
-                type="foldseek_3Di",
+                type="AF_3Di",
                 num_components=K,
                 shared_equilibrium=self.config.tree.shared_equilibrium,
                 shared_exchangeabilities=self.config.tree.shared_exchangeabilities,

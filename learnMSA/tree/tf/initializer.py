@@ -5,7 +5,7 @@ import scipy
 from learnMSA.tree.tf.util import inverse_softplus
 from learnMSA.util.sequence_dataset import SequenceDataset
 
-from evoten.substitution_models import LG, foldseek_3Di
+from evoten.substitution_models import LG, foldseek_3Di, AF_3Di
 
 class ConstantInitializer(tf.keras.initializers.Constant):
 
@@ -56,6 +56,8 @@ def make_substitution_model_init(
         R, p = LG(alphabet)
     elif type == "foldseek_3Di":
         R, p = foldseek_3Di(alphabet)
+    elif type == "AF_3Di":
+        R, p = AF_3Di(alphabet)
     else:
         raise ValueError(f"Unknown substitution model type: {type}")
     D = R.shape[0]

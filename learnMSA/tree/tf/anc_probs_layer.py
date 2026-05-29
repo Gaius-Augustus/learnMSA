@@ -33,7 +33,6 @@ class AncProbsLayer(tf.keras.layers.Layer):
             the user.
         rate_init: Initializer for the per-sequence rates.
         mixture_init: Initializer for the mixture logit weights of shape
-            (num_clusters, H, I, K) when input_dependent_weights=True, else
             (H, I, K). Defaults to RandomNormal(stddev=0.1) to break symmetry
             while keeping initial weights close to uniform.
         scale_init: Initializer for the per-component rate matrix scale factors
@@ -66,10 +65,6 @@ class AncProbsLayer(tf.keras.layers.Layer):
         num_components: The number of mixture components K. If > 1, the layer
             learns a mixture of K independent GTR models per head and track,
             sharing branch lengths across components.
-        input_dependent_weights: If True, the mixture weights depend
-            on the sequence cluster/rate index. The mixture_kernel gains a
-            leading num_clusters dimension and make_P requires a subset
-            argument. If False, all sequences share the same mixture weights.
     """
 
     def __init__(
@@ -93,7 +88,6 @@ class AncProbsLayer(tf.keras.layers.Layer):
         alphabet_size: int=20,
         time_reversed: bool=True,
         num_components: int=1,
-        input_dependent_weights: bool=False,
         **kwargs
     ):
         super(AncProbsLayer, self).__init__(**kwargs)
@@ -116,7 +110,6 @@ class AncProbsLayer(tf.keras.layers.Layer):
         self.alphabet_size = alphabet_size
         self.time_reversed = time_reversed
         self.num_components = num_components
-        self.input_dependent_weights = input_dependent_weights
         if mixture_init is None:
             self.mixture_init = tf.keras.initializers.RandomNormal(stddev=0.1)
         else:
@@ -210,11 +203,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
             trainable_mixture = (self.trainable_exchangeabilities
                 or self.trainable_scale or self.trainable_equilibrium)
             self.mixture_kernel = self.add_weight(
-                shape=(
-                    [self.num_clusters, self.heads, self.input_tracks, self.num_components]
-                    if self.input_dependent_weights
-                    else [self.heads, self.input_tracks, self.num_components]
-                ),
+                shape=[self.heads, self.input_tracks, self.num_components],
                 name="mixture_kernel",
                 initializer=self.mixture_init,
                 trainable=trainable_mixture,
@@ -300,19 +289,11 @@ class AncProbsLayer(tf.keras.layers.Layer):
             p = tf.tile(p, [1, 1, self.num_components, 1])
         return p
 
-    def make_w(self, subset: tf.Tensor | None = None) -> tf.Tensor:
+    def make_w(self) -> tf.Tensor:
         """Computes the mixture weights for all models.
 
-        Args:
-            subset: An optional tensor of shape (B, H) that specifies a
-                    subset of sequences to compute weights for.
-                    If None and input_dependent_weights=True, returns weights
-                    indexed by cluster/rate without selecting a batch.
-
         Returns:
-            A tensor of shape (B, H, I, K) when subset is provided and
-            input_dependent_weights=True, else (H, I, K).
-            All tensors sum to 1 along the K axis.
+            A tensor of shape (H, I, K) summing to 1 along the K axis.
         """
         if self.num_components == 1:
             if self._head_subset is None:
@@ -321,21 +302,8 @@ class AncProbsLayer(tf.keras.layers.Layer):
                 H_active = len(self._head_subset)
             return tf.ones((H_active, self.input_tracks, 1))
         kernel = self.mixture_kernel
-        if not self.input_dependent_weights:
-            if self._head_subset is not None:
-                kernel = tf.gather(kernel, self._head_subset, axis=0)
-            return tf.nn.softmax(kernel, axis=-1)
-        # input_dependent_weights=True: kernel shape (num_clusters, H, I, K)
         if self._head_subset is not None:
-            kernel = tf.gather(kernel, self._head_subset, axis=1)
-        if self.clusters is not None:
-            kernel = tf.gather(kernel, self.clusters, axis=0)
-        if subset is not None:
-            B, H = tf.unstack(tf.shape(subset))
-            h_range = tf.range(H, dtype=subset.dtype)[tf.newaxis, :]
-            h_indices = tf.tile(h_range, [B, 1])  # (B, H)
-            nd_indices = tf.stack([subset, h_indices], axis=-1)  # (B, H, 2)
-            kernel = tf.gather_nd(kernel, nd_indices)  # (B, H, I, K)
+            kernel = tf.gather(kernel, self._head_subset, axis=0)
         return tf.nn.softmax(kernel, axis=-1)
 
     def make_scale(self) -> tf.Tensor:
@@ -413,26 +381,18 @@ class AncProbsLayer(tf.keras.layers.Layer):
 
         return tau
 
-    def make_P(self, tau: tf.Tensor, subset: tf.Tensor | None = None) -> tf.Tensor:
+    def make_P(self, tau: tf.Tensor) -> tf.Tensor:
         """Computes the transition matrices P for all models and
         sequences given the evolutionary times tau. Takes the time_reversed
         argument of the layer into account.
 
         Args:
             tau: A tensor of shape (B, H, I) containing the evolutionary times.
-            subset: An optional tensor of shape (B, H) mapping each sequence
-                    to a rate/cluster index. Required when
-                    input_dependent_weights=True and num_components > 1.
 
         Returns:
             A tensor of shape (B, H, I, D, D) containing the transition
             matrices for all models and sequences.
         """
-        if self.input_dependent_weights and self.num_components > 1 and subset is None:
-            raise ValueError(
-                "subset must be provided to make_P when "
-                "input_dependent_weights=True and num_components > 1."
-            )
         if self._head_subset is None:
             H_active = self.heads
         else:
@@ -468,11 +428,8 @@ class AncProbsLayer(tf.keras.layers.Layer):
             [-1, H_active, self.input_tracks, self.num_components,
              self.alphabet_size, self.alphabet_size]
         )
-        w = self.make_w(subset)  # (B, H, I, K) or (H, I, K)
-        if self.input_dependent_weights and self.num_components > 1:
-            w = w[:, :, :, :, tf.newaxis, tf.newaxis]  # (B, H, I, K, 1, 1)
-        else:
-            w = w[tf.newaxis, :, :, :, tf.newaxis, tf.newaxis]  # (1, H, I, K, 1, 1)
+        w = self.make_w()  # (H, I, K)
+        w = w[tf.newaxis, :, :, :, tf.newaxis, tf.newaxis]  # (1, H, I, K, 1, 1)
         P = tf.reduce_sum(w * P_all, axis=3)  # (B, H, I, D, D)
 
         if self.time_reversed:
@@ -481,8 +438,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
         return P
 
     def _compute_anc_probs(
-        self, sequences: tf.Tensor, tau: tf.Tensor,
-        subset: tf.Tensor | None = None
+        self, sequences: tf.Tensor, tau: tf.Tensor
     ) -> tf.Tensor:
         """Computes ancestral probabilities simultaneously for all sites and
         rate matrices.
@@ -492,14 +448,11 @@ class AncProbsLayer(tf.keras.layers.Layer):
                 format. Shape: (B, L, H*, I, D)
                 Currently all sequence must share the same alphabet size D.
             tau: Evolutionary times. Shape: (B, H, I)
-            subset: Optional rate/cluster indices of shape (B, H), forwarded
-                    to make_P. Required when input_dependent_weights=True
-                    and num_components > 1.
 
         Returns:
             Ancestral probabilities. Shape: (B, L, H, I, D)
         """
-        P = self.make_P(tau, subset)  # (B, H, I, D, D)
+        P = self.make_P(tau)  # (B, H, I, D, D)
 
         # Compute ancestral probabilities using einsum
         # Sequences might require broadcasting to the number of heads
@@ -550,7 +503,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
 
         # Compute ancestral probabilities (B, L, H, I, D)
         anc_probs = self._compute_anc_probs(
-            tf.stack(inputs, axis=3), tau=tau, subset=rate_indices
+            tf.stack(inputs, axis=3), tau=tau
         )
 
         extended_anc_probs = []
@@ -584,7 +537,6 @@ class AncProbsLayer(tf.keras.layers.Layer):
             "alphabet_size": self.alphabet_size,
             "time_reversed": self.time_reversed,
             "num_components": self.num_components,
-            "input_dependent_weights": self.input_dependent_weights,
         })
         if self.num_components > 1:
             config["mixture_init"] = initializer.ConstantInitializer(
