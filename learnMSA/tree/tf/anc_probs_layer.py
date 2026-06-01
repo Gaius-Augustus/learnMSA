@@ -2,12 +2,8 @@ import tensorflow as tf
 import numpy as np
 import learnMSA.tree.tf.initializer as initializer
 from learnMSA.tree.tf.util import deserialize
-
-from evoten.backend_tf import BackendTF
-from evoten.expm_gtr import expm_gtr, precompute_gtr, expm_gtr_from_decomp
-
-# Initialize evoten backend
-backend = BackendTF()
+from learnMSA.tree.tf.substitution_model import SubstitutionModel
+from learnMSA.tree.tf.tree_model import TreeModel
 
 class AncProbsLayer(tf.keras.layers.Layer):
     """A learnable layer for ancestral probabilities.
@@ -75,6 +71,10 @@ class AncProbsLayer(tf.keras.layers.Layer):
             sharing branch lengths across components.
     """
 
+    substitution_model: SubstitutionModel
+
+    tree_model: TreeModel
+
     def __init__(
         self,
         heads: int,
@@ -104,187 +104,81 @@ class AncProbsLayer(tf.keras.layers.Layer):
         self.heads = heads
         self.rates = rates
         self.input_tracks = input_tracks
-
-        self.rate_init = rate_init
-        self.equilibrium_init = equilibrium_init
-        self.exchangeability_init = exchangeability_init
-        if exchangeability_delta_init is None:
-            self.exchangeability_delta_init = tf.keras.initializers.Zeros()
-        else:
-            self.exchangeability_delta_init = exchangeability_delta_init
-        self.exchangeability_l2 = exchangeability_l2
-
-        self.trainable_equilibrium = trainable_equilibrium
-        self.trainable_exchangeabilities = trainable_exchangeabilities
-        self.trainable_rates = trainable_rates
-        self.trainable_scale = trainable_scale
-
-        self.shared_equilibrium = shared_equilibrium
-        self.shared_exchangeabilities = shared_exchangeabilities
-        self.clusters = clusters
         self.alphabet_size = alphabet_size
-        self.time_reversed = time_reversed
         self.num_components = num_components
-        if mixture_init is None:
-            self.mixture_init = tf.keras.initializers.RandomNormal(stddev=0.1)
-        else:
-            self.mixture_init = mixture_init
-        if scale_init is None:
-            # inverse_softplus(1.0) = log(exp(1) - 1) ≈ 0.5413 → softplus gives 1.0 (neutral)
-            self.scale_init = tf.keras.initializers.Constant(
-                np.log(np.exp(1.0) - 1.0)
-            )
-        else:
-            self.scale_init = scale_init
-        if tau_track_init is None:
-            # inverse_softplus(1.0) → initial conversion rate is 1.0 (neutral)
-            self.tau_track_init = tf.keras.initializers.Constant(
-                np.log(np.exp(1.0) - 1.0)
-            )
-        else:
-            self.tau_track_init = tau_track_init
-        if clusters is None:
-            self.num_clusters = self.rates
-        else:
-            self.num_clusters = np.max(clusters) + 1
-        self._head_subset = None
-        self._gtr_decomp = None
-        if (self.trainable_exchangeabilities or self.trainable_equilibrium) \
-                and not self.time_reversed:
+        if (trainable_exchangeabilities or trainable_equilibrium) \
+                and not time_reversed:
             raise ValueError(
                 "If trainable_exchangeabilities or trainable_equilibrium is "
                 "True, time_reversed must also be True. Otherwise no meaningful "
                 "model can be learned, since Q can arbitrarily change residues "
                 "to maximize HMM likelihood."
             )
+        self.substitution_model = SubstitutionModel(
+            heads=heads,
+            input_tracks=input_tracks,
+            alphabet_size=alphabet_size,
+            equilibrium_init=equilibrium_init,
+            exchangeability_init=exchangeability_init,
+            exchangeability_delta_init=exchangeability_delta_init,
+            mixture_init=mixture_init,
+            scale_init=scale_init,
+            trainable_equilibrium=trainable_equilibrium,
+            trainable_exchangeabilities=trainable_exchangeabilities,
+            trainable_scale=trainable_scale,
+            shared_equilibrium=shared_equilibrium,
+            shared_exchangeabilities=shared_exchangeabilities,
+            exchangeability_l2=exchangeability_l2,
+            time_reversed=time_reversed,
+            num_components=num_components,
+        )
+        self.tree_model = TreeModel(
+            heads=heads,
+            rates=rates,
+            input_tracks=input_tracks,
+            rate_init=rate_init,
+            tau_track_init=tau_track_init,
+            trainable_rates=trainable_rates,
+            clusters=clusters,
+        )
 
     @property
     def head_subset(self):
         """If set, only these models are used in computations."""
-        return self._head_subset
+        return self.substitution_model.head_subset
 
     @head_subset.setter
     def head_subset(self, subset):
-        self._head_subset = subset
-        # Recompute GTR decomposition if needed
-        if self.built:
-            self._precompute_gtr_decomposition()
+        self.substitution_model.head_subset = subset
+        self.tree_model.head_subset = subset
+
+    # Forwarding properties for backward-compatible weight access
+    @property
+    def exchangeability_const(self):
+        return self.substitution_model.exchangeability_const
+
+    @property
+    def exchangeability_delta_kernel(self):
+        return self.substitution_model.exchangeability_delta_kernel
+
+    @property
+    def equilibrium_kernel(self):
+        return self.substitution_model.equilibrium_kernel
+
+    @property
+    def tau_kernel(self):
+        return self.tree_model.tau_kernel
+
+    @property
+    def tau_track_kernel(self):
+        return self.tree_model.tau_track_kernel
 
     def build(self, input_shape=None):
         if self.built:
             return
-
-        self.tau_kernel = self.add_weight(
-            shape=[self.num_clusters, self.heads],
-            name="tau_kernel",
-            initializer=self.rate_init,
-            trainable=self.trainable_rates,
-        )
-
-        if self.input_tracks > 1:
-            self.tau_track_kernel = self.add_weight(
-                shape=[self.heads, self.input_tracks],
-                name="tau_track_kernel",
-                initializer=self.tau_track_init,
-                trainable=self.trainable_rates,
-            )
-
-        _exch_shape = [
-            self.heads,
-            self.input_tracks,
-            1 if self.shared_exchangeabilities else self.num_components,
-            self.alphabet_size,
-            self.alphabet_size
-        ]
-        self.exchangeability_const = tf.constant(
-            self.exchangeability_init(
-                shape=_exch_shape, dtype=self.dtype
-            ),
-            name="exchangeability_const"
-        )
-        self.exchangeability_delta_kernel = self.add_weight(
-            shape=_exch_shape,
-            name="exchangeability_delta_kernel",
-            initializer=self.exchangeability_delta_init,
-            trainable=self.trainable_exchangeabilities,
-            regularizer=(
-                tf.keras.regularizers.L2(self.exchangeability_l2)
-                if self.exchangeability_l2 > 0.0 else None
-            )
-        )
-
-        self.equilibrium_kernel = self.add_weight(
-            shape=[
-                self.heads,
-                self.input_tracks,
-                1 if self.shared_equilibrium else self.num_components,
-                self.alphabet_size
-            ],
-            name="equilibrium_kernel",
-            initializer=self.equilibrium_init,
-            trainable=self.trainable_equilibrium
-        )
-
-        if self.num_components > 1:
-            trainable_mixture = (self.trainable_exchangeabilities
-                or self.trainable_scale or self.trainable_equilibrium)
-            self.mixture_kernel = self.add_weight(
-                shape=[self.heads, self.input_tracks, self.num_components],
-                name="mixture_kernel",
-                initializer=self.mixture_init,
-                trainable=trainable_mixture,
-                regularizer=tf.keras.regularizers.L2(5e-5 / self.heads)
-            )
-            self.scale_kernel = self.add_weight(
-                shape=[self.heads, self.input_tracks, self.num_components],
-                name="scale_kernel",
-                initializer=self.scale_init,
-                trainable=self.trainable_scale,
-            )
-
-        self._precompute_gtr_decomposition()
-
+        self.substitution_model.build()
+        self.tree_model.build()
         self.built = True
-
-    def _precompute_gtr_decomposition(self) -> None:
-        """Precompute GTR eigendecomposition for non-trainable rate matrices.
-        Stores the result as a constant tensor to optimize computation.
-        """
-        if self.trainable_exchangeabilities or self.trainable_equilibrium:
-            self._gtr_decomp = None
-            return
-        # Compute rate matrices
-        R, p = self.make_R(), self.make_p()
-
-        if self._head_subset is None:
-            heads = self.heads
-        else:
-            heads = len(self._head_subset)
-
-        IK = self.input_tracks * self.num_components
-        R_flat = tf.reshape(R, (-1, self.alphabet_size, self.alphabet_size))
-        p_flat = tf.reshape(p, (-1, self.alphabet_size))
-        Q = backend.make_rate_matrix(R_flat, p_flat)
-        Q = tf.reshape(
-            Q,
-            (heads, IK, self.alphabet_size, self.alphabet_size)
-        )
-        p_IK = tf.reshape(p, (heads, IK, self.alphabet_size))
-
-        # Add batch dimension for compatibility with _compute_anc_probs
-        Q_exp = tf.expand_dims(Q, 0)  # (1, heads, input_tracks*K, a, a)
-        p_exp = tf.expand_dims(p_IK, 0)  # (1, heads, input_tracks*K, a)
-
-        # Precompute GTR decomposition
-        decomp = precompute_gtr(Q_exp, p_exp)
-
-        # Store as non-trainable constants for use in forward pass
-        self._gtr_decomp = type(decomp)(
-            eigvals=tf.constant(decomp.eigvals.numpy()),
-            eigvecs=tf.constant(decomp.eigvecs.numpy()),
-            sqrt_pi=tf.constant(decomp.sqrt_pi.numpy()),
-            inv_sqrt_pi=tf.constant(decomp.inv_sqrt_pi.numpy())
-        )
 
     def make_R(self, kernel: tf.Tensor | None = None) -> tf.Tensor:
         """Computes the exchangeability matrices R for all models.
@@ -292,17 +186,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
         Returns:
             A tensor of shape (H, I, K, D, D).
         """
-        if kernel is None:
-            const = self.exchangeability_const
-            delta = self.exchangeability_delta_kernel
-            if self._head_subset is not None:
-                const = tf.gather(const, self._head_subset, axis=0)
-                delta = tf.gather(delta, self._head_subset, axis=0)
-            kernel = const + delta
-        R = backend.make_symmetric_pos_semidefinite(kernel)
-        if self.shared_exchangeabilities and self.num_components > 1:
-            R = tf.tile(R, [1, 1, self.num_components, 1, 1])
-        return R
+        return self.substitution_model.make_R(kernel)
 
     def make_p(self) -> tf.Tensor:
         """Computes the equilibrium distributions p for all models.
@@ -310,13 +194,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
         Returns:
             A tensor of shape (H, I, K, D).
         """
-        kernel = self.equilibrium_kernel
-        if self._head_subset is not None:
-            kernel = tf.gather(kernel, self._head_subset, axis=0)
-        p = backend.make_equilibrium(kernel)
-        if self.shared_equilibrium and self.num_components > 1:
-            p = tf.tile(p, [1, 1, self.num_components, 1])
-        return p
+        return self.substitution_model.make_p()
 
     def make_w(self) -> tf.Tensor:
         """Computes the mixture weights for all models.
@@ -324,16 +202,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
         Returns:
             A tensor of shape (H, I, K) summing to 1 along the K axis.
         """
-        if self.num_components == 1:
-            if self._head_subset is None:
-                H_active = self.heads
-            else:
-                H_active = len(self._head_subset)
-            return tf.ones((H_active, self.input_tracks, 1))
-        kernel = self.mixture_kernel
-        if self._head_subset is not None:
-            kernel = tf.gather(kernel, self._head_subset, axis=0)
-        return tf.nn.softmax(kernel, axis=-1)
+        return self.substitution_model.make_w()
 
     def make_scale(self) -> tf.Tensor:
         """Computes the per-component rate matrix scale factors for all models.
@@ -341,16 +210,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
         Returns:
             A tensor of shape (H, I, K) with positive values (via softplus).
         """
-        if self.num_components == 1:
-            if self._head_subset is None:
-                H_active = self.heads
-            else:
-                H_active = len(self._head_subset)
-            return tf.ones((H_active, self.input_tracks, 1))
-        kernel = self.scale_kernel
-        if self._head_subset is not None:
-            kernel = tf.gather(kernel, self._head_subset, axis=0)
-        return backend.make_branch_lengths(kernel)
+        return self.substitution_model.make_scale()
 
     def make_Q(self) -> tf.Tensor:
         """Computes the rate matrices Q for all models and mixture components.
@@ -358,113 +218,30 @@ class AncProbsLayer(tf.keras.layers.Layer):
         Returns:
             A tensor of shape (H, I, K, D, D).
         """
-        R, p = self.make_R(), self.make_p()  # (H, I, K, D, D), (H, I, K, D)
-        R_flat = tf.reshape(R, (-1, self.alphabet_size, self.alphabet_size))
-        p_flat = tf.reshape(p, (-1, self.alphabet_size))
-        Q_flat = backend.make_rate_matrix(R_flat, p_flat)
-        return tf.reshape(Q_flat, tf.shape(R))
-
-    def make_tau(self, subset: tf.Tensor | None = None) -> tf.Tensor:
-        """
-        Computes the evolutionary times (tau) for each sequence (in the subset),
-        i.e. the length of the branch in the star-shaped tree that connects the
-        sequence to the root.
-
-        Args:
-            subset: An optional tensor of shape (B, H) that specifies a
-                    subset of sequences to compute tau for.
-                    If None, computes tau for all sequences.
-
-        Returns:
-            A tensor of shape (B, H, I) containing the evolutionary times for
-            the specified subset of sequences.
-        """
-        tau = self.tau_kernel  # (num_clusters, H)
-
-        if self._head_subset is not None:
-            tau = tf.gather(tau, self._head_subset, axis=1)
-
-        if self.clusters is not None:
-            tau = tf.gather(tau, self.clusters, axis=0)
-
-        if subset is not None:
-            B, H = tf.unstack(tf.shape(subset))
-            h_range = tf.range(H, dtype=subset.dtype)[tf.newaxis, :]
-            h_indices = tf.tile(h_range, [B, 1])  # (B, H)
-            nd_indices = tf.stack([subset, h_indices], axis=-1)  # (B, H, 2)
-            tau = tf.gather_nd(tau, nd_indices)  # (B, H)
-
-        # Clamp kernel to prevent NaN during training.
-        tau = tf.clip_by_value(tau, -80.0, 80.0)
-        tau = backend.make_branch_lengths(tau)  # (..., H)
-
-        if self.input_tracks > 1:
-            # Apply cluster/data-independent per-head and per-track conversion rates
-            track_kernel = self.tau_track_kernel  # (H, I)
-            if self._head_subset is not None:
-                track_kernel = tf.gather(track_kernel, self._head_subset, axis=0)
-            conversion = backend.make_branch_lengths(track_kernel)  # (H_active, I)
-            tau = tau[..., tf.newaxis] * conversion[tf.newaxis]  # (..., H, I)
-        else:
-            tau = tau[..., tf.newaxis]  # (..., H, 1)
-
-        return tau
+        return self.substitution_model.make_Q()
 
     def make_P(self, tau: tf.Tensor) -> tf.Tensor:
-        """Computes the transition matrices P for all models and
-        sequences given the evolutionary times tau. Takes the time_reversed
-        argument of the layer into account.
+        """Computes the transition probability matrices P given evolutionary times tau.
 
         Args:
             tau: A tensor of shape (B, H, I) containing the evolutionary times.
 
         Returns:
-            A tensor of shape (B, H, I, D, D) containing the transition
-            matrices for all models and sequences.
+            A tensor of shape (B, H, I, D, D).
         """
-        if self._head_subset is None:
-            H_active = self.heads
-        else:
-            H_active = len(self._head_subset)
-        IK = self.input_tracks * self.num_components
+        return self.substitution_model.make_P(tau)
 
-        # Expand tau from (B, H, I) to (B, H, I*K) by repeating for each component
-        tau_expanded = tf.repeat(tau, self.num_components, axis=-1)  # (B, H, I*K)
+    def make_tau(self, subset: tf.Tensor | None = None) -> tf.Tensor:
+        """Computes the evolutionary times (tau) for each sequence.
 
-        # Scale tau per component (equivalent to scaling Q_k by s_k independently of branch lengths)
-        s = self.make_scale()  # (H_active, I, K)
-        s_flat = tf.reshape(s, [H_active, IK])  # (H_active, I*K)
-        tau_expanded = tau_expanded * s_flat[tf.newaxis]  # (B, H_active, I*K)
+        Args:
+            subset: An optional tensor of shape (B, H) selecting a subset of
+                sequences. If None, computes tau for all sequences.
 
-        # Compute probability matrices for all mixture components
-        if self._gtr_decomp is not None:
-            P_all = expm_gtr_from_decomp(self._gtr_decomp, tau_expanded)  # (B, H, I*K, D, D)
-        else:
-            R = self.make_R()  # (H, I, K, D, D)
-            p = self.make_p()  # (H, I, K, D)
-            R_flat = tf.reshape(R, (-1, self.alphabet_size, self.alphabet_size))
-            p_flat = tf.reshape(p, (-1, self.alphabet_size))
-            Q = backend.make_rate_matrix(R_flat, p_flat)  # (H*I*K, D, D)
-            Q = tf.reshape(Q, (H_active, IK, self.alphabet_size, self.alphabet_size))
-            Q = tf.expand_dims(Q, 0)  # (1, H, I*K, D, D)
-            p_IK = tf.reshape(p, (H_active, IK, self.alphabet_size))
-            p_IK = tf.expand_dims(p_IK, 0)  # (1, H, I*K, D)
-            P_all = expm_gtr(Q, tau_expanded, p_IK)  # (B, H, I*K, D, D)
-
-        # Reshape to (B, H, I, K, D, D) and compute the weighted mixture
-        P_all = tf.reshape(
-            P_all,
-            [-1, H_active, self.input_tracks, self.num_components,
-             self.alphabet_size, self.alphabet_size]
-        )
-        w = self.make_w()  # (H, I, K)
-        w = w[tf.newaxis, :, :, :, tf.newaxis, tf.newaxis]  # (1, H, I, K, 1, 1)
-        P = tf.reduce_sum(w * P_all, axis=3)  # (B, H, I, D, D)
-
-        if self.time_reversed:
-            # Transpose the last two dimensions to reverse time direction
-            P = tf.transpose(P, perm=[0, 1, 2, 4, 3])
-        return P
+        Returns:
+            A tensor of shape (B, H, I) containing the evolutionary times.
+        """
+        return self.tree_model.make_tau(subset)
 
     def _compute_anc_probs(
         self, sequences: tf.Tensor, tau: tf.Tensor
@@ -475,24 +252,15 @@ class AncProbsLayer(tf.keras.layers.Layer):
         Args:
             sequences (Tensor): Sequences in one-hot vector
                 format. Shape: (B, L, H*, I, D)
-                Currently all sequence must share the same alphabet size D.
             tau: Evolutionary times. Shape: (B, H, I)
 
         Returns:
             Ancestral probabilities. Shape: (B, L, H, I, D)
         """
         P = self.make_P(tau)  # (B, H, I, D, D)
-
-        # Compute ancestral probabilities using einsum
-        # Sequences might require broadcasting to the number of heads
         if sequences.shape[2] == 1:
-            ancprobs = tf.einsum(
-                "BLID,BHIDZ->BLHIZ", sequences[:, :, 0, :, :], P
-            )
-        else:
-            ancprobs = tf.einsum("BLHID,BHIDZ->BLHIZ", sequences, P)
-
-        return ancprobs
+            return tf.einsum("BLID,BHIDZ->BLHIZ", sequences[:, :, 0, :, :], P)
+        return tf.einsum("BLHID,BHIDZ->BLHIZ", sequences, P)
 
     def call(
         self,
@@ -520,20 +288,17 @@ class AncProbsLayer(tf.keras.layers.Layer):
         tau = self.make_tau(rate_indices)  # (B, H, I)
 
         # Handle any special input tokens beyond the standard alphabet
-        inputs = []
-        adds = []
-        for input in sequences:
-            d = input.shape[-1]
+        inputs, adds = [], []
+        for seq in sequences:
+            d = seq.shape[-1]
             assert d is not None and d >= self.alphabet_size,\
                     "Input sequences must have at least {} channels for the "\
                     "standard alphabet, got {}.".format(self.alphabet_size, d)
-            inputs.append(input[:, :, :, :self.alphabet_size])
-            adds.append(input[:, :, :, self.alphabet_size:])
+            inputs.append(seq[:, :, :, :self.alphabet_size])
+            adds.append(seq[:, :, :, self.alphabet_size:])
 
         # Compute ancestral probabilities (B, L, H, I, D)
-        anc_probs = self._compute_anc_probs(
-            tf.stack(inputs, axis=3), tau=tau
-        )
+        anc_probs = self._compute_anc_probs(tf.stack(inputs, axis=3), tau=tau)
 
         extended_anc_probs = []
         for i, add in enumerate(adds):
@@ -544,41 +309,42 @@ class AncProbsLayer(tf.keras.layers.Layer):
 
         if self.input_tracks == 1:
             return extended_anc_probs[0]
-        else:
-            return tuple(extended_anc_probs)
+        return tuple(extended_anc_probs)
 
     def get_config(self):
         config = super(AncProbsLayer, self).get_config()
+        sm = self.substitution_model
+        tm = self.tree_model
         config.update({
             "heads": self.heads,
             "rates": self.rates,
             "input_tracks": self.input_tracks,
-            "equilibrium_init": initializer.ConstantInitializer(self.equilibrium_kernel.numpy()),
-            "exchangeability_init": initializer.ConstantInitializer(self.exchangeability_const.numpy()),
-            "exchangeability_delta_init": initializer.ConstantInitializer(self.exchangeability_delta_kernel.numpy()),
-            "exchangeability_l2": self.exchangeability_l2,
-            "rate_init": initializer.ConstantInitializer(self.tau_kernel.numpy()),
-            "trainable_equilibrium": self.trainable_equilibrium,
-            "trainable_exchangeabilities": self.trainable_exchangeabilities,
-            "trainable_rates": self.trainable_rates,
-            "trainable_scale": self.trainable_scale,
-            "shared_equilibrium": self.shared_equilibrium,
-            "shared_exchangeabilities": self.shared_exchangeabilities,
-            "clusters": self.clusters,
-            "alphabet_size": self.alphabet_size,
-            "time_reversed": self.time_reversed,
-            "num_components": self.num_components,
+            "equilibrium_init": initializer.ConstantInitializer(sm.equilibrium_kernel.numpy()),
+            "exchangeability_init": initializer.ConstantInitializer(sm.exchangeability_const.numpy()),
+            "exchangeability_delta_init": initializer.ConstantInitializer(sm.exchangeability_delta_kernel.numpy()),
+            "exchangeability_l2": sm.exchangeability_l2,
+            "rate_init": initializer.ConstantInitializer(tm.tau_kernel.numpy()),
+            "trainable_equilibrium": sm.trainable_equilibrium,
+            "trainable_exchangeabilities": sm.trainable_exchangeabilities,
+            "trainable_rates": tm.trainable_rates,
+            "trainable_scale": sm.trainable_scale,
+            "shared_equilibrium": sm.shared_equilibrium,
+            "shared_exchangeabilities": sm.shared_exchangeabilities,
+            "clusters": tm.clusters,
+            "alphabet_size": sm.alphabet_size,
+            "time_reversed": sm.time_reversed,
+            "num_components": sm.num_components,
         })
-        if self.num_components > 1:
+        if sm.num_components > 1:
             config["mixture_init"] = initializer.ConstantInitializer(
-                self.mixture_kernel.numpy()
+                sm.mixture_kernel.numpy()
             )
             config["scale_init"] = initializer.ConstantInitializer(
-                self.scale_kernel.numpy()
+                sm.scale_kernel.numpy()
             )
         if self.input_tracks > 1:
             config["tau_track_init"] = initializer.ConstantInitializer(
-                self.tau_track_kernel.numpy()
+                tm.tau_track_kernel.numpy()
             )
         return config
 

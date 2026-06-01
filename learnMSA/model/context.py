@@ -170,19 +170,15 @@ class LearnMSAContext:
         # Set up encoder initialization
         K = self.config.tree.num_anc_probs_components
         R_noise_std = self.config.tree.exchangeability_noise_std
-        p_noise_std = self.config.tree.equilibrium_noise_std
         train_R = self.config.tree.trainable_exchangeabilities
         train_p = self.config.tree.trainable_equilibrium
         if K == 1 or not(train_R or train_p):
             R_noise_std = 0.0
-            p_noise_std = 0.0
         R_aa_init, p_aa_init = initializers.make_substitution_model_init(
             self.config.training.num_model,
             num_components=K,
             shared_equilibrium=self.config.tree.shared_equilibrium,
             shared_exchangeabilities=self.config.tree.shared_exchangeabilities,
-            exchangeability_noise_std=R_noise_std,
-            equilibrium_noise_std=p_noise_std,
         )
         if self.config.structure.use_structure:
             R_st_init, p_st_init = initializers.make_substitution_model_init(
@@ -191,8 +187,6 @@ class LearnMSAContext:
                 num_components=K,
                 shared_equilibrium=self.config.tree.shared_equilibrium,
                 shared_exchangeabilities=self.config.tree.shared_exchangeabilities,
-                exchangeability_noise_std=R_noise_std,
-                equilibrium_noise_std=p_noise_std,
                 alphabet=self.config.structure.structural_alphabet,
             )
             self.R_init = ConstantInitializer(
@@ -204,7 +198,12 @@ class LearnMSAContext:
         else:
             self.R_init = ConstantInitializer(R_aa_init)
             self.p_init = ConstantInitializer(p_aa_init)
-        self.R_delta_init = tf.keras.initializers.Zeros()
+        if R_noise_std > 0.0:
+            self.R_delta_init = tf.keras.initializers.RandomNormal(
+                stddev=R_noise_std
+            )
+        else:
+            self.R_delta_init = tf.keras.initializers.Zeros()
 
         if self.config.training.no_sequence_weights:
             d = self.config.advanced.initial_distance
