@@ -60,6 +60,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
                 equilibrium_init=context.p_init,
                 rate_init=context.t_init,
                 exchangeability_init=context.R_init,
+                exchangeability_delta_init=context.R_delta_init,
                 trainable_equilibrium=tree_cfg.trainable_equilibrium,
                 trainable_exchangeabilities=tree_cfg.trainable_exchangeabilities,
                 trainable_rates=tree_cfg.trainable_rates,

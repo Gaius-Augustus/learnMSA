@@ -125,8 +125,8 @@ def _transfer_model_weights(
     """
     dst.phmm_layer.set_weights(src.phmm_layer.get_weights())
     if hasattr(src, 'anc_probs_layer') and hasattr(dst, 'anc_probs_layer'):
-        dst.anc_probs_layer.exchangeability_kernel.assign(
-            src.anc_probs_layer.exchangeability_kernel
+        dst.anc_probs_layer.exchangeability_delta_kernel.assign(
+            src.anc_probs_layer.exchangeability_delta_kernel
         )
         dst.anc_probs_layer.equilibrium_kernel.assign(
             src.anc_probs_layer.equilibrium_kernel
@@ -191,6 +191,13 @@ def _fit_and_align(
         # new context inside the training loop (where batch_size is known) and
         # copy the relevant weights across.
         loaded_model = am.model
+        if hasattr(loaded_model, 'anc_probs_layer'):
+            context.R_init = ConstantInitializer(
+                loaded_model.anc_probs_layer.exchangeability_const.numpy()
+            )
+            context.R_delta_init = ConstantInitializer(
+                loaded_model.anc_probs_layer.exchangeability_delta_kernel.numpy()
+            )
     else:
         loaded_model = None
     model = None
@@ -279,7 +286,10 @@ def _fit_and_align(
         if model.anc_probs_layer is not None:
             if not context.config.advanced.reset_evo_model:
                 context.R_init = ConstantInitializer(
-                    model.anc_probs_layer.exchangeability_kernel.numpy()
+                    model.anc_probs_layer.exchangeability_const.numpy()
+                )
+                context.R_delta_init = ConstantInitializer(
+                    model.anc_probs_layer.exchangeability_delta_kernel.numpy()
                 )
                 context.p_init = ConstantInitializer(
                     model.anc_probs_layer.equilibrium_kernel.numpy()

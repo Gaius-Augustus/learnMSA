@@ -28,9 +28,14 @@ class AncProbsLayer(tf.keras.layers.Layer):
             a separate rate matrix for each track.
         equilibrium_init: Initializer for the equilibrium distribution of the
             rate matrices
-        exchangeability_init: Initializer for the exchangeability matrices.
+        exchangeability_init: Initializer for the fixed base exchangeability
+            matrices (exchangeability_const). These values are stored as a
+            non-trainable constant and are never updated during training.
             Usually inverse_softplus should be used on the initial matrix by
             the user.
+        exchangeability_delta_init: Initializer for the learnable delta added
+            on top of the fixed exchangeability_const. Defaults to zeros so
+            that training starts from the fixed base matrix.
         rate_init: Initializer for the per-sequence rates.
         mixture_init: Initializer for the mixture logit weights of shape
             (H, I, K). Defaults to RandomNormal(stddev=0.1) to break symmetry
@@ -42,8 +47,11 @@ class AncProbsLayer(tf.keras.layers.Layer):
             Defaults so that initial conversion rate is 1.0.
         trainable_equilibrium: Flag that controls whether the equilibrium
             distributions are trainable.
-        trainable_exchangeabilities: Flag that controls whether the
-            exchangeability matrices are trainable.
+        trainable_exchangeabilities: Flag that controls whether
+            exchangeability_delta_kernel is trainable (i.e. whether the
+            learnable delta on top of the fixed base matrix is updated).
+        exchangeability_l2: L2 regularization strength applied to
+            exchangeability_delta_kernel. Defaults to 0.0 (no regularization).
         trainable_rates: Flag that can prevent learning the evolutionary
             times.
         trainable_scale: Flag that can prevent learning the per-component rate
@@ -75,11 +83,13 @@ class AncProbsLayer(tf.keras.layers.Layer):
         equilibrium_init: tf.keras.initializers.Initializer,
         exchangeability_init: tf.keras.initializers.Initializer,
         rate_init: tf.keras.initializers.Initializer,
+        exchangeability_delta_init: tf.keras.initializers.Initializer|None=None,
         mixture_init: tf.keras.initializers.Initializer|None=None,
         scale_init: tf.keras.initializers.Initializer|None=None,
         tau_track_init: tf.keras.initializers.Initializer|None=None,
         trainable_equilibrium: bool=False,
         trainable_exchangeabilities: bool=False,
+        exchangeability_l2: float=0.0,
         trainable_rates: bool=True,
         trainable_scale: bool=True,
         shared_equilibrium: bool=True,
@@ -98,6 +108,11 @@ class AncProbsLayer(tf.keras.layers.Layer):
         self.rate_init = rate_init
         self.equilibrium_init = equilibrium_init
         self.exchangeability_init = exchangeability_init
+        if exchangeability_delta_init is None:
+            self.exchangeability_delta_init = tf.keras.initializers.Zeros()
+        else:
+            self.exchangeability_delta_init = exchangeability_delta_init
+        self.exchangeability_l2 = exchangeability_l2
 
         self.trainable_equilibrium = trainable_equilibrium
         self.trainable_exchangeabilities = trainable_exchangeabilities
@@ -174,17 +189,28 @@ class AncProbsLayer(tf.keras.layers.Layer):
                 trainable=self.trainable_rates,
             )
 
-        self.exchangeability_kernel = self.add_weight(
-            shape=[
-                self.heads,
-                self.input_tracks,
-                1 if self.shared_exchangeabilities else self.num_components,
-                self.alphabet_size,
-                self.alphabet_size
-            ],
-            name="exchangeability_kernel",
-            initializer=self.exchangeability_init,
-            trainable=self.trainable_exchangeabilities
+        _exch_shape = [
+            self.heads,
+            self.input_tracks,
+            1 if self.shared_exchangeabilities else self.num_components,
+            self.alphabet_size,
+            self.alphabet_size
+        ]
+        self.exchangeability_const = tf.constant(
+            self.exchangeability_init(
+                shape=_exch_shape, dtype=self.dtype
+            ),
+            name="exchangeability_const"
+        )
+        self.exchangeability_delta_kernel = self.add_weight(
+            shape=_exch_shape,
+            name="exchangeability_delta_kernel",
+            initializer=self.exchangeability_delta_init,
+            trainable=self.trainable_exchangeabilities,
+            regularizer=(
+                tf.keras.regularizers.L2(self.exchangeability_l2)
+                if self.exchangeability_l2 > 0.0 else None
+            )
         )
 
         self.equilibrium_kernel = self.add_weight(
@@ -267,9 +293,12 @@ class AncProbsLayer(tf.keras.layers.Layer):
             A tensor of shape (H, I, K, D, D).
         """
         if kernel is None:
-            kernel = self.exchangeability_kernel
+            const = self.exchangeability_const
+            delta = self.exchangeability_delta_kernel
             if self._head_subset is not None:
-                kernel = tf.gather(kernel, self._head_subset, axis=0)
+                const = tf.gather(const, self._head_subset, axis=0)
+                delta = tf.gather(delta, self._head_subset, axis=0)
+            kernel = const + delta
         R = backend.make_symmetric_pos_semidefinite(kernel)
         if self.shared_exchangeabilities and self.num_components > 1:
             R = tf.tile(R, [1, 1, self.num_components, 1, 1])
@@ -525,7 +554,9 @@ class AncProbsLayer(tf.keras.layers.Layer):
             "rates": self.rates,
             "input_tracks": self.input_tracks,
             "equilibrium_init": initializer.ConstantInitializer(self.equilibrium_kernel.numpy()),
-            "exchangeability_init": initializer.ConstantInitializer(self.exchangeability_kernel.numpy()),
+            "exchangeability_init": initializer.ConstantInitializer(self.exchangeability_const.numpy()),
+            "exchangeability_delta_init": initializer.ConstantInitializer(self.exchangeability_delta_kernel.numpy()),
+            "exchangeability_l2": self.exchangeability_l2,
             "rate_init": initializer.ConstantInitializer(self.tau_kernel.numpy()),
             "trainable_equilibrium": self.trainable_equilibrium,
             "trainable_exchangeabilities": self.trainable_exchangeabilities,

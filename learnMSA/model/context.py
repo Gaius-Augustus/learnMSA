@@ -55,6 +55,7 @@ class LearnMSAContext:
     subset: np.ndarray
     init_msa_values: Sequence[PHMMValueSet] | None
     R_init: tf.keras.initializers.Initializer
+    R_delta_init: tf.keras.initializers.Initializer
     p_init: tf.keras.initializers.Initializer
     t_init: tf.keras.initializers.Initializer
     mix_init: tf.keras.initializers.Initializer
@@ -203,6 +204,7 @@ class LearnMSAContext:
         else:
             self.R_init = ConstantInitializer(R_aa_init)
             self.p_init = ConstantInitializer(p_aa_init)
+        self.R_delta_init = tf.keras.initializers.Zeros()
 
         if self.config.training.no_sequence_weights:
             d = self.config.advanced.initial_distance
