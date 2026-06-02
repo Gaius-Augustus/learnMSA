@@ -48,6 +48,10 @@ class AlignmentModel():
 
     hit_alignment_mode: HitAlignmentMode
     """Mode for aligning the domain hits."""
+
+    fixed_viterbi_seqs: np.ndarray
+    """For legacy reasons. TODO: remove later"""
+
     class DecodingMode(Enum):
         VITERBI = "viterbi"
         MEA = "mea"
@@ -100,6 +104,7 @@ class AlignmentModel():
         self.best_head = best_head
         self.hit_alignment_mode = hit_alignment_mode
         self.metadata = {}
+        self.fixed_viterbi_seqs = np.array([], dtype=np.int32)
 
     def get_output_alphabet(self, a2m: bool = True) -> np.ndarray:
         """ Returns the output alphabet used for string representation of

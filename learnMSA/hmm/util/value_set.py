@@ -447,7 +447,7 @@ class PHMMValueSet:
         transitions = (1.-global_factor) * counts_local + global_factor * counts_global
 
         # Count how many sequences start in the left flanking state
-        flank_start = np.sum(np.any(state_seqs == 0, axis=1))
+        flank_start = np.sum(np.any(state_seqs == 3*L-1, axis=1))
         start = np.array([flank_start, N - flank_start], dtype=np.float32)
 
         return cls(
@@ -515,6 +515,7 @@ class PHMMValueSet:
         unannotated : np.ndarray | list | float = 0,
         end : np.ndarray | list | float = 0,
         flank_start : np.ndarray | list | float = 0,
+        all_param : float = 1e-8,
     ) -> "PHMMValueSet":
         """
         Adds pseudocounts to the given HMM counts in-place and returns a reference
@@ -557,9 +558,18 @@ class PHMMValueSet:
             flank_start: Optional pseudocounts for the probability
                 of starting in the left flanking state (should be a scalar or a
                 1D array of length 2).
+            all_param: Generic pseudocount to add to all counts (should be a scalar).
         """
         L = self.matches()
 
+        # Add the generic pseudocount
+        mask = PHMMTransitionIndexSet(L).mask()
+        self.match_emissions += all_param
+        self.insert_emissions += all_param
+        self.transitions += all_param * mask
+        self.start += all_param
+
+        # Add fine-grained pseudocounts
         self.match_emissions += aa
         self.insert_emissions += aa
 

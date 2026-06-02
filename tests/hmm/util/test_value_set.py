@@ -1,8 +1,11 @@
 """Tests for MSA to HMM conversion functionality."""
 
+import os
+
 import numpy as np
 import pytest
 
+from learnMSA.hmm.util.transition_index_set import PHMMTransitionIndexSet
 from learnMSA.hmm.util.value_set import PHMMValueSet
 from learnMSA.util.aligned_dataset import AlignedDataset
 
@@ -110,6 +113,107 @@ def test_msa_to_counts() -> None:
         counts_global.transitions * 0.6 + counts_local.transitions * 0.4
     )
 
+def test_msa_to_counts_2_global() -> None:
+    """Test conversion of MSA to HMM counts on a short, real dataset."""
+    filename = os.path.dirname(__file__) + "/../../data/zf-CCHH.vie"
+    with AlignedDataset(filename) as data:
+        hmm_values = PHMMValueSet.from_msa(
+            data, match_threshold=0.5, global_factor=1.0
+        ).add_pseudocounts().normalize()
+        L = 29
+        idx = PHMMTransitionIndexSet(L)
+        # Start
+        ref_start = [3./15, 12./15] # (left flank, begin)
+        np.testing.assert_almost_equal(hmm_values.start, ref_start)
+        # Emissions (test samples at some columns for simplicity)
+        ref_match = {
+            0 : {"R" : 5, "K" : 4, "H" : 1},
+            1 : {"P" : 6, "S" : 1, "V" : 1, "T" : 2, "K" : 2, "A" : 1},
+            2 : {"Y" : 9, "F" : 6},
+            4 : {"C" : 15},
+            27 : {"Q" : 1, "E" : 4, "K" : 3, "N" : 1, "V" : 1},
+            28 : {"K" : 6, "L" : 1, "A" : 1},
+        }
+        assert hmm_values.match_emissions.shape == (L, len(data.alphabet)-1)
+        for i, col_data in ref_match.items():
+            total_counts = sum(col_data.values())
+            for aa, count in col_data.items():
+                np.testing.assert_almost_equal(
+                    hmm_values.match_emissions[i, data.alphabet.index(aa)],
+                    count / total_counts,
+                    err_msg=f"Mismatch in match emissions for column {i}, "\
+                        f"amino acid {aa}"
+                )
+        # Transitions
+        # TODO: add more, for now only some selected transitions
+        np.testing.assert_almost_equal(
+            hmm_values.transitions[idx.left_flank[0], idx.left_flank[1]],
+            [6. / 9, 3. / 9],
+        )
+        np.testing.assert_almost_equal(
+            hmm_values.transitions[idx.B, idx.M[0]], 10. / 15,
+        )
+        np.testing.assert_almost_equal(
+            hmm_values.transitions[idx.B, idx.D[0]], 5. / 15,
+        )
+        np.testing.assert_almost_equal(
+            hmm_values.transitions[idx.D[0], idx.M[1]], 3. / 5,
+        )
+        np.testing.assert_almost_equal(
+            hmm_values.transitions[idx.D[0], idx.D[1]], 2. / 5,
+        )
+        np.testing.assert_almost_equal(
+            hmm_values.transitions[idx.M[6], idx.M[7]], 12. / 15,
+        )
+        np.testing.assert_almost_equal(
+            hmm_values.transitions[idx.M[6], idx.I[6]], 3. / 15,
+        )
+        np.testing.assert_almost_equal(
+            hmm_values.transitions[idx.I[6], idx.I[6]], 3. / 6,
+        )
+        np.testing.assert_almost_equal(
+            hmm_values.transitions[idx.I[6], idx.M[7]], 3. / 6,
+        )
+        np.testing.assert_almost_equal(
+            hmm_values.transitions[idx.M[21], idx.M[22]], 10. / 15,
+        )
+        np.testing.assert_almost_equal(
+            hmm_values.transitions[idx.M[21], idx.I[21]], 3. / 15,
+        )
+        np.testing.assert_almost_equal(
+            hmm_values.transitions[idx.M[21], idx.D[22]], 2. / 15,
+        )
+        np.testing.assert_almost_equal(
+            hmm_values.transitions[idx.M[23], idx.M[24]], 10. / 15,
+        )
+        np.testing.assert_almost_equal(
+            hmm_values.transitions[idx.M[23], idx.I[23]], 5. / 15,
+        )
+
+def test_add_all_pseudocount() -> None:
+    """Test adding pseudocounts to HMM parameters."""
+    L = 4
+    S = 3
+    counts = PHMMValueSet(
+        L=L,
+        match_emissions=np.zeros((L, S)),
+        insert_emissions=np.zeros((S,)),
+        transitions=np.zeros((3 * L + 5, 3 * L + 5)),
+        start=np.zeros((2,))
+    )
+    counts.add_pseudocounts(all_param=1.0)
+    np.testing.assert_equal(
+        counts.match_emissions, np.ones((L, S))
+    )
+    np.testing.assert_equal(
+        counts.insert_emissions, np.ones((S,))
+    )
+    np.testing.assert_almost_equal(
+        counts.transitions, PHMMTransitionIndexSet(L).mask()
+    )
+    np.testing.assert_equal(
+        counts.start, np.ones((2,))
+    )
 
 def test_add_pseudocounts() -> None:
     """Test adding pseudocounts to HMM parameters."""
@@ -135,6 +239,7 @@ def test_add_pseudocounts() -> None:
         unannotated=[107., 108.],
         end=[300., 301., 302.],
         flank_start=[109., 110.],
+        all_param=0.0,
     )
     np.testing.assert_equal(
         counts.match_emissions, np.tile([[0., 1., 2.]], (L, 1))

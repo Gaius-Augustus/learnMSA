@@ -210,6 +210,9 @@ def plot_phmm(
             connectionstyle=connectionstyle,
             title=_plot_title,
             ax=target_ax,
+            start_dist_pos = (0.05, 0.5),
+            start_dist_separation = 0.02,
+            start_dist_font_size = 32,
         )
 
     if fast_mode:

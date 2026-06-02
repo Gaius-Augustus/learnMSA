@@ -4,14 +4,25 @@ import numpy as np
 class PHMMTransitionIndexSet:
     """ Indices for accessing groups of values in a PHMM transition matrix.
     Uses the state order\\
-    M1 ... ML I1 ... IL-1 D1 ... DL L B E C R T\\
+    M1 ... ML I1 ... IL-1 D1 ... DL LF B E C RF T\\
     if not folded, and otherwise\\
-    M1 ... ML I1 ... IL-1 L C R T.
+    M1 ... ML I1 ... IL-1 LF C RF T.
 
     Attributes:
         L: Number of match states.
         folded: Whether the model is folded (does not contain silent states for
             deletions).
+        num_states: Total number of states in the PHMM.
+        num_transitions: Total number of transitions in the PHMM.
+        LF: Index of the left flank state.
+        RF: Index of the right flank state.
+        C: Index of the unannotated (C) state.
+        T: Index of the terminal state.
+        B: Index of the begin state (unfolded only).
+        E: Index of the end state (unfolded only).
+        M: Indices of the match states (array of length L).
+        I: Indices of the insert states (array of length L-1).
+        D: Indices of the delete states (array of length L-1, unfolded only).
         match_to_match: Transition indices from match state i to match state i+1.
         match_to_insert: Transition indices from match state i to insert state i.
         insert_to_insert: Transition indices for insert state self-loops.
@@ -32,8 +43,6 @@ class PHMMTransitionIndexSet:
         right_flank: Transition indices from right flank state (self-loop and to terminal).
         unannotated: Transition indices from unannotated state to other states.
         terminal: Transition indices for terminal state self-loop.
-        num_states: Total number of states in the PHMM.
-        num_transitions: Total number of transitions in the PHMM.
     """
     def __init__(
         self, L: int,
@@ -58,7 +67,7 @@ class PHMMTransitionIndexSet:
         self._dtype = dtype
 
         # Helper arrays for construction
-        matches_plus = np.arange(L, dtype=dtype)
+        matches_plus = self.M
         matches = matches_plus[:-1]
 
         # Create the buffer with the correct size
@@ -78,17 +87,17 @@ class PHMMTransitionIndexSet:
 
         # Match to insert
         idx, sidx = self._add_transitions(
-            idx, sidx, np.stack((matches, matches+L), axis=1), "match_to_insert"
+            idx, sidx, np.stack((matches, self.I), axis=1), "match_to_insert"
         )
 
         # Insert to insert (independent parameters per position)
         idx, sidx = self._add_transitions(
-            idx, sidx, np.stack((matches+L, matches+L), axis=1), "insert_to_insert"
+            idx, sidx, np.stack((self.I, self.I), axis=1), "insert_to_insert"
         )
 
         # Insert to match (independent parameters per position)
         idx, sidx = self._add_transitions(
-            idx, sidx, np.stack((matches+L, matches+1), axis=1), "insert_to_match"
+            idx, sidx, np.stack((self.I, matches+1), axis=1), "insert_to_match"
         )
 
         if folded:
@@ -109,52 +118,57 @@ class PHMMTransitionIndexSet:
             # Match to unannotated
             idx, sidx = self._add_transitions(
                 idx, sidx,
-                np.stack((matches_plus, np.full(L, 2*L, dtype=dtype)), axis=1),
+                np.stack((matches_plus, np.full(L, self.C, dtype=dtype)), axis=1),
                 "match_to_unannotated"
             )
 
             # Match to right
             idx, sidx = self._add_transitions(
                 idx, sidx,
-                np.stack((matches_plus, np.full(L, 2*L+1, dtype=dtype)), axis=1),
+                np.stack((matches_plus, np.full(L, self.RF, dtype=dtype)), axis=1),
                 "match_to_right"
             )
 
             # Match to terminal
             idx, sidx = self._add_transitions(
                 idx, sidx,
-                np.stack((matches_plus, np.full(L, -1, dtype=dtype)), axis=1),
+                np.stack((matches_plus, np.full(L, self.T, dtype=dtype)), axis=1),
                 "match_to_terminal"
             )
 
             # Left flank: self-loop, to M1..ML, to unannotated, to right, to terminal
+            lf = self.LF
             lf_trans = np.empty((L+4, 2), dtype=dtype)
-            lf_trans[0] = [2*L-1, 2*L-1]  # self-loop
+            lf_trans[0] = [lf, lf]  # self-loop
             lf_trans[1:1+L] = np.stack(
-                (np.full(L, 2*L-1, dtype=dtype), matches_plus), axis=1
+                (np.full(L, lf, dtype=dtype), matches_plus), axis=1
             )
-            lf_trans[1+L] = [2*L-1, 2*L]    # to unannotated
-            lf_trans[2+L] = [2*L-1, 2*L+1]  # to right
-            lf_trans[3+L] = [2*L-1, -1]     # to terminal
+            lf_trans[1+L] = [lf, self.C]    # to unannotated
+            lf_trans[2+L] = [lf, self.RF]    # to right
+            lf_trans[3+L] = [lf, self.T]       # to terminal
             idx, sidx = self._add_transitions(idx, sidx, lf_trans, "left_flank")
 
             # Right flank: self-loop, to terminal
-            rf_trans = np.array([[2*L+1, 2*L+1], [2*L+1, -1]], dtype=dtype)
+            rf = self.RF
+            rf_trans = np.array([[rf, rf], [rf, self.T]], dtype=dtype)
             idx, sidx = self._add_transitions(idx, sidx, rf_trans, "right_flank")
 
             # Unannotated: self-loop, to M1..ML, to right, to terminal
+            un = self.C
             un_trans = np.empty((L+3, 2), dtype=dtype)
-            un_trans[0] = [2*L, 2*L]  # self-loop
+            un_trans[0] = [un, un]  # self-loop
             un_trans[1:1+L] = np.stack(
-                (np.full(L, 2*L, dtype=dtype), matches_plus), axis=1
+                (np.full(L, un, dtype=dtype), matches_plus), axis=1
             )
-            un_trans[1+L] = [2*L, 2*L+1]  # to right
-            un_trans[2+L] = [2*L, -1]     # to terminal
+            un_trans[1+L] = [un, self.RF]    # to right
+            un_trans[2+L] = [un, self.T]       # to terminal
             idx, sidx = self._add_transitions(idx, sidx, un_trans, "unannotated")
 
             # Terminal
             idx, sidx = self._add_transitions(
-                idx, sidx, np.array([[-1, -1]], dtype=dtype), "terminal"
+                idx, sidx,
+                np.array([[self.T, self.T]], dtype=dtype),
+                "terminal"
             )
 
         else:
@@ -162,80 +176,160 @@ class PHMMTransitionIndexSet:
             # Match to delete
             idx, sidx = self._add_transitions(
                 idx, sidx,
-                np.stack((matches, matches+2*L), axis=1),
+                np.stack((matches, self.D + 1), axis=1),
                 "match_to_delete"
             )
 
             # Delete to delete
             idx, sidx = self._add_transitions(
                 idx, sidx,
-                np.stack((matches+2*L-1, matches+2*L), axis=1),
+                np.stack(
+                    (self.D,
+                     self.D + 1), axis=1
+                ),
                 "delete_to_delete"
             )
 
             # Delete to match
             idx, sidx = self._add_transitions(
                 idx, sidx,
-                np.stack((matches+2*L-1, matches+1), axis=1),
+                np.stack((self.D, matches + 1), axis=1),
                 "delete_to_match"
             )
 
             # Begin to match
             idx, sidx = self._add_transitions(
                 idx, sidx,
-                np.stack((np.full(L, 3*L, dtype=dtype), matches_plus), axis=1),
+                np.stack((np.full(L, self.B, dtype=dtype), matches_plus), axis=1),
                 "begin_to_match"
             )
 
             # Match to end
             idx, sidx = self._add_transitions(
                 idx, sidx,
-                np.stack((matches_plus, np.full(L, 3*L+1, dtype=dtype)), axis=1),
+                np.stack((matches_plus, np.full(L, self.E, dtype=dtype)), axis=1),
                 "match_to_end"
             )
 
             # Begin to delete
             idx, sidx = self._add_transitions(
-                idx, sidx, np.array([[3*L, 2*L-1]], dtype=dtype), "begin_to_delete"
+                idx, sidx,
+                np.array([[self.B, self.first_delete_state]], dtype=dtype),
+                "begin_to_delete"
             )
 
             # Delete to end
             idx, sidx = self._add_transitions(
-                idx, sidx, np.array([[3*L-2, 3*L+1]], dtype=dtype), "delete_to_end"
+                idx, sidx,
+                np.array([[self.first_delete_state + self.L - 1, self.E]], dtype=dtype),
+                "delete_to_end"
             )
 
             # Left flank: self-loop, to begin
-            lf_trans = np.array([[3*L-1, 3*L-1], [3*L-1, 3*L]], dtype=dtype)
+            lf = self.LF
+            lf_trans = np.array([[lf, lf], [lf, self.B]], dtype=dtype)
             idx, sidx = self._add_transitions(idx, sidx, lf_trans, "left_flank")
 
             # Right flank: self-loop, to terminal
-            rf_trans = np.array([[3*L+3, 3*L+3], [3*L+3, -1]], dtype=dtype)
+            rf = self.RF
+            rf_trans = np.array([[rf, rf], [rf, self.T]], dtype=dtype)
             idx, sidx = self._add_transitions(
                 idx, sidx, rf_trans, "right_flank",
                 shared_with="left_flank" if shared_flanks else None
             )
 
             # Unannotated: self-loop, to begin
-            un_trans = np.array([[3*L+2, 3*L+2], [3*L+2, 3*L]], dtype=dtype)
+            un = self.C
+            un_trans = np.array([[un, un], [un, self.B]], dtype=dtype)
             idx, sidx = self._add_transitions(
                 idx, sidx, un_trans, "unannotated",
             )
 
             # End: to unannotated, to right, to terminal
+            es = self.E
             end_trans = np.array(
-                [[3*L+1, 3*L+2], [3*L+1, 3*L+3], [3*L+1, -1]], dtype=dtype
+                [[es, self.C],
+                 [es, self.RF],
+                 [es, self.T]], dtype=dtype
             )
             idx, sidx = self._add_transitions(idx, sidx, end_trans, "end")
 
             # Terminal
             idx, sidx = self._add_transitions(
-                idx, sidx, np.array([[-1, -1]], dtype=dtype), "terminal"
+                idx, sidx,
+                np.array([[self.T, self.T]], dtype=dtype),
+                "terminal"
             )
 
     @property
     def folded(self) -> bool:
         """Whether the model is folded."""
         return self._folded
+
+    @property
+    def M(self) -> np.ndarray:
+        """Indices of the match states (array of length L)."""
+        return np.arange(self.L, dtype=self._dtype)
+
+    @property
+    def I(self) -> np.ndarray:
+        """Indices of the insert states (array of length L-1)."""
+        return self.M[:-1] + self.L
+
+    @property
+    def D(self) -> np.ndarray:
+        """Indices of the delete states (array of length L-1, unfolded only)."""
+        return self.M[:-1] + self.first_delete_state
+
+    @property
+    def LF(self) -> int:
+        """Index of the left flank state (2*L-1 if folded, else 3*L-1)."""
+        return 2*self.L - 1 if self._folded else 3*self.L - 1
+
+    @property
+    def RF(self) -> int:
+        """Index of the right flank state (2*L+1 if folded, else 3*L+3)."""
+        return 2*self.L + 1 if self._folded else 3*self.L + 3
+
+    @property
+    def C(self) -> int:
+        """Index of the unannotated (C) state (2*L if folded, else 3*L+2)."""
+        return 2*self.L if self._folded else 3*self.L + 2
+
+    @property
+    def T(self) -> int:
+        """Index of the terminal state (last state, equivalent to num_states-1)."""
+        return -1
+
+    @property
+    def B(self) -> int:
+        """Index of the begin state (3*L, unfolded only)."""
+        if self._folded:
+            raise AttributeError(
+                f"'{type(self).__name__}' object has no attribute 'begin_state'. "
+                "This attribute is only available in unfolded mode."
+            )
+        return 3*self.L
+
+    @property
+    def E(self) -> int:
+        """Index of the end state (3*L+1, unfolded only)."""
+        if self._folded:
+            raise AttributeError(
+                f"'{type(self).__name__}' object has no attribute 'end_state'. "
+                "This attribute is only available in unfolded mode."
+            )
+        return 3*self.L + 1
+
+    @property
+    def first_delete_state(self) -> int:
+        """Index of the first delete state D0 (2*L-1, unfolded only)."""
+        if self._folded:
+            raise AttributeError(
+                f"'{type(self).__name__}' object has no attribute 'first_delete_state'. "
+                "This attribute is only available in unfolded mode."
+            )
+        return 2*self.L - 1
 
     def _get_slice(self, name: str) -> np.ndarray:
         """Get a slice of the buffer for the given property name."""
@@ -353,16 +447,16 @@ class PHMMTransitionIndexSet:
     def start(self) -> np.ndarray:
         """Allowed starting states."""
         if self.folded:
-            # Can start in M1, ..., ML, L, R, C or T
+            # Can start in M1, ..., ML, L, C, R or T
             start = np.arange(self.L+4)
-            start[-4] = 2*self.L - 1  # L
-            start[-3] = 2*self.L      # C
-            start[-2] = 2*self.L + 1  # R
-            start[-1] = -1  # T
+            start[-4] = self.LF   # L
+            start[-3] = self.C   # C
+            start[-2] = self.RF   # R
+            start[-1] = self.T      # T
             return start
         else:
             # Can start in L or B
-            return np.array([3*self.L-1, 3*self.L])  # L, B
+            return np.array([self.LF, self.B])  # L, B
 
     @property
     def num_states(self) -> int:
