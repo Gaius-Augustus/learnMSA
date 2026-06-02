@@ -171,8 +171,7 @@ class LearnMSAContext:
         K = self.config.tree.num_anc_probs_components
         R_noise_std = self.config.tree.exchangeability_noise_std
         train_R = self.config.tree.trainable_exchangeabilities
-        train_p = self.config.tree.trainable_equilibrium
-        if K == 1 or not(train_R or train_p):
+        if (K == 1 or not train_R) and self.config.tree.low_rank is None:
             R_noise_std = 0.0
         R_aa_init, p_aa_init = initializers.make_substitution_model_init(
             self.config.training.num_model,

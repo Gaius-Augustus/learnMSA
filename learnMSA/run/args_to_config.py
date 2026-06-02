@@ -85,6 +85,8 @@ def args_to_config(args: Namespace, base_config: Configuration | None = None) ->
     tree["trainable_exchangeabilities"] = args.trainable_exchangeabilities
     tree["trainable_equilibrium"] = args.trainable_equilibrium
     tree["num_anc_probs_components"] = args.num_anc_probs_components
+    tree["exchangeability_l2"] = args.exchangeability_l2
+    tree["low_rank"] = args.anc_probs_lora
 
     # Crop: decode the argparser string representation into config fields.
     tr["auto_crop"] = args.crop == "auto"

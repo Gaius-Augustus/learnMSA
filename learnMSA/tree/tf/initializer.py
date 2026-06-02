@@ -36,7 +36,7 @@ def make_substitution_model_init(
     type: str = "LG",
     num_components: int = 1,
     shared_equilibrium: bool = True,
-    shared_exchangeabilities: bool = True,
+    shared_exchangeabilities: bool = False,
     alphabet: str = SequenceDataset._default_alphabet[:20],
 ) -> tuple[np.ndarray, np.ndarray]:
     """

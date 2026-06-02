@@ -69,6 +69,8 @@ class AncProbsLayer(tf.keras.layers.Layer):
         num_components: The number of mixture components K. If > 1, the layer
             learns a mixture of K independent GTR models per head and track,
             sharing branch lengths across components.
+        low_rank: If not None, the rank of the low-rank parameterization of the
+            exchangeability matrices. If None, full kernels are used.
     """
 
     substitution_model: SubstitutionModel
@@ -93,11 +95,12 @@ class AncProbsLayer(tf.keras.layers.Layer):
         trainable_rates: bool=True,
         trainable_scale: bool=True,
         shared_equilibrium: bool=True,
-        shared_exchangeabilities: bool=True,
+        shared_exchangeabilities: bool=False,
         clusters: np.ndarray|None=None,
         alphabet_size: int=20,
         time_reversed: bool=True,
         num_components: int=1,
+        low_rank: int|None=None,
         **kwargs
     ):
         super(AncProbsLayer, self).__init__(**kwargs)
@@ -131,6 +134,7 @@ class AncProbsLayer(tf.keras.layers.Layer):
             exchangeability_l2=exchangeability_l2,
             time_reversed=time_reversed,
             num_components=num_components,
+            lora=low_rank,
         )
         self.tree_model = TreeModel(
             heads=heads,
@@ -164,6 +168,14 @@ class AncProbsLayer(tf.keras.layers.Layer):
     @property
     def equilibrium_kernel(self):
         return self.substitution_model.equilibrium_kernel
+
+    @property
+    def mixture_kernel(self):
+        return self.substitution_model.mixture_kernel
+
+    @property
+    def scale_kernel(self):
+        return self.substitution_model.scale_kernel
 
     @property
     def tau_kernel(self):

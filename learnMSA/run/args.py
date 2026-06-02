@@ -390,6 +390,22 @@ def parse_args(
             "(default: %(default)s)"
     )
     train_group.add_argument(
+        "--anc_probs_lora",
+        dest="anc_probs_lora",
+        type=int,
+        default=tree.low_rank,
+        help="Rank of the low-rank parameterization of the exchangeability matrices. "
+            "(default: %(default)s)"
+    )
+    train_group.add_argument(
+        "--exchangeability_l2",
+        dest="exchangeability_l2",
+        type=float,
+        default=tree.exchangeability_l2,
+        help="L2 regularization strength for exchangeability parameters. "
+            "(default: %(default)s)"
+    )
+    train_group.add_argument(
         "--skip_training",
         dest="skip_training",
         action="store_true",

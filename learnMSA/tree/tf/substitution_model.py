@@ -57,6 +57,8 @@ class SubstitutionModel(tf.keras.layers.Layer):
         num_components: The number of mixture components K. If > 1, the layer
             learns a mixture of K independent GTR models per head and track,
             sharing branch lengths across components.
+        low_rank: If not None, the rank of the low-rank parameterization of the
+            exchangeability matrices. If None, full kernels are used.
     """
 
     def __init__(
@@ -73,13 +75,23 @@ class SubstitutionModel(tf.keras.layers.Layer):
         trainable_exchangeabilities: bool = False,
         trainable_scale: bool = True,
         shared_equilibrium: bool = True,
-        shared_exchangeabilities: bool = True,
+        shared_exchangeabilities: bool = False,
         exchangeability_l2: float = 0.0,
         time_reversed: bool = True,
         num_components: int = 1,
+        lora: int | None = None,
         **kwargs
     ):
         super().__init__(**kwargs)
+
+        # assert if configuration is valid
+        if lora is not None:
+            assert trainable_exchangeabilities,\
+                "Low-rank parameterization has no effect if "\
+                "exchangeabilities are not trainable."
+            assert (lora > 0 and lora < alphabet_size),\
+            "lora must be between 0 and alphabet_size"
+
         self.heads = heads
         self.input_tracks = input_tracks
         self.alphabet_size = alphabet_size
@@ -106,6 +118,7 @@ class SubstitutionModel(tf.keras.layers.Layer):
         self.exchangeability_l2 = exchangeability_l2
         self.time_reversed = time_reversed
         self.num_components = num_components
+        self.lora = lora
         self._head_subset = None
         self._gtr_decomp = None
 
@@ -124,7 +137,7 @@ class SubstitutionModel(tf.keras.layers.Layer):
         if self.built:
             return
 
-        _exch_shape = [
+        R_shape = [
             self.heads,
             self.input_tracks,
             1 if self.shared_exchangeabilities else self.num_components,
@@ -132,16 +145,18 @@ class SubstitutionModel(tf.keras.layers.Layer):
             self.alphabet_size,
         ]
         self.exchangeability_const = tf.constant(
-            self.exchangeability_init(shape=_exch_shape, dtype=self.dtype),
+            self.exchangeability_init(shape=R_shape, dtype=self.dtype),
             name="exchangeability_const",
         )
+        if self.lora is not None:
+            R_shape[-1] = self.lora
         self.exchangeability_delta_kernel = self.add_weight(
-            shape=_exch_shape,
+            shape=R_shape,
             name="exchangeability_delta_kernel",
             initializer=self.exchangeability_delta_init,
             trainable=self.trainable_exchangeabilities,
             regularizer=(
-                tf.keras.regularizers.L2(self.exchangeability_l2)
+                tf.keras.regularizers.L2(self.exchangeability_l2 / self.heads)
                 if self.exchangeability_l2 > 0.0 else None
             ),
         )
@@ -214,6 +229,8 @@ class SubstitutionModel(tf.keras.layers.Layer):
         if kernel is None:
             const = self.exchangeability_const
             delta = self.exchangeability_delta_kernel
+            if self.lora is not None:
+                delta = tf.matmul(delta, delta, transpose_b=True)
             if self._head_subset is not None:
                 const = tf.gather(const, self._head_subset, axis=0)
                 delta = tf.gather(delta, self._head_subset, axis=0)

@@ -63,6 +63,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
                 exchangeability_delta_init=context.R_delta_init,
                 trainable_equilibrium=tree_cfg.trainable_equilibrium,
                 trainable_exchangeabilities=tree_cfg.trainable_exchangeabilities,
+                exchangeability_l2=tree_cfg.exchangeability_l2,
                 trainable_rates=tree_cfg.trainable_rates,
                 shared_equilibrium=tree_cfg.shared_equilibrium,
                 shared_exchangeabilities=tree_cfg.shared_exchangeabilities,
@@ -71,6 +72,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
                 num_components=tree_cfg.num_anc_probs_components,
                 mixture_init=context.mix_init,
                 scale_init=context.scale_init,
+                low_rank=tree_cfg.low_rank,
             )
 
         self.phmm_layer = PHMMLayer(
