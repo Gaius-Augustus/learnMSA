@@ -9,7 +9,7 @@ class InitMSAConfig(BaseModel):
     """If set, the initial HMM parameters will inferred from the
     provided MSA in FASTA format."""
 
-    match_threshold: float = 0.5
+    match_threshold: float = 0.4
     """When inferring HMM parameters from an MSA, a column is
     considered a match state if its occupancy (fraction of non-gap
     characters) is at least this value."""

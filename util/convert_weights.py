@@ -141,20 +141,21 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.dirichlet:
-        # load the legacy amino acid prior
-        legacy_prior = priors.AminoAcidPrior(dtype=tf.float32)
-        legacy_prior.build()
-        legacy_alpha = legacy_prior.emission_dirichlet_mix
-        legacy_alpha = legacy_alpha.make_alpha().numpy().flatten()
+        for comp in [1, 9]:
+            # load the legacy amino acid prior
+            legacy_prior = priors.AminoAcidPrior(comp, dtype=tf.float32)
+            legacy_prior.build()
+            legacy_alpha = legacy_prior.emission_dirichlet_mix
+            legacy_alpha = legacy_alpha.make_alpha().numpy().flatten()
 
-        # Add alphas for extra amino acids (non-standard + X)
-        # alpha = 1.0 marks a uniform prior for these amino acids
-        # (i.e. irrelevant)
-        # This will change the normalization constant compared to the case of
-        # only 20 alphas values, but gradient will remain the same.
-        legacy_alpha = np.concatenate([legacy_alpha, [1.0]*3])
+            # Add alphas for extra amino acids (non-standard + X)
+            # alpha = 1.0 marks a uniform prior for these amino acids
+            # (i.e. irrelevant)
+            # This will change the normalization constant compared to the case of
+            # only 20 alphas values, but gradient will remain the same.
+            legacy_alpha = np.concatenate([legacy_alpha, [1.0]*3])
 
-        convert_dirichlet("amino_acid_dirichlet", legacy_alpha)
+            convert_dirichlet(f"amino_acid_dirichlet_{comp}", legacy_alpha)
 
         # load the legacy transition priors
         legacy_trans_prior = priors.ProfileHMMTransitionPrior(dtype=tf.float32)

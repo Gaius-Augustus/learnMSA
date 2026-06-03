@@ -272,7 +272,7 @@ class PHMMValueSet:
     def from_msa(
         cls,
         data : AlignedDataset,
-        match_threshold : float = 0.5,
+        match_threshold : float = 0.4,
         global_factor : float = 0.1,
     ) -> "PHMMValueSet":
 

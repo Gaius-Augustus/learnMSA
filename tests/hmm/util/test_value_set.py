@@ -288,7 +288,9 @@ def test_log_normalize() -> None:
         ("seq5", "--ACAAA-AA--A"),
     ]
     with AlignedDataset(sequences=sequences) as data:
-        probs = PHMMValueSet.from_msa(data, global_factor=1.0).add_pseudocounts(
+        probs = PHMMValueSet.from_msa(
+            data, match_threshold=0.5, global_factor=1.0
+        ).add_pseudocounts(
             unannotated=1.0, insert_transition=1.0,
         ).normalize()
         a_ind = data.alphabet.index("A")

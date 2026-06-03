@@ -226,7 +226,7 @@ class TestInitMSAConfig:
         """Test InitMSAConfig default values."""
         config = InitMSAConfig()
         assert config.from_msa is None
-        assert config.match_threshold == 0.5
+        assert config.match_threshold == 0.4
         assert config.global_factor == 0.1
         assert config.pseudocounts is False
 
