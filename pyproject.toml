@@ -1,3 +1,54 @@
 [build-system]
-requires = ["setuptools"]
+requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "learnMSA"
+dynamic = ["version"]
+description = "learnMSA: Learning and Aligning large Protein Families"
+license-files = ["LICENSE.md"]
+authors = [{ name = "Felix Becker", email = "beckerfelix94@gmail.com" }]
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "tensorflow[and-cuda]>=2.17,<2.21",
+    "biopython>=1.69",
+    "pyfamsa",
+    "numpy",
+    "pydantic",
+    "pandas",
+    "hidten[tensorflow]",
+    "evoten[tensorflow]",
+]
+
+[project.optional-dependencies]
+test = ["pytest"]
+docs = [
+    "sphinx>=7.0",
+    "sphinx-rtd-theme>=1.3",
+    "myst-parser>=2.0",
+]
+plots = ["evoten[tensorflow, plots]", "imageio", "logomaker", "networkx"]
+
+[project.urls]
+Homepage = "https://github.com/Gaius-Augustus/learnMSA"
+
+[project.scripts]
+learnMSA = "learnMSA.run:run_main"
+
+[tool.setuptools.dynamic]
+version = { attr = "learnMSA._version.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["learnMSA*"]
+exclude = ["learnMSA.legacy*"]
+
+[tool.setuptools.package-data]
+learnMSA = [
+    "docs/*",
+    "hmm/weights/*",
+]
+
+[tool.setuptools]
+include-package-data = false

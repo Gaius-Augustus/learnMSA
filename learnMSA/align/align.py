@@ -180,8 +180,8 @@ def _fit_and_align(
         context.model_lengths = am.model.lengths
         # Preserve the use_anc_probs setting from the loaded model so that
         # the new model's architecture matches.
-        context.config.training.use_anc_probs = (
-            am.model.context.config.training.use_anc_probs
+        context.config.tree.use_anc_probs = (
+            am.model.context.config.tree.use_anc_probs
         )
         # Keep a reference to the loaded model for weight transfer later.
         # We do NOT reuse am.model directly: its anc_probs_layer.tau_kernel

@@ -5,7 +5,9 @@ from pathlib import Path
 
 import learnMSA.run.util as util
 from learnMSA import Configuration
-from learnMSA.run import args_to_config, handle_help_command, parse_args
+from learnMSA.run.args_to_config import args_to_config
+from learnMSA.run.help import handle_help_command
+from learnMSA.run.args import parse_args
 
 # Hide TensorFlow/absl startup logs as early as possible.
 # Use defaults so users can still override through environment variables.
