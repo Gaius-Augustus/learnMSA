@@ -8,9 +8,7 @@ from learnMSA import Configuration
 from learnMSA.align.align import align
 from learnMSA.align.align_hits import HitAlignmentMode
 from learnMSA.align.alignment_metadata import AlignmentMetaData
-from learnMSA.align.alignment_model import (AlignmentModel,
-                                            find_faulty_sequences,
-                                            non_homogeneous_mask_func)
+from learnMSA.align.alignment_model import AlignmentModel
 from learnMSA.align.tf.decode import decode_core_tf, decode_flank_tf, decode_tf
 from learnMSA.model.context import LearnMSAContext
 from learnMSA.model.tf.model import LearnMSAModel
@@ -171,61 +169,6 @@ def test_alignment_egf() -> None:
         assert sp > 0.7
     # Clean up output file
     os.remove(egf_out_path)
-
-def test_non_homogeneous_mask() -> None:
-    """Test non_homogeneous_mask_func"""
-    seq_lens = tf.constant([[3, 5, 4]])
-
-    class HmmCellMock:
-        def __init__(self):
-            self.num_models = 1
-            self.length = [4]
-            self.max_num_states = 11
-            self.dtype = tf.float32
-
-    mask = non_homogeneous_mask_func(2, seq_lens, HmmCellMock()).numpy()
-    expected_zero_pos = [
-        set([(1,8), (2,8), (3,8), (8,3), (8,4)]),
-        set([(1,8), (8,3), (8,4)]),
-        set([(1,8), (2,8), (8,3), (8,4)])
-    ]
-    for k in range(3):
-        for u in range(11):
-            for v in range(11):
-                if (u, v) in expected_zero_pos[k]:
-                    assert mask[0, k, u, v] == 0, f"Expected 0 at {u},{v}"
-                else:
-                    assert mask[0, k, u, v] == 1, f"Expected 1 at {u},{v}"
-
-    # hitting a sequence end is a special case, always allow transitions out of the last match
-    mask = non_homogeneous_mask_func(4, seq_lens, HmmCellMock()).numpy()
-    expected_zero_pos = [
-        set([(1,8), (2,8), (3,8)]),
-        set([(1,8), (2,8), (3,8)]),
-        set([(1,8), (2,8), (3,8)])
-    ]
-    for k in range(3):
-        for u in range(11):
-            for v in range(11):
-                if (u, v) in expected_zero_pos[k]:
-                    assert mask[0, k, u, v] == 0, f"Expected 0 at {u},{v}"
-                else:
-                    assert mask[0, k, u, v] == 1, f"Expected 1 at {u},{v}"
-
-def test_find_faulty_sequences() -> None:
-    model_length = 4
-    C = 2*model_length
-    T = 2*model_length+2
-    seq_lens = np.array([3, 4, 4, 2,
-                        4, 4, 4, 4,
-                        2, 5, 5, 5,
-                        3])
-    state_seqs_max_lik = np.array([[[1,C,2,T,T], [1,C,2,4,T], [1,2,3,4,T], [1,3,T,T,T],
-                                    [1,2,C,3,T], [1,2,C,1,T], [1,2,C,4,T], [1,2,C,4,T],
-                                    [1,C,T,T,T], [1,2,3,C,5], [1,2,3,4,C], [3,C,C,C,1],
-                                    [3,C,1,T,T]]])
-    faulty_sequences = find_faulty_sequences(state_seqs_max_lik, model_length, seq_lens)
-    np.testing.assert_equal(faulty_sequences, [0, 1, 4, 5, 6, 7, 8])
 
 def test_aligned_insertions() -> None:
     """Test aligned insertion blocks."""
@@ -1182,14 +1125,35 @@ def test_alignment_decoding_mode_right(
         assert s == r
 
 
-def test_alignment_decoding_mode_greedy_consensus(
+def test_alignment_decoding_mode_greedy_scores(
     multi_hit_data : SequenceDataset,
     simple_model : LearnMSAModel,
 ) -> None:
     # create alignment after building model
     sub_am = AlignmentModel(
         multi_hit_data, simple_model,
-        hit_alignment_mode=HitAlignmentMode.GREEDY_CONSENSUS
+        hit_alignment_mode=HitAlignmentMode.GREEDY_SCORES
+    )
+    subalignment_strings = sub_am.to_string(0, add_block_sep=False)
+    ref_subalignment = [
+        "...---...FEL-K...---...",
+        "ahc---...F-LI-...---...",
+        "...FLKhacFELIKhaaELIaah",
+        "...---...FELIKahcELI...",
+        "...FLKa..FELIK...---..."
+    ]
+    for s, r in zip(subalignment_strings, ref_subalignment):
+        assert s == r
+
+
+def test_alignment_decoding_mode_greedy_single(
+    multi_hit_data : SequenceDataset,
+    simple_model : LearnMSAModel,
+) -> None:
+    # create alignment after building model
+    sub_am = AlignmentModel(
+        multi_hit_data, simple_model,
+        hit_alignment_mode=HitAlignmentMode.GREEDY_SINGLE
     )
     subalignment_strings = sub_am.to_string(0, add_block_sep=False)
     ref_subalignment = [

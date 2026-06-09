@@ -242,7 +242,7 @@ def parse_args(
         type=str,
         default=tr.hit_alignment_mode,
         help="Mode for aligning the domain hits during training. Options:" \
-        "'left_align', 'right_align', 'greedy_consensus'. "\
+        "'left', 'right', 'greedy_scores'. "\
         "(default: %(default)s)"
     )
 

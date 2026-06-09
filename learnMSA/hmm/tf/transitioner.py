@@ -37,7 +37,7 @@ class PHMMExplicitTransitioner(TFTransitioner):
         self,
         values: Sequence[PHMMValueSet],
         shared_flanks: bool = False,
-        allow_repeats: bool = True,
+        allow_multi_hits: bool = True,
         **kwargs
     ) -> None:
         """
@@ -46,7 +46,7 @@ class PHMMExplicitTransitioner(TFTransitioner):
                 one per head, with probabilities.
             shared_flanks (bool): Whether to share transition parameters of
                 flank states within each head.
-            allow_repeats (bool): Whether to allow repeated transitions.
+            allow_multi_hits (bool): Whether to allow multiple domain hits.
         """
         super().__init__(**kwargs)
         allow_list, value_list, shared_list = [], [], []
@@ -115,7 +115,7 @@ class PHMMExplicitTransitioner(TFTransitioner):
 
         self.share = np.hstack(shared_list)
 
-        self.allow_repeats = allow_repeats
+        self.allow_multi_hits = allow_multi_hits
 
 
     @override
@@ -144,7 +144,7 @@ class PHMMExplicitTransitioner(TFTransitioner):
             ),
             share=self.share, # type: ignore
         )
-        if not self.allow_repeats:
+        if not self.allow_multi_hits:
             # set P(C | E) to zero
             indices = []
             for h,L in enumerate(self.lengths):
@@ -207,7 +207,7 @@ class PHMMTransitioner(TFTransitioner):
         self,
         values: Sequence[PHMMValueSet],
         shared_flanks: bool = False,
-        allow_repeats: bool = True,
+        allow_multi_hits: bool = True,
         **kwargs
     ) -> None:
         """
@@ -216,12 +216,12 @@ class PHMMTransitioner(TFTransitioner):
                 head.
             shared_flanks (bool): Whether to share flank parameters across
                 heads.
-            allow_repeats (bool): Whether to allow repeated transitions.
+            allow_multi_hits (bool): Whether to allow multiple domain hits.
         """
         super().__init__(**kwargs)
 
         self.explicit_transitioner = self._make_explicit_transitioner(
-            values, shared_flanks=shared_flanks, allow_repeats=allow_repeats
+            values, shared_flanks=shared_flanks, allow_multi_hits=allow_multi_hits
         )
         self.lengths = [value_set.L for value_set in values]
 
@@ -252,6 +252,11 @@ class PHMMTransitioner(TFTransitioner):
 
         self.allow = np.vstack(transitions)
         self.allow_start = np.vstack(start)
+
+    def enable_multi_hits(self, enable: bool = True) -> None:
+        """Enable or disable multiple hits by setting the corresponding
+        transitions in the explicit transitioner."""
+        self.explicit_transitioner.allow_multi_hits = enable
 
     @override
     def build(self) -> None:
@@ -552,12 +557,12 @@ class PHMMTransitioner(TFTransitioner):
     def _make_explicit_transitioner(
         self, values: Sequence[PHMMValueSet],
         shared_flanks: bool = False,
-        allow_repeats: bool = False,
+        allow_multi_hits: bool = False,
     ) -> PHMMExplicitTransitioner:
         """Helper to create the explicit transitioner with the same
         parameters."""
         return PHMMExplicitTransitioner(
             values=values,
             shared_flanks=shared_flanks,
-            allow_repeats=allow_repeats,
+            allow_multi_hits=allow_multi_hits,
         )

@@ -6,13 +6,18 @@ from learnMSA.align.alignment_metadata import AlignmentMetaData
 
 
 class HitAlignmentMode(Enum):
-    LEFT_ALIGN = "left_align"
+    LEFT_ALIGN = "left"
     """Aligns the domain hits by index (starting from the left)."""
-    RIGHT_ALIGN = "right_align"
+    RIGHT_ALIGN = "right"
     """Aligns the domain hits by negative index (starting from the right)."""
-    GREEDY_CONSENSUS = "greedy_consensus"
-    """Aligns the domain hits such that the highest-scoring
-    domain hits assemble into the same column."""
+    GREEDY_SCORES = "greedy_scores"
+    """Aligns the domain hits such that the domain hits that use the most
+    matches assemble into the same columns."""
+    GREEDY_SINGLE = "greedy_single"
+    """Aligns the domain hits such that the single best domain hits
+    assemble into the same columns. The best domain hit is determined by
+    comparing the hit intervals in a multi-hit model with the hit interval
+    resulting from a single-hit model."""
 
     @staticmethod
     def from_str(label: str) -> "HitAlignmentMode":
@@ -20,8 +25,10 @@ class HitAlignmentMode(Enum):
             return HitAlignmentMode.LEFT_ALIGN
         elif label.lower() == "right":
             return HitAlignmentMode.RIGHT_ALIGN
-        elif label.lower() == "greedy":
-            return HitAlignmentMode.GREEDY_CONSENSUS
+        elif label.lower() == "greedy_scores":
+            return HitAlignmentMode.GREEDY_SCORES
+        elif label.lower() == "greedy_single":
+            return HitAlignmentMode.GREEDY_SINGLE
         else:
             raise ValueError(f"Unsupported decoding mode: {label}")
 
@@ -39,7 +46,7 @@ def hit_alignment(
         mode : HitAlignmentMode
             Mode for aligning the domain hits.
         scores : np.ndarray, shape (num_repeats, num_rows)
-            Score matrix required by `GREEDY_CONSENSUS` mode. The scores should
+            Score matrix required by `GREEDY_SCORES` mode. The scores should
             be non-negative, except for -1 which is allowed to indicate empty
             hits.
 
@@ -56,14 +63,14 @@ def hit_alignment(
         scores = np.where(occ == -1, -1.0, 0.0)
         last_virt = data._repeat_offset + data.num_repeats_per_row - 1
         scores[last_virt, np.arange(data.num_rows)] = 1.0
-        shift = greedy_consensus_hit_alignment(scores)
+        shift = greedy_scores_hit_alignment(scores)
         data.shift(shift)
         return data
 
-    elif mode == HitAlignmentMode.GREEDY_CONSENSUS:
+    elif mode == HitAlignmentMode.GREEDY_SCORES:
         assert scores is not None,\
             "Scores are required for greedy consensus hit alignment."
-        shift = greedy_consensus_hit_alignment(scores)
+        shift = greedy_scores_hit_alignment(scores)
         data.shift(shift)
         return data
 
@@ -71,7 +78,7 @@ def hit_alignment(
         raise ValueError(f"Unknown hit alignment mode: {mode}")
 
 
-def greedy_consensus_hit_alignment(
+def greedy_scores_hit_alignment(
     Z: np.ndarray, prevent_extend: bool = True
 ) -> np.ndarray:
     """Aligns the domain hits such that the highest-scoring
@@ -89,7 +96,6 @@ def greedy_consensus_hit_alignment(
     Returns:
         shifts : np.ndarray of bool, shape (N,)
     """
-    K = Z.shape[0]
     # Find the best hit per row
     Zm = np.argmax(Z, axis=0)
     # Compute how much the domains per row must be shifted

@@ -96,6 +96,11 @@ class AlignmentMetaData:
         if self.num_rows == 0:
             return 0
         return int(np.amax(self._repeat_offset + self.num_repeats_per_row))
+    
+    @property
+    def total_repeats(self) -> int:
+        """Total number of repeats across all rows."""
+        return self.domain_hit.shape[0]
 
     @property
     def skip(self) -> np.ndarray:

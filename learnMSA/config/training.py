@@ -126,9 +126,9 @@ class TrainingConfig(BaseModel):
     decoding_mode: str = "viterbi"
     """Decoding mode for training. Options: "viterbi", "mea"."""
 
-    hit_alignment_mode: str = "greedy"
+    hit_alignment_mode: str = "greedy_scores"
     """Mode for aligning the domain hits during training. Options: "left",
-    "right", "greedy"."""
+    "right", "greedy_scores", "greedy_single"."""
 
 
     @field_validator("learning_rate")

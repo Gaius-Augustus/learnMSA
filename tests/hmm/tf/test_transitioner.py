@@ -59,7 +59,7 @@ def test_explicit_transitioner_matrix() -> None:
     )
     np.testing.assert_allclose(np.sum(A[1, -1], axis=-1), 1.0, atol=1e-6)
 
-def test_allow_repeats(hmm_config: HidtenHMMConfig) -> None:
+def test_allow_multi_hits(hmm_config: HidtenHMMConfig) -> None:
     lengths = [4, 3]
 
     # Create value sets for different heads
@@ -74,7 +74,7 @@ def test_allow_repeats(hmm_config: HidtenHMMConfig) -> None:
         PHMMTransitionIndexSet(L=L, folded=True).num_states
         for L in lengths
     ]
-    transitioner = PHMMTransitioner(values=values, allow_repeats=False)
+    transitioner = PHMMTransitioner(values=values, allow_multi_hits=False)
     transitioner.hmm_config = hmm_config
     transitioner.build()
     A_uf = transitioner.explicit_transitioner.matrix().numpy()

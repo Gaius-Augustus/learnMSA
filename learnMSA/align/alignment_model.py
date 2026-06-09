@@ -49,9 +49,6 @@ class AlignmentModel():
     hit_alignment_mode: HitAlignmentMode
     """Mode for aligning the domain hits."""
 
-    fixed_viterbi_seqs: np.ndarray
-    """For legacy reasons. TODO: remove later"""
-
     class DecodingMode(Enum):
         VITERBI = "viterbi"
         MEA = "mea"
@@ -74,7 +71,7 @@ class AlignmentModel():
         gap_symbol: str = '-',
         gap_symbol_insertions: str = '.',
         best_head: int = -1,
-        hit_alignment_mode: HitAlignmentMode = HitAlignmentMode.GREEDY_CONSENSUS,
+        hit_alignment_mode: HitAlignmentMode = HitAlignmentMode.GREEDY_SCORES,
     ) -> None:
         """
         Args:
@@ -104,7 +101,6 @@ class AlignmentModel():
         self.best_head = best_head
         self.hit_alignment_mode = hit_alignment_mode
         self.metadata = {}
-        self.fixed_viterbi_seqs = np.array([], dtype=np.int32)
 
     def get_output_alphabet(self, a2m: bool = True) -> np.ndarray:
         """ Returns the output alphabet used for string representation of
@@ -1001,85 +997,102 @@ class AlignmentModel():
                 f"with decoding mode {decoding_mode}..."
             )
 
-        if False: # NEW implementation
+        if decoding_mode == AlignmentModel.DecodingMode.VITERBI:
+            self.model.viterbi_mode()
+        elif decoding_mode == AlignmentModel.DecodingMode.MEA:
+            self.model.mea_mode()
+        else:
+            raise ValueError(f"Unsupported decoding mode: {decoding_mode}")
 
-            if decoding_mode == AlignmentModel.DecodingMode.VITERBI:
-                self.model.viterbi_decode_mode()
-            elif decoding_mode == AlignmentModel.DecodingMode.MEA:
-                self.model.mea_decode_mode()
-            else:
-                raise ValueError(f"Unsupported decoding mode: {decoding_mode}")
+        outputs = self.model.predict(
+            self.data, indices=self.indices, models=models,
+            ragged_output=True
+        ) # (B, T, H)
 
-            # predict returns a plain dict of arrays when _decode_msa is True.
-            # The full state-sequence array is never materialised in CPU memory.
-            raw_dict = self.model.predict(
-                self.data, indices=self.indices, models=models
+        t = time.time()
+
+        meta_data = self._stack_ragged_outputs(outputs, models)
+
+        if self.hit_alignment_mode == HitAlignmentMode.GREEDY_SCORES:
+            # Use occupancy (number of used match states) as hit score.
+            occupancy = meta_data.occupancy_matrix()  # (R, N), -1 for empty
+            meta_data = hit_alignment(
+                meta_data, self.hit_alignment_mode, occupancy
             )
-            assert isinstance(raw_dict, dict)
-            c = int(self.model.phmm_layer.lengths[models[0]])
-            meta_data_base = AlignmentMetaData.from_kwargs(
-                num_rows=len(self.indices), num_match=c, **raw_dict
-            )
+        elif self.hit_alignment_mode == HitAlignmentMode.GREEDY_SINGLE:
+            # Find sequences with multiple hits
+            n = meta_data.num_rows
+            # Indices of rows with multiple hits
+            multi_hit_rows = np.arange(n)[meta_data.num_repeats_per_row > 1]
+            n_multi = len(multi_hit_rows)
 
-            # TODO: this is just here to generate empty fixed_viterbi_seqs
-            _ = self._clean_up_viterbi_seqs(None, [0])
+            if n_multi == 0:
+                # When no multi-hits were predicted, hit alignment is trivial
+                meta_data = hit_alignment(meta_data, HitAlignmentMode.LEFT_ALIGN)
+            else:
+                if self.model.context.config.input_output.verbose:
+                    print(f"Predicted {n_multi} sequences with multi-hits.")
 
-
-            t = time.time()
-
-            j = models[0]
-            if self.hit_alignment_mode == HitAlignmentMode.GREEDY_CONSENSUS:
-                # Use occupancy (number of used match states) as hit score.
-                occupancy = meta_data_base.occupancy_matrix()  # (R, N), -1 for empty
-                meta_data = hit_alignment(
-                    meta_data_base, self.hit_alignment_mode, occupancy
+                # Re-run Viterbi for all sequences with more than one hit
+                # and a model where multi-hits are forbidden
+                self.model.phmm_layer.hmm.transitioner.enable_multi_hits(False)
+    
+                outputs_single = self.model.predict(
+                    self.data, indices=multi_hit_rows, models=models,
+                    ragged_output=True
+                ) # (B, T, H)
+                meta_data_single = self._stack_ragged_outputs(
+                    outputs_single, models
                 )
-            else:
-                meta_data = hit_alignment(meta_data_base, self.hit_alignment_mode)
-            self.metadata[j] = meta_data
+                
+                # Restore original behavior
+                self.model.phmm_layer.hmm.transitioner.enable_multi_hits(True)
 
-        else: # OLD implementation
+                assert all(meta_data_single.num_repeats_per_row == 1)
 
-            if decoding_mode == AlignmentModel.DecodingMode.VITERBI:
-                self.model.viterbi_mode()
-            elif decoding_mode == AlignmentModel.DecodingMode.MEA:
-                self.model.mea_mode()
-            else:
-                raise ValueError(f"Unsupported decoding mode: {decoding_mode}")
-
-            state_seqs_max_lik = self.model.predict(
-                self.data, indices=self.indices, models=models,
-                ragged_output=True
-            ) # (B, T, H)
-
-            # TODO: this is just here to generate empty fixed_viterbi_seqs
-            _ = self._clean_up_viterbi_seqs(None, [0])
-
-            t = time.time()
-
-            all_meta_data = []
-            all_idx = []
-            while len(state_seqs_max_lik) > 0:
-                seqs, idx = state_seqs_max_lik.pop(0)
-                model_len = self.model.context.model_lengths[models[0]]
-                md = AlignmentModel.decode(model_len, seqs[:,:,0])
-                del seqs
-                all_meta_data.append(md)
-                all_idx.append(idx)
-            meta_data = AlignmentMetaData.concat(all_meta_data)
-            all_idx = np.concatenate(all_idx)
-            meta_data.reorder(all_idx)
-
-            if self.hit_alignment_mode == HitAlignmentMode.GREEDY_CONSENSUS:
-                # Use occupancy (number of used match states) as hit score.
-                occupancy = meta_data.occupancy_matrix()  # (R, N), -1 for empty
-                meta_data = hit_alignment(
-                    meta_data, self.hit_alignment_mode, occupancy
+                repeated_single_hit_loc = np.repeat(
+                    meta_data_single.domain_loc,
+                    meta_data.num_repeats_per_row[multi_hit_rows],
+                    axis=0
                 )
-            else:
-                meta_data = hit_alignment(meta_data, self.hit_alignment_mode)
 
-            self.metadata[models[0]] = meta_data
+                # (R, N), -1 for empty
+                occupancy = meta_data.occupancy_matrix() > 0
+                multi_hit_occupancy = occupancy[:, multi_hit_rows]
+                idx = np.arange(meta_data.total_repeats, dtype=np.int32)
+                idx_helper = np.full(
+                    (meta_data.num_rows, meta_data.num_repeats),
+                    -1,
+                    dtype=np.int32,
+                )
+                idx_helper[occupancy.T] = idx
+                multi_hit_repeats = idx_helper[multi_hit_rows][multi_hit_occupancy.T]
+
+                multi_hit_loc = meta_data.domain_loc[multi_hit_repeats]
+
+                # Score single-hits implicitly with 1 (their score does not matter)
+                interval_similarity = occupancy.astype(np.float32)
+
+                multi_hit_interval_similarity = _interval_jaccard(
+                    multi_hit_loc, repeated_single_hit_loc
+                )
+
+                mh_rows, mh_virt = np.nonzero(multi_hit_occupancy.T)
+                interval_similarity[
+                    mh_virt,
+                    multi_hit_rows[mh_rows],
+                ] = multi_hit_interval_similarity
+                interval_similarity[~occupancy] = -1
+    
+                meta_data = hit_alignment(
+                    meta_data,
+                    HitAlignmentMode.GREEDY_SCORES,
+                    interval_similarity,
+                )
+        else:
+            meta_data = hit_alignment(meta_data, self.hit_alignment_mode)
+
+        self.metadata[models[0]] = meta_data
 
         if self.model.context.config.input_output.verbose:
             print(
@@ -1087,103 +1100,38 @@ class AlignmentModel():
                 "seconds."
             )
 
-    def _clean_up_viterbi_seqs(self, state_seqs_max_lik, models):
+    def _stack_ragged_outputs(
+        self,
+        outputs : list[tuple[np.ndarray, np.ndarray]],
+        models : list[int]
+    ) -> AlignmentMetaData:
+        all_meta_data = []
+        all_idx = []
+        while len(outputs) > 0:
+            seqs, idx = outputs.pop(0)
+            model_len = self.model.context.model_lengths[models[0]]
+            md = AlignmentModel.decode(model_len, seqs[:,:,0])
+            del seqs
+            all_meta_data.append(md)
+            all_idx.append(idx)
+        meta_data = AlignmentMetaData.concat(all_meta_data)
+        all_idx = np.concatenate(all_idx)
+        meta_data.reorder(all_idx)
+        return meta_data
 
-        assert len(models) == 1, "Not implemented for multiple models."
+def _interval_jaccard(i1: np.ndarray, i2: np.ndarray) -> np.ndarray:
+    """ Computes the Jaccard index of two arrays of half-open intervals
+    defined by [start, end) positions.
 
-        # TODO
-        self.fixed_viterbi_seqs = np.array([], dtype=np.int32)
-        return state_seqs_max_lik
-
-        # state_seqs_max_lik has shape (num_model, num_seq, L)
-        faulty_sequences = find_faulty_sequences(
-            state_seqs_max_lik,
-            self.model.context.model_lengths[models[0]],
-            self.data.seq_lens[self.indices]
-        )
-        self.fixed_viterbi_seqs = faulty_sequences
-        if faulty_sequences.size > 0:
-            # repeat Viterbi with a masking that prevents certain transitions
-            # that can cause problems
-            fixed_state_seqs = self.model.decode(
-                self.data,
-                faulty_sequences,
-                self.batch_size,
-                models,
-                non_homogeneous_mask_func,
-            )
-            if state_seqs_max_lik.shape[-1] < fixed_state_seqs.shape[-1]:
-                state_seqs_max_like = np.pad(
-                    state_seqs_max_lik,
-                    ((0,0),(0,0),(0,fixed_state_seqs.shape[-1]-state_seqs_max_lik.shape[-1])),
-                    constant_values=2*self.model.context.model_lengths[0]+2
-                )
-            state_seqs_max_lik[0,faulty_sequences,:fixed_state_seqs.shape[-1]] = fixed_state_seqs[0]
-        return state_seqs_max_lik
-
-
-@tf.function
-def non_homogeneous_mask_func(i, seq_lens, hmm_cell):
-    """ Let S = S_1 … S_L be the sequence and M_1 … M_Z the match states.
-    In a Viterbi path pi = pi_1 … pi_L prevent transitions such that either
-    a) (pi_{i-1}, pi_i) = (M_j, E) and L-i <= Z-j or
-    b) (pi_{i-1}, pi_i) = (S, M_j) and i <= j.
+    Args:
+        i1: Array of intervals, shape (n, 2), where each row is [start, end).
+        i2: Array of intervals, shape (n, 2), where each row is [start, end).
 
     Returns:
-        A mask of shape (num_models, batch_size, num_states, num_states)
-        indicating allowed transitions.
+        Array of Jaccard indices, shape (n,).
     """
-    k = hmm_cell.num_models
-    q = tf.cast(hmm_cell.max_num_states, tf.int32)
-    template = tf.ones((1,q,q), dtype=hmm_cell.dtype)
-    model_masks = []
-    for k,length in enumerate(hmm_cell.length):
-        length = tf.cast(length, tf.int32)
-        C = 2 * length
-        states_left = one_hot_set([C], q, hmm_cell.dtype)
-        states_right = one_hot_set([C], q, hmm_cell.dtype)
-        allowed_CL_transitions = 1 - one_hot_set(tf.range(i+1, tf.maximum(i+1, length + 1)), q, hmm_cell.dtype)
-        number_of_forbidden_match_states = tf.maximum(0, length - seq_lens[k] + i)
-        #always allow transitions out of the last match state
-        number_of_forbidden_match_states = tf.minimum(length-1, number_of_forbidden_match_states)
-        length_mask = 1-tf.cast(tf.sequence_mask(number_of_forbidden_match_states, maxlen=q-1), hmm_cell.dtype)
-        allowed_CR_transitions = tf.concat([tf.ones_like(length_mask[:,:1]), length_mask], axis=1)
-        mask_left = states_left[...,tf.newaxis] * allowed_CL_transitions[tf.newaxis] # type: ignore
-        mask_left += template * (1 - states_left[:,tf.newaxis])
-        mask_right = states_right[tf.newaxis] * allowed_CR_transitions[...,tf.newaxis] # type: ignore
-        mask_right += template * (1 - states_right[tf.newaxis])
-        mask = mask_left * mask_right
-        model_masks.append(mask)
-    return tf.stack(model_masks, axis=0)
-
-
-@tf.function
-def one_hot_set(indices, d, dtype):
-    # Returns a vector in {0,1}}^d with a 1 at positions i in indices and 0
-    # elsewhere
-    return tf.reduce_sum(tf.one_hot(indices, d, dtype=dtype), axis=0)
-
-
-def find_faulty_sequences(
-    state_seqs_max_lik, model_length, seq_lens, limit=32000
-):
-    if state_seqs_max_lik.shape[1] > limit:
-        return np.array([], dtype=np.int32)
-    else:
-        # Returns an array of sequences indices for that Viterbi should be
-        # rerun with restrictions
-        C = 2 * model_length
-        C_state = state_seqs_max_lik == C
-        prev_C_state = np.roll(C_state, 1, axis=2)
-        prev_C_state[:,:,0] = False
-        C_state_starts = C_state & ~prev_C_state
-        previous_state = np.roll(state_seqs_max_lik, 1, axis=2).astype(np.int32)
-        previous_state[:,:,0] = -1
-        previous_is_match = (previous_state > 0) & (previous_state < model_length+1)
-        #there are enough match states to align without repeat
-        remaining_matches = model_length - previous_state
-        remaining_residues = seq_lens[np.newaxis,:,np.newaxis] - np.arange(state_seqs_max_lik.shape[-1])[np.newaxis,np.newaxis,:]
-        enough_matches = remaining_matches >= remaining_residues
-        faulty_sequences = np.any(C_state_starts & previous_is_match & enough_matches, axis=-1)
-        faulty_sequences = np.argwhere(faulty_sequences[0])[:,0]
-        return faulty_sequences
+    overlap_start = np.maximum(i1[:, 0], i2[:, 0])
+    overlap_end = np.minimum(i1[:, 1], i2[:, 1])
+    intersection = np.maximum(0, overlap_end - overlap_start)
+    union = (i1[:, 1] - i1[:, 0]) + (i2[:, 1] - i2[:, 0]) - intersection
+    return np.where(union > 0, intersection / union, 0.0)

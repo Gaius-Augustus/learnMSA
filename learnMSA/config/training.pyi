@@ -76,7 +76,7 @@ class TrainingConfig(BaseModel):
         reset_emissions_after_surgery: bool = False,
         reset_transitions_after_surgery: bool = False,
         decoding_mode: str = "viterbi",
-        hit_alignment_mode: str = "greedy_consensus",
+        hit_alignment_mode: str = "greedy_scores",
         **kwargs: Any,
     ) -> None: ...
 
