@@ -19,13 +19,16 @@ class AlignmentMetaData:
 
     domain_hit: np.ndarray
     """An array of shape (total_repeats, num_match) with the domain hits,
-    where total_repeats = sum(num_repeats_per_row). Stored in row-major flat
+    where total_repeats = sum(num_repeats_per_row). For each hit i and match
+    state j, `domain_hit[i, j]` contains the index of the residue that is
+    assigned to j, or -1 if no residue is assigned. Stored in row-major flat
     order: all repeats for row 0, then row 1, etc.
     """
 
     domain_loc: np.ndarray
     """An array of shape (total_repeats, 2) with the starting and ending
-    positions of the domain hits in the sequences.
+    positions of the domain hits in the sequences (ending position exclusive).
+    Same layout as `domain_hit`.
     """
 
     insertion_lens: np.ndarray
@@ -87,10 +90,6 @@ class AlignmentMetaData:
         # (all zeros initially; modified by shift())
         self._repeat_offset = np.zeros(self.num_rows, dtype=np.int32)
 
-    # ------------------------------------------------------------------
-    # Derived scalar / array properties
-    # ------------------------------------------------------------------
-
     @property
     def num_repeats(self) -> int:
         """Maximum virtual repeat index + 1 (= alignment width in repeats)."""
@@ -121,10 +120,6 @@ class AlignmentMetaData:
         result[is_active] = False
         return result
 
-    # ------------------------------------------------------------------
-    # Core flat-to-virtual helpers
-    # ------------------------------------------------------------------
-
     def _flat_virt_rep_and_row(self) -> tuple:
         """Return (virtual_repeat_idx, row_idx) arrays for every flat entry."""
         total_R = len(self.domain_hit)
@@ -138,10 +133,6 @@ class AlignmentMetaData:
         )
         virt_rep = (self._repeat_offset[flat_to_row] + flat_local).astype(np.int32)
         return virt_rep, flat_to_row
-
-    # ------------------------------------------------------------------
-    # Per-repeat data access
-    # ------------------------------------------------------------------
 
     def get_repeat_data(
         self, repeat_idx: int, row_indices: np.ndarray
@@ -218,10 +209,6 @@ class AlignmentMetaData:
         s[~has_seg] = -1
         return l, s
 
-    # ------------------------------------------------------------------
-    # Per-row flank getters
-    # ------------------------------------------------------------------
-
     def left_flank_len_for(self, row_indices: np.ndarray) -> np.ndarray:
         """Return ``left_flank_len`` for *row_indices*."""
         return self.left_flank_len[row_indices]
@@ -237,10 +224,6 @@ class AlignmentMetaData:
     def right_flank_start_for(self, row_indices: np.ndarray) -> np.ndarray:
         """Return ``right_flank_start`` for *row_indices*."""
         return self.right_flank_start[row_indices]
-
-    # ------------------------------------------------------------------
-    # Aggregate properties
-    # ------------------------------------------------------------------
 
     def occupancy_matrix(self) -> np.ndarray:
         """Return (num_repeats, num_rows) int32 with the number of used match
@@ -335,9 +318,6 @@ class AlignmentMetaData:
             + self.right_flank_len_total
         )
 
-    # ------------------------------------------------------------------
-    # Shift (logical re-alignment of domain hits)
-    # ------------------------------------------------------------------
 
     def shift(self, shift: np.ndarray) -> None:
         """Logically shift each row's domain hits right by *shift[j]* repeat
@@ -349,9 +329,6 @@ class AlignmentMetaData:
         """
         self._repeat_offset += shift.astype(np.int32)
 
-    # ------------------------------------------------------------------
-    # Row reordering / concatenation utilities
-    # ------------------------------------------------------------------
 
     def reorder(self, idx: np.ndarray) -> None:
         """Reorder rows in-place.

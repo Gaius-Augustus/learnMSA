@@ -59,6 +59,37 @@ def test_explicit_transitioner_matrix() -> None:
     )
     np.testing.assert_allclose(np.sum(A[1, -1], axis=-1), 1.0, atol=1e-6)
 
+def test_allow_repeats(hmm_config: HidtenHMMConfig) -> None:
+    lengths = [4, 3]
+
+    # Create value sets for different heads
+    values = [
+        PHMMValueSet.from_config(L, h, ref.config)
+        for h, L in enumerate(lengths)
+    ]
+
+    # We need to manually create a Hidten HMMConfig because the transitioner is
+    # not added to an HMM here.
+    states = [
+        PHMMTransitionIndexSet(L=L, folded=True).num_states
+        for L in lengths
+    ]
+    transitioner = PHMMTransitioner(values=values, allow_repeats=False)
+    transitioner.hmm_config = hmm_config
+    transitioner.build()
+    A_uf = transitioner.explicit_transitioner.matrix().numpy()
+    A_f = transitioner.matrix().numpy()
+
+    for h, L in enumerate(lengths):
+        idx_unfolded = PHMMTransitionIndexSet(L, folded=False)
+        idx_folded = PHMMTransitionIndexSet(L, folded=True)
+        # Check that P(C | E) is exactly zero in the unfolded model
+        np.testing.assert_equal(A_uf[h, idx_unfolded.E, idx_unfolded.C], 0.0)
+        # In the folded model, all transitions into C (except the self-loop)
+        # should be zero
+        np.testing.assert_equal(A_f[h, :idx_folded.C, idx_folded.C], 0.0)
+        np.testing.assert_equal(A_f[h, idx_folded.C+1:, idx_folded.C], 0.0)
+
 def test_folded_transitioner_matrix(hmm_config: HidtenHMMConfig) -> None:
     lengths = [4, 3]
 

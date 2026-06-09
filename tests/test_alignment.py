@@ -1108,6 +1108,38 @@ def test_viterbi(
             np.testing.assert_equal(alignment_block, ref)
 
 
+def test_alignment_metadata(
+    multi_hit_data : SequenceDataset,
+    simple_model : LearnMSAModel,
+) -> None:
+    # create alignment after building model
+    am = AlignmentModel(
+        multi_hit_data, simple_model,
+        hit_alignment_mode=HitAlignmentMode.LEFT_ALIGN
+    )
+    am.build_alignment([0], AlignmentModel.DecodingMode.VITERBI)
+    np.testing.assert_equal(
+        am.metadata[0].domain_hit,
+        [
+            [0, 1, 2, -1, 3],
+            [3, -1, 4, 5, -1],
+            [0, -1, 1, -1, 2], [6, 7, 8, 9, 10], [-1, 14, 15, 16, -1],
+            [0, 1, 2, 3, 4], [-1, 8, 9, 10, -1],
+            [0, -1, 1, -1, 2], [4, 5, 6, 7, 8]
+        ]
+    )
+    np.testing.assert_equal(
+        am.metadata[0].domain_loc,
+        [
+            [0, 4],
+            [3, 6],
+            [0, 3], [6, 11], [14, 17],
+            [0, 5], [8, 11],
+            [0, 3], [4, 9]
+        ]
+    )
+
+
 def test_alignment_decoding_mode_left(
     multi_hit_data : SequenceDataset,
     simple_model : LearnMSAModel,

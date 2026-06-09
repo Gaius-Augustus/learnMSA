@@ -1092,7 +1092,6 @@ class AlignmentModel():
         assert len(models) == 1, "Not implemented for multiple models."
 
         # TODO
-        print("WARNING: Fixing faulty Viterbi sequences is currently not supported. SKIPPING.")
         self.fixed_viterbi_seqs = np.array([], dtype=np.int32)
         return state_seqs_max_lik
 

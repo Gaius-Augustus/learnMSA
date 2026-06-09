@@ -37,6 +37,7 @@ class PHMMExplicitTransitioner(TFTransitioner):
         self,
         values: Sequence[PHMMValueSet],
         shared_flanks: bool = False,
+        allow_repeats: bool = True,
         **kwargs
     ) -> None:
         """
@@ -45,15 +46,14 @@ class PHMMExplicitTransitioner(TFTransitioner):
                 one per head, with probabilities.
             shared_flanks (bool): Whether to share transition parameters of
                 flank states within each head.
-            hidten_hmm_config (HidtenHMMConfig): The configuration of the
-                hidten HMM.
+            allow_repeats (bool): Whether to allow repeated transitions.
         """
         super().__init__(**kwargs)
         allow_list, value_list, shared_list = [], [], []
         start, start_values = [], []
         states = []
-        lengths = [value_set.L for value_set in values]
-        max_states = PHMMTransitionIndexSet.num_states_unfolded(max(lengths))
+        self.lengths = [value_set.L for value_set in values]    
+        max_states = PHMMTransitionIndexSet.num_states_unfolded(max(self.lengths))
         value_sum = 0
         for h, value_set in enumerate(values):
             index_set = PHMMTransitionIndexSet(
@@ -115,6 +115,8 @@ class PHMMExplicitTransitioner(TFTransitioner):
 
         self.share = np.hstack(shared_list)
 
+        self.allow_repeats = allow_repeats
+
 
     @override
     def matrix(self, transition_delta: T_TFTensor | None = None) -> T_TFTensor:
@@ -142,6 +144,17 @@ class PHMMExplicitTransitioner(TFTransitioner):
             ),
             share=self.share, # type: ignore
         )
+        if not self.allow_repeats:
+            # set P(C | E) to zero
+            indices = []
+            for h,L in enumerate(self.lengths):
+                idx = PHMMTransitionIndexSet(L, folded=False)
+                indices.append([h, idx.E, idx.C])
+            dense_tensor = tf.tensor_scatter_nd_update(
+                dense_tensor,
+                indices=indices,
+                updates=[-1e16]*len(self.hmm_config.states)
+            )
         return zero_row_softmax(dense_tensor)
 
 
@@ -194,6 +207,7 @@ class PHMMTransitioner(TFTransitioner):
         self,
         values: Sequence[PHMMValueSet],
         shared_flanks: bool = False,
+        allow_repeats: bool = True,
         **kwargs
     ) -> None:
         """
@@ -202,11 +216,12 @@ class PHMMTransitioner(TFTransitioner):
                 head.
             shared_flanks (bool): Whether to share flank parameters across
                 heads.
+            allow_repeats (bool): Whether to allow repeated transitions.
         """
         super().__init__(**kwargs)
 
         self.explicit_transitioner = self._make_explicit_transitioner(
-            values, shared_flanks=shared_flanks
+            values, shared_flanks=shared_flanks, allow_repeats=allow_repeats
         )
         self.lengths = [value_set.L for value_set in values]
 
@@ -535,10 +550,14 @@ class PHMMTransitioner(TFTransitioner):
         return M_skip
 
     def _make_explicit_transitioner(
-        self, values: Sequence[PHMMValueSet], shared_flanks: bool = False
+        self, values: Sequence[PHMMValueSet],
+        shared_flanks: bool = False,
+        allow_repeats: bool = False,
     ) -> PHMMExplicitTransitioner:
         """Helper to create the explicit transitioner with the same
         parameters."""
         return PHMMExplicitTransitioner(
-            values=values, shared_flanks=shared_flanks
+            values=values,
+            shared_flanks=shared_flanks,
+            allow_repeats=allow_repeats,
         )

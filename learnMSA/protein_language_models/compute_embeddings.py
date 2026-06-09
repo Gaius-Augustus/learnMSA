@@ -110,6 +110,8 @@ def _compute_reduced_embeddings(
     encoder: InputEncoder,
     lm_scoring_call,
 ) -> np.ndarray:
+    assert data.remove_gaps,\
+        "Embeddings can only be computed for datasets with remove_gaps=True"
     seq_batch = [data.get_standardized_seq(i) for i in indices]
     lm_inputs = encoder(
         seq_batch, np.repeat([[False, False]], len(seq_batch), axis=0)
