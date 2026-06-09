@@ -126,7 +126,7 @@ class TrainingConfig(BaseModel):
     decoding_mode: str = "viterbi"
     """Decoding mode for training. Options: "viterbi", "mea"."""
 
-    hit_alignment_mode: str = "greedy_scores"
+    hit_alignment_mode: str = "greedy_single"
     """Mode for aligning the domain hits during training. Options: "left",
     "right", "greedy_scores", "greedy_single"."""
 
