@@ -1,0 +1,10 @@
+tensorflow==2.19
+tf-keras==2.19
+networkx
+logomaker
+seaborn
+biopython>=1.69
+pyfamsa
+transformers
+imageio
+SentencePiece
