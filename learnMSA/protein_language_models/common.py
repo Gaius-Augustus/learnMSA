@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import tensorflow as tf
 import numpy as np
 import os
@@ -149,10 +151,11 @@ class InputEncoder():
 
 def make_cache_dir(path, model_id):
     if path is None:
-        path = os.path.dirname(__file__)
-    elif not os.path.exists(path):
-        os.mkdir(path)
-    return os.path.join(path, model_id)
+        path = Path.home() / ".cache" / "learnmsa"
+    
+    path = Path(path)
+    path.mkdir(parents=True, exist_ok=True)
+    return str(path / model_id)
 
 
 # for convenience
