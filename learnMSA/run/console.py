@@ -1,4 +1,9 @@
 import os
+import sys
+
+# Block triton from being imported - it segfaults when TF CUDA libs are loaded
+sys.modules["triton"] = None  # type: ignore
+
 import time
 from contextlib import ExitStack
 from pathlib import Path
