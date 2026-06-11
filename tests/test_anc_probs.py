@@ -350,7 +350,7 @@ def test_time_reversed() -> None:
         R_init=Initializers.ConstantInitializer(R_init),
         p_init=Initializers.ConstantInitializer(p_init),
         t_init=Initializers.ConstantInitializer(-3.0),
-        num_rates=1,
+        num_rates=2,
         time_reversed=True,
     )
 

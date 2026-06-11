@@ -201,6 +201,7 @@ class TestArgsToConfig:
             "-i", "tests/data/egf.fasta",
             "-o", "output.a2m",
             "--work_dir", "tmp",
+            "--save_emb",
         ])
 
         config = args_to_config(args)

@@ -107,9 +107,12 @@ def args_to_config(args: Namespace, base_config: Configuration | None = None) ->
     im["pseudocounts"] = args.pseudocounts
     im["seeded"] = args.seeded
 
+    load_emb = args.emb_file is not None
+    save_emb = args.save_emb != "" and args.save_emb != "<workdir>"
+
     # --- Language model ---
-    lm["use_language_model"] = args.use_language_model or args.emb_file is not None
-    lm["only_embeddings"] = args.save_emb != "<workdir>" and not args.use_language_model
+    lm["use_language_model"] = load_emb or args.use_language_model
+    lm["only_embeddings"] = save_emb and not args.use_language_model
     lm["plm_cache_dir"] = args.plm_cache_dir
     lm["language_model"] = args.language_model
     lm["scoring_model_dim"] = args.scoring_model_dim
