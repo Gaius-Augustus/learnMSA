@@ -160,7 +160,8 @@ def parse_args(
         dest="save_emb",
         type=str,
         nargs='?',
-        default="<workdir>",
+        const="<workdir>",
+        default="",
         help="Path to save computed embeddings for each sequence. Per default, "\
             "stores embeddings in the working directory. Set to an empty "\
             "string to disable."
