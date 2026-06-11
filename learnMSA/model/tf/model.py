@@ -1,7 +1,12 @@
 import math
 from pathlib import Path
 import time
-from typing import Any, Literal, Sequence, override, overload
+import sys
+from typing import Any, Literal, Sequence, overload
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    from typing_extensions import override
 
 import numpy as np
 import tensorflow as tf

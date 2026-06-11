@@ -35,7 +35,10 @@ plots = [
     "networkx"
 ]
 plm = [
-    "torch",
+    # NOTE: on systems with custom CUDA/NCCL installs (e.g. Blackwell),
+    # install torch manually first:
+    # pip install torch --index-url https://download.pytorch.org/whl/cpu
+    "torch<=2.7.1",
     "transformers<5.0",
     "tf-keras",
     "SentencePiece"
