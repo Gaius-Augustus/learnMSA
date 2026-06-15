@@ -13,7 +13,11 @@ from learnMSA.util.sequence_dataset import SequenceDataset
 #computes clustering based sequence weights if mmseqs2 is installed
 def compute_sequence_weights(fasta_filename, directory, cluster_seq_id=0.5, return_clusters=False):
     if which("mmseqs") is None:
-        print("mmseqs2 is not installed or not in path. Please install it (e.g. with conda install -c bioconda mmseqs2) or disable sequence weighting with --no_sequence_weights (not recommended).")
+        print(
+            "mmseqs2 is not installed or not in path. Please install it "\
+            "(e.g. conda install -c conda-forge -c bioconda mmseqs2 --no-update-deps) or disable "\
+            "sequence weighting with --no_sequence_weights (not recommended)."
+        )
         sys.exit(1)
     else:
         cluster_files = directory+"/"+os.path.splitext(os.path.basename(fasta_filename))[0]

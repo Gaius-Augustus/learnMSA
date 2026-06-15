@@ -16,7 +16,7 @@ dependencies = [
     "pyfamsa",
     "numpy",
     "pydantic",
-    "pandas",
+    "pandas", 
     "hidten[tensorflow]",
     "evoten[tensorflow]",
 ]
@@ -32,7 +32,8 @@ plots = [
     "evoten[tensorflow, plots]",
     "imageio",
     "logomaker",
-    "networkx"
+    "networkx",
+    "scipy"
 ]
 plm = [
     # NOTE: on systems with custom CUDA/NCCL installs (e.g. Blackwell),
