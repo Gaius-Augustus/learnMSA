@@ -16,6 +16,10 @@ class PHMMPriorConfig(BaseModel):
     use_amino_acid_prior: bool = True
     """Whether to use a Dirichlet prior for emissions."""
 
+    amino_acid_dirichlet_components: int = 1
+    """Number of components for the Dirichlet prior. If > 1, a mixture of
+    Dirichlet distributions is used."""
+
     alpha_flank: float = 7000.0
     """Alpha parameter for flank prior. Favors high probability of staying in
     flanking states."""

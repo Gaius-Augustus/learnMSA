@@ -5,8 +5,7 @@ import numpy as np
 import os
 
 
-PRIOR_PATH = "priors_V3"
-SCORING_MODEL_PATH = "new_scoring_models_frozen"
+SCORING_MODEL_PATH = "scoring_models"
 PRIOR_DEFAULT_COMPONENTS = 32
 
 class ScoringModelConfig():
@@ -43,11 +42,6 @@ class ScoringModelConfig():
 def get_scoring_model_path(config : ScoringModelConfig):
     return f"{SCORING_MODEL_PATH}/{config.lm_name}_{config.dim}_"\
         f"{config.activation}{config.suffix}.h5"
-
-
-def get_prior_path(config : ScoringModelConfig, components):
-    return f"{PRIOR_PATH}/{config.lm_name}_{config.dim}_"\
-        f"reduced_mix{components}_{config.activation}{config.suffix}.h5"
 
 
 ## Constructs and loads a language model with contextual imports.

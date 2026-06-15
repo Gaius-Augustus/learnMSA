@@ -342,8 +342,9 @@ class LearnMSAContext:
         if self.config.init_msa.pseudocounts:
             # Infer meaningful pseudocounts from Dirichlet priors
             # Get amino acid pseudocounts
+            c = self.config.hmm_prior.amino_acid_dirichlet_components
             aa_prior = load_dirichlet(
-                "amino_acid_dirichlet.weights",
+                f"amino_acid_dirichlet_{c}.weights",
                 dim = len(SequenceDataset._default_alphabet)-1
             )
             alpha = aa_prior.matrix().numpy()[0,0]

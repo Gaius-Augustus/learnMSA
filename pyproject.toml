@@ -63,6 +63,7 @@ exclude = ["learnMSA.legacy*"]
 learnMSA = [
     "docs/*",
     "hmm/weights/*",
+    "protein_language_models/scoring_models/*",
 ]
 
 [tool.setuptools]
