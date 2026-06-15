@@ -288,7 +288,7 @@ def update_kernels(
         if config.use_prior_for_emission_init:
             # use prior mean as brackground distribution
             emission_prior = load_dirichlet(
-                "amino_acid_dirichlet.weights",
+                f"amino_acid_dirichlet_1.weights", # TODO: use component count from config here
                 dim = len(SequenceDataset._default_alphabet)-1,
                 states = [1],
             )

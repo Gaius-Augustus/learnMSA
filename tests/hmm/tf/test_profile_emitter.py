@@ -31,7 +31,7 @@ def emitter(hmm_config: HidtenHMMConfig) -> ProfileEmitter:
     # Add the prior for tests that need it
     alphabet_size = len(SequenceDataset._default_alphabet)-1
     emission_prior = load_dirichlet(
-        "amino_acid_dirichlet.weights",
+        "amino_acid_dirichlet_1.weights",
         dim=alphabet_size
     )
     emission_prior.share = np.tile(
