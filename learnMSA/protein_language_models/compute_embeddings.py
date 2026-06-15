@@ -1,3 +1,4 @@
+import importlib.resources as resources
 import gc
 import os
 from functools import partial
