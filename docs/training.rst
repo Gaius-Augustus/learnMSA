@@ -88,7 +88,13 @@ differ slighly in their initialization, length (number of match states) and
 
 ``--len_mul`` *LEN_MUL*
     Multiplicative constant for the quantile used to define the initial model
-    length (see ``--length_init_quantile``).
+    length (see ``--length_init_quantile``). If model surgery is not used
+    (i.e., ``--max_iterations`` is 1), this value is forced to 1.0, as the
+    algorithm has no chance to optimize the model length.
+    The intuition behind the parameter is that shorter models might be faster
+    and more stable to train at first, focusing on the most important parts of
+    a family profile. Missin match states will be automatically added by model
+    surgery if necessary.
 
     Default: 0.8
 
@@ -146,12 +152,22 @@ differ slighly in their initialization, length (number of match states) and
     Large-scale alignments often produce very large output files, depending on how
     insertions are represented. Although learnMSA aligns insertions, which keeps
     alignments as compact as possible, substantial numbers of gaps can still occur
-    and increase file size. This option can be used to omit all insertions and write
-    only those amino acids that are assigned to match states while representing
-    deletions with the gap character. The alignment length will be bounded by the
-    model length *ℓ*, unless domain repeat occurs.
+    and increase file size. This option can be used to omit all insertions in
+    the output file and write only those amino acids that are assigned to match
+    states while representing deletions with the gap character. The alignment
+    length will be bounded by the model length *ℓ*, unless domain repeat occurs.
     This can be useful, for example, in phylogenetic downstream analyses where only
     conserved columns are of interest.
+
+``--no_noise``
+    With this flag learnMSA will not perturb the initial HMM parameters with
+    Dirichlet noise.
+
+``noise_concentration`` *NOISE_CONCENTRATION*
+    Concentration parameter for the Dirichlet noise applied to the initial HMM
+    parameters.
+
+    Default: 100.0
 
 
 Practical tips and example commands

@@ -7,7 +7,7 @@ sys.path.insert(0, os.path.abspath(".."))
 project = 'learnMSA'
 copyright = '2025, Felix Becker'
 author = 'Felix Becker'
-release = '2.0.16'
+release = '2.1.0'
 
 # Base extensions
 extensions = [

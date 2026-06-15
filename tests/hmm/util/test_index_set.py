@@ -1,0 +1,135 @@
+"""Tests for MSA to HMM conversion functionality."""
+
+import numpy as np
+
+from learnMSA.hmm.util.transition_index_set import PHMMTransitionIndexSet
+
+
+def test_index_set() -> None:
+    """Test PHMMTransitionIndexSet initialization and structure."""
+    ind = PHMMTransitionIndexSet(3)
+    assert ind.L == 3
+    np.testing.assert_equal(ind.begin_to_match, [[9, 0], [9, 1], [9, 2]])
+    np.testing.assert_equal(ind.match_to_match, [[0, 1], [1, 2]])
+    np.testing.assert_equal(ind.match_to_insert, [[0, 3], [1, 4]])
+    np.testing.assert_equal(ind.match_to_delete, [[0, 6], [1, 7]])
+    np.testing.assert_equal(ind.insert_to_match, [[3, 1], [4, 2]])
+    np.testing.assert_equal(ind.insert_to_insert, [[3, 3], [4, 4]])
+    np.testing.assert_equal(ind.delete_to_match, [[5, 1], [6, 2]])
+    np.testing.assert_equal(ind.delete_to_delete, [[5, 6], [6, 7]])
+    np.testing.assert_equal(ind.match_to_end, [[0, 10], [1, 10], [2, 10]])
+    np.testing.assert_equal(ind.left_flank, [[8, 8], [8, 9]])
+    np.testing.assert_equal(ind.unannotated, [[11, 11], [11, 9]])
+    np.testing.assert_equal(ind.end, [[10, 11], [10, 12], [10, -1]])
+    np.testing.assert_equal(ind.mask(), [
+        [1., 0, 1, 0, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1],
+        [1, 1, 0, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 1],
+        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1],
+        [1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+        [1, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+        [1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1],
+        [1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1],
+        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1],
+        [1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1],
+        [0, 0, 0, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1],
+        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0],
+        [1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 1],
+        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0],
+    ])
+    np.testing.assert_equal(ind.num_states, 14)
+    np.testing.assert_equal(ind.num_transitions, 32)
+
+
+def test_index_set_folded() -> None:
+    """
+    Test PHMMTransitionIndexSet initialization and structure for folded case.
+    """
+    ind = PHMMTransitionIndexSet(4, folded=True)
+    assert ind.L == 4
+    assert ind.folded is True
+
+    # Basic transitions
+    np.testing.assert_equal(ind.match_to_match, [[0, 1], [1, 2], [2, 3]])
+    np.testing.assert_equal(ind.match_to_insert, [[0, 4], [1, 5], [2, 6]])
+    np.testing.assert_equal(ind.insert_to_insert, [[4, 4], [5, 5], [6, 6]])
+    np.testing.assert_equal(ind.insert_to_match, [[4, 1], [5, 2], [6, 3]])
+
+    # Jump transitions (match to match, skipping states)
+    # M0->M2, M0->M3, M1->M3
+    np.testing.assert_equal(ind.match_to_match_jump, [[0, 2], [0, 3], [1, 3]])
+
+    # Transitions to special states
+    np.testing.assert_equal(
+        ind.match_to_unannotated, [[0, 8], [1, 8], [2, 8], [3, 8]]
+    )
+    np.testing.assert_equal(
+        ind.match_to_right, [[0, 9], [1, 9], [2, 9], [3, 9]]
+    )
+    np.testing.assert_equal(
+        ind.match_to_terminal, [[0, -1], [1, -1], [2, -1], [3, -1]]
+    )
+
+    # Left flank: self-loop, to all matches, to unannotated, to right, to terminal
+    np.testing.assert_equal(ind.left_flank, [
+        [7, 7],  # L to L self-loop
+        [7, 0],  # L to M1
+        [7, 1],  # L to M2
+        [7, 2],  # L to M3
+        [7, 3],  # L to M4
+        [7, 8],  # L to C (unannotated)
+        [7, 9],  # L to R (right flank)
+        [7, -1],  # L to T (terminal)
+    ])
+
+    # Right flank: self-loop and to terminal
+    np.testing.assert_equal(ind.right_flank, [[9, 9], [9, -1]])
+
+    # Unannotated: self-loop, to all matches, to right, to terminal
+    np.testing.assert_equal(ind.unannotated, [
+        [8, 8],  # C to C self-loop
+        [8, 0],  # C to M1
+        [8, 1],  # C to M2
+        [8, 2],  # C to M3
+        [8, 3],  # C to M4
+        [8, 9],  # C to R (right flank)
+        [8, -1],  # C to T (terminal)
+    ])
+
+    # Terminal self-loop
+    np.testing.assert_equal(ind.terminal, [[-1, -1]])
+    np.testing.assert_equal(ind.num_states, 11)
+    np.testing.assert_equal(ind.num_transitions, 45)
+
+
+def test_shared_flanks() -> None:
+    """Test that shared_flanks causes left_flank, right_flank and unannotated
+    to share the same parameter indices, and that it is forbidden for folded models."""
+    ind = PHMMTransitionIndexSet(3, shared_flanks=False)
+    si = ind.shared_indices()
+    lf = ind._row_offsets['left_flank']
+    rf = ind._row_offsets['right_flank']
+    # Without sharing, we have distinct parameter indices
+    assert len(set(si[lf[0]:lf[1]]) & set(si[rf[0]:rf[1]])) == 0
+    assert len(np.unique(si)) == ind.num_transitions
+
+    ind2 = PHMMTransitionIndexSet(3, shared_flanks=True)
+    si2 = ind2.shared_indices()
+    lf2 = ind2._row_offsets['left_flank']
+    rf2 = ind2._row_offsets['right_flank']
+    # With sharing, right_flank reuses left_flank's parameter indices
+    np.testing.assert_equal(si2[rf2[0]:rf2[1]], si2[lf2[0]:lf2[1]])
+    assert len(np.unique(si2)) == ind.num_transitions - 2
+
+    # shared_flanks is not allowed with folded models
+    import pytest
+    with pytest.raises(AssertionError):
+        PHMMTransitionIndexSet(3, folded=True, shared_flanks=True)
+
+
+def test_num_transitions() -> None:
+    """Test PHMMTransitionIndexSet num_transitions method."""
+    ind = PHMMTransitionIndexSet(5)
+    assert ind.num_transitions == 50
+    ind_folded = PHMMTransitionIndexSet(5, folded=True)
+    assert ind_folded.num_transitions == 57

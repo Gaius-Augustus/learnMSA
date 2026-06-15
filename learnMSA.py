@@ -1,4 +1,4 @@
-from learnMSA.run import run_main
+from learnMSA.run.console import run_main
 
 
 if __name__ == '__main__':

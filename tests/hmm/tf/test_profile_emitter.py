@@ -1,0 +1,205 @@
+import numpy as np
+import pytest
+import tensorflow as tf
+from hidten.hmm import HMMConfig as HidtenHMMConfig
+
+from learnMSA.config.hmm import PHMMConfig
+from learnMSA.hmm.tf.profile_emitter import ProfileEmitter
+from learnMSA.hmm.tf.util import load_dirichlet
+from learnMSA.hmm.util.value_set import PHMMValueSet
+from learnMSA.util.sequence_dataset import SequenceDataset
+
+
+@pytest.fixture
+def hmm_config() -> HidtenHMMConfig:
+    lengths = [4, 3]
+    return HidtenHMMConfig(states=[2*L+2 for L in lengths])
+
+@pytest.fixture
+def emitter(hmm_config: HidtenHMMConfig) -> ProfileEmitter:
+    lengths = [4, 3]
+
+    # Create value sets for different heads
+    values = [
+        PHMMValueSet.from_config(L, h, PHMMConfig())
+        for h, L in enumerate(lengths)
+    ]
+
+    # Construct an emitter with two heads from the initial values
+    emitter = ProfileEmitter(values)
+
+    # Add the prior for tests that need it
+    alphabet_size = len(SequenceDataset._default_alphabet)-1
+    emission_prior = load_dirichlet(
+        "amino_acid_dirichlet_1.weights",
+        dim=alphabet_size
+    )
+    emission_prior.share = np.tile(
+        np.arange(alphabet_size),
+        reps=2 * sum(lengths) + 2 * len(lengths)
+    )
+    emitter.prior = emission_prior
+    emitter.hmm_config = hmm_config
+
+    emitter.build()
+
+    return emitter
+
+def test_matrix(emitter: ProfileEmitter) -> None:
+    B = emitter.matrix()
+
+    # Check basic matrix properties
+    assert B.shape == (2, 10, 23)
+    np.testing.assert_allclose(np.sum(B[0], axis=-1), 1.0)
+    np.testing.assert_allclose(np.sum(B[1, :8], axis=-1), 1.0)
+
+
+def test_call_shapes(emitter: ProfileEmitter) -> None:
+    # Create dummy emissions
+    B, T, H, S = 2, 10, 2, 23
+    inputs = np.random.randint(0, S, size=(B, T))
+    inputs_with_heads = np.random.randint(0, S, size=(B, T, H))
+
+    inputs_oh = tf.one_hot(inputs, depth=S)
+    inputs_oh_heads = tf.one_hot(inputs_with_heads, depth=S)
+
+    emission_scores = emitter.call(inputs_oh)
+    emission_scores_heads = emitter.call(inputs_oh_heads)
+    assert emission_scores.shape == (B, T, H, 2*4+3)  # max length is 4
+    assert emission_scores_heads.shape == (B, T, H, 2*4+3)
+
+
+def test_call(emitter: ProfileEmitter, hmm_config: HidtenHMMConfig) -> None:
+    # Create two value sets for different heads
+    values_1 = PHMMValueSet(
+        L=4,
+        match_emissions=np.array([
+            [0.9]+[0.1/22]*22,
+            [0.1/22] + [0.9] + [0.1/22]*21,
+            [0.1/22]*2 + [0.9] + [0.1/22]*20,
+            [0.1/22]*3 + [0.9] + [0.1/22]*19,
+        ]),
+        insert_emissions=np.array([1./23]*23),
+        transitions=np.array([]), # not used
+        start=np.array([]), # not used
+    )
+    values_2 = PHMMValueSet(
+        L=3,
+        match_emissions=np.array([
+            [0.8]+[0.2/22]*22,
+            [0.2/22] + [0.8] + [0.2/22]*21,
+            [0.2/22]*2 + [0.8] + [0.2/22]*20,
+        ]),
+        insert_emissions=np.array([1./23]*23),
+        transitions=np.array([]), # not used
+        start=np.array([]), # not used
+    )
+
+    # Construct an emitter with two heads from the initial values
+    emitter = ProfileEmitter([values_1, values_2])
+    emitter.hmm_config = hmm_config
+    emitter.build()
+
+    inputs_1_list = [0, 1, 2, 3, 9]
+    inputs_2_list = [0, 1, 2, 16]
+    inputs_1 = tf.one_hot(inputs_1_list, depth=23)
+    inputs_2 = tf.one_hot(inputs_2_list, depth=23)
+    # Add padding
+    inputs_2 = tf.pad(inputs_2, [[0, 1], [0, 0]], constant_values=0.0)
+    inputs = tf.stack([inputs_1, inputs_2], axis=0)  # (B, T, S)
+    padding = np.sum(inputs.numpy(), axis=-1)
+
+    emission_scores = emitter.call(inputs).numpy()
+
+    # Head 1, sequence 1
+    np.testing.assert_allclose(
+        emission_scores[0, range(4), 0, range(4)], 0.9
+    )
+    np.testing.assert_allclose(
+        emission_scores[0, 4, 0, :4], 0.1/22, atol=1e-6
+    )
+    np.testing.assert_allclose(
+        emission_scores[0, :, 0, 4:-1], 1.0/23, atol=1e-6
+    )
+    # Head 1, sequence 2
+    np.testing.assert_allclose(
+        emission_scores[1, range(3), 0, range(3)], 0.9
+    )
+    np.testing.assert_allclose(
+        emission_scores[1, 3, 0, :3], 0.1/22, atol=1e-6
+    )
+    np.testing.assert_allclose(
+        emission_scores[1, 4, 0, :3], 0.0, atol=1e-6
+    )
+    np.testing.assert_allclose(
+        emission_scores[1, :-1, 0, 4:-1], 1.0/23, atol=1e-6
+    )
+    np.testing.assert_allclose(
+        emission_scores[1, -1, 0, -2], 0.0, atol=1e-6
+    )
+
+    # Test padding
+    # See HidTen docs on how padding works
+    # We expect the emitter to add a new, rightmost padding state
+    np.testing.assert_allclose(emission_scores[..., -1], 1.0)
+
+
+def test_dirichlet_prior(emitter: ProfileEmitter) -> None:
+    print(emitter.matrix().numpy()[:,0])
+    print(emitter.prior_scores().numpy())
+
+
+def test_construct_big_emitter(hmm_config: HidtenHMMConfig) -> None:
+    import time
+
+    lengths = [500]*10
+    config = PHMMConfig()
+    values = [
+        PHMMValueSet.from_config(L, h, config) for h, L in enumerate(lengths)
+    ]
+
+    # Construct an emitter with two heads from the initial values
+    t0 = time.perf_counter()
+    emitter = ProfileEmitter(values)
+    emitter.hmm_config = hmm_config
+    t1 = time.perf_counter()
+    print(f"Constructor time: {t1-t0:.4f}s")
+
+    t0 = time.perf_counter()
+    emitter.build()
+    t1 = time.perf_counter()
+    print(f"Build time: {t1-t0:.4f}s")
+
+    t0 = time.perf_counter()
+    M = emitter.matrix()
+    t1 = time.perf_counter()
+    print(f"Matrix time: {t1-t0:.4f}s")
+
+
+def test_head_subset(hmm_config: HidtenHMMConfig) -> None:
+    lengths = [4, 3]
+
+    # Create value sets for different heads
+    values = [
+        PHMMValueSet.from_config(L, h, PHMMConfig())
+        for h, L in enumerate(lengths)
+    ]
+
+    emitter = ProfileEmitter(values)
+    emitter.hmm_config = hmm_config
+    emitter.build()
+
+    assert emitter.matrix().shape[0] == 2  # two heads
+
+    # Set head subset to only head 1
+    emitter.head_subset = [1]
+
+    B = emitter.matrix()
+
+    assert B.shape[0] == 1  # only one head
+    assert B.shape[1] == hmm_config.states[1]
+
+    # Check matrix properties for the subset head
+    np.testing.assert_allclose(
+        np.sum(B[0, :hmm_config.states[1]], axis=-1), 1.0
+    )

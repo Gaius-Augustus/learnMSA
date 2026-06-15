@@ -74,6 +74,28 @@ Arguments
     correlated with sequence length. When this option is used, the ``-o / --out_file``
     parameter becomes optional.
 
+``--struct`` *STRUCT_FILE*
+    Path to a fasta file containing discrete letters from a structural alphabet
+    for each sequence. Currently, only the 3Di alphabet from Foldseek is
+    supported. It must be possible to match the sequences in the input fasta
+    file to the sequences in the structural file by sequence ID. When this
+    option is used, learnMSA will use the structural information to guide the
+    alignment process.
+
+``--load_emb`` *EMB_FILE*
+    Path to a file containing embeddings for each sequence. This file should be
+    a binary file in the format produced by the ``--save_emb`` option.
+    When this option is used, learnMSA will load the embeddings and use them to
+    guide the alignment process.
+
+``--save_emb`` *EMB_FILE*
+    Path to save computed embeddings for each sequence. Per default, stores
+    embeddings in the working directory (``--work_dir``). Set to an empty
+    string to disable. This option must be used together with
+    ``--use_language_model`` when alignments should be computed, saved and
+    used for alignment. If ``--use_language_model`` is not set, learnMSA
+    will only compute and save the embeddings, but not perform any other
+    computation.
 
 
 Practical tips and example commands
