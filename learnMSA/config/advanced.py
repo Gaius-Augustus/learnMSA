@@ -21,6 +21,11 @@ class AdvancedConfig(BaseModel):
     jit_compile: bool = True
     """Enable XLA JIT compilation in TensorFlow."""
 
+    one_dnn_opts: bool = False
+    """Whether to use oneDNN optimizations in TensorFlow. This can improve
+    performance on CPUs. Set the to false per default as for HMMs it caused
+    numerical instabilities on many CPU."""
+
     reset_branch_lengths: bool = True
     """Whether to reset the branch lengths (tau) before training."""
 

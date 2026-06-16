@@ -59,6 +59,7 @@ def run_main() -> None:
     util.setup_devices(
         config.input_output.cuda_visible_devices,
         config.input_output.verbose,
+        config.advanced.one_dnn_opts,
     )
 
     from learnMSA.align.align import align

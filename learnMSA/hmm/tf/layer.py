@@ -120,6 +120,7 @@ class PHMMLayer(tf.keras.Layer):
             emission_prior = load_dirichlet(
                 f"amino_acid_dirichlet_{c}.weights",
                 dim = len(SequenceDataset._default_alphabet)-1,
+                components = c,
                 states = self.states,
             )
 

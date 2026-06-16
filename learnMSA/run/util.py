@@ -30,6 +30,7 @@ def get_version() -> str:
 def setup_devices(
     cuda_visible_devices : str,
     verbose : bool,
+    one_dnn_opts: bool,
 ) -> None:
     """
     Args:
@@ -48,6 +49,9 @@ def setup_devices(
 
     # Must be set before any TensorFlow operations
     os.environ["TF_GPU_ALLOCATOR"] = "cuda_malloc_async"
+
+    if not one_dnn_opts:
+        os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 
     import tensorflow as tf
     from tensorflow.python.client import device_lib
