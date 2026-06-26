@@ -114,150 +114,20 @@ class PHMMLayer(tf.keras.Layer):
             for value_set in values:
                 value_set.add_noise(concentration=config.noise_concentration)
 
-        if prior_config.use_amino_acid_prior:
-            # Set up the Dirichlet prior for emissions
-            c = prior_config.amino_acid_dirichlet_components
-            emission_prior = load_dirichlet(
-                f"amino_acid_dirichlet_{c}.weights",
-                dim = len(SequenceDataset._default_alphabet)-1,
-                components = c,
-                states = self.states,
-            )
-
-        # Override emission values with prior distribution if requested
-        if config.use_prior_for_emission_init and value_sets is None:
-            assert prior_config.use_amino_acid_prior, (
-                "Cannot use prior for emission initialization if no "
-                "emission prior is set."
-            )
-            values = self._override_emissions_with_prior(
-                values,
-                emission_prior,
-                override_matches=config.match_emissions is None,
-                override_insertions=config.insert_emissions is None,
-            )
-
         # Create the HMM, with 2*L+2 states per head
         self.hmm = TFHMM(states=self.states, heads=self.heads)
 
-        # Add the transitioner and prior
-        self.hmm.transitioner = PHMMTransitioner(
-            values=values, shared_flanks=config.shared_flank_transitions
-        )
-        if self.use_prior:
-            self.hmm.transitioner.prior = TFPHMMTransitionPrior(
-                self.lengths, prior_config
-            )
-            self.hmm.transitioner.prior_start = TFPHMMStartPrior(
-                self.lengths, prior_config
-            )
+        self._add_transitioner(values, config, prior_config)
 
         if not no_aa:
-            # Add the profile emitter
-            profile_emitter = ProfileEmitter(
-                values=values, trainable_insertions=trainable_insertions
-            )
-            self.hmm.add_emitter(profile_emitter)
-            if self.use_prior and prior_config.use_amino_acid_prior:
-                profile_emitter.prior = emission_prior
-
-        self.use_language_model = plm_config != None\
-            and plm_config.use_language_model
-        self.plm_config = plm_config
-        self.emb_mean = None
-        if self.use_language_model:
-            assert self.plm_config is not None,\
-                "plm_config must be provided if use_language_model is True"
-            # Create embedding value sets
-            emb_values = [
-                PHMMEmbeddingValueSet.from_config(L, h, plm_config) # type: ignore
-                for h, L in enumerate(self.lengths)
-            ]
-
-            # Set up the MVN prior for mean embeddings
-            mvn_prior = load_mvn(
-                self.plm_config.id_string() + ".weights",
-                dim=self.plm_config.scoring_model_dim,
-                components=self.plm_config.embedding_prior_components,
-                states=self.states,
+            self._add_amino_acid_emitter(
+                values, config, prior_config,
+                value_sets is None, trainable_insertions
             )
 
-            # Override embedding values with prior distribution if requested
-            if config.use_prior_for_emission_init:
-                emb_values, emb_mean = self._override_embeddings_with_prior(
-                    emb_values,
-                    mvn_prior,
-                    override_matches=config.match_emissions is None,
-                    override_insertions=config.insert_emissions is None,
-                )
-                self.emb_mean = emb_mean
+        self._add_emb_emitter(config, plm_config, trainable_insertions)
 
-            # Set the inverse gamma prior for embedding variances
-            inv_gamma_prior = TFInverseGammaPrior()
-            inv_gamma_prior.share = np.tile(
-                [0, 1],
-                reps=2 * sum(self.lengths) + 2 * len(self.lengths)
-            )
-            inv_gamma_prior.initializer = [
-                self.plm_config.inverse_gamma_alpha,
-                self.plm_config.inverse_gamma_beta,
-            ]
-
-            combined_prior = TFCombinedPrior()
-            combined_prior.add_prior(mvn_prior)
-            combined_prior.add_prior(inv_gamma_prior)
-
-            # Add the embedding emitter
-            embedding_emitter = EmbeddingEmitter(
-                values=emb_values,
-                trainable_insertions=trainable_insertions,
-                temperature=self.plm_config.temperature,
-            )
-            self.hmm.add_emitter(embedding_emitter)
-            if self.use_prior:
-                embedding_emitter.prior = combined_prior
-
-        self.structural_config = structural_config
-        if structural_config and structural_config.use_structure:
-            self.use_structure = True
-            struct_values = [
-                PHMMValueSet.from_structural_config(L, h, structural_config)
-                for h, L in enumerate(self.lengths)
-            ]
-
-            # If specified, load and add a Dirichlet prior
-            if structural_config.prior_name:
-                struct_prior = load_dirichlet(
-                    structural_config.prior_name+".weights",
-                    dim=structural_config.alphabet_size,
-                    components=structural_config.prior_components,
-                    states=self.states,
-                )
-                struct_prior.temperature = structural_config.prior_temperature
-
-                # Override emission values with prior distribution if requested
-                override_matches=structural_config.match_emissions is None
-                override_insertions=structural_config.insert_emissions is None
-                if structural_config.use_prior_for_emission_init:
-                    struct_values = self._override_emissions_with_prior(
-                        struct_values,
-                        struct_prior,
-                        override_matches=override_matches,
-                        override_insertions=override_insertions,
-                    )
-            else:
-                struct_prior = None
-
-            structural_emitter = ProfileEmitter(
-                values=struct_values,
-                trainable_insertions=trainable_insertions,
-                temperature=structural_config.emitter_temperature,
-            )
-            if struct_prior is not None and self.use_prior:
-                structural_emitter.prior = struct_prior
-            self.hmm.add_emitter(structural_emitter)
-        else:
-            self.use_structure = False
+        self._add_struct_emitter(structural_config, trainable_insertions)
 
         # Add the padding emitter
         self.hmm.add_emitter(TFSubsetPaddingEmitter())
@@ -330,6 +200,172 @@ class PHMMLayer(tf.keras.Layer):
                 number of heads in the pHMM.
         """
         return self.hmm.prior_scores()
+
+    def _add_transitioner(
+        self,
+        values: Sequence[PHMMValueSet],
+        config: PHMMConfig,
+        prior_config: PHMMPriorConfig,
+    ) -> None:
+        # Add the transitioner and prior
+        self.hmm.transitioner = PHMMTransitioner(
+            values=values, shared_flanks=config.shared_flank_transitions
+        )
+        if self.use_prior:
+            self.hmm.transitioner.prior = TFPHMMTransitionPrior(
+                self.lengths, prior_config
+            )
+            self.hmm.transitioner.prior_start = TFPHMMStartPrior(
+                self.lengths, prior_config
+            )
+
+    def _add_amino_acid_emitter(
+        self,
+        values: Sequence[PHMMValueSet],
+        config: PHMMConfig,
+        prior_config: PHMMPriorConfig,
+        allow_override: bool,
+        trainable_insertions: bool,
+    ) -> None:
+        if prior_config.use_amino_acid_prior:
+            # Set up the Dirichlet prior for emissions
+            c = prior_config.amino_acid_dirichlet_components
+            emission_prior = load_dirichlet(
+                f"amino_acid_dirichlet_{c}.weights",
+                dim = len(SequenceDataset._default_alphabet)-1,
+                components = c,
+                states = self.states,
+            )
+
+        # Override emission values with prior distribution if requested
+        if config.use_prior_for_emission_init and allow_override:
+            assert prior_config.use_amino_acid_prior, (
+                "Cannot use prior for emission initialization if no "
+                "emission prior is set."
+            )
+            values = self._override_emissions_with_prior(
+                values,
+                emission_prior,
+                override_matches=config.match_emissions is None,
+                override_insertions=config.insert_emissions is None,
+            )
+
+        # Add the profile emitter
+        profile_emitter = ProfileEmitter(
+            values=values, trainable_insertions=trainable_insertions
+        )
+        self.hmm.add_emitter(profile_emitter)
+        if self.use_prior and prior_config.use_amino_acid_prior:
+            profile_emitter.prior = emission_prior
+
+    def _add_emb_emitter(
+        self,
+        config: PHMMConfig,
+        plm_config: LanguageModelConfig | None,
+        trainable_insertions: bool,
+    ) -> None:
+        self.use_language_model = plm_config != None\
+            and plm_config.use_language_model
+        self.plm_config = plm_config
+        self.emb_mean = None
+        if self.use_language_model:
+            assert self.plm_config is not None,\
+                "plm_config must be provided if use_language_model is True"
+            # Create embedding value sets
+            emb_values = [
+                PHMMEmbeddingValueSet.from_config(L, h, plm_config) # type: ignore
+                for h, L in enumerate(self.lengths)
+            ]
+
+            # Set up the MVN prior for mean embeddings
+            mvn_prior = load_mvn(
+                self.plm_config.id_string() + ".weights",
+                dim=self.plm_config.scoring_model_dim,
+                components=self.plm_config.embedding_prior_components,
+                states=self.states,
+            )
+
+            # Override embedding values with prior distribution if requested
+            if config.use_prior_for_emission_init:
+                emb_values, emb_mean = self._override_embeddings_with_prior(
+                    emb_values,
+                    mvn_prior,
+                    override_matches=config.match_emissions is None,
+                    override_insertions=config.insert_emissions is None,
+                )
+                self.emb_mean = emb_mean
+
+            # Set the inverse gamma prior for embedding variances
+            inv_gamma_prior = TFInverseGammaPrior()
+            inv_gamma_prior.share = np.tile(
+                [0, 1],
+                reps=2 * sum(self.lengths) + 2 * len(self.lengths)
+            )
+            inv_gamma_prior.initializer = [
+                self.plm_config.inverse_gamma_alpha,
+                self.plm_config.inverse_gamma_beta,
+            ]
+
+            combined_prior = TFCombinedPrior()
+            combined_prior.add_prior(mvn_prior)
+            combined_prior.add_prior(inv_gamma_prior)
+
+            # Add the embedding emitter
+            embedding_emitter = EmbeddingEmitter(
+                values=emb_values,
+                trainable_insertions=trainable_insertions,
+                temperature=self.plm_config.temperature,
+            )
+            self.hmm.add_emitter(embedding_emitter)
+            if self.use_prior:
+                embedding_emitter.prior = combined_prior
+
+    def _add_struct_emitter(
+        self,
+        structural_config : StructureConfig | None,
+        trainable_insertions: bool,
+    ) -> None:
+        self.structural_config = structural_config
+        if structural_config and structural_config.use_structure:
+            self.use_structure = True
+            struct_values = [
+                PHMMValueSet.from_structural_config(L, h, structural_config)
+                for h, L in enumerate(self.lengths)
+            ]
+
+            # If specified, load and add a Dirichlet prior
+            if structural_config.prior_name:
+                struct_prior = load_dirichlet(
+                    structural_config.prior_name+".weights",
+                    dim=structural_config.alphabet_size,
+                    components=structural_config.prior_components,
+                    states=self.states,
+                )
+                struct_prior.temperature = structural_config.prior_temperature
+
+                # Override emission values with prior distribution if requested
+                override_matches=structural_config.match_emissions is None
+                override_insertions=structural_config.insert_emissions is None
+                if structural_config.use_prior_for_emission_init:
+                    struct_values = self._override_emissions_with_prior(
+                        struct_values,
+                        struct_prior,
+                        override_matches=override_matches,
+                        override_insertions=override_insertions,
+                    )
+            else:
+                struct_prior = None
+
+            structural_emitter = ProfileEmitter(
+                values=struct_values,
+                trainable_insertions=trainable_insertions,
+                temperature=structural_config.emitter_temperature,
+            )
+            if struct_prior is not None and self.use_prior:
+                structural_emitter.prior = struct_prior
+            self.hmm.add_emitter(structural_emitter)
+        else:
+            self.use_structure = False
 
     @staticmethod
     def _override_emissions_with_prior(

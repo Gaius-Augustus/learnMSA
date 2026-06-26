@@ -31,6 +31,8 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
 
     phmm_layer: PHMMLayer
 
+    anc_probs_layer: AncProbsLayer | None = None
+
     # enable proper type checking for __new__
     # otherwise the tf type stubs package causes trouble
     def __new__(cls, *args, **kwargs) -> "LearnMSAModel":
@@ -245,7 +247,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         # AncProbsLayer now expects (batch, L, num_models) shape
         seq_shape_batch_first = (B, None, n)
         ind_shape_batch_first = (B, n)
-        if hasattr(self, "anc_probs_layer"):
+        if self.anc_probs_layer is not None:
             self.anc_probs_layer.build(
                 [seq_shape_batch_first, ind_shape_batch_first]
             )
@@ -549,7 +551,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         # restrict to specified models
         prev_head_subset = self.phmm_layer.head_subset
         self.phmm_layer.head_subset = models
-        if hasattr(self, "anc_probs_layer"):
+        if self.anc_probs_layer is not None:
             self.anc_probs_layer.head_subset = models
 
         if models is None:
@@ -861,7 +863,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         # restrict to specified models
         prev_head_subset = self.phmm_layer.head_subset
         self.phmm_layer.head_subset = models
-        if hasattr(self, "anc_probs_layer"):
+        if self.anc_probs_layer is not None:
             self.anc_probs_layer.head_subset = models
 
         if models is None:
