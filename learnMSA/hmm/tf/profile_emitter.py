@@ -1,5 +1,6 @@
-from collections.abc import Sequence
 import sys
+from collections.abc import Sequence
+
 if sys.version_info >= (3, 12):
     from typing import override
 else:
@@ -81,24 +82,7 @@ class ProfileEmitter(TFCategoricalEmitter):
                 "Input feature dimension must match alphabet size provided "\
                 f"via the ValueSets ({input_shape[-1]} != {s})."
 
-        # Share all insertion emissions across positions
-        # We need to provide an array with indices into the emitter's kernel
-        # values, which is flat and sorted by head, states, emissions (major
-        # to minor).
-        i_sum = 0
-        indices = []
-        for L in self._lengths: # use unrestricted lengths here
-            # Nothing is shared for match states (L per head)
-            share_match = np.arange(i_sum, i_sum + L*s)
-            i_sum += L*s
-            # Each head shares its insert state emissions (1 per head)
-            share_insert = np.tile(
-                share_match[-1] + 1 + np.arange(s),
-                reps=L + 2
-            )
-            i_sum += s
-            indices.extend([share_match, share_insert])
-        self.share = np.concatenate(indices)
+        self.share = self._build_share()
 
         super().build(input_shape)
 
@@ -208,3 +192,24 @@ class ProfileEmitter(TFCategoricalEmitter):
             )
 
         return emission_scores
+
+    def _build_share(self) -> np.ndarray:
+        # Share all insertion emissions across positions
+        # We need to provide an array with indices into the emitter's kernel
+        # values, which is flat and sorted by head, states, emissions (major
+        # to minor).
+        s = self.alphabet_size
+        i_sum = 0
+        indices = []
+        for L in self._lengths: # use unrestricted lengths here
+            # Nothing is shared for match states (L per head)
+            share_match = np.arange(i_sum, i_sum + L*s)
+            i_sum += L*s
+            # Each head shares its insert state emissions (1 per head)
+            share_insert = np.tile(
+                share_match[-1] + 1 + np.arange(s),
+                reps=L + 2
+            )
+            i_sum += s
+            indices.extend([share_match, share_insert])
+        return np.concatenate(indices)

@@ -26,8 +26,8 @@ class PHMMValueSet:
     L: int
     match_emissions : np.ndarray
     insert_emissions : np.ndarray
-    transitions : np.ndarray
-    start : np.ndarray
+    transitions : np.ndarray | None = None
+    start : np.ndarray | None = None
 
     @property
     def alphabet_size(self) -> int:
@@ -566,8 +566,9 @@ class PHMMValueSet:
         mask = PHMMTransitionIndexSet(L).mask()
         self.match_emissions += all_param
         self.insert_emissions += all_param
-        self.transitions += all_param * mask
-        self.start += all_param
+        self._assert_transitions_start_not_none()
+        self.transitions += all_param * mask # type: ignore
+        self.start += all_param # type: ignore
 
         # Add fine-grained pseudocounts
         self.match_emissions += aa
@@ -626,18 +627,21 @@ class PHMMValueSet:
         Normalizes the counts in the given HMMValueSet to probabilities
         in-place and returns a reference to the modified object.
         """
+        self._assert_transitions_start_not_none()
         # Normalize emissions
         self.match_emissions /= \
             np.sum(self.match_emissions, axis=-1, keepdims=True)
         self.insert_emissions /= np.sum(self.insert_emissions)
 
         # Normalize starting probabilities
-        self.start /= np.sum(self.start)
+        self.start /= np.sum(self.start) # type: ignore
 
         # Mask for invalid
         mask = PHMMTransitionIndexSet(L = self.matches()).mask()
 
         # Normalize transitions
+        assert self.transitions is not None,\
+            "Transitions must be initialized before normalization."
         self.transitions[-1, -1] = 1 # terminal state can loop to itself
         self.transitions /= np.sum(self.transitions, axis=-1, keepdims=True)
 
@@ -649,6 +653,7 @@ class PHMMValueSet:
         normalize(). Computes log(0) as log_zero_value.
         Operates in-place and returns a reference to the modified object.
         """
+        self._assert_transitions_start_not_none()
 
         # Apply log transform with error handling
         with np.errstate(divide='raise', invalid='raise'):
@@ -659,8 +664,8 @@ class PHMMValueSet:
                 self.insert_emissions = safe_log(
                     self.insert_emissions, log_zero_value
                 )
-                self.start = safe_log(self.start, log_zero_value)
-                self.transitions = safe_log(self.transitions, log_zero_value)
+                self.start = safe_log(self.start, log_zero_value) # type: ignore
+                self.transitions = safe_log(self.transitions, log_zero_value) # type: ignore
             except FloatingPointError as e:
                 raise ValueError(
                     "Cannot compute log probabilities. "
@@ -688,6 +693,7 @@ class PHMMValueSet:
         def add_dirichlet_noise_sparse(
             probs: np.ndarray, concentration: float
         ) -> np.ndarray:
+            self._assert_transitions_start_not_none()
             """Add Dirichlet noise while preserving zeros (sparsity)."""
             result = probs.copy()
 
@@ -719,16 +725,23 @@ class PHMMValueSet:
         self.match_emissions = add_dirichlet_noise_sparse(
             self.match_emissions, concentration
         )
-        self.start = add_dirichlet_noise_sparse(self.start, concentration)
+        self.start = add_dirichlet_noise_sparse(self.start, concentration) # type: ignore
 
         # Apply Dirichlet noise to transitions (preserving structural zeros!)
         self.transitions = add_dirichlet_noise_sparse(
-            self.transitions, concentration
+            self.transitions, concentration #type: ignore
         )
         # Ensure terminal state loops to itself
         self.transitions[-1, -1] = 1.0
 
         return self
+
+
+    def _assert_transitions_start_not_none(self) -> None:
+        assert self.transitions is not None,\
+                "Transitions must be initialized before adding pseudocounts."
+        assert self.start is not None,\
+            "Start must be initialized before adding pseudocounts."
 
 
 def safe_log(x: np.ndarray, log_zero_value: float = -1e8) -> np.ndarray:

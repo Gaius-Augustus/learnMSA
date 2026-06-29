@@ -9,6 +9,7 @@ from .advanced import AdvancedConfig
 from .input_output import InputOutputConfig
 from .hmm import PHMMConfig, PHMMPriorConfig
 from .util import get_value, get_emission_dist
+from .structure import StructureConfig
 from .config import Configuration
 
 __all__ = [

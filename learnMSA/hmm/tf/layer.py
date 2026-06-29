@@ -66,7 +66,9 @@ class PHMMLayer(tf.keras.Layer):
         structural_config: StructureConfig | None = None,
         use_prior: bool = True,
         trainable_insertions: bool = True,
-        value_sets: Sequence[PHMMValueSet] | None = None,
+        aa_value_sets: Sequence[PHMMValueSet] | None = None,
+        emb_value_sets: Sequence[PHMMValueSet] | None = None,
+        struct_value_sets: Sequence[PHMMValueSet] | None = None,
         no_aa: bool = False,
         **kwargs
     ) -> None:
@@ -83,51 +85,44 @@ class PHMMLayer(tf.keras.Layer):
             structural_config: Structural information configuration.
             use_prior: Whether to use priors for regularization.
             trainable_insertions: Whether insertion emissions are trainable.
-            value_sets: Optional pre-built :class:`PHMMValueSet` objects, one
+            aa_value_sets: Optional pre-built :class:`PHMMValueSet` objects, one
                 per head. When provided, ``PHMMValueSet.from_config`` is
-                skipped and ``lengths`` may be ``None``.
+                skipped and ``lengths`` may be ``None``. Initializes all
+                transitions and the amino acid emissions.
+            emb_value_sets: Optional pre-built :class:`PHMMEmbeddingValueSet`
+                objects, one per head. Initializes the embedding emissions.
+            struct_value_sets: Optional pre-built :class:`PHMMValueSet` objects,
+                one per head. Initializes the structural emissions.
             no_aa: Whether to use amino acid emissions in the model.
         """
         super().__init__(**kwargs)
         if prior_config is None:
             prior_config = PHMMPriorConfig()
+        self.prior_config = prior_config
+        self.plm_config = plm_config
+        self.structural_config = structural_config
         self.use_prior = use_prior
         self.no_aa = no_aa
+        self.config = config
 
-        if value_sets is not None:
-            values = list(value_sets)
-            self.lengths = np.array([vs.L for vs in values], dtype=np.int32)
+        if aa_value_sets is not None:
+            self.lengths = np.asarray(
+                [vs.L for vs in aa_value_sets], dtype=np.int32
+            )
         else:
             assert lengths is not None, (
                 "lengths must be provided when value_sets is None"
             )
             self.lengths = np.asarray(lengths, dtype=np.int32)
-            values = [
-                PHMMValueSet.from_config(L, h, config)
-                for h, L in enumerate(lengths)
-            ]
-
-        self.config = config
-
-        # Apply random noise
-        if config.use_noise:
-            for value_set in values:
-                value_set.add_noise(concentration=config.noise_concentration)
 
         # Create the HMM, with 2*L+2 states per head
         self.hmm = TFHMM(states=self.states, heads=self.heads)
 
-        self._add_transitioner(values, config, prior_config)
-
-        if not no_aa:
-            self._add_amino_acid_emitter(
-                values, config, prior_config,
-                value_sets is None, trainable_insertions
-            )
-
-        self._add_emb_emitter(config, plm_config, trainable_insertions)
-
-        self._add_struct_emitter(structural_config, trainable_insertions)
+        self._add_transitioner_and_aa_emitter(
+            aa_value_sets, lengths, trainable_insertions
+        )
+        self._add_emb_emitter(trainable_insertions)
+        self._add_struct_emitter(trainable_insertions)
 
         # Add the padding emitter
         self.hmm.add_emitter(TFSubsetPaddingEmitter())
@@ -201,35 +196,62 @@ class PHMMLayer(tf.keras.Layer):
         """
         return self.hmm.prior_scores()
 
-    def _add_transitioner(
+    def _add_transitioner_and_aa_emitter(
         self,
-        values: Sequence[PHMMValueSet],
-        config: PHMMConfig,
-        prior_config: PHMMPriorConfig,
+        aa_value_sets: Sequence[PHMMValueSet] | None,
+        lengths: Sequence[int] | np.ndarray | None,
+        trainable_insertions: bool,
     ) -> None:
+
+        if aa_value_sets is not None:
+            values = list(aa_value_sets)
+        else:
+            values = [
+                PHMMValueSet.from_config(L, h, self.config)
+                for h, L in enumerate(self.lengths)
+            ]
+
+        # Apply random noise
+        if self.config.use_noise:
+            for value_set in values:
+                value_set.add_noise(self.config.noise_concentration)
+
+        if not self.no_aa:
+            self._add_amino_acid_emitter(
+                values,
+                allow_override = aa_value_sets is None,
+                trainable_insertions = trainable_insertions,
+            )
+
+        assert self.config is not None,\
+            "config must be set before adding transitioner"
+        assert self.prior_config is not None,\
+            "prior_config must be set before adding transitioner"
         # Add the transitioner and prior
         self.hmm.transitioner = PHMMTransitioner(
-            values=values, shared_flanks=config.shared_flank_transitions
+            values=values, shared_flanks=self.config.shared_flank_transitions
         )
         if self.use_prior:
             self.hmm.transitioner.prior = TFPHMMTransitionPrior(
-                self.lengths, prior_config
+                self.lengths, self.prior_config
             )
             self.hmm.transitioner.prior_start = TFPHMMStartPrior(
-                self.lengths, prior_config
+                self.lengths, self.prior_config
             )
 
     def _add_amino_acid_emitter(
         self,
         values: Sequence[PHMMValueSet],
-        config: PHMMConfig,
-        prior_config: PHMMPriorConfig,
         allow_override: bool,
         trainable_insertions: bool,
     ) -> None:
-        if prior_config.use_amino_acid_prior:
+        assert self.config is not None,\
+            "config must be set before adding amino acid emitter"
+        assert self.prior_config is not None,\
+            "prior_config must be set before adding amino acid emitter"
+        if self.prior_config.use_amino_acid_prior:
             # Set up the Dirichlet prior for emissions
-            c = prior_config.amino_acid_dirichlet_components
+            c = self.prior_config.amino_acid_dirichlet_components
             emission_prior = load_dirichlet(
                 f"amino_acid_dirichlet_{c}.weights",
                 dim = len(SequenceDataset._default_alphabet)-1,
@@ -238,16 +260,16 @@ class PHMMLayer(tf.keras.Layer):
             )
 
         # Override emission values with prior distribution if requested
-        if config.use_prior_for_emission_init and allow_override:
-            assert prior_config.use_amino_acid_prior, (
+        if self.config.use_prior_for_emission_init and allow_override:
+            assert self.prior_config.use_amino_acid_prior, (
                 "Cannot use prior for emission initialization if no "
                 "emission prior is set."
             )
             values = self._override_emissions_with_prior(
                 values,
                 emission_prior,
-                override_matches=config.match_emissions is None,
-                override_insertions=config.insert_emissions is None,
+                override_matches=self.config.match_emissions is None,
+                override_insertions=self.config.insert_emissions is None,
             )
 
         # Add the profile emitter
@@ -255,18 +277,18 @@ class PHMMLayer(tf.keras.Layer):
             values=values, trainable_insertions=trainable_insertions
         )
         self.hmm.add_emitter(profile_emitter)
-        if self.use_prior and prior_config.use_amino_acid_prior:
+        if self.use_prior and self.prior_config.use_amino_acid_prior:
             profile_emitter.prior = emission_prior
 
     def _add_emb_emitter(
         self,
-        config: PHMMConfig,
-        plm_config: LanguageModelConfig | None,
         trainable_insertions: bool,
     ) -> None:
-        self.use_language_model = plm_config != None\
-            and plm_config.use_language_model
-        self.plm_config = plm_config
+        assert self.config is not None,\
+            "config must be set before adding embedding emitter"
+        self.use_language_model = self.plm_config != None\
+            and self.plm_config.use_language_model
+        self.plm_config = self.plm_config
         self.emb_mean = None
         if self.use_language_model:
             assert self.plm_config is not None,\
@@ -286,12 +308,12 @@ class PHMMLayer(tf.keras.Layer):
             )
 
             # Override embedding values with prior distribution if requested
-            if config.use_prior_for_emission_init:
+            if self.config.use_prior_for_emission_init:
                 emb_values, emb_mean = self._override_embeddings_with_prior(
                     emb_values,
                     mvn_prior,
-                    override_matches=config.match_emissions is None,
-                    override_insertions=config.insert_emissions is None,
+                    override_matches=self.config.match_emissions is None,
+                    override_insertions=self.config.insert_emissions is None,
                 )
                 self.emb_mean = emb_mean
 
@@ -322,31 +344,33 @@ class PHMMLayer(tf.keras.Layer):
 
     def _add_struct_emitter(
         self,
-        structural_config : StructureConfig | None,
         trainable_insertions: bool,
     ) -> None:
-        self.structural_config = structural_config
-        if structural_config and structural_config.use_structure:
+        assert self.config is not None,\
+            "config must be set before adding structural emitter"
+        if self.structural_config and self.structural_config.use_structure:
+            assert self.structural_config is not None,\
+                "structural_config must be set before adding structural emitter"
             self.use_structure = True
             struct_values = [
-                PHMMValueSet.from_structural_config(L, h, structural_config)
+                PHMMValueSet.from_structural_config(L, h, self.structural_config)
                 for h, L in enumerate(self.lengths)
             ]
 
             # If specified, load and add a Dirichlet prior
-            if structural_config.prior_name:
+            if self.structural_config.prior_name:
                 struct_prior = load_dirichlet(
-                    structural_config.prior_name+".weights",
-                    dim=structural_config.alphabet_size,
-                    components=structural_config.prior_components,
+                    self.structural_config.prior_name+".weights",
+                    dim=self.structural_config.alphabet_size,
+                    components=self.structural_config.prior_components,
                     states=self.states,
                 )
-                struct_prior.temperature = structural_config.prior_temperature
+                struct_prior.temperature = self.structural_config.prior_temperature
 
                 # Override emission values with prior distribution if requested
-                override_matches=structural_config.match_emissions is None
-                override_insertions=structural_config.insert_emissions is None
-                if structural_config.use_prior_for_emission_init:
+                override_matches=self.structural_config.match_emissions is None
+                override_insertions=self.structural_config.insert_emissions is None
+                if self.structural_config.use_prior_for_emission_init:
                     struct_values = self._override_emissions_with_prior(
                         struct_values,
                         struct_prior,
@@ -359,7 +383,7 @@ class PHMMLayer(tf.keras.Layer):
             structural_emitter = ProfileEmitter(
                 values=struct_values,
                 trainable_insertions=trainable_insertions,
-                temperature=structural_config.emitter_temperature,
+                temperature=self.structural_config.emitter_temperature,
             )
             if struct_prior is not None and self.use_prior:
                 structural_emitter.prior = struct_prior
