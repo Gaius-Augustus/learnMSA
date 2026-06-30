@@ -248,7 +248,9 @@ def test_update_kernels(model_single_head: LearnMSAModel) -> None:
     )
 
     # Create a new HMM layer from the config
-    updated_phmm_layer = PHMMLayer([result.length], result.config)
+    updated_phmm_layer = PHMMLayer(
+        [result.length], config, aa_value_sets = [result.aa_values]
+    )
     updated_phmm_layer.build(((None, None, None, 23), (None, None, None, 1)))
 
     emissions_new = updated_phmm_layer.hmm.emitter[0].matrix().numpy()[0]
@@ -521,3 +523,15 @@ def test_model_surgery(data: SequenceDataset, model: LearnMSAModel) -> None:
 
     # Surgery should not have converged (modifications were applied)
     assert not result.surgery_converged
+
+    # Verify that the amino acid values were updated correctly
+    expected_aa_values_head_1 = string_to_one_hot("FELIK").numpy()
+    expected_aa_values_head_1[2] = model.context.config.hmm.background_distribution  # Position 2 is expanded, should be background
+    expected_aa_values_head_2 = string_to_one_hot("FELIK").numpy()
+
+    np.testing.assert_allclose(
+        result.aa_values[0].match_emissions, expected_aa_values_head_1
+    )
+    np.testing.assert_allclose(
+        result.aa_values[1].match_emissions, expected_aa_values_head_2
+    )

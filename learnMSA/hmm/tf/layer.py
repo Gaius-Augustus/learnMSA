@@ -289,7 +289,6 @@ class PHMMLayer(tf.keras.Layer):
             "config must be set before adding embedding emitter"
         self.use_language_model = self.plm_config != None\
             and self.plm_config.use_language_model
-        self.plm_config = self.plm_config
         self.emb_mean = None
         if self.use_language_model:
             assert self.plm_config is not None,\
@@ -297,7 +296,7 @@ class PHMMLayer(tf.keras.Layer):
             # Create embedding value sets
             if emb_values is None:
                 _emb_values = [
-                    PHMMEmbeddingValueSet.from_config(L, h, plm_config) # type: ignore
+                    PHMMEmbeddingValueSet.from_config(L, h, self.plm_config) # type: ignore
                     for h, L in enumerate(self.lengths)
                 ]
             else:

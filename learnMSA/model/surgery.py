@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Sequence
 
 import numpy as np
 
@@ -10,6 +11,8 @@ from learnMSA.config.util import get_value
 from learnMSA.hmm.tf.layer import PHMMLayer
 from learnMSA.hmm.tf.util import load_dirichlet
 from learnMSA.hmm.util.transition_index_set import PHMMTransitionIndexSet
+from learnMSA.hmm.util.value_set import PHMMValueSet
+from learnMSA.hmm.util.value_set_emb import PHMMEmbeddingValueSet
 from learnMSA.model.tf.model import LearnMSAModel
 from learnMSA.util.dataset import Dataset
 from learnMSA.util.sequence_dataset import SequenceDataset
@@ -216,14 +219,12 @@ def extend_mods(
 class UpdateKernelResult:
     length: int
     """The lengths of the updated models."""
-    config: PHMMConfig
-    """The updated PHMMConfig with modified parameters."""
-    plm_config: LanguageModelConfig | None = None
-    """The updated LanguageModelConfig with modified parameters, if
-    the PHMMLayer was using embeddings."""
-    structural_config: StructureConfig | None = None
-    """The updated StructureConfig with modified parameters, if
-    the PHMMLayer was using structural information."""
+    aa_values: PHMMValueSet
+    """The updated pHMM parameters."""
+    emb_values: PHMMEmbeddingValueSet | None = None
+    """The updated embedding value sets."""
+    struct_values: PHMMValueSet | None = None
+    """The updated structural value sets."""
 
 def update_kernels(
     phmm_layer: PHMMLayer,
@@ -453,13 +454,18 @@ def update_kernels(
         new_config.p_begin_delete = begin_delete
         new_config.p_match_end = match_end[np.newaxis]
 
+    aa_values = PHMMValueSet.from_config(L_new, 0, new_config)
+
     if phmm_layer.use_language_model and plm_config is not None:
         assert emb_emissions_new is not None
         new_plm_config = plm_config.model_copy(deep=True)
         new_plm_config.match_expectations = emb_emissions_new[np.newaxis, :, :embedding_dim]
         new_plm_config.match_variance = emb_emissions_new[np.newaxis, :, embedding_dim:]
+        emb_value_sets = PHMMEmbeddingValueSet.from_config(
+            L_new, 0, new_plm_config
+        )
     else:
-        new_plm_config = None
+        emb_value_sets = None
 
     if phmm_layer.use_structure\
             and structural_config is not None\
@@ -467,17 +473,21 @@ def update_kernels(
         assert struct_emissions_new is not None
         new_structural_config = structural_config.model_copy(deep=True)
         new_structural_config.match_emissions = struct_emissions_new[np.newaxis]
+
+        struct_value_sets = PHMMValueSet.from_structural_config(
+            L_new, 0, new_structural_config
+        )
     else:
-        new_structural_config = None
+        struct_value_sets = None
 
     # Reset
     phmm_layer.head_subset = head_subset_backup
 
     return UpdateKernelResult(
         length=L_new,
-        config=new_config,
-        plm_config=new_plm_config,
-        structural_config=new_structural_config,
+        aa_values=aa_values,
+        emb_values=emb_value_sets,
+        struct_values=struct_value_sets
     )
 
 @dataclass
@@ -486,14 +496,12 @@ class ModelSurgeryResult:
     """The lengths of the updated models."""
     surgery_converged: bool
     """Whether no modifications were applied during surgery."""
-    config: PHMMConfig
-    """The updated PHMMConfig with modified parameters."""
-    plm_config: LanguageModelConfig | None = None
-    """The updated LanguageModelConfig with modified parameters, if
-    the PHMMLayer was using embeddings."""
-    structural_config: StructureConfig | None = None
-    """The updated StructureConfig with modified parameters, if
-    the PHMMLayer was using structural information."""
+    aa_values: Sequence[PHMMValueSet]
+    """The updated pHMM parameters."""
+    emb_values: Sequence[PHMMEmbeddingValueSet] | None
+    """The updated embedding value sets."""
+    struct_values: Sequence[PHMMValueSet] | None
+    """The updated structural value sets."""
 
 def model_surgery(
     model: LearnMSAModel,
@@ -539,9 +547,9 @@ def model_surgery(
     # Loop over models and apply modifications
     surgery_converged = True #becomes False if any modification is applied
     model_lengths = []
-    configs = []
-    plm_configs = []
-    structural_configs = []
+    aa_values = []
+    emb_values = []
+    struct_values = []
     for i,k in enumerate(range(model.heads)):
         surgery_converged &= pos_expand[k].size == 0 and pos_discard[k].size == 0
 
@@ -575,122 +583,23 @@ def model_surgery(
                 "A pHMM is too short (length <= 2)."
             )
 
-        configs.append(result.config)
-        plm_configs.append(result.plm_config)
-        structural_configs.append(result.structural_config)
+        aa_values.append(result.aa_values)
+        emb_values.append(result.emb_values)
+        struct_values.append(result.struct_values)
 
-    # Merge configurations that contain parameters per head to a single config
-    def concat_param(param_name: str):
-        values = [getattr(c, param_name) for c in configs]
-
-        # Check if all values are None
-        if all(v is None for v in values):
-            return None
-
-        arrays = [np.atleast_1d(v) for v in values]
-
-        # Simple 1D case (like p_begin_delete): just concatenate
-        if arrays[0].ndim == 1:
-            y = np.concatenate(arrays, axis=0)
-            if y.size == 1:
-                return y[0]
-            else:
-                return y
-
-        # 2D or higher: create zeros array and fill
-        num_heads = len(arrays)
-        max_len = max(arr.shape[1] for arr in arrays)
-        full_shape = (num_heads, max_len) + arrays[0].shape[2:]
-        result = np.zeros(full_shape, dtype=arrays[0].dtype)
-
-        for i, arr in enumerate(arrays):
-            result[i, :arr.shape[1]] = arr[0]
-
-        return result
-
-    config = configs[0].model_copy(deep=True)
-    config.match_emissions = concat_param("match_emissions")
-    config.insert_emissions = concat_param("insert_emissions")
-    config.p_begin_match = concat_param("p_begin_match")
-    config.p_match_match = concat_param("p_match_match")
-    config.p_match_insert = concat_param("p_match_insert")
-    config.p_match_delete = concat_param("p_match_delete")
-    config.p_match_end = concat_param("p_match_end")
-    config.p_insert_insert = concat_param("p_insert_insert")
-    config.p_delete_delete = concat_param("p_delete_delete")
-    config.p_begin_delete = concat_param("p_begin_delete")
-    config.p_left_left = concat_param("p_left_left")
-    config.p_right_right = concat_param("p_right_right")
-    config.p_unannot_unannot = concat_param("p_unannot_unannot")
-    config.p_end_unannot = concat_param("p_end_unannot")
-    config.p_end_right = concat_param("p_end_right")
-    config.p_start_left_flank = concat_param("p_start_left_flank")
-    config.use_noise = model.context.config.training.reset_transitions_after_surgery
-
-    # validate the config again
-    config = type(config).model_validate(config.model_dump())
-
-    if plm_configs[0] is not None:
-        def concat_emb_param(param_name: str):
-            values = [getattr(c, param_name) for c in plm_configs]
-
-            # Check if all values are None
-            if all(v is None for v in values):
-                return None
-
-            arrays = [np.atleast_1d(v) for v in values]
-
-            # create zeros array and fill
-            num_heads = len(arrays)
-            max_len = max(arr.shape[1] for arr in arrays)
-            full_shape = (num_heads, max_len) + arrays[0].shape[2:]
-            result = np.zeros(full_shape, dtype=arrays[0].dtype)
-
-            for i, arr in enumerate(arrays):
-                result[i, :arr.shape[1]] = arr[0]
-
-            return result
-
-        merged_plm_config = plm_configs[0].model_copy(deep=True)
-        merged_plm_config.match_expectations = concat_emb_param(
-            "match_expectations"
-        )
-        merged_plm_config.match_variance = concat_emb_param("match_variance")
+    if any(v is not None for v in emb_values):
+        emb_values = emb_values
     else:
-        merged_plm_config = None
-
-    if structural_configs[0] is not None:
-        def concat_struct_param(param_name: str):
-            values = [getattr(c, param_name) for c in structural_configs]
-
-            # Check if all values are None
-            if all(v is None for v in values):
-                return None
-
-            arrays = [np.atleast_1d(v) for v in values]
-
-            # create zeros array and fill
-            num_heads = len(arrays)
-            max_len = max(arr.shape[1] for arr in arrays)
-            full_shape = (num_heads, max_len) + arrays[0].shape[2:]
-            result = np.zeros(full_shape, dtype=arrays[0].dtype)
-
-            for i, arr in enumerate(arrays):
-                result[i, :arr.shape[1]] = arr[0]
-
-            return result
-
-        merged_structural_config = structural_configs[0].model_copy(deep=True)
-        merged_structural_config.match_emissions = concat_struct_param(
-            "match_emissions"
-        )
+        emb_values = None
+    if any(v is not None for v in struct_values):
+        struct_values = struct_values
     else:
-        merged_structural_config = None
+        struct_values = None
 
     return ModelSurgeryResult(
         model_lengths=np.array(model_lengths, dtype=np.int32),
         surgery_converged=surgery_converged,
-        config=config,
-        plm_config=merged_plm_config,
-        structural_config=merged_structural_config,
+        aa_values=aa_values,
+        emb_values=emb_values,
+        struct_values=struct_values
     )

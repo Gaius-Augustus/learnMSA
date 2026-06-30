@@ -276,12 +276,9 @@ def _fit_and_align(
         )
 
         context.model_lengths = surgery_result.model_lengths
-        context.config.hmm = surgery_result.config
-        context.aa_values = None # don't use init MSA after surgery
-        if surgery_result.plm_config is not None:
-            context.config.language_model = surgery_result.plm_config
-        if surgery_result.structural_config is not None:
-            context.config.structure = surgery_result.structural_config
+        context.aa_values = surgery_result.aa_values
+        context.emb_values = surgery_result.emb_values
+        context.struct_values = surgery_result.struct_values
         surgery_converged = surgery_result.surgery_converged
         if model.anc_probs_layer is not None:
             if not context.config.advanced.reset_evo_model:
