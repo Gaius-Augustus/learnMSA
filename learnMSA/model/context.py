@@ -5,6 +5,7 @@ from typing import Any, Callable, Sequence
 import numpy as np
 import tensorflow as tf
 
+from learnMSA.hmm.util.value_set_emb import PHMMEmbeddingValueSet
 import learnMSA.model.tf.training as train
 import learnMSA.model.training_util as training_util
 import learnMSA.tree.tf.initializer as initializers
@@ -53,7 +54,9 @@ class LearnMSAContext:
     sequence_weights: np.ndarray | None
     clusters: Any
     subset: np.ndarray
-    init_msa_values: Sequence[PHMMValueSet] | None
+    aa_values: Sequence[PHMMValueSet] | None
+    struct_values: Sequence[PHMMValueSet] | None
+    emb_values: Sequence[PHMMEmbeddingValueSet] | None
     R_init: tf.keras.initializers.Initializer
     R_delta_init: tf.keras.initializers.Initializer
     p_init: tf.keras.initializers.Initializer
@@ -86,7 +89,9 @@ class LearnMSAContext:
                 provided when data is None.
         """
         self.config = config
-        self.init_msa_values = None
+        self.aa_values = None
+        self.struct_values = None
+        self.emb_values = None
 
         if data is None:
             assert num_seq is not None, (
@@ -124,7 +129,7 @@ class LearnMSAContext:
 
         # Set up initializers
         if self.config.init_msa.from_msa is not None:
-            model_len_cb, self.init_msa_values = self._setup_init_msa(
+            model_len_cb, self.aa_values = self._setup_init_msa(
                 msa_file=self.config.init_msa.from_msa
             )
         elif self.config.init_msa.seeded and data is not None:
@@ -137,7 +142,7 @@ class LearnMSAContext:
                 output=out_file,
                 threads=self.config.advanced.aligner_threads,
             )
-            model_len_cb, self.init_msa_values = self._setup_init_msa(
+            model_len_cb, self.aa_values = self._setup_init_msa(
                 msa_file=out_file
             )
 
