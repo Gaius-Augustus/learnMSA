@@ -98,7 +98,7 @@ def get_emission_dist(
         return default
 
     # Case 1: Single distribution for all
-    if all(isinstance(x, (float, int)) for x in param):
+    if all(isinstance(x, (float, int, np.floating, np.integer)) for x in param):
         # Type assertion: at this point we know param is Sequence[float]
         return param  # type: ignore[return-value]
 
@@ -106,7 +106,7 @@ def get_emission_dist(
     inner = param[head]  # type: ignore[index]
 
     # Case 2: Head-specific, position-independent
-    if all(isinstance(x, (float, int)) for x in inner):  # type: ignore[arg-type]
+    if all(isinstance(x, (float, int, np.floating, np.integer)) for x in inner):  # type: ignore[arg-type]
         return inner  # type: ignore[return-value]
 
     # Case 3: Fully specified - need index

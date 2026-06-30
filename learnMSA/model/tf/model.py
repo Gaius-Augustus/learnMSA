@@ -87,7 +87,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             config = context.config.hmm,
             prior_config = context.config.hmm_prior,
             plm_config = context.config.language_model,
-            structural_config = context.config.structure,
+            struct_config = context.config.structure,
             use_prior = context.config.training.use_prior,
             trainable_insertions = train_cfg.trainable_insertions,
             aa_value_sets = context.init_msa_values,

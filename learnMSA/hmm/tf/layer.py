@@ -63,11 +63,11 @@ class PHMMLayer(tf.keras.Layer):
         config : PHMMConfig,
         prior_config: PHMMPriorConfig | None = None,
         plm_config: LanguageModelConfig | None = None,
-        structural_config: StructureConfig | None = None,
+        struct_config: StructureConfig | None = None,
         use_prior: bool = True,
         trainable_insertions: bool = True,
         aa_value_sets: Sequence[PHMMValueSet] | None = None,
-        emb_value_sets: Sequence[PHMMValueSet] | None = None,
+        emb_value_sets: Sequence[PHMMEmbeddingValueSet] | None = None,
         struct_value_sets: Sequence[PHMMValueSet] | None = None,
         no_aa: bool = False,
         **kwargs
@@ -100,7 +100,7 @@ class PHMMLayer(tf.keras.Layer):
             prior_config = PHMMPriorConfig()
         self.prior_config = prior_config
         self.plm_config = plm_config
-        self.structural_config = structural_config
+        self.structural_config = struct_config
         self.use_prior = use_prior
         self.no_aa = no_aa
         self.config = config
@@ -121,8 +121,8 @@ class PHMMLayer(tf.keras.Layer):
         self._add_transitioner_and_aa_emitter(
             aa_value_sets, lengths, trainable_insertions
         )
-        self._add_emb_emitter(trainable_insertions)
-        self._add_struct_emitter(trainable_insertions)
+        self._add_emb_emitter(emb_value_sets, trainable_insertions)
+        self._add_struct_emitter(struct_value_sets, trainable_insertions)
 
         # Add the padding emitter
         self.hmm.add_emitter(TFSubsetPaddingEmitter())
@@ -282,6 +282,7 @@ class PHMMLayer(tf.keras.Layer):
 
     def _add_emb_emitter(
         self,
+        emb_values: Sequence[PHMMEmbeddingValueSet] | None,
         trainable_insertions: bool,
     ) -> None:
         assert self.config is not None,\
@@ -294,10 +295,16 @@ class PHMMLayer(tf.keras.Layer):
             assert self.plm_config is not None,\
                 "plm_config must be provided if use_language_model is True"
             # Create embedding value sets
-            emb_values = [
-                PHMMEmbeddingValueSet.from_config(L, h, plm_config) # type: ignore
-                for h, L in enumerate(self.lengths)
-            ]
+            if emb_values is None:
+                _emb_values = [
+                    PHMMEmbeddingValueSet.from_config(L, h, plm_config) # type: ignore
+                    for h, L in enumerate(self.lengths)
+                ]
+            else:
+                assert len(emb_values) == self.heads, (
+                    "Number of embedding value sets must match number of heads"
+                )
+                _emb_values = list(emb_values)
 
             # Set up the MVN prior for mean embeddings
             mvn_prior = load_mvn(
@@ -308,12 +315,17 @@ class PHMMLayer(tf.keras.Layer):
             )
 
             # Override embedding values with prior distribution if requested
-            if self.config.use_prior_for_emission_init:
-                emb_values, emb_mean = self._override_embeddings_with_prior(
-                    emb_values,
+            if self.config.use_prior_for_emission_init\
+                    and emb_values is None:
+                override_matches = self.plm_config.match_expectations is None\
+                    and self.plm_config.match_variance is None
+                override_insertions = self.plm_config.insert_expectation is None\
+                    and self.plm_config.insert_variance is None
+                _emb_values, emb_mean = self._override_embeddings_with_prior(
+                    _emb_values,
                     mvn_prior,
-                    override_matches=self.config.match_emissions is None,
-                    override_insertions=self.config.insert_emissions is None,
+                    override_matches=override_matches,
+                    override_insertions=override_insertions,
                 )
                 self.emb_mean = emb_mean
 
@@ -334,7 +346,7 @@ class PHMMLayer(tf.keras.Layer):
 
             # Add the embedding emitter
             embedding_emitter = EmbeddingEmitter(
-                values=emb_values,
+                values=_emb_values,
                 trainable_insertions=trainable_insertions,
                 temperature=self.plm_config.temperature,
             )
@@ -344,6 +356,7 @@ class PHMMLayer(tf.keras.Layer):
 
     def _add_struct_emitter(
         self,
+        struct_values: Sequence[PHMMValueSet] | None,
         trainable_insertions: bool,
     ) -> None:
         assert self.config is not None,\
@@ -352,10 +365,17 @@ class PHMMLayer(tf.keras.Layer):
             assert self.structural_config is not None,\
                 "structural_config must be set before adding structural emitter"
             self.use_structure = True
-            struct_values = [
-                PHMMValueSet.from_structural_config(L, h, self.structural_config)
-                for h, L in enumerate(self.lengths)
-            ]
+
+            if struct_values is None:
+                _struct_values = [
+                    PHMMValueSet.from_structural_config(L, h, self.structural_config)
+                    for h, L in enumerate(self.lengths)
+                ]
+            else:
+                assert len(struct_values) == self.heads, (
+                    "Number of structural value sets must match number of heads"
+                )
+                _struct_values = list(struct_values)
 
             # If specified, load and add a Dirichlet prior
             if self.structural_config.prior_name:
@@ -370,9 +390,10 @@ class PHMMLayer(tf.keras.Layer):
                 # Override emission values with prior distribution if requested
                 override_matches=self.structural_config.match_emissions is None
                 override_insertions=self.structural_config.insert_emissions is None
-                if self.structural_config.use_prior_for_emission_init:
-                    struct_values = self._override_emissions_with_prior(
-                        struct_values,
+                if self.structural_config.use_prior_for_emission_init\
+                        and struct_values is None:
+                    _struct_values = self._override_emissions_with_prior(
+                        _struct_values,
                         struct_prior,
                         override_matches=override_matches,
                         override_insertions=override_insertions,
@@ -381,7 +402,7 @@ class PHMMLayer(tf.keras.Layer):
                 struct_prior = None
 
             structural_emitter = ProfileEmitter(
-                values=struct_values,
+                values=_struct_values,
                 trainable_insertions=trainable_insertions,
                 temperature=self.structural_config.emitter_temperature,
             )

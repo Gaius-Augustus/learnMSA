@@ -49,7 +49,7 @@ def test_phmm_multi_emitter(
     layer = PHMMLayer(
         lengths=lengths,
         config=phmm_config,
-        structural_config=structural_config
+        struct_config=structural_config
     )
     layer.build(input_shape=(
         (None, None, None, 23),

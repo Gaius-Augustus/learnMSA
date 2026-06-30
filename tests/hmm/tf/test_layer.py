@@ -4,6 +4,10 @@ import numpy as np
 import pytest
 import tensorflow as tf
 
+from learnMSA.config.language_model import LanguageModelConfig
+from learnMSA.config.structure import StructureConfig
+from learnMSA.hmm.util.value_set import PHMMValueSet
+from learnMSA.hmm.util.value_set_emb import PHMMEmbeddingValueSet
 import tests.hmm.ref as ref
 from learnMSA.config.hmm import PHMMConfig, PHMMPriorConfig
 from learnMSA.hmm.tf import prior
@@ -194,6 +198,10 @@ def felix_reference_states() -> np.ndarray:
 def test_matrices(
     layer: PHMMLayer, seq: tf.Tensor, padding: tf.Tensor
 ) -> None:
+    _test_ref_matrices(layer)
+    assert layer.hmm.use_padding()
+
+def _test_ref_matrices(layer: PHMMLayer) -> None:
     # Check whether parameters are built correctly
     A = layer.hmm.transitioner.matrix().numpy()
     S = layer.hmm.transitioner.start_dist().numpy()
@@ -247,7 +255,72 @@ def test_matrices(
         err_msg="Emission matrix does not match reference for model B"
     )
 
-    assert layer.hmm.use_padding()
+def test_initialization() -> None:
+    """Test if passing value sets correctly overrides config values."""
+    # Test models A & B
+    lengths = [4, 3]
+    config = ref.config.model_copy(deep=True)
+    aa_values = [
+        PHMMValueSet.from_config(L, h, config) for h, L in enumerate(lengths)
+    ]
+    custom_plm_config = LanguageModelConfig(
+        match_expectations = np.array([list(range(16))]*2, dtype=np.float32)
+    )
+    emb_values = [
+        PHMMEmbeddingValueSet.from_config(
+            L, h, custom_plm_config
+        ) for h, L in enumerate(lengths)
+    ]
+    custom_struct_config = StructureConfig(
+        background_distribution=np.arange(20) / (19*20/2)
+    )
+    struct_values = [
+        PHMMValueSet.from_structural_config(
+            L, h, custom_struct_config
+        ) for h, L in enumerate(lengths)
+    ]
+
+    # Don't pass the reference config, but a default one
+    default_config = PHMMConfig()
+    default_struct_config = StructureConfig()
+    default_struct_config.use_structure = True
+    default_plm_config = LanguageModelConfig()
+    default_plm_config.use_language_model = True
+    layer = PHMMLayer(
+        lengths=lengths,
+        config=default_config,
+        struct_config=default_struct_config,
+        plm_config=default_plm_config,
+        aa_value_sets=aa_values,
+        struct_value_sets=struct_values,
+        emb_value_sets=emb_values,
+    )
+
+    # Build the layer by providing shapes for observations and padding
+    layer.build(input_shape=(
+        (None, None, 2), (None, None, 16), (None, None, 20), (None, None, 1)
+    ))
+
+    # test transitions and amino acid emissions
+    _test_ref_matrices(layer)
+
+    # test plm embedding emissions
+    B_emb = layer.hmm.emitter[1].matrix().numpy()
+    np.testing.assert_allclose(
+        B_emb[:, :3, :16],
+        np.stack([custom_plm_config.match_expectations]*3, axis=1), # type: ignore
+        atol=1e-6,
+    )
+
+    # test structural emissions
+    B_struct = layer.hmm.emitter[2].matrix().numpy()
+    np.testing.assert_allclose(
+        B_struct[:, :3],
+        np.broadcast_to(
+            custom_struct_config.background_distribution, (2, 3, 20)
+        ),
+        atol=1e-6,
+    )
 
 def test_loglik_call(
     layer: PHMMLayer, seq: tf.Tensor, padding: tf.Tensor
