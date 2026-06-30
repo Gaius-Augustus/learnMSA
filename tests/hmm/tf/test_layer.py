@@ -205,7 +205,8 @@ def _test_ref_matrices(layer: PHMMLayer) -> None:
     # Check whether parameters are built correctly
     A = layer.hmm.transitioner.matrix().numpy()
     S = layer.hmm.transitioner.start_dist().numpy()
-    B = layer.hmm.emitter[0].matrix().numpy()
+    assert layer.profile_emitter is not None
+    B = layer.profile_emitter.matrix().numpy()
     np.testing.assert_allclose(
         A[0],
         ref.transitions_a,
@@ -298,7 +299,7 @@ def test_initialization() -> None:
 
     # Build the layer by providing shapes for observations and padding
     layer.build(input_shape=(
-        (None, None, 2), (None, None, 16), (None, None, 20), (None, None, 1)
+        (None, None, 2), (None, None, 20), (None, None, 16), (None, None, 1)
     ))
 
     # test transitions and amino acid emissions
@@ -808,10 +809,11 @@ def test_prior_values() -> None:
     ])
 
     # Compute gradients with the new implementation
-    assert layer.hmm.emitter[0].prior is not None
+    assert layer.profile_emitter is not None
+    assert layer.profile_emitter.prior is not None
 
     # Test if parameter sharing works
-    matrix = layer.hmm.emitter[0].prior.matrix()
+    matrix = layer.profile_emitter.prior.matrix()
     for i in range(1, 4):
         np.testing.assert_equal(
             matrix[0, i].numpy(),
@@ -820,7 +822,7 @@ def test_prior_values() -> None:
 
     with tf.GradientTape() as tape:
         tape.watch(p)
-        prior_score = layer.hmm.emitter[0].prior(p) # type: ignore
+        prior_score = layer.profile_emitter.prior(p) # type: ignore
     grads = tape.gradient(prior_score, p)
     assert isinstance(grads, tf.Tensor)
     # Multiply expected gradients by 10 to account because we have 10 states

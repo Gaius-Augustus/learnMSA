@@ -210,7 +210,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         anc_prob_inputs = [sequences_onehot]
 
         if self.context.config.structure.use_structure:
-            struct_inputs = adds[-1]
+            struct_inputs = adds[0]
             anc_prob_inputs.append(struct_inputs)
 
         if self.context.config.tree.use_anc_probs\
@@ -224,7 +224,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             if self.context.config.structure.use_structure:
                 encoded_struct = encoded_seq[1]
                 encoded_seq = encoded_seq[0]
-                adds = (*adds[:-1], encoded_struct)
+                adds = (encoded_struct, *adds[1:])
         else:
             encoded_seq = sequences_onehot
             # keep original adds, as structural track uses
@@ -259,11 +259,11 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             input_shape = ()
         else:
             input_shape = ((B, None, n, s),)
+        if cfg.structure.use_structure:
+             input_shape += ((B, None, n, cfg.structure.alphabet_size),)
         if cfg.language_model.use_language_model:
             emb_dim = cfg.language_model.scoring_model_dim
             input_shape += ((B, None, n, emb_dim),)
-        if cfg.structure.use_structure:
-             input_shape += ((B, None, n, cfg.structure.alphabet_size),)
         input_shape += ((B, None, n, 1),) # padding
         self.phmm_layer.build(input_shape = input_shape)
 
@@ -1098,9 +1098,10 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         # Prepare the background frequencies
         if background_dist is None:
             # Use prior background distribution
-            assert self.phmm_layer.hmm.emitter[0].prior,\
+            assert self.phmm_layer.profile_emitter is not None
+            assert self.phmm_layer.profile_emitter.prior,\
                     "Emitter needs a Dirichlet prior for null model computation."
-            dirichlet_alpha = self.phmm_layer.hmm.emitter[0].prior.matrix().numpy()
+            dirichlet_alpha = self.phmm_layer.profile_emitter.prior.matrix().numpy()
             dirichlet_alpha = dirichlet_alpha[0,0] # Shared, pick any head and state
             _background_dist = dirichlet_alpha / np.sum(dirichlet_alpha)
 
@@ -1203,7 +1204,9 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             (num_models, max(model_lengths)+1, alphabet_size + 1)
         )
         match_seqs[:,:,-1] = 1  # initialize with terminal symbols
-        emitter = self.phmm_layer.hmm.emitter[0]
+        assert self.phmm_layer.profile_emitter is not None,\
+            "Consensus score computation requires a profile emitter."
+        emitter = self.phmm_layer.profile_emitter
         for i, L in enumerate(model_lengths):
             match_seqs[i, :L] = emitter.matrix()[i, 1:L+1]
         # we need to tile the match sequences over the batch dimension because

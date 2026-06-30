@@ -127,11 +127,22 @@ class PHMMLayer(tf.keras.Layer):
         # Create the HMM, with 2*L+2 states per head
         self.hmm = TFHMM(states=self.states, heads=self.heads)
 
-        self._add_transitioner_and_aa_emitter(
+        values = self._add_transitioner(
             aa_value_sets, lengths, trainable_insertions
         )
+        if self.structural_config and self.structural_config.joint_emissions:
+            raise NotImplementedError(
+                "Joint emissions for amino acids and structure are not yet "+
+                "implemented."
+            )
+        else:
+            self._add_amino_acid_emitter(
+                values,
+                allow_override = aa_value_sets is None,
+                trainable_insertions = trainable_insertions,
+            )
+            self._add_struct_emitter(struct_value_sets, trainable_insertions)
         self._add_emb_emitter(emb_value_sets, trainable_insertions)
-        self._add_struct_emitter(struct_value_sets, trainable_insertions)
 
         # Add the padding emitter
         self.hmm.add_emitter(TFSubsetPaddingEmitter())
@@ -205,12 +216,12 @@ class PHMMLayer(tf.keras.Layer):
         """
         return self.hmm.prior_scores()
 
-    def _add_transitioner_and_aa_emitter(
+    def _add_transitioner(
         self,
         aa_value_sets: Sequence[PHMMValueSet] | None,
         lengths: Sequence[int] | np.ndarray | None,
         trainable_insertions: bool,
-    ) -> None:
+    ) -> Sequence[PHMMValueSet]:
 
         if aa_value_sets is not None:
             values = list(aa_value_sets)
@@ -224,13 +235,6 @@ class PHMMLayer(tf.keras.Layer):
         if self.config.use_noise:
             for value_set in values:
                 value_set.add_noise(self.config.noise_concentration)
-
-        if not self.no_aa:
-            self._add_amino_acid_emitter(
-                values,
-                allow_override = aa_value_sets is None,
-                trainable_insertions = trainable_insertions,
-            )
 
         assert self.config is not None,\
             "config must be set before adding transitioner"
@@ -248,12 +252,16 @@ class PHMMLayer(tf.keras.Layer):
                 self.lengths, self.prior_config
             )
 
+        return values
+
     def _add_amino_acid_emitter(
         self,
         values: Sequence[PHMMValueSet],
         allow_override: bool,
         trainable_insertions: bool,
     ) -> None:
+        if self.no_aa:
+            return
         assert self.config is not None,\
             "config must be set before adding amino acid emitter"
         assert self.prior_config is not None,\

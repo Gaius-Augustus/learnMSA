@@ -219,12 +219,15 @@ def extend_mods(
 class UpdateKernelResult:
     length: int
     """The lengths of the updated models."""
-    aa_values: PHMMValueSet
+    aa_values: PHMMValueSet | None = None
     """The updated pHMM parameters."""
     emb_values: PHMMEmbeddingValueSet | None = None
     """The updated embedding value sets."""
     struct_values: PHMMValueSet | None = None
     """The updated structural value sets."""
+    joint_aa_struct_values: PHMMValueSet | None = None
+    """Can be provided instead of aa_values and struct_values if the model uses
+    joint emissions for amino acids and structural information."""
 
 def update_kernels(
     phmm_layer: PHMMLayer,
@@ -476,6 +479,8 @@ def update_kernels(
     else:
         struct_value_sets = None
 
+    joint_aa_struct_value_sets = None
+
     # Reset
     phmm_layer.head_subset = head_subset_backup
 
@@ -483,7 +488,8 @@ def update_kernels(
         length=L_new,
         aa_values=aa_values,
         emb_values=emb_value_sets,
-        struct_values=struct_value_sets
+        struct_values=struct_value_sets,
+        joint_aa_struct_values=joint_aa_struct_value_sets,
     )
 
 @dataclass
@@ -492,12 +498,15 @@ class ModelSurgeryResult:
     """The lengths of the updated models."""
     surgery_converged: bool
     """Whether no modifications were applied during surgery."""
-    aa_values: Sequence[PHMMValueSet]
+    aa_values: Sequence[PHMMValueSet] | None
     """The updated pHMM parameters."""
     emb_values: Sequence[PHMMEmbeddingValueSet] | None
     """The updated embedding value sets."""
     struct_values: Sequence[PHMMValueSet] | None
     """The updated structural value sets."""
+    joint_aa_struct_values: Sequence[PHMMValueSet] | None
+    """Can be provided instead of aa_values and struct_values if the model uses
+    joint emissions for amino acids and structural information."""
 
 def model_surgery(
     model: LearnMSAModel,
@@ -546,6 +555,7 @@ def model_surgery(
     aa_values = []
     emb_values = []
     struct_values = []
+    joint_aa_struct_values = []
     for i,k in enumerate(range(model.heads)):
         surgery_converged &= pos_expand[k].size == 0 and pos_discard[k].size == 0
 
@@ -582,20 +592,29 @@ def model_surgery(
         aa_values.append(result.aa_values)
         emb_values.append(result.emb_values)
         struct_values.append(result.struct_values)
+        joint_aa_struct_values.append(result.joint_aa_struct_values)
 
-    if any(v is not None for v in emb_values):
-        emb_values = emb_values
-    else:
-        emb_values = None
-    if any(v is not None for v in struct_values):
-        struct_values = struct_values
-    else:
-        struct_values = None
+    aa_values = _squeeze_none(aa_values)
+    emb_values = _squeeze_none(emb_values)
+    struct_values = _squeeze_none(struct_values)
+    joint_aa_struct_values = _squeeze_none(joint_aa_struct_values)
+
+    assert aa_values is not None or emb_values is not None\
+        or struct_values is not None or joint_aa_struct_values is not None
 
     return ModelSurgeryResult(
         model_lengths=np.array(model_lengths, dtype=np.int32),
         surgery_converged=surgery_converged,
         aa_values=aa_values,
         emb_values=emb_values,
-        struct_values=struct_values
+        struct_values=struct_values,
+        joint_aa_struct_values=joint_aa_struct_values,
     )
+
+def _squeeze_none(seq: Sequence | None) -> Sequence | None:
+    """Returns None if all elements of seq are None, otherwise returns seq."""
+    if seq is None:
+        return None
+    if all(x is None for x in seq):
+        return None
+    return seq

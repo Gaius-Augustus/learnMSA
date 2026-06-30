@@ -280,14 +280,15 @@ def test_fit(context_amino_acid: LearnMSAContext) -> None:
     ])
 
     # Get average emission probability of A before training
-    matrix_before_training = model.phmm_layer.hmm.emitter[0].matrix().numpy()
+    assert model.phmm_layer.profile_emitter is not None
+    matrix_before_training = model.phmm_layer.profile_emitter.matrix().numpy()
     prob_A_before_training = matrix_before_training[:, :10, 0].mean()
 
     # Fit for a few epochs
     model.fit(data, batch_size=4, epochs=1, steps_per_epoch=10)
 
     # Get average emission probability of A after training
-    matrix_after_training = model.phmm_layer.hmm.emitter[0].matrix().numpy()
+    matrix_after_training = model.phmm_layer.profile_emitter.matrix().numpy()
     prob_A_after_training = matrix_after_training[:, :10, 0].mean()
 
     assert prob_A_after_training > prob_A_before_training, \
@@ -610,9 +611,9 @@ def test_init_msa(
     np.testing.assert_equal(model.lengths, [5, 5])  # second column is an insert
 
     # # Check if the HMM parameters are as expected
-    hmm = model.phmm_layer.hmm
-    A = hmm.transitioner.matrix().numpy()
-    B = hmm.emitter[0].matrix().numpy()
+    A = model.phmm_layer.hmm.transitioner.matrix().numpy()
+    assert model.phmm_layer.profile_emitter is not None
+    B = model.phmm_layer.profile_emitter.matrix().numpy()
 
     # Since we have very few sequences and we add very small pseudocounts
     # to ensure non-zero counts everyvery, just test if the emission

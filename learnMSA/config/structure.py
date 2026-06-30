@@ -51,6 +51,13 @@ class StructureConfig(BaseModel):
     """Whether to reset the structural information emission parameters after
     model surgery. default: False."""
 
+    joint_emissions: bool = False
+    """Whether to use joint amino acid and structural emissions. If True, amino
+    acids and structural tokens are not emitted independently. Dirichlet priors
+    are still applied to the marginals of the joint distribution and
+    initialization is also based on the product of the marginal probabilities
+    provided in the configs. (EXPERIMENTAL)"""
+
     match_emissions: (Sequence[float] | Sequence[Sequence[float]] |
                       Sequence[Sequence[Sequence[float]]] |
                       NPArray | None) = None

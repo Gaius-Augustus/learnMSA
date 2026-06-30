@@ -253,7 +253,8 @@ def test_update_kernels(model_single_head: LearnMSAModel) -> None:
     )
     updated_phmm_layer.build(((None, None, None, 23), (None, None, None, 1)))
 
-    emissions_new = updated_phmm_layer.hmm.emitter[0].matrix().numpy()[0]
+    assert updated_phmm_layer.profile_emitter is not None
+    emissions_new = updated_phmm_layer.profile_emitter.matrix().numpy()[0]
     transitions_new = updated_phmm_layer.hmm.transitioner\
         .explicit_transitioner.matrix().numpy()[0]
 

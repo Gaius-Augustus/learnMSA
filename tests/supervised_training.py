@@ -244,7 +244,7 @@ def test_training():
         rolls += np.sum(np.sum(per_state, axis=0), axis=0)
     print(sums / (100 * batch * T))
     print(rolls / np.sum(rolls, axis=1, keepdims=True))
-        
+
     model.fit(data, epochs=5, steps_per_epoch=100)
 
     print("A", model.layers[-1].cell.transitioner.make_A())

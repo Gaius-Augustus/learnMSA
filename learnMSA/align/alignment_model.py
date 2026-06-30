@@ -503,7 +503,9 @@ class AlignmentModel():
         )[:,0]
         # Compute the bitscore
         A = self.model.phmm_layer.hmm.transitioner.matrix()
-        B = self.model.phmm_layer.hmm.emitter[0].matrix()
+        assert self.model.phmm_layer.profile_emitter is not None,\
+            "Profile emitter is not set. Using no_aa?"
+        B = self.model.phmm_layer.profile_emitter.matrix()
         L = self.model.lengths[model]
         log_null = self.model.compute_null_model_log_probs(
             self.data[0],

@@ -86,6 +86,11 @@ def run_main() -> None:
         ## Load a structural dataset (optional)
         struct_data = util.load_struct_data(config, data, stack)
 
+        if config.structure.use_structure:
+            assert struct_data is not None,\
+                "Structural data is required but not provided."
+            datasets += (struct_data, )
+
         ## Load embeddings dataset (optional)
         emb_data = util.load_emb_data(config, data, stack)
 
@@ -124,11 +129,6 @@ def run_main() -> None:
                         return
 
             datasets += (emb_data, )
-
-        if config.structure.use_structure:
-            assert struct_data is not None,\
-                "Structural data is required but not provided."
-            datasets += (struct_data, )
 
         # Run a training to align the sequences
         am = align(datasets, config) # type:ignore
