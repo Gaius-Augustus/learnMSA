@@ -305,7 +305,8 @@ def test_initialization() -> None:
     _test_ref_matrices(layer)
 
     # test plm embedding emissions
-    B_emb = layer.hmm.emitter[1].matrix().numpy()
+    assert layer.embedding_emitter is not None
+    B_emb = layer.embedding_emitter.matrix().numpy()
     np.testing.assert_allclose(
         B_emb[:, :3, :16],
         np.stack([custom_plm_config.match_expectations]*3, axis=1), # type: ignore
@@ -313,7 +314,8 @@ def test_initialization() -> None:
     )
 
     # test structural emissions
-    B_struct = layer.hmm.emitter[2].matrix().numpy()
+    assert layer.struct_emitter is not None
+    B_struct = layer.struct_emitter.matrix().numpy()
     np.testing.assert_allclose(
         B_struct[:, :3],
         np.broadcast_to(

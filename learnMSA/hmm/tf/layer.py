@@ -54,6 +54,15 @@ class PHMMLayer(tf.keras.Layer):
             if hasattr(emitter, "head_subset"):
                 emitter.head_subset = subset
 
+    profile_emitter: ProfileEmitter | None
+    """The profile emitter for amino acid emissions, if used."""
+
+    embedding_emitter: EmbeddingEmitter | None
+    """The embedding emitter for embedding emissions, if used."""
+
+    struct_emitter: ProfileEmitter | None
+    """The profile emitter for structural emissions, if used."""
+
     _mode: HMMMode = HMMMode.LIKELIHOOD_LOG
     """Determines the return value of the layer."""
 
@@ -279,6 +288,7 @@ class PHMMLayer(tf.keras.Layer):
         self.hmm.add_emitter(profile_emitter)
         if self.use_prior and self.prior_config.use_amino_acid_prior:
             profile_emitter.prior = emission_prior
+        self.profile_emitter = profile_emitter
 
     def _add_emb_emitter(
         self,
@@ -350,6 +360,7 @@ class PHMMLayer(tf.keras.Layer):
                 temperature=self.plm_config.temperature,
             )
             self.hmm.add_emitter(embedding_emitter)
+            self.embedding_emitter = embedding_emitter
             if self.use_prior:
                 embedding_emitter.prior = combined_prior
 
@@ -408,6 +419,7 @@ class PHMMLayer(tf.keras.Layer):
             if struct_prior is not None and self.use_prior:
                 structural_emitter.prior = struct_prior
             self.hmm.add_emitter(structural_emitter)
+            self.struct_emitter = structural_emitter
         else:
             self.use_structure = False
 

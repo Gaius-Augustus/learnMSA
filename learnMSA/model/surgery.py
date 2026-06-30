@@ -276,13 +276,11 @@ def update_kernels(
     phmm_layer.head_subset = [model_index]
     L = phmm_layer.lengths[model_index]
 
-    # Gather the current emission parameters
-    i = 0
-
     # Amino acids
     if not phmm_layer.no_aa\
             and not training_config.reset_emissions_after_surgery:
-        aa_emissions = phmm_layer.hmm.emitter[i].matrix().numpy()
+        assert phmm_layer.profile_emitter is not None
+        aa_emissions = phmm_layer.profile_emitter.matrix().numpy()
         assert aa_emissions.shape[0] == 1,\
             "Head subset is not working properly for the amino acid emitter."
         aa_emissions = aa_emissions[0, :L, :]
@@ -303,14 +301,13 @@ def update_kernels(
             pos_discard=pos_discard,
             insert_value=aa_insert_value,
         )
-    if not phmm_layer.no_aa:
-        i += 1
     if phmm_layer.no_aa or training_config.reset_emissions_after_surgery:
         aa_emissions_new = None
 
     # pLM embeddings
     if phmm_layer.use_language_model:
-        emb_emissions = phmm_layer.hmm.emitter[i].matrix().numpy()
+        assert phmm_layer.embedding_emitter is not None
+        emb_emissions = phmm_layer.embedding_emitter.matrix().numpy()
         assert emb_emissions.shape[0] == 1,\
             "Head subset is not working properly for the embedding emitter."
         emb_emissions = emb_emissions[0, :L, :]
@@ -332,7 +329,6 @@ def update_kernels(
             pos_discard=pos_discard,
             insert_value=emb_insert_value,
         )
-        i += 1
     else:
         emb_emissions_new = None
 
@@ -340,7 +336,8 @@ def update_kernels(
     if phmm_layer.use_structure\
             and structural_config is not None\
             and not structural_config.reset_after_surgery:
-        struct_emissions = phmm_layer.hmm.emitter[i].matrix().numpy()
+        assert phmm_layer.struct_emitter is not None
+        struct_emissions = phmm_layer.struct_emitter.matrix().numpy()
         assert struct_emissions.shape[0] == 1,\
             "Head subset is not working properly for the structural emitter."
         struct_emissions = struct_emissions[0, :L, :]
@@ -364,7 +361,6 @@ def update_kernels(
             pos_discard=pos_discard,
             insert_value=struct_insert_value,
         )
-        i += 1
     else:
         struct_emissions_new = None
 
