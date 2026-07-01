@@ -755,5 +755,11 @@ def parse_args(
         action="store_true",
         help=argparse.SUPPRESS
     )
+    parser.add_argument(
+        "--joint_emissions",
+        dest="joint_emissions",
+        action="store_true",
+        help=argparse.SUPPRESS
+    )
 
     return parser

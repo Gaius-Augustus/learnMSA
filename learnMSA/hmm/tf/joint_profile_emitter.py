@@ -59,7 +59,7 @@ class JointProfileEmitter(ProfileEmitter):
         else:
             assert marginal_values is not None,\
                 "Either `values` or `marginal_values` must be provided."
-            _values = _product_marginal_values(marginal_values)
+            _values = product_marginal_values(marginal_values)
 
         if len(_values) == 0:
             raise ValueError("At least one value set must be provided.")
@@ -132,7 +132,7 @@ class JointProfileEmitter(ProfileEmitter):
     def call(
         self, *emissions: T_TFTensor, use_padding: bool = True,
     ) -> T_TFTensor:
-        observation_product = _outer_product_flat(*emissions)
+        observation_product = outer_product_flat(*emissions)
         return super().call(observation_product, use_padding=use_padding)
 
     def marginal_matrices(
@@ -145,7 +145,7 @@ class JointProfileEmitter(ProfileEmitter):
         )
         marginal_matrices = []
         for i in range(len(self.marginal_dims)):
-            marginal_matrices.append(_marginal_matrix(matrix, i))
+            marginal_matrices.append(marginal_matrix(matrix, i))
         return tuple(marginal_matrices)
 
     def prior_scores(self) -> T_TFTensor:
@@ -170,7 +170,7 @@ class JointProfileEmitter(ProfileEmitter):
         return log_prior_scores
 
 
-def _product_marginal_values(
+def product_marginal_values(
     marginal_values: Sequence[Sequence[PHMMValueSet]]
 ) -> Sequence[PHMMValueSet]:
     """Computes the outer product of the marginal value sets to create a
@@ -193,10 +193,10 @@ def _product_marginal_values(
 
     joint_values: list[PHMMValueSet] = []
     for h in range(len(marginal_values[0])):
-        match_emission = _outer_product_flat(
+        match_emission = outer_product_flat(
             *[tf.constant(mv[h].match_emissions) for mv in marginal_values]
         ).numpy()
-        insert_emission = _outer_product_flat(
+        insert_emission = outer_product_flat(
             *[tf.constant(mv[h].insert_emissions) for mv in marginal_values]
         ).numpy()
         joint_values.append(
@@ -210,7 +210,7 @@ def _product_marginal_values(
         )
     return joint_values
 
-def _outer_product_flat(*emissions: T_TFTensor) -> T_TFTensor:
+def outer_product_flat(*emissions: T_TFTensor | np.ndarray) -> T_TFTensor:
     """Computes the outer product of the emissions in the last dimension
     and returns a tensor with the flatted product dimension.
 
@@ -223,12 +223,14 @@ def _outer_product_flat(*emissions: T_TFTensor) -> T_TFTensor:
         ``(..., prod_i D_i)``.
     """
     assert len(emissions) > 1, "At least two emissions are required."
-    x = _outer_product_flat_pw(emissions[0], emissions[1])
+    x = outer_product_flat_pw(emissions[0], emissions[1])
     for obs in emissions[2:]:
-        x = _outer_product_flat_pw(x, obs)
+        x = outer_product_flat_pw(x, obs)
     return x
 
-def _outer_product_flat_pw(x: T_TFTensor, y: T_TFTensor) -> T_TFTensor:
+def outer_product_flat_pw(x
+    : T_TFTensor | np.ndarray, y: T_TFTensor | np.ndarray
+) -> T_TFTensor:
     """Computes the outer product of two tensors and flattens the multiplied
     dimensions.
 
@@ -246,7 +248,7 @@ def _outer_product_flat_pw(x: T_TFTensor, y: T_TFTensor) -> T_TFTensor:
     )
     return tf.reshape(z, product_shape)
 
-def _marginal_matrix(matrix: T_TFTensor, i: int) -> T_TFTensor:
+def marginal_matrix(matrix: T_TFTensor, i: int) -> T_TFTensor:
     """Computes the marginal matrix for a given marginal index.
 
     Args:

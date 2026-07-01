@@ -9,10 +9,11 @@ from hidten.tf.prior import TFCombinedPrior, TFInverseGammaPrior
 from learnMSA.config import LanguageModelConfig, PHMMConfig, PHMMPriorConfig
 from learnMSA.config.structure import StructureConfig
 from learnMSA.hmm.tf.embedding_emitter import EmbeddingEmitter
+from learnMSA.hmm.tf.joint_profile_emitter import JointProfileEmitter
+from learnMSA.hmm.tf.padding_emitter import TFSubsetPaddingEmitter
 from learnMSA.hmm.tf.prior import TFPHMMStartPrior, TFPHMMTransitionPrior
 from learnMSA.hmm.tf.profile_emitter import ProfileEmitter
 from learnMSA.hmm.tf.transitioner import PHMMTransitioner
-from learnMSA.hmm.tf.padding_emitter import TFSubsetPaddingEmitter
 from learnMSA.hmm.tf.util import load_dirichlet, load_mvn
 from learnMSA.hmm.util.value_set import PHMMValueSet
 from learnMSA.hmm.util.value_set_emb import PHMMEmbeddingValueSet
@@ -54,14 +55,20 @@ class PHMMLayer(tf.keras.Layer):
             if hasattr(emitter, "head_subset"):
                 emitter.head_subset = subset
 
-    profile_emitter: ProfileEmitter | None
+    profile_emitter: ProfileEmitter | None = None
     """The profile emitter for amino acid emissions, if used."""
 
-    embedding_emitter: EmbeddingEmitter | None
+    embedding_emitter: EmbeddingEmitter | None = None
     """The embedding emitter for embedding emissions, if used."""
 
-    struct_emitter: ProfileEmitter | None
+    struct_emitter: ProfileEmitter | None = None
     """The profile emitter for structural emissions, if used."""
+
+    joint_emitter: JointProfileEmitter | None = None
+    """The joint profile emitter for amino acid and structural emissions, if used."""
+
+    use_structure: bool = False
+    """Whether structural emissions are used in the model."""
 
     _mode: HMMMode = HMMMode.LIKELIHOOD_LOG
     """Determines the return value of the layer."""
@@ -78,6 +85,7 @@ class PHMMLayer(tf.keras.Layer):
         aa_value_sets: Sequence[PHMMValueSet] | None = None,
         emb_value_sets: Sequence[PHMMEmbeddingValueSet] | None = None,
         struct_value_sets: Sequence[PHMMValueSet] | None = None,
+        joint_aa_struct_value_sets: Sequence[PHMMValueSet] | None = None,
         no_aa: bool = False,
         **kwargs
     ) -> None:
@@ -102,6 +110,9 @@ class PHMMLayer(tf.keras.Layer):
                 objects, one per head. Initializes the embedding emissions.
             struct_value_sets: Optional pre-built :class:`PHMMValueSet` objects,
                 one per head. Initializes the structural emissions.
+            joint_aa_struct_value_sets: Optional pre-built
+                :class:`PHMMValueSet` objects, one per head. Initializes the
+                joint amino acid and structural emissions.
             no_aa: Whether to use amino acid emissions in the model.
         """
         super().__init__(**kwargs)
@@ -131,9 +142,12 @@ class PHMMLayer(tf.keras.Layer):
             aa_value_sets, lengths, trainable_insertions
         )
         if self.structural_config and self.structural_config.joint_emissions:
-            raise NotImplementedError(
-                "Joint emissions for amino acids and structure are not yet "+
-                "implemented."
+            self._add_joint_aa_struct_emitter(
+                values,
+                struct_value_sets,
+                joint_aa_struct_value_sets,
+                allow_override = aa_value_sets is None,
+                trainable_insertions = trainable_insertions,
             )
         else:
             self._add_amino_acid_emitter(
@@ -298,6 +312,166 @@ class PHMMLayer(tf.keras.Layer):
             profile_emitter.prior = emission_prior
         self.profile_emitter = profile_emitter
 
+    def _add_struct_emitter(
+        self,
+        struct_values: Sequence[PHMMValueSet] | None,
+        trainable_insertions: bool,
+    ) -> None:
+        assert self.config is not None,\
+            "config must be set before adding structural emitter"
+        if self.structural_config and self.structural_config.use_structure:
+            assert self.structural_config is not None,\
+                "structural_config must be set before adding structural emitter"
+            self.use_structure = True
+
+            if struct_values is None:
+                _struct_values = [
+                    PHMMValueSet.from_structural_config(L, h, self.structural_config)
+                    for h, L in enumerate(self.lengths)
+                ]
+            else:
+                assert len(struct_values) == self.heads, (
+                    "Number of structural value sets must match number of heads"
+                )
+                _struct_values = list(struct_values)
+
+            # If specified, load and add a Dirichlet prior
+            if self.structural_config.prior_name:
+                struct_prior = load_dirichlet(
+                    self.structural_config.prior_name+".weights",
+                    dim=self.structural_config.alphabet_size,
+                    components=self.structural_config.prior_components,
+                    states=self.states,
+                )
+                struct_prior.temperature = self.structural_config.prior_temperature
+
+                # Override emission values with prior distribution if requested
+                override_matches=self.structural_config.match_emissions is None
+                override_insertions=self.structural_config.insert_emissions is None
+                if self.structural_config.use_prior_for_emission_init\
+                        and struct_values is None:
+                    _struct_values = self._override_emissions_with_prior(
+                        _struct_values,
+                        struct_prior,
+                        override_matches=override_matches,
+                        override_insertions=override_insertions,
+                    )
+            else:
+                struct_prior = None
+
+            structural_emitter = ProfileEmitter(
+                values=_struct_values,
+                trainable_insertions=trainable_insertions,
+                temperature=self.structural_config.emitter_temperature,
+            )
+            if struct_prior is not None and self.use_prior:
+                structural_emitter.prior = struct_prior
+            self.hmm.add_emitter(structural_emitter)
+            self.struct_emitter = structural_emitter
+        else:
+            self.use_structure = False
+
+    def _add_joint_aa_struct_emitter(
+        self,
+        aa_values: Sequence[PHMMValueSet] | None,
+        struct_values: Sequence[PHMMValueSet] | None,
+        joint_values: Sequence[PHMMValueSet] | None,
+        allow_override: bool,
+        trainable_insertions: bool,
+    ) -> None:
+        assert self.config is not None,\
+            "config must be set before adding joint amino acid and structural "\
+            "emitter"
+
+        needs_aa_prior = self.prior_config.use_amino_acid_prior\
+            and self.use_prior\
+            or self.config.use_prior_for_emission_init\
+            and allow_override
+
+        if needs_aa_prior:
+            # Load the Dirichlet prior for emissions
+            c = self.prior_config.amino_acid_dirichlet_components
+            emission_prior = load_dirichlet(
+                f"amino_acid_dirichlet_{c}.weights",
+                dim = len(SequenceDataset._default_alphabet)-1,
+                components = c,
+                states = self.states,
+            )
+
+        assert self.structural_config is not None,\
+            "structural_config must be set before adding joint amino acid and "\
+            "structural emitter"
+
+        if struct_values is None and joint_values is None:
+            _struct_values = [
+                PHMMValueSet.from_structural_config(L, h, self.structural_config)
+                for h, L in enumerate(self.lengths)
+            ]
+        else:
+            assert struct_values is not None,\
+                "Structural value sets must be provided unless"\
+                "joint_values are provided."
+            assert len(struct_values) == self.heads, (
+                "Number of structural value sets must match number of heads"
+            )
+            _struct_values = list(struct_values)
+
+        needs_struct_prior = self.structural_config.prior_name\
+            and self.use_prior\
+            or self.structural_config.prior_name\
+            and self.structural_config.use_prior_for_emission_init\
+            and struct_values is None
+
+        if needs_struct_prior:
+            struct_prior = load_dirichlet(
+                self.structural_config.prior_name+".weights",
+                dim=self.structural_config.alphabet_size,
+                components=self.structural_config.prior_components,
+                states=self.states,
+            )
+
+        # Override emission values with prior distribution if requested
+        if self.config.use_prior_for_emission_init:
+            assert self.prior_config.use_amino_acid_prior, (
+                "Cannot use prior for emission initialization if no "
+                "emission prior is set."
+            )
+            assert aa_values is not None
+            # Override amino acid emissions with prior distribution
+            aa_values = self._override_emissions_with_prior(
+                aa_values,
+                emission_prior,
+                override_matches=self.config.match_emissions is None,
+                override_insertions=self.config.insert_emissions is None,
+            )
+            # Override structural emissions with prior distribution if specified
+            if self.structural_config.prior_name :
+                struct_prior.temperature = self.structural_config.prior_temperature
+                _struct_values = self._override_emissions_with_prior(
+                    _struct_values,
+                    struct_prior,
+                    override_matches=self.structural_config.match_emissions is None,
+                    override_insertions=self.structural_config.insert_emissions is None,
+                )
+
+        if joint_values is None:
+            assert aa_values is not None
+            joint_emitter = JointProfileEmitter(
+                marginal_values=[aa_values, _struct_values],
+                trainable_insertions=trainable_insertions,
+            )
+        else:
+            joint_emitter = JointProfileEmitter(
+                values=joint_values,
+                trainable_insertions=trainable_insertions,
+            )
+        if self.prior_config.use_amino_acid_prior and self.use_prior:
+            joint_emitter.add_marginal_prior(0, emission_prior)
+        if self.structural_config.prior_name and self.use_prior:
+            joint_emitter.add_marginal_prior(1, struct_prior)
+        self.hmm.add_emitter(joint_emitter, observations=(0,1))
+        self.joint_emitter = joint_emitter
+
     def _add_emb_emitter(
         self,
         emb_values: Sequence[PHMMEmbeddingValueSet] | None,
@@ -371,65 +545,6 @@ class PHMMLayer(tf.keras.Layer):
             self.embedding_emitter = embedding_emitter
             if self.use_prior:
                 embedding_emitter.prior = combined_prior
-
-    def _add_struct_emitter(
-        self,
-        struct_values: Sequence[PHMMValueSet] | None,
-        trainable_insertions: bool,
-    ) -> None:
-        assert self.config is not None,\
-            "config must be set before adding structural emitter"
-        if self.structural_config and self.structural_config.use_structure:
-            assert self.structural_config is not None,\
-                "structural_config must be set before adding structural emitter"
-            self.use_structure = True
-
-            if struct_values is None:
-                _struct_values = [
-                    PHMMValueSet.from_structural_config(L, h, self.structural_config)
-                    for h, L in enumerate(self.lengths)
-                ]
-            else:
-                assert len(struct_values) == self.heads, (
-                    "Number of structural value sets must match number of heads"
-                )
-                _struct_values = list(struct_values)
-
-            # If specified, load and add a Dirichlet prior
-            if self.structural_config.prior_name:
-                struct_prior = load_dirichlet(
-                    self.structural_config.prior_name+".weights",
-                    dim=self.structural_config.alphabet_size,
-                    components=self.structural_config.prior_components,
-                    states=self.states,
-                )
-                struct_prior.temperature = self.structural_config.prior_temperature
-
-                # Override emission values with prior distribution if requested
-                override_matches=self.structural_config.match_emissions is None
-                override_insertions=self.structural_config.insert_emissions is None
-                if self.structural_config.use_prior_for_emission_init\
-                        and struct_values is None:
-                    _struct_values = self._override_emissions_with_prior(
-                        _struct_values,
-                        struct_prior,
-                        override_matches=override_matches,
-                        override_insertions=override_insertions,
-                    )
-            else:
-                struct_prior = None
-
-            structural_emitter = ProfileEmitter(
-                values=_struct_values,
-                trainable_insertions=trainable_insertions,
-                temperature=self.structural_config.emitter_temperature,
-            )
-            if struct_prior is not None and self.use_prior:
-                structural_emitter.prior = struct_prior
-            self.hmm.add_emitter(structural_emitter)
-            self.struct_emitter = structural_emitter
-        else:
-            self.use_structure = False
 
     @staticmethod
     def _override_emissions_with_prior(

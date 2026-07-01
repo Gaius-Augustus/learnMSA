@@ -8,6 +8,7 @@ from learnMSA.config.language_model import LanguageModelConfig
 from learnMSA.config.structure import StructureConfig
 from learnMSA.config.training import TrainingConfig
 from learnMSA.config.util import get_value
+from learnMSA.hmm.tf.joint_profile_emitter import outer_product_flat_pw
 from learnMSA.hmm.tf.layer import PHMMLayer
 from learnMSA.hmm.tf.util import load_dirichlet
 from learnMSA.hmm.util.transition_index_set import PHMMTransitionIndexSet
@@ -281,22 +282,14 @@ def update_kernels(
 
     # Amino acids
     if not phmm_layer.no_aa\
-            and not training_config.reset_emissions_after_surgery:
+            and not training_config.reset_emissions_after_surgery\
+            and phmm_layer.joint_emitter is None:
         assert phmm_layer.profile_emitter is not None
         aa_emissions = phmm_layer.profile_emitter.matrix().numpy()
         assert aa_emissions.shape[0] == 1,\
             "Head subset is not working properly for the amino acid emitter."
         aa_emissions = aa_emissions[0, :L, :]
-        if config.use_prior_for_emission_init:
-            # use prior mean as brackground distribution
-            emission_prior = load_dirichlet(
-                f"amino_acid_dirichlet_1.weights", # TODO: use component count from config here
-                dim = len(SequenceDataset._default_alphabet)-1,
-                states = [1],
-            )
-            aa_insert_value = emission_prior.mean()[0,0].numpy()
-        else:
-            aa_insert_value = np.array(config.background_distribution)
+        aa_insert_value = _get_aa_insert_value(config)
         aa_emissions_new = apply_mods(
             aa_emissions,
             pos_expand=pos_expand,
@@ -304,8 +297,29 @@ def update_kernels(
             pos_discard=pos_discard,
             insert_value=aa_insert_value,
         )
-    if phmm_layer.no_aa or training_config.reset_emissions_after_surgery:
+    else:
         aa_emissions_new = None
+
+    # Structural information
+    if phmm_layer.use_structure\
+            and structural_config is not None\
+            and not structural_config.reset_after_surgery\
+            and phmm_layer.joint_emitter is None:
+        assert phmm_layer.struct_emitter is not None
+        struct_emissions = phmm_layer.struct_emitter.matrix().numpy()
+        assert struct_emissions.shape[0] == 1,\
+            "Head subset is not working properly for the structural emitter."
+        struct_emissions = struct_emissions[0, :L, :]
+        struct_insert_value = _get_struct_insert_value(structural_config)
+        struct_emissions_new = apply_mods(
+            struct_emissions,
+            pos_expand=pos_expand,
+            expansion_lens=expansion_lens,
+            pos_discard=pos_discard,
+            insert_value=struct_insert_value,
+        )
+    else:
+        struct_emissions_new = None
 
     # pLM embeddings
     if phmm_layer.use_language_model:
@@ -335,37 +349,29 @@ def update_kernels(
     else:
         emb_emissions_new = None
 
-    # Structural information
-    if phmm_layer.use_structure\
-            and structural_config is not None\
-            and not structural_config.reset_after_surgery:
-        assert phmm_layer.struct_emitter is not None
-        struct_emissions = phmm_layer.struct_emitter.matrix().numpy()
-        assert struct_emissions.shape[0] == 1,\
-            "Head subset is not working properly for the structural emitter."
-        struct_emissions = struct_emissions[0, :L, :]
-        if structural_config.use_prior_for_emission_init\
-                and structural_config.prior_name:
-            struct_prior = load_dirichlet(
-                    structural_config.prior_name+".weights",
-                    dim=structural_config.alphabet_size,
-                    components=structural_config.prior_components,
-                    states=[1],
-                )
-            struct_insert_value = struct_prior.mean()[0,0].numpy()
-        else:
-            struct_insert_value = np.array(
-                structural_config.background_distribution # type: ignore
-        )
-        struct_emissions_new = apply_mods(
-            struct_emissions,
+    # Joint emissions
+    if phmm_layer.joint_emitter is not None:
+        joint_emissions = phmm_layer.joint_emitter.matrix().numpy()
+        assert joint_emissions.shape[0] == 1,\
+            "Head subset is not working properly for the joint emitter."
+        joint_emissions = joint_emissions[0, :L, :]
+
+        aa_insert_value = _get_aa_insert_value(config)
+        assert structural_config is not None,\
+            "structural_config must be provided to update_kernels if the "\
+            "PHMMLayer uses joint emissions."
+        struct_insert_value = _get_struct_insert_value(structural_config)
+
+        joint_insert_value = outer_product_flat_pw(
+            aa_insert_value, struct_insert_value
+        ).numpy()
+        joint_emissions_new = apply_mods(
+            joint_emissions,
             pos_expand=pos_expand,
             expansion_lens=expansion_lens,
             pos_discard=pos_discard,
-            insert_value=struct_insert_value,
+            insert_value=joint_insert_value,
         )
-    else:
-        struct_emissions_new = None
 
     L_new = L - pos_discard.size + int(expansion_lens.sum())
 
@@ -455,8 +461,10 @@ def update_kernels(
 
     aa_values = PHMMValueSet.from_config(L_new, 0, new_config)
 
-    if phmm_layer.use_language_model and plm_config is not None:
+    if phmm_layer.use_language_model\
+            and plm_config is not None:
         assert emb_emissions_new is not None
+        # TODO: get rid of config detour
         new_plm_config = plm_config.model_copy(deep=True)
         new_plm_config.match_expectations = emb_emissions_new[np.newaxis, :, :embedding_dim]
         new_plm_config.match_variance = emb_emissions_new[np.newaxis, :, embedding_dim:]
@@ -468,18 +476,25 @@ def update_kernels(
 
     if phmm_layer.use_structure\
             and structural_config is not None\
-            and not structural_config.reset_after_surgery:
+            and not structural_config.reset_after_surgery\
+            and not phmm_layer.joint_emitter:
         assert struct_emissions_new is not None
+        # TODO: get rid of config detour
         new_structural_config = structural_config.model_copy(deep=True)
         new_structural_config.match_emissions = struct_emissions_new[np.newaxis]
-
         struct_value_sets = PHMMValueSet.from_structural_config(
             L_new, 0, new_structural_config
         )
     else:
         struct_value_sets = None
 
-    joint_aa_struct_value_sets = None
+    if phmm_layer.joint_emitter is None:
+        joint_aa_struct_value_sets = None
+    else:
+        assert joint_emissions_new is not None
+        joint_aa_struct_value_sets = PHMMValueSet(
+            L_new, joint_emissions_new, joint_insert_value
+        )
 
     # Reset
     phmm_layer.head_subset = head_subset_backup
@@ -610,6 +625,35 @@ def model_surgery(
         struct_values=struct_values,
         joint_aa_struct_values=joint_aa_struct_values,
     )
+
+def _get_aa_insert_value(config: PHMMConfig) -> np.ndarray:
+    if config.use_prior_for_emission_init:
+        # use prior mean as brackground distribution
+        emission_prior = load_dirichlet(
+            f"amino_acid_dirichlet_1.weights", # TODO: use component count from config here
+            dim = len(SequenceDataset._default_alphabet)-1,
+            states = [1],
+        )
+        aa_insert_value = emission_prior.mean()[0,0].numpy()
+    else:
+        aa_insert_value = np.array(config.background_distribution)
+    return aa_insert_value
+
+def _get_struct_insert_value(structural_config: StructureConfig) -> np.ndarray:
+    if structural_config.use_prior_for_emission_init\
+            and structural_config.prior_name:
+        struct_prior = load_dirichlet(
+            structural_config.prior_name+".weights",
+            dim=structural_config.alphabet_size,
+            components=structural_config.prior_components,
+            states=[1],
+        )
+        struct_insert_value = struct_prior.mean()[0,0].numpy()
+    else:
+        struct_insert_value = np.array(
+            structural_config.background_distribution # type: ignore
+        )
+    return struct_insert_value
 
 def _squeeze_none(seq: Sequence | None) -> Sequence | None:
     """Returns None if all elements of seq are None, otherwise returns seq."""

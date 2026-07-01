@@ -149,6 +149,7 @@ def args_to_config(args: Namespace, base_config: Configuration | None = None) ->
     st["prior_components"] = args.struct_prior_components
     st["prior_temperature"] = args.struct_prior_temperature
     st["reset_after_surgery"] = args.struct_reset_after_surgery
+    st["joint_emissions"] = args.joint_emissions
 
     # --- Advanced ---
     adv["dist_out"] = args.dist_out

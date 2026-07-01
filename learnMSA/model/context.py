@@ -57,6 +57,7 @@ class LearnMSAContext:
     aa_values: Sequence[PHMMValueSet] | None
     struct_values: Sequence[PHMMValueSet] | None
     emb_values: Sequence[PHMMEmbeddingValueSet] | None
+    joint_values: Sequence[PHMMValueSet] | None
     R_init: tf.keras.initializers.Initializer
     R_delta_init: tf.keras.initializers.Initializer
     p_init: tf.keras.initializers.Initializer
@@ -92,7 +93,7 @@ class LearnMSAContext:
         self.aa_values = None
         self.struct_values = None
         self.emb_values = None
-
+        self.joint_values = None
         if data is None:
             assert num_seq is not None, (
                 "When no data is provided, num_seq must be specified."

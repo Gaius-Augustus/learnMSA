@@ -93,6 +93,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             aa_value_sets = context.aa_values,
             struct_value_sets = context.struct_values,
             emb_value_sets = context.emb_values,
+            joint_aa_struct_value_sets = context.joint_values,
             no_aa = train_cfg.no_aa,
         )
 
