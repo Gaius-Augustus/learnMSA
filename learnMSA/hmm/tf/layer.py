@@ -407,7 +407,7 @@ class PHMMLayer(tf.keras.Layer):
                 PHMMValueSet.from_structural_config(L, h, self.structural_config)
                 for h, L in enumerate(self.lengths)
             ]
-        else:
+        elif joint_values is None:
             assert struct_values is not None,\
                 "Structural value sets must be provided unless"\
                 "joint_values are provided."

@@ -279,6 +279,7 @@ def _fit_and_align(
         context.aa_values = surgery_result.aa_values
         context.emb_values = surgery_result.emb_values
         context.struct_values = surgery_result.struct_values
+        context.joint_values = surgery_result.joint_aa_struct_values
         surgery_converged = surgery_result.surgery_converged
         if model.anc_probs_layer is not None:
             if not context.config.advanced.reset_evo_model:
