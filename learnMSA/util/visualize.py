@@ -219,7 +219,9 @@ def plot_phmm(
         if ax is not None:
             raise ValueError("fast_mode=True requires ax=None.")
 
-        n_active = sum([not layer.no_aa, layer.use_language_model, layer.use_structure])
+        n_active = len(layer.hmm.emitter) - 1 # exclude padding emitter
+        if layer.joint_emitter:
+            n_active += 1
         logo_row_h = 3   # inches per emitter row in the logo panel
 
         xs = [x for x, _ in pos.values()]
@@ -245,11 +247,15 @@ def plot_phmm(
         )
 
         emitter_row = 0
-        if not layer.no_aa:
+
+        if layer.joint_emitter:
             ax_m = fig.add_subplot(top_gs[emitter_row, 0])
             ax_i = fig.add_subplot(top_gs[emitter_row, 1])
+            aa_matrix, struct_matrix = layer.joint_emitter.marginal_matrices()
+            aa_matrix = aa_matrix.numpy()
+            struct_matrix = struct_matrix.numpy()
             _render_emitter_fast(
-                layer.hmm.emitter[emitter_row], head, L,
+                aa_matrix, "TFCategoricalEmitter", head, L,
                 ax_m, ax_i,
                 alphabet=SequenceDataset._default_alphabet,
                 color_scheme="skylign_protein",
@@ -257,31 +263,63 @@ def plot_phmm(
                 show_information_content=show_information_content,
             )
             emitter_row += 1
-
-        if layer.use_language_model:
-            ax_m = fig.add_subplot(top_gs[emitter_row, 0])
-            ax_i = fig.add_subplot(top_gs[emitter_row, 1])
-            _render_emitter_fast(
-                layer.hmm.emitter[emitter_row], head, L,
-                ax_m, ax_i,
-                label="emb",
-                show_information_content=show_information_content,
-            )
-            emitter_row += 1
-
-        if layer.use_structure:
             assert layer.structural_config is not None, \
                 "Structural config must be provided if use_structure is True"
             ax_m = fig.add_subplot(top_gs[emitter_row, 0])
             ax_i = fig.add_subplot(top_gs[emitter_row, 1])
             _render_emitter_fast(
-                layer.hmm.emitter[emitter_row], head, L,
+                struct_matrix, "TFCategoricalEmitter", head, L,
                 ax_m, ax_i,
                 alphabet=layer.structural_config.structural_alphabet,
                 color_scheme="NajafabadiEtAl2017",
                 label="3Di",
                 show_information_content=show_information_content,
             )
+            emitter_row += 1
+        else:
+            if not layer.no_aa:
+                ax_m = fig.add_subplot(top_gs[emitter_row, 0])
+                ax_i = fig.add_subplot(top_gs[emitter_row, 1])
+                assert layer.profile_emitter is not None
+                matrix = layer.profile_emitter.matrix().numpy()
+                _render_emitter_fast(
+                    matrix, "TFCategoricalEmitter", head, L,
+                    ax_m, ax_i,
+                    alphabet=SequenceDataset._default_alphabet,
+                    color_scheme="skylign_protein",
+                    label="AA",
+                    show_information_content=show_information_content,
+                )
+                emitter_row += 1
+
+            if layer.use_structure:
+                assert layer.structural_config is not None, \
+                    "Structural config must be provided if use_structure is True"
+                ax_m = fig.add_subplot(top_gs[emitter_row, 0])
+                ax_i = fig.add_subplot(top_gs[emitter_row, 1])
+                assert layer.struct_emitter is not None
+                matrix = layer.struct_emitter.matrix().numpy()
+                _render_emitter_fast(
+                    matrix, "TFCategoricalEmitter", head, L,
+                    ax_m, ax_i,
+                    alphabet=layer.structural_config.structural_alphabet,
+                    color_scheme="NajafabadiEtAl2017",
+                    label="3Di",
+                    show_information_content=show_information_content,
+                )
+
+        if layer.use_language_model:
+            ax_m = fig.add_subplot(top_gs[emitter_row, 0])
+            ax_i = fig.add_subplot(top_gs[emitter_row, 1])
+            assert layer.embedding_emitter is not None
+            matrix = layer.embedding_emitter.matrix().numpy()
+            _render_emitter_fast(
+                matrix, "TFMVNormalEmitter", head, L,
+                ax_m, ax_i,
+                label="emb",
+                show_information_content=show_information_content,
+            )
+            emitter_row += 1
 
         # ── Bottom panel: transition graph, no emission insets ───────────────
         # Node diameter target: 50% of horizontal display spacing.
@@ -301,6 +339,10 @@ def plot_phmm(
         ax_graph.set_ylim(min(ys) - y_pad, max(ys) + y_pad)
 
         return fig
+    elif layer.joint_emitter:
+        raise NotImplementedError(
+            "plot_phmm does not yet support joint emitters in non-fast mode."
+        )
 
     # Default single-panel layout
     if ax is None:
@@ -317,7 +359,8 @@ def plot_phmm(
 
 
 def _render_emitter_fast(
-    emitter,
+    matrix: np.ndarray,
+    type: str,
     head: int,
     L: int,
     ax_match,
@@ -331,7 +374,8 @@ def _render_emitter_fast(
     representative logo side by side using direct draw calls.
 
     Args:
-        emitter: The emitter whose matrix is rendered.
+        matrix: The matrix whose emitter is rendered.
+        type: Type of the emitter.
         head: Emitter head index.
         L: Number of match states. Match states are indices 0…L-1; the
             representative insert state is index *L*.
@@ -348,15 +392,9 @@ def _render_emitter_fast(
     import pandas as pd
     import logomaker
 
-    mro_names = {c.__name__ for c in type(emitter).__mro__}
+    M_np = matrix
 
-    M = emitter.matrix()
-    try:
-        M_np = M.numpy()
-    except AttributeError:
-        M_np = np.array(M)
-
-    if "TFCategoricalEmitter" in mro_names:
+    if type == "TFCategoricalEmitter":
         A = M_np.shape[2]
         chars = list(alphabet[:A])
         match_probs = M_np[head, :L, :]        # (L, A)
@@ -404,7 +442,7 @@ def _render_emitter_fast(
         ax_ins.set_xticks([])
         ax_ins.set_yticks([])
 
-    elif "TFMVNormalEmitter" in mro_names:
+    elif type == "TFMVNormalEmitter":
         D = M_np.shape[2] // 2
         colors = plt.cm.tab10.colors  # type: ignore
         # Match: heatmap of per-dimension means across L states
