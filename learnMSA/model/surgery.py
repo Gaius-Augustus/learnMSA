@@ -8,7 +8,9 @@ from learnMSA.config.language_model import LanguageModelConfig
 from learnMSA.config.structure import StructureConfig
 from learnMSA.config.training import TrainingConfig
 from learnMSA.config.util import get_value
-from learnMSA.hmm.tf.joint_profile_emitter import outer_product_flat_pw
+from learnMSA.hmm.tf.joint_profile_emitter import (AB_from_marginals,
+                                                   flatten_AB,
+                                                   outer_product_flat_pw)
 from learnMSA.hmm.tf.layer import PHMMLayer
 from learnMSA.hmm.tf.util import load_dirichlet
 from learnMSA.hmm.util.transition_index_set import PHMMTransitionIndexSet
@@ -351,7 +353,7 @@ def update_kernels(
 
     # Joint emissions
     if phmm_layer.joint_emitter is not None:
-        joint_emissions = phmm_layer.joint_emitter.matrix().numpy()
+        joint_emissions = phmm_layer.joint_emitter.parameter_matrix().numpy()
         assert joint_emissions.shape[0] == 1,\
             "Head subset is not working properly for the joint emitter."
         joint_emissions = joint_emissions[0, :L, :]
@@ -362,9 +364,15 @@ def update_kernels(
             "PHMMLayer uses joint emissions."
         struct_insert_value = _get_struct_insert_value(structural_config)
 
-        joint_insert_value = outer_product_flat_pw(
-            aa_insert_value, struct_insert_value
-        ).numpy()
+        r = phmm_layer.joint_emitter.low_rank
+        if r > 0:
+            joint_insert_value = flatten_AB(
+                *AB_from_marginals(aa_insert_value, struct_insert_value, r)
+            )
+        else:
+            joint_insert_value = outer_product_flat_pw(
+                aa_insert_value, struct_insert_value
+            ).numpy()
         joint_emissions_new = apply_mods(
             joint_emissions,
             pos_expand=pos_expand,

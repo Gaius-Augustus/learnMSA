@@ -55,7 +55,7 @@ class ProfileEmitter(TFCategoricalEmitter):
         if len(values) == 0:
             raise ValueError("At least one value set must be provided.")
 
-        self.alphabet_size = values[0].alphabet_size
+        self.matrix_dim = values[0].alphabet_size
         self._lengths = np.array([value_set.L for value_set in values])
         self.trainable_insertions = trainable_insertions
         self.use_full_matmul = use_full_matmul
@@ -63,18 +63,18 @@ class ProfileEmitter(TFCategoricalEmitter):
         init_values = []
         # Initialization based on provided value sets
         for value_set in values:
-            assert value_set.alphabet_size == self.alphabet_size,\
+            assert value_set.alphabet_size == self.matrix_dim,\
                 "All value sets must have the same alphabet size."
             assert value_set.match_emissions.shape ==\
-                (value_set.L, self.alphabet_size),\
+                (value_set.L, self.matrix_dim),\
                 "Match emissions for each value set must have shape "\
-                f"(L, alphabet_size), but got {value_set.match_emissions.shape}."
+                f"(L, matrix_dim), but got {value_set.match_emissions.shape}."
             init_values.append(value_set.match_emissions.flatten())
             init_values.append(value_set.insert_emissions)
         self.initializer = np.concatenate(init_values)
 
     def build(self, input_shape: T_shapelike | None = None) -> None:
-        s = self.alphabet_size
+        s = self.matrix_dim
         if input_shape is None:
             input_shape = (None, None, s)
         else:
@@ -89,27 +89,7 @@ class ProfileEmitter(TFCategoricalEmitter):
     @override
     def matrix(self) -> T_TFTensor:
         matrix = super().matrix()
-        if self.head_subset is not None:
-            matrix = tf.gather(matrix, self.head_subset, axis=0)
-            max_states_subset = max(
-                [self.hmm_config.states[h] for h in self.head_subset]
-            )
-            # Keep only relevant states
-            matrix = matrix[:, :max_states_subset, :]
-
-        if not self.trainable_insertions:
-            # Create mask for match states (True) vs insertion states (False)
-            # self.lengths gives the number of match states per head
-            max_states = tf.shape(matrix)[1]
-            mask = tf.sequence_mask(
-                self.lengths, maxlen=max_states, dtype=matrix.dtype
-            )
-            # Expand mask to cover the emission dimension
-            mask = mask[:, :, tf.newaxis]
-            # Apply mask: keep gradients for match states, stop for insertions
-            matrix = mask * matrix + (1 - mask) * tf.stop_gradient(matrix)
-
-        return matrix
+        return self._prepare_matrix(matrix)
 
     def emission_scores(self, observations: T_TFTensor) -> T_TFTensor:
         if self.use_full_matmul:
@@ -198,7 +178,7 @@ class ProfileEmitter(TFCategoricalEmitter):
         # We need to provide an array with indices into the emitter's kernel
         # values, which is flat and sorted by head, states, emissions (major
         # to minor).
-        s = self.alphabet_size
+        s = self.matrix_dim
         i_sum = 0
         indices = []
         for L in self._lengths: # use unrestricted lengths here
@@ -213,3 +193,26 @@ class ProfileEmitter(TFCategoricalEmitter):
             i_sum += s
             indices.extend([share_match, share_insert])
         return np.concatenate(indices)
+
+    def _prepare_matrix(self, matrix: T_TFTensor) -> T_TFTensor:
+        if self.head_subset is not None:
+            matrix = tf.gather(matrix, self.head_subset, axis=0)
+            max_states_subset = max(
+                [self.hmm_config.states[h] for h in self.head_subset]
+            )
+            # Keep only relevant states
+            matrix = matrix[:, :max_states_subset, :]
+
+        if not self.trainable_insertions:
+            # Create mask for match states (True) vs insertion states (False)
+            # self.lengths gives the number of match states per head
+            max_states = tf.shape(matrix)[1]
+            mask = tf.sequence_mask(
+                self.lengths, maxlen=max_states, dtype=matrix.dtype
+            )
+            # Expand mask to cover the emission dimension
+            mask = mask[:, :, tf.newaxis]
+            # Apply mask: keep gradients for match states, stop for insertions
+            matrix = mask * matrix + (1 - mask) * tf.stop_gradient(matrix)
+
+        return matrix

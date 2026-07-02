@@ -459,11 +459,14 @@ class PHMMLayer(tf.keras.Layer):
             joint_emitter = JointProfileEmitter(
                 marginal_values=[aa_values, _struct_values],
                 trainable_insertions=trainable_insertions,
+                low_rank=self.structural_config.joint_emission_low_rank,
             )
         else:
             joint_emitter = JointProfileEmitter(
                 values=joint_values,
                 trainable_insertions=trainable_insertions,
+                low_rank=self.structural_config.joint_emission_low_rank,
+                kernel_values=True,
             )
         if self.prior_config.use_amino_acid_prior and self.use_prior:
             joint_emitter.add_marginal_prior(0, emission_prior)

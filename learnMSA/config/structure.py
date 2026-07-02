@@ -58,6 +58,10 @@ class StructureConfig(BaseModel):
     initialization is also based on the product of the marginal probabilities
     provided in the configs. (EXPERIMENTAL)"""
 
+    joint_emission_low_rank: int = 0
+    """If joint_emissions is True, this specifies the rank of the low-rank
+    approximation of the joint emission matrix."""
+
     match_emissions: (Sequence[float] | Sequence[Sequence[float]] |
                       Sequence[Sequence[Sequence[float]]] |
                       NPArray | None) = None

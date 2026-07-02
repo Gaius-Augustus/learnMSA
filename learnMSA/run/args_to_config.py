@@ -5,7 +5,9 @@ from argparse import Namespace
 from learnMSA.config import Configuration
 
 
-def args_to_config(args: Namespace, base_config: Configuration | None = None) -> Configuration:
+def args_to_config(
+    args: Namespace, base_config: Configuration | None = None
+) -> Configuration:
     """Apply parsed command-line arguments on top of base_config.
 
     Args:
@@ -150,6 +152,7 @@ def args_to_config(args: Namespace, base_config: Configuration | None = None) ->
     st["prior_temperature"] = args.struct_prior_temperature
     st["reset_after_surgery"] = args.struct_reset_after_surgery
     st["joint_emissions"] = args.joint_emissions
+    st["joint_emission_low_rank"] = args.joint_emission_low_rank
 
     # --- Advanced ---
     adv["dist_out"] = args.dist_out
@@ -171,7 +174,8 @@ def _get_save_emb(args: Namespace) -> str:
         if args.input_file is None:
             return ""
         else:
-            return str(Path(args.work_dir) / (Path(args.input_file).stem + ".emb"))
+            p = Path(args.work_dir) / (Path(args.input_file).stem + ".emb")
+            return str(p)
     else:
         return args.save_emb
 

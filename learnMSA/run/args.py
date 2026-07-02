@@ -761,5 +761,12 @@ def parse_args(
         action="store_true",
         help=argparse.SUPPRESS
     )
+    parser.add_argument(
+        "--joint_emission_low_rank",
+        dest="joint_emission_low_rank",
+        type=int,
+        default=st.joint_emission_low_rank,
+        help=argparse.SUPPRESS
+    )
 
     return parser
