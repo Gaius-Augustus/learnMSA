@@ -415,6 +415,8 @@ class PHMMLayer(tf.keras.Layer):
                 "Number of structural value sets must match number of heads"
             )
             _struct_values = list(struct_values)
+        else:
+            _struct_values = None
 
         needs_struct_prior = self.structural_config.prior_name\
             and self.use_prior\
@@ -445,10 +447,10 @@ class PHMMLayer(tf.keras.Layer):
                 override_insertions=self.config.insert_emissions is None,
             )
             # Override structural emissions with prior distribution if specified
-            if self.structural_config.prior_name :
+            if self.structural_config.prior_name and struct_values is not None:
                 struct_prior.temperature = self.structural_config.prior_temperature
                 _struct_values = self._override_emissions_with_prior(
-                    _struct_values,
+                    _struct_values, # type: ignore
                     struct_prior,
                     override_matches=self.structural_config.match_emissions is None,
                     override_insertions=self.structural_config.insert_emissions is None,
@@ -456,10 +458,12 @@ class PHMMLayer(tf.keras.Layer):
 
         if joint_values is None:
             assert aa_values is not None
+            assert _struct_values is not None
             joint_emitter = JointProfileEmitter(
                 marginal_values=[aa_values, _struct_values],
                 trainable_insertions=trainable_insertions,
                 low_rank=self.structural_config.joint_emission_low_rank,
+                temperature=self.structural_config.emitter_temperature,
             )
         else:
             joint_emitter = JointProfileEmitter(
@@ -467,6 +471,7 @@ class PHMMLayer(tf.keras.Layer):
                 trainable_insertions=trainable_insertions,
                 low_rank=self.structural_config.joint_emission_low_rank,
                 kernel_values=True,
+                temperature=self.structural_config.emitter_temperature,
             )
         if self.prior_config.use_amino_acid_prior and self.use_prior:
             joint_emitter.add_marginal_prior(0, emission_prior)

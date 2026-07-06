@@ -42,9 +42,10 @@ class JointProfileEmitter(ProfileEmitter):
         marginal_values: Sequence[Sequence[PHMMValueSet]] | None = None,
         trainable_insertions: bool = True,
         use_full_matmul: bool = True,
-        temperature: float = 1.0,
         low_rank: int = 0,
         kernel_values: bool = False,
+        temperature: float = 1.0,
+        conditional: bool = False,
         **kwargs
     ) -> None:
         """
@@ -62,8 +63,6 @@ class JointProfileEmitter(ProfileEmitter):
             use_full_matmul (bool): Whether to compute emission scores via
                 a full matrix multiplication instead of copying insertion
                 emissions.
-            temperature (float): Temperature applied as an exponent
-                (1/temperature) to the emission scores. Defaults to 1.0.
             low_rank (int): The rank of the low-rank approximation to
                 parameterize the joint distribution when exactly two marginals are
                 provided. If 0, no low-rank approximation is used.
@@ -71,6 +70,11 @@ class JointProfileEmitter(ProfileEmitter):
                 as kernel values instead of probabilities, i.e. logits unless
                 low_rank > 0, in which case they are treated as the concatenated
                 and flattened A and B matrices.
+            conditional (bool): If true, instead of modeling the joint
+                distribution, the emission scores are now the conditional
+                of the second variable given the first, i.e. P(x2 | x1, s).
+            temperature (float): Temperature applied as an exponent
+                (1/temperature).
         """
         _values : Sequence[PHMMValueSet]
         if values is not None:
@@ -105,6 +109,8 @@ class JointProfileEmitter(ProfileEmitter):
         # triggering the "tracker locked" error.
         object.__setattr__(self, '_marginal_priors', {})
         self.marginal_dims = []
+
+        self.conditional = conditional
 
     def add_marginal_prior(self, marginal_index: int, prior: TFPrior) -> None:
         """Adds a prior to the marginal distribution of the joint distribution.
@@ -176,13 +182,23 @@ class JointProfileEmitter(ProfileEmitter):
     def matrix(self) -> T_TFTensor:
         matrix = self._build_matrix(tf.identity)
         matrix = self._prepare_matrix(matrix)
+
         if self.low_rank > 0:
             A, B = self._A_B_matrices(matrix)
             matrix = tf.einsum("...ik,...jk->...ij", A, B)
-            matrix = tf.reshape(
-                matrix, [tf.shape(matrix)[0], tf.shape(matrix)[1], -1]
-            )
-        matrix = zero_row_softmax(matrix)
+            if self.conditional:
+                matrix = tf.nn.softmax(matrix, axis=-1)
+                matrix = tf.reshape(
+                    matrix, [tf.shape(matrix)[0], tf.shape(matrix)[1], -1]
+                )
+            else:
+                matrix = tf.reshape(
+                    matrix, [tf.shape(matrix)[0], tf.shape(matrix)[1], -1]
+                )
+                matrix = zero_row_softmax(matrix)
+        else:
+            matrix = zero_row_softmax(matrix)
+
         # mask out padding states; use only the subset of states if head_subset
         # is active, otherwise self.states would broadcast the mask back to the
         # full number of heads after _prepare_matrix has already filtered them
@@ -191,7 +207,10 @@ class JointProfileEmitter(ProfileEmitter):
             if self.head_subset is not None
             else self.states
         )
-        matrix *= tf.sequence_mask(effective_states, dtype=matrix.dtype)[..., tf.newaxis]
+        matrix *= tf.sequence_mask(
+            effective_states, dtype=matrix.dtype
+        )[..., tf.newaxis]
+
         return matrix
 
     def parameter_matrix(self) -> T_TFTensor:
