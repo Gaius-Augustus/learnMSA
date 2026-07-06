@@ -284,8 +284,7 @@ def update_kernels(
 
     # Amino acids
     if not phmm_layer.no_aa\
-            and not training_config.reset_emissions_after_surgery\
-            and phmm_layer.joint_emitter is None:
+            and not training_config.reset_emissions_after_surgery:
         assert phmm_layer.profile_emitter is not None
         aa_emissions = phmm_layer.profile_emitter.matrix().numpy()
         assert aa_emissions.shape[0] == 1,\

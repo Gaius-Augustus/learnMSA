@@ -141,6 +141,11 @@ class PHMMLayer(tf.keras.Layer):
         values = self._add_transitioner(
             aa_value_sets, lengths, trainable_insertions
         )
+        self._add_amino_acid_emitter(
+            values,
+            allow_override = aa_value_sets is None,
+            trainable_insertions = trainable_insertions,
+        )
         if self.structural_config and self.structural_config.joint_emissions:
             self._add_joint_aa_struct_emitter(
                 values,
@@ -150,11 +155,6 @@ class PHMMLayer(tf.keras.Layer):
                 trainable_insertions = trainable_insertions,
             )
         else:
-            self._add_amino_acid_emitter(
-                values,
-                allow_override = aa_value_sets is None,
-                trainable_insertions = trainable_insertions,
-            )
             self._add_struct_emitter(struct_value_sets, trainable_insertions)
         self._add_emb_emitter(emb_value_sets, trainable_insertions)
 
@@ -464,6 +464,7 @@ class PHMMLayer(tf.keras.Layer):
                 trainable_insertions=trainable_insertions,
                 low_rank=self.structural_config.joint_emission_low_rank,
                 temperature=self.structural_config.emitter_temperature,
+                conditional=True
             )
         else:
             joint_emitter = JointProfileEmitter(
@@ -472,6 +473,7 @@ class PHMMLayer(tf.keras.Layer):
                 low_rank=self.structural_config.joint_emission_low_rank,
                 kernel_values=True,
                 temperature=self.structural_config.emitter_temperature,
+                conditional=True
             )
         if self.prior_config.use_amino_acid_prior and self.use_prior:
             joint_emitter.add_marginal_prior(0, emission_prior)
