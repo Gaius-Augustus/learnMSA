@@ -1,3 +1,5 @@
+from collections.abc import Callable
+
 import numpy as np
 import pytest
 import tensorflow as tf
@@ -29,8 +31,7 @@ def config() -> Configuration:
         structure=structure,
     )
 
-@pytest.fixture
-def joint_emitter_from_marginals(
+def make_joint_emitter_from_marginals(
     config: Configuration,
     hidten_config: HidtenHMMConfig
 ) -> JointProfileEmitter:
@@ -48,7 +49,10 @@ def joint_emitter_from_marginals(
 
     # Construct an emitter with two heads from the marginal values,
     # inferring the initial joint distribution as the product of marginals
-    emitter = JointProfileEmitter(marginal_values=[aa_values, struct_values])
+    emitter = JointProfileEmitter(
+        marginal_values=[aa_values, struct_values],
+        low_rank=config.structure.joint_emission_low_rank,
+    )
 
     emitter.hmm_config = hidten_config
     input_shapes = ((None, None, 23), (None, None, 20))
@@ -68,8 +72,7 @@ def joint_emitter_from_marginals(
 
     return emitter
 
-@pytest.fixture
-def joint_emitter_from_values(
+def make_joint_emitter_from_values(
     config: Configuration,
     hidten_config: HidtenHMMConfig
 ) -> JointProfileEmitter:
@@ -104,7 +107,10 @@ def joint_emitter_from_values(
     joint_values = [values_1, values_2]
 
     # Construct an emitter with two heads from the initial values
-    emitter = JointProfileEmitter(values = joint_values)
+    emitter = JointProfileEmitter(
+        values=joint_values,
+        low_rank=config.structure.joint_emission_low_rank,
+    )
 
     emitter.hmm_config = hidten_config
     input_shapes = ((None, None, 23), (None, None, 20))
@@ -113,8 +119,12 @@ def joint_emitter_from_values(
     return emitter
 
 def test_matrix_from_marginals(
-    joint_emitter_from_marginals: JointProfileEmitter
+    config: Configuration,
+    hidten_config: HidtenHMMConfig
 ) -> None:
+    joint_emitter_from_marginals = make_joint_emitter_from_marginals(
+        config, hidten_config
+    )
     B = joint_emitter_from_marginals.matrix()
 
     # Check basic matrix properties
@@ -144,8 +154,12 @@ def test_matrix_from_marginals(
     np.testing.assert_allclose(B[1, 3:8, expected_index], 1.0, rtol=1e-6)
 
 def test_matrix_from_values(
-    joint_emitter_from_values: JointProfileEmitter
+    config: Configuration,
+    hidten_config: HidtenHMMConfig
 ) -> None:
+    joint_emitter_from_values = make_joint_emitter_from_values(
+        config, hidten_config
+    )
     B = joint_emitter_from_values.matrix()
 
     # Check basic matrix properties
@@ -172,8 +186,12 @@ def test_matrix_from_values(
     np.testing.assert_allclose(B[1, 3:8, expected_index_head_2], 1.0, rtol=1e-6)
 
 def test_marginal_matrix_and_priors(
-    joint_emitter_from_marginals: JointProfileEmitter,
+    config: Configuration,
+    hidten_config: HidtenHMMConfig
 ) -> None:
+    joint_emitter_from_marginals = make_joint_emitter_from_marginals(
+        config, hidten_config
+    )
     # The the marginal matrices
     aa_matrix, struct_matrix = joint_emitter_from_marginals.marginal_matrices()
     assert aa_matrix.shape == (2, 10, 23)
@@ -195,8 +213,12 @@ def test_marginal_matrix_and_priors(
     assert all(prior_scores.numpy() != 0)
 
 def test_call(
-    joint_emitter_from_values: JointProfileEmitter,
+    config: Configuration,
+    hidten_config: HidtenHMMConfig
 ) -> None:
+    joint_emitter_from_values = make_joint_emitter_from_values(
+        config, hidten_config
+    )
 
     aa_head_1 = [21, 11, 3, 6]
     struct_head_1 = [10, 11, 12, 13]
@@ -247,3 +269,48 @@ def test_call(
     assert np.allclose(E_2[:,3,:], [0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 1])
     assert np.allclose(E[:,:4,0,:4], np.eye(4))
     assert np.allclose(E[:,:3,1,:3], np.eye(3))
+
+@pytest.mark.parametrize("low_rank", [2, 4])
+def test_matrix_low_rank(
+    low_rank: int,
+    config: Configuration,
+    hidten_config: HidtenHMMConfig
+) -> None:
+    """Test that the low-rank parameterization recovers the product of
+    marginals at initialization.
+
+    A product distribution P(aa, struct) = P(aa) * P(struct) is rank-1 in
+    probability space. AB_from_marginals encodes it as logits
+    log P(aa) + log P(struct), so any low_rank >= 2 recovers the product
+    exactly at initialization (extra columns contribute zero to the logits).
+    """
+    config.structure.joint_emission_low_rank = low_rank
+    emitter = make_joint_emitter_from_marginals(config, hidten_config)
+    B = emitter.matrix()
+
+    # Check if the kernel has the correct size
+    assert emitter.low_rank == low_rank
+    assert emitter.parameter_matrix().shape == (2, 10, (20 + 23) * low_rank)
+
+    # Check basic matrix properties
+    assert B.shape == (2, 10, 23 * 20)
+    np.testing.assert_allclose(np.sum(B[0], axis=-1), 1.0, rtol=1e-5)
+    np.testing.assert_allclose(np.sum(B[1, :8], axis=-1), 1.0, rtol=1e-5)
+
+    # The config uses one-hot marginals: aa peaks at position i, struct peaks
+    # at i+10. The joint product is therefore a one-hot at i*20 + (i+10).
+
+    # Check match emissions of head 1
+    for i in range(4):
+        expected_index = i * 20 + (i + 10)
+        np.testing.assert_allclose(B[0, i, expected_index], 1.0, rtol=1e-5)
+
+    # Check match emissions of head 2
+    for i in range(3):
+        expected_index = i * 20 + (i + 10)
+        np.testing.assert_allclose(B[1, i, expected_index], 1.0, rtol=1e-5)
+
+    # Check insertions: aa insert=7, struct insert=18
+    expected_insert_index = 7 * 20 + 18
+    np.testing.assert_allclose(B[0, 4:, expected_insert_index], 1.0, rtol=1e-5)
+    np.testing.assert_allclose(B[1, 3:8, expected_insert_index], 1.0, rtol=1e-5)

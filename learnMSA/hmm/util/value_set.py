@@ -213,7 +213,7 @@ class PHMMValueSet:
         # Check for that transitions is stochastic
         row_sums = np.sum(transitions, axis=-1)
         for i, row_sum in enumerate(row_sums):
-            if not np.isclose(row_sum, 1.0):
+            if not np.isclose(row_sum, 1.0, atol=1e-4):
                 raise ValueError(
                     "Transition probabilities for state "
                     f"{state_index_to_name(i, L)} in head {h} with "

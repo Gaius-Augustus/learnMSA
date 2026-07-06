@@ -28,9 +28,9 @@ class JointProfileEmitter(ProfileEmitter):
     marginal distributions.
     """
 
-    _marginal_priors: dict[int, TFPrior] = {}
+    _marginal_priors: dict[int, TFPrior]
 
-    marginal_dims: list[int] = []
+    marginal_dims: list[int]
 
     @TFCategoricalEmitter.initializer.setter
     def initializer(self, initializer: T_initializer) -> None:
@@ -100,6 +100,11 @@ class JointProfileEmitter(ProfileEmitter):
         )
 
         self.low_rank = low_rank
+        # Use object.__setattr__ to store as a plain Python dict, bypassing
+        # Keras tracking. This allows priors to be added after build() without
+        # triggering the "tracker locked" error.
+        object.__setattr__(self, '_marginal_priors', {})
+        self.marginal_dims = []
 
     def add_marginal_prior(self, marginal_index: int, prior: TFPrior) -> None:
         """Adds a prior to the marginal distribution of the joint distribution.
@@ -235,8 +240,9 @@ class JointProfileEmitter(ProfileEmitter):
     ) -> tuple[T_TFTensor, ...]:
         if matrix is None:
             matrix = self.matrix()
+        H, Q = tf.unstack(tf.shape(matrix)[:2])
         matrix = tf.reshape(
-            matrix, [self.heads, self.max_states] + self.marginal_dims
+            matrix, [H, Q] + self.marginal_dims
         )
         marginal_matrices = []
         for i in range(len(self.marginal_dims)):
