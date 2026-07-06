@@ -475,9 +475,16 @@ class PHMMLayer(tf.keras.Layer):
                 temperature=self.structural_config.emitter_temperature,
                 conditional=True
             )
-        if self.prior_config.use_amino_acid_prior and self.use_prior:
-            joint_emitter.add_marginal_prior(0, emission_prior)
+        # TODO: don't use an aa prior with conditional = True
+        # if self.prior_config.use_amino_acid_prior and self.use_prior:
+        #     joint_emitter.add_marginal_prior(0, emission_prior)
         if self.structural_config.prior_name and self.use_prior:
+            # TODO: this needs a fix for the conditional=True case,
+            # but the Dirichlet prior for 3Di does not work well anyway
+            raise NotImplementedError(
+                "Adding a structural prior to a joint amino acid and structural "
+                "emitter is not implemented yet."
+            )
             joint_emitter.add_marginal_prior(1, struct_prior)
         self.hmm.add_emitter(joint_emitter, observations=(0,1))
         self.joint_emitter = joint_emitter
