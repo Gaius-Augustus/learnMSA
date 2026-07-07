@@ -372,6 +372,7 @@ def update_kernels(
             joint_insert_value = outer_product_flat_pw(
                 aa_insert_value, struct_insert_value
             ).numpy()
+            joint_insert_value = np.log(joint_insert_value + 1e-16)
         joint_emissions_new = apply_mods(
             joint_emissions,
             pos_expand=pos_expand,
