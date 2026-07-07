@@ -251,7 +251,14 @@ def plot_phmm(
         if layer.joint_emitter:
             ax_m = fig.add_subplot(top_gs[emitter_row, 0])
             ax_i = fig.add_subplot(top_gs[emitter_row, 1])
-            aa_matrix, struct_matrix = layer.joint_emitter.marginal_matrices()
+            if layer.joint_emitter.conditional:
+                assert layer.profile_emitter is not None
+                aa_matrix = layer.profile_emitter.matrix()
+                struct_matrix = layer.joint_emitter.marginal_matrix_from_conditional(
+                    prior=layer.profile_emitter.matrix(),
+                )
+            else:
+                aa_matrix, struct_matrix = layer.joint_emitter.marginal_matrices()
             aa_matrix = aa_matrix.numpy()
             struct_matrix = struct_matrix.numpy()
             _render_emitter_fast(

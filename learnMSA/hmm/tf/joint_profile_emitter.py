@@ -197,7 +197,14 @@ class JointProfileEmitter(ProfileEmitter):
                 )
                 matrix = zero_row_softmax(matrix)
         else:
-            matrix = zero_row_softmax(matrix)
+            if self.conditional:
+                H = tf.shape(matrix)[0]
+                Q = tf.shape(matrix)[1]
+                matrix = tf.reshape(matrix, [H, Q] + self.marginal_dims)
+                matrix = tf.nn.softmax(matrix, axis=-1)
+                matrix = tf.reshape(matrix, [H, Q, -1])
+            else:
+                matrix = zero_row_softmax(matrix)
 
         # mask out padding states; use only the subset of states if head_subset
         # is active, otherwise self.states would broadcast the mask back to the
@@ -257,6 +264,10 @@ class JointProfileEmitter(ProfileEmitter):
     def marginal_matrices(
         self, matrix: T_TFTensor | None = None
     ) -> tuple[T_TFTensor, ...]:
+        """Computes the marginal matrices for each marginal distribution.
+        Requires `conditional=False`."""
+        assert not self.conditional,\
+            "Marginal matrices can only be computed for joint distributions."
         if matrix is None:
             matrix = self.matrix()
         H, Q = tf.unstack(tf.shape(matrix)[:2])
@@ -267,6 +278,24 @@ class JointProfileEmitter(ProfileEmitter):
         for i in range(len(self.marginal_dims)):
             marginal_matrices.append(marginal_matrix(matrix, i))
         return tuple(marginal_matrices)
+
+    def marginal_matrix_from_conditional(
+        self, prior: T_TFTensor, matrix: T_TFTensor | None = None
+    ) -> T_TFTensor:
+        """Computes the marginal matrix for the second variable from the
+        conditional distribution of the second variable given the first and
+        the prior distribution of the first variable.
+        Requires `conditional=False`.
+        """
+        assert self.conditional,\
+            "Marginal matrix from conditional can only be computed for "\
+            "conditional distributions."
+        if matrix is None:
+            matrix = self.matrix() # (H, Q, D1 * D2)
+        H, Q = tf.unstack(tf.shape(matrix)[:2])
+        matrix = tf.reshape(matrix, [H, Q] + self.marginal_dims) # (H, Q, D1, D2)
+        marginal_matrix = tf.einsum("...i,...ij->...j", prior, matrix)
+        return marginal_matrix
 
     def prior_scores(self) -> T_TFTensor:
         """Calculates the prior scores for the modules' parameters in log-scale.
@@ -279,9 +308,10 @@ class JointProfileEmitter(ProfileEmitter):
         matrix = self.matrix()
 
         # Apply priors to the marginal distributions if they exist
-        marginal_matrices = self.marginal_matrices(matrix)
-        for i, prior in self._marginal_priors.items():
-            log_prior_scores += prior(marginal_matrices[i])
+        if len(self._marginal_priors) > 0:
+            marginal_matrices = self.marginal_matrices(matrix)
+            for i, prior in self._marginal_priors.items():
+                log_prior_scores += prior(marginal_matrices[i])
 
         # Apply a prior to the joint distribution if it exists
         if hasattr(self, "_prior"):

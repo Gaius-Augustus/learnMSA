@@ -314,3 +314,147 @@ def test_matrix_low_rank(
     expected_insert_index = 7 * 20 + 18
     np.testing.assert_allclose(B[0, 4:, expected_insert_index], 1.0, rtol=1e-5)
     np.testing.assert_allclose(B[1, 3:8, expected_insert_index], 1.0, rtol=1e-5)
+
+
+def make_conditional_emitter(
+    config: Configuration,
+    hidten_config: HidtenHMMConfig,
+    low_rank: int = 0,
+) -> JointProfileEmitter:
+    """Builds a JointProfileEmitter with conditional=True from marginal values."""
+    lengths = [4, 3]
+    aa_values = [
+        PHMMValueSet.from_config(L, h, config.hmm)
+        for h, L in enumerate(lengths)
+    ]
+    struct_values = [
+        PHMMValueSet.from_structural_config(L, h, config.structure)
+        for h, L in enumerate(lengths)
+    ]
+    emitter = JointProfileEmitter(
+        marginal_values=[aa_values, struct_values],
+        low_rank=low_rank,
+        conditional=True,
+    )
+    emitter.hmm_config = hidten_config
+    emitter.build(((None, None, 23), (None, None, 20)))
+    return emitter
+
+
+def test_conditional_matrix_normalization(
+    config: Configuration,
+    hidten_config: HidtenHMMConfig,
+) -> None:
+    """Full distribution (low_rank=0): each conditional row P(x2 | x1=i, s)
+    must sum to 1 for valid states."""
+    emitter = make_conditional_emitter(config, hidten_config, low_rank=0)
+    B = emitter.matrix()
+    assert B.shape == (2, 10, 23 * 20)
+
+    D1, D2 = 23, 20
+    B_reshaped = B.numpy().reshape(2, 10, D1, D2)
+
+    # Head 0: all 10 states are valid
+    np.testing.assert_allclose(
+        B_reshaped[0, :, :, :].sum(axis=-1),
+        np.ones((10, D1)),
+        rtol=1e-6,
+    )
+    # Head 1: only 8 states are valid (L=3 → 2*3+2=8)
+    np.testing.assert_allclose(
+        B_reshaped[1, :8, :, :].sum(axis=-1),
+        np.ones((8, D1)),
+        rtol=1e-6,
+    )
+
+
+def test_conditional_initializes_independent_of_x1(
+    config: Configuration,
+    hidten_config: HidtenHMMConfig,
+) -> None:
+    """When initialized from the product of marginals (one-hot per state) with
+    conditional=True:
+    - For the "peak" x1 value (the one with non-zero marginal probability), the
+      conditional must be peaked at the corresponding x2 value.
+    - For all other x1 values the joint logits are all equal, so the
+      conditional must be uniform over x2.
+    """
+    emitter = make_conditional_emitter(config, hidten_config, low_rank=0)
+    B = emitter.matrix()
+
+    D1, D2 = 23, 20
+    B_reshaped = B.numpy().reshape(2, 10, D1, D2)
+
+    # Head 0 has 4 match states. The config gives:
+    #   aa  marginal for state i → one-hot at position i
+    #   str marginal for state i → one-hot at position i+10
+    # Peak x1 for state i is i; expected peak x2 is i+10.
+    for i in range(4):
+        # Peak row: should be one-hot at x2 = i+10
+        np.testing.assert_allclose(
+            B_reshaped[0, i, i, i + 10], 1.0, rtol=1e-5
+        )
+        # Non-peak rows: joint logits all equal → uniform conditional
+        for d1 in range(D1):
+            if d1 != i:
+                np.testing.assert_allclose(
+                    B_reshaped[0, i, d1, :],
+                    np.full(D2, 1.0 / D2),
+                    rtol=1e-5,
+                )
+
+
+def test_marginal_matrix_from_conditional(
+    config: Configuration,
+    hidten_config: HidtenHMMConfig,
+) -> None:
+    """marginal_matrix_from_conditional returns the correct weighted average
+    of conditional rows."""
+    emitter = make_conditional_emitter(config, hidten_config, low_rank=0)
+    B = emitter.matrix()
+
+    D1, D2 = 23, 20
+    B_reshaped = B.numpy().reshape(2, 10, D1, D2)
+
+    # One-hot prior selects a single row of the conditional
+    for d1_idx in [0, 5, 22]:
+        prior_onehot = tf.one_hot(d1_idx, D1)
+        marginal = emitter.marginal_matrix_from_conditional(prior_onehot, B)
+        assert marginal.shape == (2, 10, D2)
+        np.testing.assert_allclose(
+            marginal.numpy(), B_reshaped[:, :, d1_idx, :], rtol=1e-5
+        )
+
+    # Uniform prior: marginal equals the mean over x1 rows
+    prior_uniform = tf.ones([D1], dtype=tf.float32) / D1
+    marginal_uniform = emitter.marginal_matrix_from_conditional(prior_uniform, B)
+    expected_uniform = B_reshaped.mean(axis=2)  # (H, Q, D2)
+    np.testing.assert_allclose(marginal_uniform.numpy(), expected_uniform, rtol=1e-5)
+
+
+@pytest.mark.parametrize("low_rank", [2, 4])
+def test_conditional_low_rank_normalization(
+    low_rank: int,
+    config: Configuration,
+    hidten_config: HidtenHMMConfig,
+) -> None:
+    """Low-rank conditional: each conditional row P(x2 | x1=i, s) must sum
+    to 1 for valid states."""
+    config.structure.joint_emission_low_rank = low_rank
+    emitter = make_conditional_emitter(config, hidten_config, low_rank=low_rank)
+    B = emitter.matrix()
+    assert B.shape == (2, 10, 23 * 20)
+
+    D1, D2 = 23, 20
+    B_reshaped = B.numpy().reshape(2, 10, D1, D2)
+
+    np.testing.assert_allclose(
+        B_reshaped[0, :, :, :].sum(axis=-1),
+        np.ones((10, D1)),
+        rtol=1e-5,
+    )
+    np.testing.assert_allclose(
+        B_reshaped[1, :8, :, :].sum(axis=-1),
+        np.ones((8, D1)),
+        rtol=1e-5,
+    )
