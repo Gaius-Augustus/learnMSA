@@ -768,5 +768,12 @@ def parse_args(
         default=st.joint_emission_low_rank,
         help=argparse.SUPPRESS
     )
+    parser.add_argument(
+        "--struct_emitter_temperature",
+        dest="struct_emitter_temperature",
+        type=float,
+        default=st.emitter_temperature,
+        help=argparse.SUPPRESS
+    )
 
     return parser

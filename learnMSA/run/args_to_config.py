@@ -153,6 +153,7 @@ def args_to_config(
     st["reset_after_surgery"] = args.struct_reset_after_surgery
     st["joint_emissions"] = args.joint_emissions
     st["joint_emission_low_rank"] = args.joint_emission_low_rank
+    st["emitter_temperature"] = args.struct_emitter_temperature
 
     # --- Advanced ---
     adv["dist_out"] = args.dist_out
