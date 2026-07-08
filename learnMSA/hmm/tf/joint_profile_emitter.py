@@ -376,7 +376,6 @@ def low_rank_marginal_values(
     kernel_values: list[PHMMValueSet] = []
 
     for h in range(len(marginal_values[0])):
-        k = 2  # Default low rank
         A, B = AB_from_marginals(
             marginal_values[0][h].match_emissions,
             marginal_values[1][h].match_emissions,
