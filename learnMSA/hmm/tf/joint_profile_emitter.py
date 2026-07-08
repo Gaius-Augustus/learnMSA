@@ -188,6 +188,7 @@ class JointProfileEmitter(ProfileEmitter):
             matrix = tf.einsum("...ik,...jk->...ij", A, B)
             if self.conditional:
                 matrix = tf.nn.softmax(matrix, axis=-1)
+                matrix = self._anneal_matrix(matrix)
                 matrix = tf.reshape(
                     matrix, [tf.shape(matrix)[0], tf.shape(matrix)[1], -1]
                 )
@@ -196,15 +197,18 @@ class JointProfileEmitter(ProfileEmitter):
                     matrix, [tf.shape(matrix)[0], tf.shape(matrix)[1], -1]
                 )
                 matrix = zero_row_softmax(matrix)
+                matrix = self._anneal_matrix(matrix)
         else:
             if self.conditional:
                 H = tf.shape(matrix)[0]
                 Q = tf.shape(matrix)[1]
                 matrix = tf.reshape(matrix, [H, Q] + self.marginal_dims)
                 matrix = tf.nn.softmax(matrix, axis=-1)
+                matrix = self._anneal_matrix(matrix)
                 matrix = tf.reshape(matrix, [H, Q, -1])
             else:
                 matrix = zero_row_softmax(matrix)
+                matrix = self._anneal_matrix(matrix)
 
         # mask out padding states; use only the subset of states if head_subset
         # is active, otherwise self.states would broadcast the mask back to the

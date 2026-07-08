@@ -165,21 +165,45 @@ class PHMMLayer(tf.keras.Layer):
         """Makes the layer return log-likelihoods.
         """
         self._mode = HMMMode.LIKELIHOOD_LOG
+        if self.struct_emitter is not None:
+            self.struct_emitter.temperature = 1
+        if self.joint_emitter is not None:
+            self.joint_emitter.temperature = 1
 
     def viterbi_mode(self) -> None:
         """Makes the layer return Viterbi paths.
         """
         self._mode = HMMMode.VITERBI
+        if self.struct_emitter is not None:
+            st_conf = self.structural_config
+            assert st_conf is not None
+            self.struct_emitter.temperature = st_conf.emitter_temperature
+        if self.joint_emitter is not None:
+            st_conf = self.structural_config
+            assert st_conf is not None
+            self.joint_emitter.temperature = st_conf.emitter_temperature
 
     def mea_mode(self) -> None:
         """Makes the layer return MEA paths.
         """
         self._mode = HMMMode.MEA
+        if self.struct_emitter is not None:
+            st_conf = self.structural_config
+            assert st_conf is not None
+            self.struct_emitter.temperature = st_conf.emitter_temperature
+        if self.joint_emitter is not None:
+            st_conf = self.structural_config
+            assert st_conf is not None
+            self.joint_emitter.temperature = st_conf.emitter_temperature
 
     def posterior_mode(self) -> None:
         """Makes the layer return state posterior probabilities.
         """
         self._mode = HMMMode.POSTERIOR
+        if self.struct_emitter is not None:
+            self.struct_emitter.temperature = 1
+        if self.joint_emitter is not None:
+            self.joint_emitter.temperature = 1
 
     def is_loglik_mode(self) -> bool:
         """Check if the layer is in log-likelihood mode.
@@ -362,7 +386,6 @@ class PHMMLayer(tf.keras.Layer):
             structural_emitter = ProfileEmitter(
                 values=_struct_values,
                 trainable_insertions=trainable_insertions,
-                temperature=self.structural_config.emitter_temperature,
             )
             if struct_prior is not None and self.use_prior:
                 structural_emitter.prior = struct_prior
@@ -463,7 +486,6 @@ class PHMMLayer(tf.keras.Layer):
                 marginal_values=[aa_values, _struct_values],
                 trainable_insertions=trainable_insertions,
                 low_rank=self.structural_config.joint_emission_low_rank,
-                temperature=self.structural_config.emitter_temperature,
                 conditional=True
             )
         else:
@@ -472,7 +494,6 @@ class PHMMLayer(tf.keras.Layer):
                 trainable_insertions=trainable_insertions,
                 low_rank=self.structural_config.joint_emission_low_rank,
                 kernel_values=True,
-                temperature=self.structural_config.emitter_temperature,
                 conditional=True
             )
         # TODO: don't use an aa prior with conditional = True

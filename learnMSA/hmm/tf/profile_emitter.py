@@ -89,7 +89,9 @@ class ProfileEmitter(TFCategoricalEmitter):
     @override
     def matrix(self) -> T_TFTensor:
         matrix = super().matrix()
-        return self._prepare_matrix(matrix)
+        matrix = self._prepare_matrix(matrix)
+        matrix = self._anneal_matrix(matrix)
+        return matrix
 
     def emission_scores(self, observations: T_TFTensor) -> T_TFTensor:
         if self.use_full_matmul:
@@ -111,15 +113,6 @@ class ProfileEmitter(TFCategoricalEmitter):
             # Mask invalid positions in shorter heads
             emission_scores *= tf.sequence_mask(
                 self.lengths+1, dtype=emission_scores.dtype
-            )
-
-        if self.temperature != 1.0:
-            # Clip to a small epsilon before raising to a fractional power.
-            # Clipping to 0 would cause the gradient p*x^(p-1) -> +Inf at x=0
-            # when temperature > 1 (p = 1/temperature < 1). Masked positions
-            # with near-zero scores are irrelevant to the loss anyway.
-            emission_scores = tf.pow(
-                tf.maximum(emission_scores, 1e-12), 1.0 / self.temperature
             )
 
         return emission_scores
@@ -215,4 +208,12 @@ class ProfileEmitter(TFCategoricalEmitter):
             # Apply mask: keep gradients for match states, stop for insertions
             matrix = mask * matrix + (1 - mask) * tf.stop_gradient(matrix)
 
+        return matrix
+
+    def _anneal_matrix(self, matrix: T_TFTensor) -> T_TFTensor:
+        if self.temperature != 1.0:
+            nonzero_mask = tf.reduce_sum(matrix, axis=-1, keepdims=True) > 0
+            log_matrix = tf.math.log(tf.maximum(matrix, 1e-16))
+            matrix = tf.nn.softmax(log_matrix / self.temperature, axis=-1)
+            matrix = tf.where(nonzero_mask, matrix, tf.zeros_like(matrix))
         return matrix
