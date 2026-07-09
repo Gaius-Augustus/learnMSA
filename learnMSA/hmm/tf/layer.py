@@ -430,14 +430,21 @@ class PHMMLayer(tf.keras.Layer):
                 PHMMValueSet.from_structural_config(L, h, self.structural_config)
                 for h, L in enumerate(self.lengths)
             ]
-        elif joint_values is None:
-            assert struct_values is not None,\
-                "Structural value sets must be provided unless"\
-                "joint_values are provided."
-            assert len(struct_values) == self.heads, (
-                "Number of structural value sets must match number of heads"
-            )
-            _struct_values = list(struct_values)
+        elif joint_values is None\
+                or self.structural_config.joint_emission_low_rank > 0:
+            if struct_values is None:
+                # Surgery path with low_rank > 0: struct_values are not saved
+                # by surgery (joint emitter owns both). Use config defaults;
+                # these become the struct marginals for C recomputation.
+                _struct_values = [
+                    PHMMValueSet.from_structural_config(L, h, self.structural_config)
+                    for h, L in enumerate(self.lengths)
+                ]
+            else:
+                assert len(struct_values) == self.heads, (
+                    "Number of structural value sets must match number of heads"
+                )
+                _struct_values = list(struct_values)
         else:
             _struct_values = None
 
@@ -488,12 +495,25 @@ class PHMMLayer(tf.keras.Layer):
                 low_rank=self.structural_config.joint_emission_low_rank,
                 conditional=True
             )
+        elif self.structural_config.joint_emission_low_rank > 0:
+            # Coming from surgery: C is recomputed from current marginals;
+            # A and B are restored from the saved AB kernel values.
+            assert aa_values is not None
+            assert _struct_values is not None
+            joint_emitter = JointProfileEmitter(
+                marginal_values=[aa_values, _struct_values],
+                AB_values=joint_values,
+                trainable_insertions=trainable_insertions,
+                low_rank=self.structural_config.joint_emission_low_rank,
+                conditional=True
+            )
         else:
+            # Coming from surgery (full joint case): joint_values holds
+            # probabilities; safe_log is applied inside __init__.
             joint_emitter = JointProfileEmitter(
                 values=joint_values,
                 trainable_insertions=trainable_insertions,
                 low_rank=self.structural_config.joint_emission_low_rank,
-                kernel_values=True,
                 conditional=True
             )
         # TODO: don't use an aa prior with conditional = True

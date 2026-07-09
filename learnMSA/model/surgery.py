@@ -8,7 +8,7 @@ from learnMSA.config.language_model import LanguageModelConfig
 from learnMSA.config.structure import StructureConfig
 from learnMSA.config.training import TrainingConfig
 from learnMSA.config.util import get_value
-from learnMSA.hmm.tf.joint_profile_emitter import (AB_from_marginals,
+from learnMSA.hmm.tf.joint_profile_emitter import (AB_init,
                                                    flatten_AB,
                                                    outer_product_flat_pw)
 from learnMSA.hmm.tf.layer import PHMMLayer
@@ -352,11 +352,6 @@ def update_kernels(
 
     # Joint emissions
     if phmm_layer.joint_emitter is not None:
-        joint_emissions = phmm_layer.joint_emitter.parameter_matrix().numpy()
-        assert joint_emissions.shape[0] == 1,\
-            "Head subset is not working properly for the joint emitter."
-        joint_emissions = joint_emissions[0, :L, :]
-
         aa_insert_value = _get_aa_insert_value(config)
         assert structural_config is not None,\
             "structural_config must be provided to update_kernels if the "\
@@ -365,14 +360,21 @@ def update_kernels(
 
         r = phmm_layer.joint_emitter.low_rank
         if r > 0:
-            joint_insert_value = flatten_AB(
-                *AB_from_marginals(aa_insert_value, struct_insert_value, r)
-            )
+            joint_emissions = phmm_layer.joint_emitter.AB_matrix().numpy()
+            assert joint_emissions.shape[0] == 1,\
+                "Head subset is not working properly for the joint emitter."
+            joint_emissions = joint_emissions[0, :L, :]
+            n1 = len(aa_insert_value)
+            n2 = len(struct_insert_value)
+            joint_insert_value = flatten_AB(*AB_init(n1, n2, r))
         else:
+            joint_emissions = phmm_layer.joint_emitter.matrix().numpy()
+            assert joint_emissions.shape[0] == 1,\
+                "Head subset is not working properly for the joint emitter."
+            joint_emissions = joint_emissions[0, :L, :]
             joint_insert_value = outer_product_flat_pw(
                 aa_insert_value, struct_insert_value
             ).numpy()
-            joint_insert_value = np.log(joint_insert_value + 1e-16)
         joint_emissions_new = apply_mods(
             joint_emissions,
             pos_expand=pos_expand,

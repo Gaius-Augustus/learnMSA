@@ -270,19 +270,18 @@ def test_call(
     assert np.allclose(E[:,:4,0,:4], np.eye(4))
     assert np.allclose(E[:,:3,1,:3], np.eye(3))
 
-@pytest.mark.parametrize("low_rank", [2, 4])
+@pytest.mark.parametrize("low_rank", [1, 2, 4])
 def test_matrix_low_rank(
     low_rank: int,
     config: Configuration,
     hidten_config: HidtenHMMConfig
 ) -> None:
-    """Test that the low-rank parameterization recovers the product of
-    marginals at initialization.
+    """Test that the low-rank C + AB^T parameterization recovers the product
+    of marginals at initialization.
 
-    A product distribution P(aa, struct) = P(aa) * P(struct) is rank-1 in
-    probability space. AB_from_marginals encodes it as logits
-    log P(aa) + log P(struct), so any low_rank >= 2 recovers the product
-    exactly at initialization (extra columns contribute zero to the logits).
+    C encodes the log-outer-product of the marginals; A and B are initialised
+    near zero so AB^T \u2248 0.  At init, softmax(C) = P(aa) \u2297 P(struct),
+    recovering the independent joint for any low_rank >= 1.
     """
     config.structure.joint_emission_low_rank = low_rank
     emitter = make_joint_emitter_from_marginals(config, hidten_config)
@@ -290,7 +289,7 @@ def test_matrix_low_rank(
 
     # Check if the kernel has the correct size
     assert emitter.low_rank == low_rank
-    assert emitter.parameter_matrix().shape == (2, 10, (20 + 23) * low_rank)
+    assert emitter.AB_matrix().shape == (2, 10, (20 + 23) * low_rank)
 
     # Check basic matrix properties
     assert B.shape == (2, 10, 23 * 20)
@@ -314,6 +313,55 @@ def test_matrix_low_rank(
     expected_insert_index = 7 * 20 + 18
     np.testing.assert_allclose(B[0, 4:, expected_insert_index], 1.0, rtol=1e-5)
     np.testing.assert_allclose(B[1, 3:8, expected_insert_index], 1.0, rtol=1e-5)
+
+
+def test_C_weight(
+    config: Configuration,
+    hidten_config: HidtenHMMConfig
+) -> None:
+    """Test that C_weight is non-trainable and equals log(p1) + log(p2)."""
+    from learnMSA.hmm.tf.joint_profile_emitter import compute_C_from_marginals
+    config.structure.joint_emission_low_rank = 2
+    emitter = make_joint_emitter_from_marginals(config, hidten_config)
+
+    assert emitter.C_weight.trainable is False
+
+    lengths = [4, 3]
+    aa_values = [
+        PHMMValueSet.from_config(L, h, config.hmm)
+        for h, L in enumerate(lengths)
+    ]
+    struct_values = [
+        PHMMValueSet.from_structural_config(L, h, config.structure)
+        for h, L in enumerate(lengths)
+    ]
+    # Verify C_weight values for head 0 match states
+    for i in range(4):
+        expected_C = compute_C_from_marginals(
+            aa_values[0].match_emissions[i],
+            struct_values[0].match_emissions[i],
+        )  # (n1, n2)
+        actual_C = emitter.C_weight.numpy()[0, i, :].reshape(23, 20)
+        np.testing.assert_allclose(actual_C, expected_C, rtol=1e-5)
+
+    # Verify insert state C
+    expected_C_ins = compute_C_from_marginals(
+        aa_values[0].insert_emissions,
+        struct_values[0].insert_emissions,
+    )
+    actual_C_ins = emitter.C_weight.numpy()[0, 4, :].reshape(23, 20)
+    np.testing.assert_allclose(actual_C_ins, expected_C_ins, rtol=1e-5)
+
+
+def test_AB_matrix_requires_low_rank(
+    config: Configuration,
+    hidten_config: HidtenHMMConfig
+) -> None:
+    """Test that AB_matrix() raises AssertionError when low_rank == 0."""
+    emitter = make_joint_emitter_from_marginals(config, hidten_config)
+    assert emitter.low_rank == 0
+    with pytest.raises(AssertionError):
+        emitter.AB_matrix()
 
 
 def make_conditional_emitter(

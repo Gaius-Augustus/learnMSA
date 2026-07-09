@@ -40,10 +40,11 @@ class JointProfileEmitter(ProfileEmitter):
         self,
         values: Sequence[PHMMValueSet] | None = None,
         marginal_values: Sequence[Sequence[PHMMValueSet]] | None = None,
+        AB_values: Sequence[PHMMValueSet] | None = None,
         trainable_insertions: bool = True,
         use_full_matmul: bool = True,
         low_rank: int = 0,
-        kernel_values: bool = False,
+        l2_reg: float = 1e-1,
         temperature: float = 1.0,
         conditional: bool = False,
         **kwargs
@@ -51,46 +52,57 @@ class JointProfileEmitter(ProfileEmitter):
         """
         Args:
             values (Sequence[PHMMValueSet]): A sequence of value sets for the
-                joint distribution, one per head, with probabilities.
+                joint distribution, one per head, with probabilities. Only
+                valid when low_rank == 0.
             marginal_values (Sequence[Sequence[PHMMValueSet]]): Value sets for
-                the marginal distribution. An alternative to providing joint
-                values. The outer sequence is over the marginals, the inner
-                sequence is over the heads. The number of heads must be the
-                same for all marginals. If both `values` and `marginal_values`
-                are provided, `values` takes precedence.
+                the marginal distributions. Required when low_rank > 0 (used
+                to compute the constant log-joint bias C). When low_rank == 0,
+                an alternative to `values`; the joint is initialised as the
+                outer product of the marginals.
+            AB_values (Sequence[PHMMValueSet] | None): Pre-computed flat A+B
+                kernel values for the low-rank case, e.g. from model surgery.
+                Only valid when low_rank > 0. If None, A and B are default-
+                initialised near zero.
             trainable_insertions (bool): Whether insertion emissions are
                 trainable. Defaults to True.
             use_full_matmul (bool): Whether to compute emission scores via
                 a full matrix multiplication instead of copying insertion
                 emissions.
             low_rank (int): The rank of the low-rank approximation to
-                parameterize the joint distribution when exactly two marginals are
-                provided. If 0, no low-rank approximation is used.
-            kernel_values (bool): If true, the provided values are treated as
-                as kernel values instead of probabilities, i.e. logits unless
-                low_rank > 0, in which case they are treated as the concatenated
-                and flattened A and B matrices.
-            conditional (bool): If true, instead of modeling the joint
-                distribution, the emission scores are now the conditional
-                of the second variable given the first, i.e. P(x2 | x1, s).
+                parameterise the joint distribution when exactly two marginals
+                are provided. If 0, no low-rank approximation is used.
+            conditional (bool): If true, instead of modelling the joint
+                distribution, the emission scores are the conditional of the
+                second variable given the first, i.e. P(x2 | x1, s).
+            l2_reg (float): L2 regularization coefficient applied to the
+                kernel (A and B matrices) when ``low_rank > 0``. Defaults
+                to 0.0 (no regularization).
             temperature (float): Temperature applied as an exponent
                 (1/temperature).
         """
-        _values : Sequence[PHMMValueSet]
-        if values is not None:
-            _values = values
-            self.init_transform = None if kernel_values else safe_log
-        else:
-            assert marginal_values is not None,\
-                "Either `values` or `marginal_values` must be provided."
-            if low_rank <= 0:
-                _values = product_marginal_values(marginal_values)
-                self.init_transform = None if kernel_values else safe_log
+        _values: Sequence[PHMMValueSet]
+        if low_rank <= 0:
+            assert AB_values is None, \
+                "`AB_values` is only valid when low_rank > 0."
+            if values is not None:
+                _values = values
             else:
-                assert not kernel_values, "kernel_values is not supported for"\
-                    "low-rank initialization with marginals."
-                _values = low_rank_marginal_values(marginal_values, low_rank)
-                self.init_transform = None
+                assert marginal_values is not None, \
+                    "Either `values` or `marginal_values` must be provided."
+                _values = product_marginal_values(marginal_values)
+            self.init_transform = safe_log
+        else:
+            assert marginal_values is not None, \
+                "`marginal_values` is required when low_rank > 0."
+            assert values is None, \
+                "`values` is not supported when low_rank > 0; " \
+                "use `marginal_values`."
+            _assert_value_sets(marginal_values)
+            # Compute and store the constant log-joint bias C from marginals.
+            self._c_bias_init = _compute_c_bias_init(marginal_values)
+            _values = AB_values if AB_values is not None \
+                else low_rank_marginal_values(marginal_values, low_rank)
+            self.init_transform = None
 
         if len(_values) == 0:
             raise ValueError("At least one value set must be provided.")
@@ -104,6 +116,7 @@ class JointProfileEmitter(ProfileEmitter):
         )
 
         self.low_rank = low_rank
+        self.l2_reg = l2_reg
         # Use object.__setattr__ to store as a plain Python dict, bypassing
         # Keras tracking. This allows priors to be added after build() without
         # triggering the "tracker locked" error.
@@ -178,6 +191,23 @@ class JointProfileEmitter(ProfileEmitter):
             name="kernel",
         )
 
+        if self.low_rank > 0:
+            n1, n2 = self.marginal_dims[0], self.marginal_dims[1]
+            H = len(self._lengths)
+            max_states = max(self.hmm_config.states)
+            c_init = np.zeros((H, max_states, n1 * n2), dtype=np.float32)
+            for h, (c_match, c_insert) in enumerate(self._c_bias_init):
+                L_h = int(self._lengths[h])
+                q_h = self.hmm_config.states[h]
+                c_init[h, :L_h, :] = c_match.reshape(L_h, n1 * n2)
+                c_init[h, L_h:q_h, :] = c_insert.reshape(n1 * n2)
+            self.C_weight = self.add_weight(
+                shape=(H, max_states, n1 * n2),
+                initializer=tf.constant_initializer(c_init),
+                trainable=False,
+                name="C_bias",
+            )
+
     @override
     def matrix(self) -> T_TFTensor:
         matrix = self._build_matrix(tf.identity)
@@ -185,16 +215,16 @@ class JointProfileEmitter(ProfileEmitter):
 
         if self.low_rank > 0:
             A, B = self._A_B_matrices(matrix)
-            matrix = tf.einsum("...ik,...jk->...ij", A, B)
+            logits = self._get_C() + tf.einsum("...ik,...jk->...ij", A, B)
             if self.conditional:
-                matrix = tf.nn.softmax(matrix, axis=-1)
+                matrix = tf.nn.softmax(logits, axis=-1)
                 matrix = self._anneal_matrix(matrix)
                 matrix = tf.reshape(
                     matrix, [tf.shape(matrix)[0], tf.shape(matrix)[1], -1]
                 )
             else:
                 matrix = tf.reshape(
-                    matrix, [tf.shape(matrix)[0], tf.shape(matrix)[1], -1]
+                    logits, [tf.shape(logits)[0], tf.shape(logits)[1], -1]
                 )
                 matrix = zero_row_softmax(matrix)
                 matrix = self._anneal_matrix(matrix)
@@ -224,24 +254,32 @@ class JointProfileEmitter(ProfileEmitter):
 
         return matrix
 
-    def parameter_matrix(self) -> T_TFTensor:
-        """Returns the matrix of raw parameters (before softmax). If low-rank
-        is used, this is the concatenated A and B matrices for each head and
-        state of shape ``(H, Q, n1*k + n2*k)`` where ``n1`` and ``n2`` are the
-        marginal dimensions."""
+    def AB_matrix(self) -> T_TFTensor:
+        """Returns the concatenated A and B matrices for each head and state
+        of shape ``(H, Q, n1*k + n2*k)`` where ``n1`` and ``n2`` are the
+        marginal dimensions. Padding states are zeroed out. Requires
+        ``low_rank > 0``."""
+        assert self.low_rank > 0, "AB_matrix() requires low_rank > 0."
         matrix = self._build_matrix(tf.identity)
         matrix = self._prepare_matrix(matrix)
-        if self.low_rank > 0:
-            A, B = self._A_B_matrices(matrix)
-            n1 = self.marginal_dims[0]
-            n2 = self.marginal_dims[1]
-            k = self.low_rank
-            H = tf.shape(matrix)[0]
-            Q = tf.shape(matrix)[1]
-            A = tf.reshape(A, [H, Q, n1 * k])
-            B = tf.reshape(B, [H, Q, n2 * k])
-            matrix = tf.concat([A, B], axis=-1)
-        return matrix
+        A, B = self._A_B_matrices(matrix)
+        n1 = self.marginal_dims[0]
+        n2 = self.marginal_dims[1]
+        k = self.low_rank
+        H = tf.shape(matrix)[0]
+        Q = tf.shape(matrix)[1]
+        A = tf.reshape(A, [H, Q, n1 * k])
+        B = tf.reshape(B, [H, Q, n2 * k])
+        ab = tf.concat([A, B], axis=-1)
+        effective_states = (
+            [self.states[h] for h in self.head_subset]
+            if self.head_subset is not None
+            else self.states
+        )
+        ab *= tf.sequence_mask(
+            effective_states, dtype=ab.dtype
+        )[..., tf.newaxis]
+        return ab
 
     def _A_B_matrices(self, matrix: T_TFTensor) -> tuple[T_TFTensor, T_TFTensor]:
         """Returns the A and B matrices for the low-rank parameterization."""
@@ -257,6 +295,21 @@ class JointProfileEmitter(ProfileEmitter):
         A = tf.reshape(matrix[:, :, :n1 * k], [H, Q, n1, k])
         B = tf.reshape(matrix[:, :, n1 * k:], [H, Q, n2, k])
         return A, B
+
+    def _get_C(self) -> T_TFTensor:
+        """Returns the log-joint bias C for the active heads and states,
+        shaped ``(H', Q', n1, n2)``."""
+        n1, n2 = self.marginal_dims[0], self.marginal_dims[1]
+        C = self.C_weight  # (H, max_states, n1*n2)
+        if self.head_subset is not None:
+            C = tf.gather(C, self.head_subset, axis=0)
+            max_states_subset = max(
+                [self.hmm_config.states[h] for h in self.head_subset]
+            )
+            C = C[:, :max_states_subset, :]
+        H = tf.shape(C)[0]
+        Q = tf.shape(C)[1]
+        return tf.reshape(C, [H, Q, n1, n2])
 
     @override
     def call(
@@ -321,6 +374,13 @@ class JointProfileEmitter(ProfileEmitter):
         if hasattr(self, "_prior"):
             log_prior_scores += self._prior(matrix)
 
+        # Apply L2 regularization to the raw kernel (A and B matrices)
+        if self.low_rank > 0 and self.l2_reg > 0.0:
+            ab = self.AB_matrix()
+            # Sum over states, mean over kernel dimension to normalize by rank
+            ab_sq_sum = tf.reduce_sum(tf.square(ab), axis=[1,2])
+            log_prior_scores -= self.l2_reg * ab_sq_sum
+
         return log_prior_scores
 
 
@@ -360,49 +420,52 @@ def product_marginal_values(
 
 def low_rank_marginal_values(
     marginal_values: Sequence[Sequence[PHMMValueSet]],
-    low_rank: int = 2,
+    low_rank: int = 1,
+    noise_std: float = 1e-2,
+    seed: int | None = None,
 ) -> Sequence[PHMMValueSet]:
-    """Computes low rank initial values.
+    """Creates near-zero A and B kernel value sets for low-rank initialisation.
+
+    A and B are initialised so that AB^T = 0, meaning the initial joint
+    distribution is determined entirely by the constant log-joint bias C
+    (computed separately from the marginals in ``_compute_c_bias_init``).
 
     Args:
         marginal_values (Sequence[Sequence[PHMMValueSet]]): Value sets for
-            the marginal distribution.
+            the marginal distributions. Used for shapes only.
         low_rank (int): The rank of the low-rank approximation.
+        noise_std (float): Standard deviation for A's random noise. B is
+            always zero, so AB^T = 0 exactly at initialisation.
+        seed (int | None): Optional random seed.
 
     Returns:
-        Sequence[PHMMValueSet]: The joint value sets with low rank kernel
-            values.
+        Sequence[PHMMValueSet]: PHMMValueSets whose match/insert emissions
+            contain the flattened near-zero A and B kernel values.
     """
     _assert_value_sets(marginal_values)
-    assert len(marginal_values) == 2,\
-        "Low-rank initialization is only supported for exactly two marginals."
+    assert len(marginal_values) == 2, \
+        "Low-rank initialisation is only supported for exactly two marginals."
 
-    kernel_values: list[PHMMValueSet] = []
-
+    result: list[PHMMValueSet] = []
     for h in range(len(marginal_values[0])):
-        A, B = AB_from_marginals(
-            marginal_values[0][h].match_emissions,
-            marginal_values[1][h].match_emissions,
-            low_rank,
-        )
-        joint_match_emissions = flatten_AB(A, B)
-        joint_insert_emissions = flatten_AB(
-            *AB_from_marginals(
-                marginal_values[0][h].insert_emissions,
-                marginal_values[1][h].insert_emissions,
-                low_rank,
-            )
-        )
-        kernel_values.append(
+        n1 = marginal_values[0][h].match_emissions.shape[-1]
+        n2 = marginal_values[1][h].match_emissions.shape[-1]
+        L = marginal_values[0][h].L
+        A_match, B_match = AB_init(n1, n2, low_rank,
+                                   batch_shape=(L,),
+                                   noise_std=noise_std, seed=seed)
+        A_ins, B_ins = AB_init(n1, n2, low_rank,
+                               noise_std=noise_std, seed=seed)
+        result.append(
             PHMMValueSet(
-                L=marginal_values[0][h].L,
-                match_emissions=joint_match_emissions,
-                insert_emissions=joint_insert_emissions,
+                L=L,
+                match_emissions=flatten_AB(A_match, B_match),
+                insert_emissions=flatten_AB(A_ins, B_ins),
                 transitions=np.empty(()),
                 start=np.empty(()),
             )
         )
-    return kernel_values
+    return result
 
 def outer_product_flat(*emissions: T_TFTensor | np.ndarray) -> T_TFTensor:
     """Computes the outer product of the emissions in the last dimension
@@ -460,67 +523,92 @@ def marginal_matrix(matrix: T_TFTensor, i: int) -> T_TFTensor:
     marginal_matrix = tf.reduce_sum(matrix, axis=2)
     return marginal_matrix
 
-def AB_from_marginals(
+def compute_C_from_marginals(
     p1: np.ndarray,
     p2: np.ndarray,
-    low_rank: int,
-    noise_std: float = 1e-2,
     epsilon: float = 1e-16,
-    seed: int | None = None,
-) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Build A (..., n1, r), B (..., n2, r) so that
-    softmax(flatten(A @ B.T)) starts out equal to the independent
-    joint p1_i * p2_j (per batch element), with any extra (k - 2)
-    columns randomly initialized so gradients can break symmetry and
-    learn interaction/dependence.
+) -> np.ndarray:
+    """Computes the log-joint bias C for the low-rank parameterisation.
+
+    ``C[..., i, j] = log(p1[i]) + log(p2[j])``, which encodes the independent
+    joint distribution as a constant log-probability matrix.  When used as the
+    sole logit contribution (AB = 0), ``softmax(C) = p1 ⊗ p2``.
 
     Args:
-        p1 (np.ndarray): The first marginal distribution of shape (..., n1).
-        p2 (np.ndarray): The second marginal distribution of shape (..., n2).
-        low_rank (int): The rank of the low-rank approximation.
-        noise_std (float): The standard deviation of the noise added to the
-            extra columns. Defaults to 1e-2.
-        epsilon (float): A small value to avoid log(0). Defaults to 1e-16.
-        seed (Optional[int]): The random seed for reproducibility.
-            Defaults to None.
+        p1 (np.ndarray): First marginal distribution of shape ``(..., n1)``.
+        p2 (np.ndarray): Second marginal distribution of shape ``(..., n2)``.
+        epsilon (float): Small value to avoid log(0). Defaults to 1e-16.
 
     Returns:
-        tuple[np.ndarray, np.ndarray]: A tuple containing the A and B matrices
-            of shapes (..., n1, low_rank) and (..., n2, low_rank), respectively.
+        np.ndarray: C of shape ``(..., n1, n2)``, dtype float32.
     """
     p1 = np.asarray(p1, dtype=np.float64)
     p2 = np.asarray(p2, dtype=np.float64)
-    n1, n2 = p1.shape[-1], p2.shape[-1]
-    batch_shape = np.broadcast_shapes(p1.shape[:-1], p2.shape[:-1])
+    log_p1 = np.log(p1 + epsilon)
+    log_p2 = np.log(p2 + epsilon)
+    C = log_p1[..., :, np.newaxis] + log_p2[..., np.newaxis, :]
+    return C.astype(np.float32)
 
-    assert np.all(np.isclose(p1.sum(axis=-1), 1.0, atol=1e-6)), (
-        "each row of p1 must sum to 1"
-    )
-    assert np.all(np.isclose(p2.sum(axis=-1), 1.0, atol=1e-6)), (
-        "each row of p2 must sum to 1"
-    )
-    assert low_rank >= 2, "low_rank must be at least 2"
 
+def _compute_c_bias_init(
+    marginal_values: Sequence[Sequence[PHMMValueSet]],
+    epsilon: float = 1e-16,
+) -> list[tuple[np.ndarray, np.ndarray]]:
+    """Computes the constant log-joint bias C for each head.
+
+    Returns a list of ``(c_match, c_insert)`` pairs per head, where
+    ``c_match`` has shape ``(L, n1, n2)`` and ``c_insert`` has shape
+    ``(n1, n2)``.
+    """
+    result = []
+    for h in range(len(marginal_values[0])):
+        c_match = compute_C_from_marginals(
+            marginal_values[0][h].match_emissions,
+            marginal_values[1][h].match_emissions,
+            epsilon=epsilon,
+        )  # (L, n1, n2)
+        c_insert = compute_C_from_marginals(
+            marginal_values[0][h].insert_emissions,
+            marginal_values[1][h].insert_emissions,
+            epsilon=epsilon,
+        )  # (n1, n2)
+        result.append((c_match, c_insert))
+    return result
+
+
+def AB_init(
+    n1: int,
+    n2: int,
+    low_rank: int,
+    batch_shape: tuple[int, ...] = (),
+    noise_std: float = 1e-2,
+    seed: int | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Initialises A and B matrices near zero for low-rank parameterisation.
+
+    A is filled with small Gaussian noise; B is zeros.  Because B = 0,
+    AB^T = 0 exactly at initialisation, so the initial joint distribution
+    is determined entirely by the constant log-joint bias C.
+
+    Args:
+        n1 (int): Size of the first marginal alphabet.
+        n2 (int): Size of the second marginal alphabet.
+        low_rank (int): Rank of the approximation.  Must be >= 1.
+        batch_shape (tuple[int, ...]): Optional leading batch dimensions.
+        noise_std (float): Standard deviation for A's Gaussian noise.
+            Pass 0.0 for exact zeros (e.g. for surgery-inserted positions).
+        seed (int | None): Random seed for reproducibility.
+
+    Returns:
+        tuple[np.ndarray, np.ndarray]: A of shape
+            ``batch_shape + (n1, low_rank)`` and B of shape
+            ``batch_shape + (n2, low_rank)``.
+    """
+    assert low_rank >= 1, "low_rank must be at least 1"
     rng = np.random.default_rng(seed)
-    A = np.zeros(batch_shape + (n1, low_rank), dtype=np.float64)
+    A = rng.normal(scale=noise_std,
+                   size=batch_shape + (n1, low_rank)).astype(np.float64)
     B = np.zeros(batch_shape + (n2, low_rank), dtype=np.float64)
-
-    A[..., 0] = np.log(p1 + epsilon)
-    B[..., 0] = 1.0
-    A[..., 1] = 1.0
-    B[..., 1] = np.log(p2 + epsilon)
-
-    # Extra columns: zero on one side, small noise on the other. This
-    # keeps the initial joint == p1 (x) p2 exactly (the extra columns
-    # contribute 0 to the logits) while still giving nonzero gradients
-    # on the noisy side from the very first training step.
-    if low_rank > 2:
-        A[..., 2:] = rng.normal(
-            scale=noise_std, size=batch_shape + (n1, low_rank - 2)
-        )
-        B[..., 2:] = 0.0
-
     return A, B
 
 def flatten_AB(A: np.ndarray, B: np.ndarray) -> np.ndarray:
