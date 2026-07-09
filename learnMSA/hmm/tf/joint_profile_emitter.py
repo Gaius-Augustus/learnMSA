@@ -46,7 +46,7 @@ class JointProfileEmitter(ProfileEmitter):
         low_rank: int = 0,
         l2_reg: float = 1e-1,
         temperature: float = 1.0,
-        conditional: bool = False,
+        conditional: bool = True,
         **kwargs
     ) -> None:
         """
@@ -89,7 +89,10 @@ class JointProfileEmitter(ProfileEmitter):
             else:
                 assert marginal_values is not None, \
                     "Either `values` or `marginal_values` must be provided."
-                _values = product_marginal_values(marginal_values)
+                if conditional:
+                    _values = conditional_marginal_values(marginal_values)
+                else:
+                    _values = product_marginal_values(marginal_values)
             self.init_transform = safe_log
         else:
             assert marginal_values is not None, \
@@ -417,6 +420,46 @@ def product_marginal_values(
             )
         )
     return joint_values
+
+def conditional_marginal_values(
+    marginal_values: Sequence[Sequence[PHMMValueSet]],
+) -> Sequence[PHMMValueSet]:
+    """Creates value sets for conditional initialization P(x2 | x1, s) = P(x2 | s).
+
+    Only uses the second marginal (index 1). For each state the conditional is
+    initialized as the x2 marginal tiled D1 times, so P(x2 | x1=i, s) = P(x2 | s)
+    for all x1.
+
+    Args:
+        marginal_values (Sequence[Sequence[PHMMValueSet]]): Value sets for the
+            marginal distributions. Must contain at least two sequences.
+
+    Returns:
+        Sequence[PHMMValueSet]: Value sets whose match/insert emissions contain
+            the tiled second marginal, suitable for conditional initialisation.
+    """
+    _assert_value_sets(marginal_values)
+
+    result: list[PHMMValueSet] = []
+    for h in range(len(marginal_values[0])):
+        n1 = marginal_values[0][h].match_emissions.shape[-1]
+        p2_match = marginal_values[1][h].match_emissions   # (L, D2)
+        p2_insert = marginal_values[1][h].insert_emissions  # (D2,)
+
+        # Tile p2 along the x1 axis so every conditional row equals p2.
+        # Flat layout: [p2[0], ..., p2[D2-1], p2[0], ...] repeated D1 times.
+        match_emission = np.tile(p2_match, n1)   # (L, D1 * D2)
+        insert_emission = np.tile(p2_insert, n1)  # (D1 * D2,)
+
+        result.append(PHMMValueSet(
+            L=marginal_values[0][h].L,
+            match_emissions=match_emission,
+            insert_emissions=insert_emission,
+            transitions=np.empty(()),
+            start=np.empty(()),
+        ))
+    return result
+
 
 def low_rank_marginal_values(
     marginal_values: Sequence[Sequence[PHMMValueSet]],

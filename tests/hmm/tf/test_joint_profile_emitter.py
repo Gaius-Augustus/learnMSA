@@ -52,6 +52,7 @@ def make_joint_emitter_from_marginals(
     emitter = JointProfileEmitter(
         marginal_values=[aa_values, struct_values],
         low_rank=config.structure.joint_emission_low_rank,
+        conditional=False,
     )
 
     emitter.hmm_config = hidten_config
@@ -110,6 +111,7 @@ def make_joint_emitter_from_values(
     emitter = JointProfileEmitter(
         values=joint_values,
         low_rank=config.structure.joint_emission_low_rank,
+        conditional=False,
     )
 
     emitter.hmm_config = hidten_config
@@ -420,12 +422,10 @@ def test_conditional_initializes_independent_of_x1(
     config: Configuration,
     hidten_config: HidtenHMMConfig,
 ) -> None:
-    """When initialized from the product of marginals (one-hot per state) with
-    conditional=True:
-    - For the "peak" x1 value (the one with non-zero marginal probability), the
-      conditional must be peaked at the corresponding x2 value.
-    - For all other x1 values the joint logits are all equal, so the
-      conditional must be uniform over x2.
+    """When initialized from marginals with conditional=True, the emitter uses
+    only the x2 marginal so that P(x2 | x1=i, s) = P(x2 | s) for every x1.
+    Because the struct marginals are one-hot (position i+10 for match state i),
+    every conditional row must be one-hot at x2 = i+10, regardless of x1.
     """
     emitter = make_conditional_emitter(config, hidten_config, low_rank=0)
     B = emitter.matrix()
@@ -433,23 +433,15 @@ def test_conditional_initializes_independent_of_x1(
     D1, D2 = 23, 20
     B_reshaped = B.numpy().reshape(2, 10, D1, D2)
 
-    # Head 0 has 4 match states. The config gives:
-    #   aa  marginal for state i → one-hot at position i
-    #   str marginal for state i → one-hot at position i+10
-    # Peak x1 for state i is i; expected peak x2 is i+10.
+    # Head 0 has 4 match states. The struct marginal for state i is one-hot
+    # at position i+10, so every conditional row must be one-hot there.
     for i in range(4):
-        # Peak row: should be one-hot at x2 = i+10
-        np.testing.assert_allclose(
-            B_reshaped[0, i, i, i + 10], 1.0, rtol=1e-5
-        )
-        # Non-peak rows: joint logits all equal → uniform conditional
         for d1 in range(D1):
-            if d1 != i:
-                np.testing.assert_allclose(
-                    B_reshaped[0, i, d1, :],
-                    np.full(D2, 1.0 / D2),
-                    rtol=1e-5,
-                )
+            np.testing.assert_allclose(
+                B_reshaped[0, i, d1, :],
+                np.eye(D2)[i + 10],
+                rtol=1e-5,
+            )
 
 
 def test_marginal_matrix_from_conditional(
