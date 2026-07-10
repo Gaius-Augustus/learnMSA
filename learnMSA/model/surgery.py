@@ -10,7 +10,8 @@ from learnMSA.config.training import TrainingConfig
 from learnMSA.config.util import get_value
 from learnMSA.hmm.tf.joint_profile_emitter import (AB_init,
                                                    flatten_AB,
-                                                   outer_product_flat_pw)
+                                                   outer_product_flat_pw,
+                                                   tile_conditional)
 from learnMSA.hmm.tf.layer import PHMMLayer
 from learnMSA.hmm.tf.util import load_dirichlet
 from learnMSA.hmm.util.transition_index_set import PHMMTransitionIndexSet
@@ -372,9 +373,13 @@ def update_kernels(
             assert joint_emissions.shape[0] == 1,\
                 "Head subset is not working properly for the joint emitter."
             joint_emissions = joint_emissions[0, :L, :]
-            joint_insert_value = outer_product_flat_pw(
-                aa_insert_value, struct_insert_value
-            ).numpy()
+            if phmm_layer.joint_emitter.conditional:
+                n1 = len(aa_insert_value)
+                joint_insert_value = tile_conditional(struct_insert_value, n1)
+            else:
+                joint_insert_value = outer_product_flat_pw(
+                    aa_insert_value, struct_insert_value
+                ).numpy()
         joint_emissions_new = apply_mods(
             joint_emissions,
             pos_expand=pos_expand,

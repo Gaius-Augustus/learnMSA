@@ -448,8 +448,8 @@ def conditional_marginal_values(
 
         # Tile p2 along the x1 axis so every conditional row equals p2.
         # Flat layout: [p2[0], ..., p2[D2-1], p2[0], ...] repeated D1 times.
-        match_emission = np.tile(p2_match, n1)   # (L, D1 * D2)
-        insert_emission = np.tile(p2_insert, n1)  # (D1 * D2,)
+        match_emission = tile_conditional(p2_match, n1)  # (L * D1, D2)
+        insert_emission = tile_conditional(p2_insert, n1)  # (D1 * D2,)
 
         result.append(PHMMValueSet(
             L=marginal_values[0][h].L,
@@ -527,6 +527,20 @@ def outer_product_flat(*emissions: T_TFTensor | np.ndarray) -> T_TFTensor:
     for obs in emissions[2:]:
         x = outer_product_flat_pw(x, obs)
     return x
+
+def tile_conditional(marginal: np.ndarray, n1: int) -> np.ndarray:
+    """Tiles the second marginal along the first marginal dimension to create
+    a conditional distribution P(x2 | x1, s) = P(x2 | s).
+
+    Args:
+        marginal (Tensor): The second marginal of shape ``(..., D2)``.
+        n1 (int): The size of the first marginal.
+
+    Returns:
+        Tensor: The tiled conditional distribution of shape
+        ``(..., D1 * D2)``.
+    """
+    return np.tile(marginal, n1)
 
 def outer_product_flat_pw(x
     : T_TFTensor | np.ndarray, y: T_TFTensor | np.ndarray
