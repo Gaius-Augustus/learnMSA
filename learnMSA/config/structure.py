@@ -37,7 +37,8 @@ class StructureConfig(BaseModel):
     """The number of mixture components for the Dirichlet prior."""
 
     prior_temperature: float = 1.0
-    """Scaling factor for the prior log-likelihood."""
+    """Temperature applied as a factor (1/temperature) to the log prior scores
+    """
 
     use_prior_for_emission_init: bool = True
     """Whether to use the prior distribution for initializing the structural
