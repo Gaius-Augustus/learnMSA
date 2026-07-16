@@ -16,6 +16,11 @@ class PHMMPriorConfig(BaseModel):
     use_amino_acid_prior: bool = True
     """Whether to use a Dirichlet prior for emissions."""
 
+    amino_acid_prior_name: str = "amino_acid_dirichlet"
+    """Base name of the amino acid Dirichlet prior weights file. The number of
+    components is appended to form the resource name
+    ``{amino_acid_prior_name}_{amino_acid_dirichlet_components}.weights``."""
+
     amino_acid_dirichlet_components: int = 1
     """Number of components for the Dirichlet prior. If > 1, a mixture of
     Dirichlet distributions is used."""

@@ -308,7 +308,7 @@ class PHMMLayer(tf.keras.Layer):
             # Set up the Dirichlet prior for emissions
             c = self.prior_config.amino_acid_dirichlet_components
             emission_prior = load_dirichlet(
-                f"amino_acid_dirichlet_{c}.weights",
+                f"{self.prior_config.amino_acid_prior_name}_{c}.weights",
                 dim = len(SequenceDataset._default_alphabet)-1,
                 components = c,
                 states = self.states,
@@ -415,7 +415,7 @@ class PHMMLayer(tf.keras.Layer):
             # Load the Dirichlet prior for emissions
             c = self.prior_config.amino_acid_dirichlet_components
             emission_prior = load_dirichlet(
-                f"amino_acid_dirichlet_{c}.weights",
+                f"{self.prior_config.amino_acid_prior_name}_{c}.weights",
                 dim = len(SequenceDataset._default_alphabet)-1,
                 components = c,
                 states = self.states,

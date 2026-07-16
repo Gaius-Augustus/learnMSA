@@ -231,6 +231,23 @@ def parse_args(
         "Default: use amino acid emissions."
     )
     train_group.add_argument(
+        "--aa_prior_name",
+        dest="aa_prior_name",
+        type=str,
+        default=hp.amino_acid_prior_name,
+        help="Base name of the amino acid Dirichlet prior weights file. The "
+            "number of components is appended to form the resource name. "
+            "(default: %(default)s)"
+    )
+    train_group.add_argument(
+        "--aa_prior_components",
+        dest="aa_prior_components",
+        type=int,
+        default=hp.amino_acid_dirichlet_components,
+        help="Number of mixture components for the amino acid Dirichlet prior. "
+            "(default: %(default)s)"
+    )
+    train_group.add_argument(
         "--decode", "--decoding_mode",
         dest="decoding_mode",
         type=str,

@@ -138,6 +138,8 @@ def args_to_config(
     hmm_d["noise_concentration"] = args.noise_concentration
 
     # --- HMM prior ---
+    hp["amino_acid_prior_name"] = args.aa_prior_name
+    hp["amino_acid_dirichlet_components"] = args.aa_prior_components
     hp["alpha_flank"] = args.alpha_flank
     hp["alpha_single"] = args.alpha_single
     hp["alpha_global"] = args.alpha_global
