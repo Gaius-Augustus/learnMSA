@@ -43,7 +43,6 @@ Fit a 3Di structural-token prior::
 import argparse
 import importlib.resources as resources
 import os
-import types
 from pathlib import Path
 
 # Must be set before any TensorFlow operations
@@ -51,6 +50,8 @@ os.environ["TF_GPU_ALLOCATOR"] = "cuda_malloc_async"
 
 import numpy as np
 import tensorflow as tf
+
+from hidten.tf.prior.dirichlet import TFDirichletPrior
 
 from learnMSA.hmm.tf.util import make_dirichlet_model
 from learnMSA.util.aligned_dataset import AlignedDataset
@@ -189,6 +190,17 @@ def parse_args() -> argparse.Namespace:
              "(log-normal concentrations, softmax mixture weights).",
     )
     parser.add_argument(
+        "--score",
+        type=str,
+        default="counts",
+        choices=["counts", "probabilities"],
+        help="Observation model used to score columns. 'counts' (default) "
+             "scores raw per-column token counts with the proper "
+             "Dirichlet-multinomial marginal (Sjolander et al. 1996), which "
+             "accounts for the per-column sample size. 'probabilities' scores "
+             "normalized column distributions with the Dirichlet density.",
+    )
+    parser.add_argument(
         "--seed",
         type=int,
         default=0,
@@ -233,12 +245,13 @@ def collect_columns(
     min_count: int,
     min_occupancy: float,
 ) -> tuple[np.ndarray, np.ndarray, list[str]]:
-    """Collect normalized column distributions from a directory of alignments.
+    """Collect per-column token counts from a directory of alignments.
 
-    Each retained column is turned into a probability vector over the ``dim =
-    len(alphabet)`` non-gap tokens. A column is kept only if it satisfies both
-    thresholds: its total non-gap residue count is at least ``min_count`` and
-    its occupancy (fraction of non-gap residues) is at least ``min_occupancy``.
+    Each retained column is turned into a raw count vector over the ``dim =
+    len(alphabet)`` non-gap tokens (callers may normalize it to a probability
+    vector if needed). A column is kept only if it satisfies both thresholds:
+    its total non-gap residue count is at least ``min_count`` and its occupancy
+    (fraction of non-gap residues) is at least ``min_occupancy``.
 
     The provenance of each column is also returned (which family/file it came
     from), so callers can group columns by family and clan for balanced sampling.
@@ -255,7 +268,7 @@ def collect_columns(
 
     Returns:
         A tuple ``(columns, family_of_column, family_accessions)`` where
-        ``columns`` has shape ``(M, dim)`` with one probability vector per
+        ``columns`` has shape ``(M, dim)`` with one count vector per
         column, ``family_of_column`` has shape ``(M,)`` and holds the family
         index of each column, and ``family_accessions`` maps each family index
         to its accession (the file name up to the first dot, e.g. ``PF01024``).
@@ -296,7 +309,7 @@ def collect_columns(
         keep = (totals >= max(min_count, 1)) & (occupancy >= min_occupancy)
         if not np.any(keep):
             continue
-        kept = counts[keep] / totals[keep, np.newaxis]
+        kept = counts[keep]
         # Family accession is the file name up to the first dot (strips the
         # version and extension, e.g. PF01024.25.fasta -> PF01024).
         family_index = len(family_accessions)
@@ -310,7 +323,7 @@ def collect_columns(
             "--min-occupancy."
         )
 
-    columns = np.concatenate(distributions, axis=0)
+    columns = np.concatenate(distributions, axis=0).astype(np.float64)
     family_of_column = np.concatenate(family_ids, axis=0)
     print(
         f"Collected {columns.shape[0]} columns from {len(family_accessions)} "
@@ -677,39 +690,62 @@ class DirichletMAPRegularizer(tf.keras.layers.Layer):
         return sum_alpha_prior + mix_prior + comp_prior
 
 
-def _attach_regularizer(
-    model: tf.keras.Model,
-    regularizer: DirichletMAPRegularizer,
-    num_examples: int,
-) -> None:
-    """Add the MAP-prior penalty to ``model``'s training loss.
+class DirichletTrainingModel(tf.keras.Model):
+    """Trainable model scoring observations with a ``TFDirichletPrior``.
 
-    The penalty is injected by overriding ``compute_loss`` on the model instance
-    so it is added only when ``training`` is True. The validation loss therefore
-    stays a pure held-out log-likelihood, keeping early stopping and cross-run
-    model selection comparable across configurations. The penalty is scaled by
-    ``1 / num_examples`` so the objective is the per-example-averaged MAP density
-    matching the per-batch mean log-likelihood used as the loss.
+    Depending on ``score_counts`` the observations are scored either as raw
+    count vectors with the Dirichlet-multinomial marginal
+    (:meth:`TFDirichletPrior.dirichlet_multinomial_scores`, Sjolander et al.
+    1996) or as probability vectors with the Dirichlet density
+    (:meth:`TFDirichletPrior.prior_scores`). The explicit scoring method is
+    invoked here rather than through the prior's ``call`` so the inference-time
+    prior keeps a single, unambiguous behavior.
+
+    When a MAP ``regularizer`` is given, its Dirichlet-Process penalty is added
+    to the training loss only, so the validation loss stays a pure held-out
+    log-likelihood (keeping early stopping and cross-run model selection
+    comparable). The penalty is scaled by ``1 / num_examples`` so the objective
+    is the per-example-averaged MAP density matching the per-batch mean
+    log-likelihood used as the loss.
+
+    The prior and the (optional) regularizer are held as attributes, so Keras
+    tracks their weights and the optimizer updates them.
 
     Args:
-        model: The trainable Dirichlet model (a plain functional model).
-        regularizer: The MAP-prior layer owning the hyperparameter weights.
-        num_examples: Number of training columns (``N`` in the MAP scaling).
+        prior: The (already built) trainable ``TFDirichletPrior``.
+        score_counts: If True, score count vectors with the Dirichlet-multinomial
+            marginal; otherwise score probability vectors with the density.
+        regularizer: Optional MAP-prior layer owning the hyperparameter weights.
+        num_examples: Number of training columns (``N`` in the MAP scaling);
+            required when ``regularizer`` is given.
     """
-    prior = model.layers[1]
-    inv_n = 1.0 / float(num_examples)
+
+    def __init__(
+        self,
+        prior: TFDirichletPrior,
+        score_counts: bool,
+        regularizer: DirichletMAPRegularizer | None = None,
+        num_examples: int | None = None,
+        **kwargs,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.prior = prior
+        self.score_counts = score_counts
+        self.map_regularizer = regularizer
+        self._inv_n = 1.0 / float(num_examples) if num_examples else 0.0
+
+    def call(self, inputs: tf.Tensor, training: bool = False) -> tf.Tensor:
+        if self.score_counts:
+            return self.prior.dirichlet_multinomial_scores(inputs)
+        return self.prior.prior_scores(inputs)
 
     def compute_loss(
         self, x=None, y=None, y_pred=None, sample_weight=None, training=True
     ):
-        loss = tf.keras.Model.compute_loss(
-            self, x, y, y_pred, sample_weight, training
-        )
-        if training:
-            loss = loss - regularizer.log_prior(prior) * inv_n
+        loss = super().compute_loss(x, y, y_pred, sample_weight, training)
+        if training and self.map_regularizer is not None:
+            loss = loss - self.map_regularizer.log_prior(self.prior) * self._inv_n
         return loss
-
-    model.compute_loss = types.MethodType(compute_loss, model)
 
 
 def build_trainable_model(
@@ -720,6 +756,7 @@ def build_trainable_model(
     num_examples: int | None = None,
     use_map_prior: bool = True,
     freeze_hyperparams: bool = False,
+    score_counts: bool = True,
 ) -> tf.keras.Model:
     """Create a trainable keras model wrapping a ``TFDirichletPrior``.
 
@@ -733,15 +770,23 @@ def build_trainable_model(
             when ``use_map_prior`` is True).
         use_map_prior: Whether to attach the Dirichlet-Process MAP prior.
         freeze_hyperparams: If True, freeze gamma/beta/lambda at their inits.
+        score_counts: If True, train on count vectors with the
+            Dirichlet-multinomial marginal; otherwise on probability vectors
+            with the Dirichlet density.
 
     Returns:
-        A compiled-ready keras model whose prior layer is trainable.
+        A built keras model whose prior layer is trainable.
     """
-    model = make_dirichlet_model(
+    # make_dirichlet_model builds the prior with the correct sharing layout; we
+    # reuse its (single) prior layer as the trainable component of our model.
+    base = make_dirichlet_model(
         initializer=initializer, dim=dim, components=components
     )
+    prior = base.layers[1]
     # Priors are frozen by default; enable training of the concentrations.
-    model.layers[1].trainable = True
+    prior.trainable = True
+
+    regularizer = None
     if use_map_prior:
         assert background_init is not None and num_examples is not None, (
             "background_init and num_examples are required for the MAP prior."
@@ -750,13 +795,14 @@ def build_trainable_model(
             dim, components, background_init,
             trainable_hyperparams=not freeze_hyperparams,
         )
-        # Route the log-likelihood output through the regularizer (an identity)
-        # so Keras tracks its hyperparameter weights as part of the model and
-        # the optimizer updates them. model.layers[1] stays the prior.
-        outputs = regularizer(model.outputs[0])
-        model = tf.keras.Model(model.inputs, outputs)
-        model.map_regularizer = regularizer
-        _attach_regularizer(model, regularizer, num_examples)
+        regularizer.build()
+
+    model = DirichletTrainingModel(
+        prior, score_counts=score_counts,
+        regularizer=regularizer, num_examples=num_examples,
+    )
+    # Build the model so a subsequent summary()/fit() has known weights.
+    model(tf.zeros((1, 1, dim)))
     return model
 
 
@@ -917,6 +963,7 @@ def main() -> None:
     args = parse_args()
 
     dim = len(args.alphabet)
+    score_counts = args.score == "counts"
     columns, family_of_column, family_accessions = collect_columns(
         input_dir=args.input_dir,
         pattern=args.pattern,
@@ -926,6 +973,11 @@ def main() -> None:
         min_count=args.min_count,
         min_occupancy=args.min_occupancy,
     )
+    # collect_columns returns raw counts. The Dirichlet-multinomial marginal
+    # scores counts directly; the Dirichlet density needs probability vectors.
+    if not score_counts:
+        columns = columns / columns.sum(axis=1, keepdims=True)
+    print(f"Scoring columns as {args.score}.")
 
     rng = np.random.default_rng(args.seed)
     num_total = columns.shape[0]
@@ -1009,6 +1061,7 @@ def main() -> None:
             num_examples=num_examples,
             use_map_prior=use_map_prior,
             freeze_hyperparams=args.freeze_hyperparams,
+            score_counts=score_counts,
         )
         model.summary()
         val_loss = train(
@@ -1021,12 +1074,12 @@ def main() -> None:
             patience=args.patience,
             seed=run_seed,
         )
-        print(summarize_prior(model.layers[1], dim, args.components))
+        print(summarize_prior(model.prior, dim, args.components))
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             # Keep only the prior kernel; the MAP-prior hyperparameters are a
             # training-only artifact and are not part of the saved format.
-            best_prior_weights = model.layers[1].get_weights()
+            best_prior_weights = model.prior.get_weights()
             print(f"New best model (validation loss {val_loss:.4f}).")
 
     assert best_prior_weights is not None  # num_runs >= 1 guarantees a fit
