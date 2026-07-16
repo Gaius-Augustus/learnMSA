@@ -17,11 +17,21 @@ default). Several trainings are run from different random initializations (10
 by default), each stopped early once the validation loss stops improving, and
 the model with the best validation log-likelihood is saved.
 
+By default every column contributes equally, so large families dominate. Pass
+``--clans`` with a Pfam-style clan TSV to instead draw the training columns
+hierarchically (clan uniform -> family uniform -> column uniform), which removes
+the bias of large families (and large clans) from the fitted prior.
+
 Example
 -------
 Fit a 9-component amino-acid mixture and overwrite the shipped prior::
 
     python -m learnMSA.hmm.util.fit_dirichlet /path/to/msas -c 9
+
+Fit a 9-component amino-acid mixture with clan-balanced sampling::
+
+    python -m learnMSA.hmm.util.fit_dirichlet /path/to/msas -c 9 \\
+        --pattern "*.fasta" --clans Pfam-A.clans.tsv
 
 Fit a 3Di structural-token prior::
 
@@ -94,13 +104,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--min-count",
         type=int,
-        default=10,
+        default=30,
         help="Minimum total non-gap residue count required to keep a column.",
     )
     parser.add_argument(
         "--min-occupancy",
         type=float,
-        default=0.95,
+        default=0.8,
         help="Minimum column occupancy (fraction of non-gap residues) required "
              "to keep a column. Combined with --min-count: a column is kept "
              "only if it satisfies both thresholds.",
@@ -188,7 +198,22 @@ def parse_args() -> argparse.Namespace:
         "--max-columns",
         type=int,
         default=None,
-        help="Optional cap on the number of training columns (for memory).",
+        help="Optional cap on the number of training columns (for memory). With "
+             "--clans this is the total number of columns drawn by the "
+             "hierarchical sampler (default: the number of collected columns).",
+    )
+    parser.add_argument(
+        "--clans",
+        type=str,
+        default=None,
+        help="Optional Pfam-style clans TSV (tab-separated; col0=family "
+             "accession e.g. PF00001, col1=clan accession e.g. CL0192, empty if "
+             "none). When given, training columns are drawn hierarchically to "
+             "remove large-family bias: a clan is drawn uniformly, then a family "
+             "within it, then a column within the family. Families with no clan "
+             "(or absent from the TSV) each form their own singleton clan. The "
+             "family accession is matched from the file name up to the first dot "
+             "(e.g. PF01024.25.fasta -> PF01024).",
     )
     parser.add_argument(
         "-o", "--output",
@@ -207,13 +232,16 @@ def collect_columns(
     replace_with_x: str,
     min_count: int,
     min_occupancy: float,
-) -> np.ndarray:
+) -> tuple[np.ndarray, np.ndarray, list[str]]:
     """Collect normalized column distributions from a directory of alignments.
 
     Each retained column is turned into a probability vector over the ``dim =
     len(alphabet)`` non-gap tokens. A column is kept only if it satisfies both
     thresholds: its total non-gap residue count is at least ``min_count`` and
     its occupancy (fraction of non-gap residues) is at least ``min_occupancy``.
+
+    The provenance of each column is also returned (which family/file it came
+    from), so callers can group columns by family and clan for balanced sampling.
 
     Args:
         input_dir: Directory containing the alignment files.
@@ -226,7 +254,12 @@ def collect_columns(
             keep a column.
 
     Returns:
-        Array of shape ``(M, dim)`` with one probability vector per column.
+        A tuple ``(columns, family_of_column, family_accessions)`` where
+        ``columns`` has shape ``(M, dim)`` with one probability vector per
+        column, ``family_of_column`` has shape ``(M,)`` and holds the family
+        index of each column, and ``family_accessions`` maps each family index
+        to its accession (the file name up to the first dot, e.g. ``PF01024``).
+        Only files that contributed at least one kept column are indexed.
     """
     dim = len(alphabet)
     parse_alphabet = alphabet + "-"
@@ -237,7 +270,8 @@ def collect_columns(
         )
 
     distributions: list[np.ndarray] = []
-    num_files = 0
+    family_ids: list[np.ndarray] = []
+    family_accessions: list[str] = []
     for path in files:
         try:
             data = AlignedDataset(
@@ -247,7 +281,7 @@ def collect_columns(
                 replace_with_x=replace_with_x,
             )
         except Exception as err:  # noqa: BLE001 - skip unreadable files
-            print(f"Skipping '{path}': {err}")
+            #print(f"Skipping '{path}': {err}")
             continue
 
         matrix = data.msa_matrix  # (num_seq, L)
@@ -263,8 +297,12 @@ def collect_columns(
         if not np.any(keep):
             continue
         kept = counts[keep] / totals[keep, np.newaxis]
+        # Family accession is the file name up to the first dot (strips the
+        # version and extension, e.g. PF01024.25.fasta -> PF01024).
+        family_index = len(family_accessions)
+        family_accessions.append(path.name.split(".")[0])
         distributions.append(kept)
-        num_files += 1
+        family_ids.append(np.full((kept.shape[0],), family_index, dtype=np.int64))
 
     if not distributions:
         raise ValueError(
@@ -273,11 +311,133 @@ def collect_columns(
         )
 
     columns = np.concatenate(distributions, axis=0)
+    family_of_column = np.concatenate(family_ids, axis=0)
     print(
-        f"Collected {columns.shape[0]} columns from {num_files} alignment(s) "
-        f"(alphabet size {dim})."
+        f"Collected {columns.shape[0]} columns from {len(family_accessions)} "
+        f"alignment(s) (alphabet size {dim})."
     )
-    return columns
+    return columns, family_of_column, family_accessions
+
+
+def load_clan_of_family(
+    clans_path: str, family_accessions: list[str]
+) -> np.ndarray:
+    """Map each family to a clan index; clanless/absent families are singletons.
+
+    The clans file is a Pfam-style TSV: column 0 is a family accession (e.g.
+    ``PF00001``) and column 1 is its clan accession (e.g. ``CL0192``, empty when
+    the family has no clan). Only these two columns are used. A family whose clan
+    field is empty, or which does not appear in the file at all, is assigned its
+    own singleton clan so it competes on equal footing in a uniform clan draw.
+
+    Args:
+        clans_path: Path to the tab-separated clans file.
+        family_accessions: Family accession per family index (see
+            :func:`collect_columns`).
+
+    Returns:
+        Array of shape ``(num_families,)`` with a clan index per family; clan
+        indices are contiguous starting at 0.
+    """
+    fam_to_clan: dict[str, str] = {}
+    with open(clans_path) as handle:
+        for line in handle:
+            parts = line.rstrip("\n").split("\t")
+            if not parts or not parts[0]:
+                continue
+            clan = parts[1] if len(parts) > 1 and parts[1] else None
+            if clan is not None:
+                fam_to_clan[parts[0]] = clan
+
+    clan_labels: list[str] = []
+    num_singletons = 0
+    for acc in family_accessions:
+        clan = fam_to_clan.get(acc)
+        if clan is None:
+            clan = f"__singleton__{acc}"
+            num_singletons += 1
+        clan_labels.append(clan)
+
+    # Map the (string) clan labels to contiguous integer indices.
+    clan_to_index: dict[str, int] = {}
+    clan_of_family = np.empty((len(clan_labels),), dtype=np.int64)
+    for i, label in enumerate(clan_labels):
+        clan_of_family[i] = clan_to_index.setdefault(label, len(clan_to_index))
+
+    print(
+        f"Loaded clans for {len(family_accessions)} famil(y/ies): "
+        f"{len(clan_to_index)} distinct clan(s), of which {num_singletons} are "
+        f"singleton clans (family with no clan or absent from the TSV)."
+    )
+    return clan_of_family
+
+
+def sample_clan_family_columns(
+    family_of_column: np.ndarray,
+    clan_of_family: np.ndarray,
+    subset_idx: np.ndarray,
+    n_samples: int,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    """Draw column indices by hierarchical clan -> family -> column sampling.
+
+    Realizes the generative process (with replacement): draw a clan uniformly,
+    then a family uniformly within that clan, then a column uniformly within that
+    family. Only the columns in ``subset_idx`` (and hence only the families and
+    clans present within that subset) are eligible, so the same routine can be
+    used for a disjoint training and validation pool.
+
+    Args:
+        family_of_column: Family index per column, shape ``(M,)``.
+        clan_of_family: Clan index per family, shape ``(num_families,)``.
+        subset_idx: Indices (into ``family_of_column``) of the eligible columns.
+        n_samples: Number of columns to draw.
+        rng: Random generator for the draws.
+
+    Returns:
+        Array of ``n_samples`` column indices (into ``family_of_column``), drawn
+        with replacement.
+    """
+    subset_idx = np.asarray(subset_idx)
+    if subset_idx.size == 0:
+        raise ValueError("Cannot sample from an empty column subset.")
+
+    # Group the eligible columns by their family. Sorting by family index lays
+    # the columns of each family out contiguously so a family is a flat slice.
+    families = family_of_column[subset_idx]
+    order = np.argsort(families, kind="stable")
+    family_col_indices = subset_idx[order]  # original column indices, by family
+    fam_sorted = families[order]
+    present_families, first_pos, family_col_count = np.unique(
+        fam_sorted, return_index=True, return_counts=True
+    )
+    family_col_start = first_pos  # start of each present family's slice
+
+    # Group the present families by their clan, laid out contiguously likewise.
+    clans = clan_of_family[present_families]
+    clan_order = np.argsort(clans, kind="stable")
+    # For each clan slot (in clan order) we store its index into the present-
+    # family arrays, so drawing a family slot yields a present-family position.
+    clan_fam_indices = clan_order
+    clan_sorted = clans[clan_order]
+    _, clan_first_pos, clan_fam_count = np.unique(
+        clan_sorted, return_index=True, return_counts=True
+    )
+    clan_fam_start = clan_first_pos
+    num_clans = clan_fam_start.shape[0]
+
+    # Stage 1: draw a clan uniformly.
+    c = rng.integers(0, num_clans, size=n_samples)
+    # Stage 2: draw a family uniformly within the clan.
+    fam_slot = clan_fam_start[c] + np.floor(
+        rng.random(n_samples) * clan_fam_count[c]
+    ).astype(np.int64)
+    present_family_pos = clan_fam_indices[fam_slot]
+    # Stage 3: draw a column uniformly within the family.
+    col_slot = family_col_start[present_family_pos] + np.floor(
+        rng.random(n_samples) * family_col_count[present_family_pos]
+    ).astype(np.int64)
+    return family_col_indices[col_slot]
 
 
 def random_normal_initializer(
@@ -757,7 +917,7 @@ def main() -> None:
     args = parse_args()
 
     dim = len(args.alphabet)
-    columns = collect_columns(
+    columns, family_of_column, family_accessions = collect_columns(
         input_dir=args.input_dir,
         pattern=args.pattern,
         fmt=args.fmt,
@@ -766,24 +926,59 @@ def main() -> None:
         min_count=args.min_count,
         min_occupancy=args.min_occupancy,
     )
-    if args.max_columns is not None and columns.shape[0] > args.max_columns:
-        rng = np.random.default_rng(args.seed)
-        idx = rng.choice(columns.shape[0], size=args.max_columns, replace=False)
-        columns = columns[idx]
-        print(f"Subsampled to {columns.shape[0]} columns.")
 
-    # Split into a training and a held-out validation set for model selection.
-    # The same split is reused across runs so their scores are comparable.
     rng = np.random.default_rng(args.seed)
-    perm = rng.permutation(columns.shape[0])
-    num_val = int(round(args.val_fraction * columns.shape[0]))
-    if not 0 < num_val < columns.shape[0]:
+    num_total = columns.shape[0]
+    num_val = int(round(args.val_fraction * num_total))
+    if not 0 < num_val < num_total:
         raise ValueError(
             f"--val-fraction {args.val_fraction} yields {num_val} validation "
-            f"columns out of {columns.shape[0]}; choose a value in (0, 1)."
+            f"columns out of {num_total}; choose a value in (0, 1)."
         )
-    val_columns = columns[perm[:num_val]]
-    train_columns = columns[perm[num_val:]]
+
+    if args.clans is None:
+        # Flat, un-balanced pool: optionally cap, then split by permutation.
+        if args.max_columns is not None and num_total > args.max_columns:
+            idx = rng.choice(num_total, size=args.max_columns, replace=False)
+            columns = columns[idx]
+            print(f"Subsampled to {columns.shape[0]} columns.")
+        # The same split is reused across runs so their scores are comparable.
+        perm = rng.permutation(columns.shape[0])
+        num_val = int(round(args.val_fraction * columns.shape[0]))
+        if not 0 < num_val < columns.shape[0]:
+            raise ValueError(
+                f"--val-fraction {args.val_fraction} yields {num_val} "
+                f"validation columns out of {columns.shape[0]}; choose a value "
+                f"in (0, 1)."
+            )
+        val_columns = columns[perm[:num_val]]
+        train_columns = columns[perm[num_val:]]
+    else:
+        # Clan-balanced sampling. Split the columns into disjoint train/val
+        # pools first (so the with-replacement draws never share a column),
+        # then draw each set hierarchically (clan -> family -> column).
+        clan_of_family = load_clan_of_family(args.clans, family_accessions)
+        perm = rng.permutation(num_total)
+        val_pool = perm[:num_val]
+        train_pool = perm[num_val:]
+        n_total = args.max_columns if args.max_columns is not None else num_total
+        n_val = int(round(args.val_fraction * n_total))
+        n_train = n_total - n_val
+        if not 0 < n_val < n_total:
+            raise ValueError(
+                f"--val-fraction {args.val_fraction} and --max-columns "
+                f"{args.max_columns} yield {n_val} validation columns; choose "
+                f"compatible values."
+            )
+        train_idx = sample_clan_family_columns(
+            family_of_column, clan_of_family, train_pool, n_train, rng
+        )
+        val_idx = sample_clan_family_columns(
+            family_of_column, clan_of_family, val_pool, n_val, rng
+        )
+        train_columns = columns[train_idx]
+        val_columns = columns[val_idx]
+
     print(
         f"Split into {train_columns.shape[0]} training and "
         f"{val_columns.shape[0]} validation columns."
