@@ -22,6 +22,13 @@ By default every column contributes equally, so large families dominate. Pass
 hierarchically (clan uniform -> family uniform -> column uniform), which removes
 the bias of large families (and large clans) from the fitted prior.
 
+With the default count-based scoring (``--score counts``) the per-column counts
+are additionally reweighted HMMER-style so that redundant sequences within a
+family do not inflate the effective sample size: sequences are down-weighted by
+Henikoff & Henikoff (1994) position-based weights and each family's total weight
+is rescaled to an entropy-targeted effective sequence number (Neff). Pass
+``--no-neff`` to fall back to raw per-sequence counts.
+
 Example
 -------
 Fit a 9-component amino-acid mixture and overwrite the shipped prior::
@@ -105,13 +112,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--min-count",
         type=int,
-        default=30,
+        default=10,
         help="Minimum total non-gap residue count required to keep a column.",
     )
     parser.add_argument(
         "--min-occupancy",
         type=float,
-        default=0.8,
+        default=0.5,
         help="Minimum column occupancy (fraction of non-gap residues) required "
              "to keep a column. Combined with --min-count: a column is kept "
              "only if it satisfies both thresholds.",
@@ -201,6 +208,40 @@ def parse_args() -> argparse.Namespace:
              "normalized column distributions with the Dirichlet density.",
     )
     parser.add_argument(
+        "--no-neff",
+        action="store_true",
+        help="Disable HMMER-style Neff sequence weighting. By default (with "
+             "--score counts) sequences are down-weighted by Henikoff "
+             "position-based weights and each family's total weight is rescaled "
+             "to an entropy-targeted effective sequence number (Neff), so "
+             "redundant families no longer inflate the per-column sample size. "
+             "Has no effect with --score probabilities.",
+    )
+    parser.add_argument(
+        "--neff-target-bits",
+        type=float,
+        default=0.59,
+        help="Per-column mean-relative-entropy target (in bits) for the Neff "
+             "bisection (HMMER's protein default; 0.45 for nucleotides). Note "
+             "the target is calibrated for a 20-letter amino-acid alphabet.",
+    )
+    parser.add_argument(
+        "--neff-prior-conc",
+        type=float,
+        default=10.0,
+        help="Total concentration of the data-anchored reference single "
+             "Dirichlet (alpha = background * concentration) used only inside "
+             "the Neff entropy target. The target depends only on the ratio "
+             "Neff/concentration, so this scales the resulting Neff linearly: "
+             "doubling it doubles every family's Neff. The self-consistent "
+             "choice is the total concentration of the prior being fit; the "
+             "default is that fixed point for Pfam seed columns at "
+             "--min-occupancy 0.5 --min-count 30. Set it too low and columns "
+             "carry ~1 effective count each, which makes the concentration "
+             "unidentifiable and the fit diverge; too high and families clamp "
+             "at their actual sequence count (watch the Neff diagnostic).",
+    )
+    parser.add_argument(
         "--seed",
         type=int,
         default=0,
@@ -236,6 +277,180 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+# --------------------------------------------------------------------------
+# HMMER-style sequence weighting and effective-sequence-number (Neff) targeting.
+#
+# The count-based fit treats every sequence as an independent observation, so a
+# family with many near-identical sequences inflates the per-column sample size
+# the Dirichlet-multinomial sees. HMMER counters this in two stages: Henikoff &
+# Henikoff (1994) position-based weights down-weight redundant sequences, and an
+# entropy-based bisection rescales a family's total weight to an effective
+# sequence number (Neff) whose columns carry an information-appropriate sample
+# size. Both stages run per family before the counts feed the fit.
+# --------------------------------------------------------------------------
+
+
+def emissions_single_dirichlet(
+    counts: np.ndarray, alpha: np.ndarray
+) -> np.ndarray:
+    """Mean-posterior emission probabilities under a single Dirichlet.
+
+    Args:
+        counts: Weighted residue counts of shape ``(M, dim)``.
+        alpha: Concentration parameters of shape ``(dim,)``, broadcast over the
+            ``M`` columns.
+
+    Returns:
+        Posterior mean probabilities of shape ``(M, dim)`` (each row sums to 1).
+    """
+    post = counts + alpha
+    return post / post.sum(axis=1, keepdims=True)
+
+
+def henikoff_pb_weights(msa: np.ndarray, dim: int, gap: int) -> np.ndarray:
+    """Henikoff & Henikoff (1994) position-based sequence weights.
+
+    Purely per-column and free of any pairwise-similarity computation (HMMER's
+    default weighting). In a column with ``r`` distinct residue types, a sequence
+    carrying a residue of type ``a`` seen ``c(a)`` times receives ``1 / (r *
+    c(a))`` from that column; gaps contribute nothing. The per-sequence sums are
+    normalized to relative weights summing to 1.
+
+    Args:
+        msa: Integer-encoded alignment of shape ``(num_seq, L)``; tokens
+            ``0..dim-1`` are residues and ``gap`` marks a gap.
+        dim: Alphabet size (number of non-gap tokens).
+        gap: Token value marking a gap.
+
+    Returns:
+        Relative weights of shape ``(num_seq,)`` summing to 1. An empty or
+        all-gap alignment yields uniform weights.
+    """
+    num_seq = msa.shape[0]
+    w = np.zeros(num_seq, dtype=np.float64)
+    for j in range(msa.shape[1]):
+        col = msa[:, j]
+        obs = col != gap
+        if not obs.any():
+            continue
+        counts = np.bincount(col[obs], minlength=dim)  # c(a) per residue type
+        r = np.count_nonzero(counts)                   # distinct types in column
+        # A residue of type a in this column contributes 1 / (r * c(a)).
+        w[obs] += 1.0 / (r * counts[col[obs]])
+    total = w.sum()
+    return w / total if total > 0 else np.full(num_seq, 1.0 / num_seq)
+
+
+def weighted_counts(
+    msa: np.ndarray, rel_w: np.ndarray, dim: int, columns: np.ndarray, gap: int
+) -> np.ndarray:
+    """Accumulate relative-weight residue counts at the given columns.
+
+    Because ``rel_w`` sums to 1, the returned vectors are the *base* counts for
+    :func:`target_neff`: the effective counts at a chosen ``neff`` are simply
+    ``neff * weighted_counts(...)``.
+
+    Args:
+        msa: Integer-encoded alignment of shape ``(num_seq, L)``.
+        rel_w: Per-sequence relative weights of shape ``(num_seq,)`` (sum to 1).
+        dim: Alphabet size (number of non-gap tokens).
+        columns: Column indices to accumulate, shape ``(M,)``.
+        gap: Token value marking a gap.
+
+    Returns:
+        Weighted counts of shape ``(len(columns), dim)``. Each row sums to at
+        most 1 (the non-gap weight fraction of that column).
+    """
+    counts = np.zeros((len(columns), dim), dtype=np.float64)
+    for m, j in enumerate(columns):
+        col = msa[:, j]
+        obs = col != gap
+        np.add.at(counts[m], col[obs], rel_w[obs])
+    return counts
+
+
+def mean_relative_entropy(p: np.ndarray, bg: np.ndarray) -> float:
+    """Mean over columns of the relative entropy ``KL(p_col || bg)`` in bits.
+
+    Args:
+        p: Per-column probability vectors of shape ``(M, dim)`` (each summing
+            to 1).
+        bg: Background probability vector of shape ``(dim,)``.
+
+    Returns:
+        The mean over the ``M`` columns of ``sum_a p_a * log2(p_a / bg_a)``.
+    """
+    with np.errstate(divide="ignore", invalid="ignore"):
+        terms = p * (np.log2(p) - np.log2(bg)[None, :])
+    terms = np.where(p > 0, terms, 0.0)
+    return float(terms.sum(axis=1).mean())
+
+
+def target_neff(
+    base_counts: np.ndarray,
+    alpha: np.ndarray,
+    bg: np.ndarray,
+    target_bits: float = 0.59,
+    n_actual: float | None = None,
+    lo: float = 1e-3,
+    iters: int = 60,
+) -> tuple[float, np.ndarray]:
+    """Find the effective sequence number matching a relative-entropy target.
+
+    Mirrors HMMER's entropy weighting (``--eent``): the per-column mean relative
+    entropy of the posterior-mean emissions increases monotonically with the
+    effective sequence number ``neff``, so a bisection finds the ``neff`` at
+    which it equals ``target_bits``. ``base_counts`` are relative-weight counts
+    (from :func:`weighted_counts`), so the counts at a given ``neff`` are linear,
+    ``neff * base_counts``. If even ``neff = n_actual`` cannot reach the target
+    (the family is not conserved enough), ``neff = n_actual`` is kept, matching
+    HMMER's behavior.
+
+    Note that the emissions depend on ``alpha`` and ``neff`` only through their
+    ratio, so scaling ``alpha`` scales the returned ``neff`` by exactly the same
+    factor (up to the ``n_actual`` clamp). The total concentration of ``alpha``
+    is therefore a linear gain on the effective sample size, not a smoothing
+    strength: the extra smoothing it adds is exactly undone by the bisection.
+
+    Args:
+        base_counts: Relative-weight counts of shape ``(M, dim)`` at the family's
+            match columns (``rel_w`` summed to 1).
+        alpha: Reference single-Dirichlet concentrations of shape ``(dim,)``.
+        bg: Background probability vector of shape ``(dim,)``.
+        target_bits: Target mean relative entropy per column, in bits.
+        n_actual: Upper bound on ``neff`` (the actual number of sequences);
+            defaults to the number of match columns if not given.
+        lo: Lower bound of the bisection.
+        iters: Number of bisection iterations.
+
+    Returns:
+        A tuple ``(neff, emissions)`` of the effective sequence number and the
+        posterior-mean emissions of shape ``(M, dim)`` evaluated at that ``neff``.
+    """
+    hi = float(n_actual) if n_actual is not None else float(base_counts.shape[0])
+
+    def re_at(neff: float) -> tuple[float, np.ndarray]:
+        p = emissions_single_dirichlet(neff * base_counts, alpha)
+        return mean_relative_entropy(p, bg), p
+
+    # Monotonicity: mean relative entropy grows with neff. If the maximum
+    # attainable value already falls short, keep the full sequence count.
+    re_hi, p_hi = re_at(hi)
+    if re_hi <= target_bits:
+        return hi, p_hi
+
+    a, b = lo, hi
+    mid, p_mid = hi, p_hi
+    for _ in range(iters):
+        mid = 0.5 * (a + b)
+        re_mid, p_mid = re_at(mid)
+        if re_mid > target_bits:
+            b = mid
+        else:
+            a = mid
+    return mid, p_mid
+
+
 def collect_columns(
     input_dir: str,
     pattern: str,
@@ -244,6 +459,9 @@ def collect_columns(
     replace_with_x: str,
     min_count: int,
     min_occupancy: float,
+    neff: bool = False,
+    neff_target_bits: float = 0.59,
+    neff_prior_conc: float = 10.0,
 ) -> tuple[np.ndarray, np.ndarray, list[str]]:
     """Collect per-column token counts from a directory of alignments.
 
@@ -252,6 +470,15 @@ def collect_columns(
     vector if needed). A column is kept only if it satisfies both thresholds:
     its total non-gap residue count is at least ``min_count`` and its occupancy
     (fraction of non-gap residues) is at least ``min_occupancy``.
+
+    With ``neff`` enabled the raw counts are replaced by HMMER-style effective
+    counts: each family's sequences are down-weighted by Henikoff position-based
+    weights (:func:`henikoff_pb_weights`) and its total weight is rescaled to an
+    entropy-targeted effective sequence number (:func:`target_neff`). The column
+    selection is unchanged -- the same kept columns are emitted -- but their
+    count vectors reflect effective, not raw, sequence numbers. The reference
+    background used by the entropy target is the global marginal token
+    distribution over all kept columns, so the routine stays alphabet-agnostic.
 
     The provenance of each column is also returned (which family/file it came
     from), so callers can group columns by family and clan for balanced sampling.
@@ -265,6 +492,17 @@ def collect_columns(
         min_count: Minimum total non-gap residue count required to keep a column.
         min_occupancy: Minimum column occupancy (non-gap fraction) required to
             keep a column.
+        neff: If True, emit HMMER-style effective counts (Henikoff weighting plus
+            entropy-based Neff targeting) instead of raw per-sequence counts.
+        neff_target_bits: Per-column mean-relative-entropy target (in bits) for
+            the Neff bisection; ignored when ``neff`` is False.
+        neff_prior_conc: Total concentration of the data-anchored reference single
+            Dirichlet (``alpha = bg * neff_prior_conc``) used by the entropy
+            target; ignored when ``neff`` is False. The target depends only on
+            the ratio ``neff / neff_prior_conc``, so this is a linear gain on the
+            resulting Neff rather than a smoothing strength (see
+            :func:`target_neff`). The self-consistent value is the total
+            concentration of the prior being fit.
 
     Returns:
         A tuple ``(columns, family_of_column, family_accessions)`` where
@@ -276,6 +514,7 @@ def collect_columns(
     """
     dim = len(alphabet)
     parse_alphabet = alphabet + "-"
+    gap = dim  # gap token index (parse_alphabet appends the gap symbol)
     files = sorted(p for p in Path(input_dir).glob(pattern) if p.is_file())
     if not files:
         raise ValueError(
@@ -285,6 +524,8 @@ def collect_columns(
     distributions: list[np.ndarray] = []
     family_ids: list[np.ndarray] = []
     family_accessions: list[str] = []
+    family_num_seq: list[int] = []  # sequences per family (for Neff targeting)
+    bg_accum = np.zeros(dim, dtype=np.float64)  # global marginal token counts
     for path in files:
         try:
             data = AlignedDataset(
@@ -309,18 +550,54 @@ def collect_columns(
         keep = (totals >= max(min_count, 1)) & (occupancy >= min_occupancy)
         if not np.any(keep):
             continue
-        kept = counts[keep]
+        # The global background is the marginal over the kept (fitted) columns.
+        bg_accum += counts[keep].sum(axis=0)
+        if neff:
+            # Henikoff-weighted base counts at the kept columns. These are scaled
+            # to the family's effective sequence number below, once the global
+            # background needed by the entropy target is known.
+            rel_w = henikoff_pb_weights(matrix, dim, gap=gap)
+            kept = weighted_counts(matrix, rel_w, dim, np.where(keep)[0], gap=gap)
+        else:
+            kept = counts[keep]
         # Family accession is the file name up to the first dot (strips the
         # version and extension, e.g. PF01024.25.fasta -> PF01024).
         family_index = len(family_accessions)
         family_accessions.append(path.name.split(".")[0])
         distributions.append(kept)
         family_ids.append(np.full((kept.shape[0],), family_index, dtype=np.int64))
+        family_num_seq.append(num_seq)
 
     if not distributions:
         raise ValueError(
             "No columns passed the filters. Try lowering --min-count or "
             "--min-occupancy."
+        )
+
+    if neff:
+        # Data-anchored reference for the entropy target: the global marginal
+        # token distribution and a single Dirichlet alpha = bg * concentration.
+        bg = np.clip(bg_accum / max(bg_accum.sum(), 1.0), 1e-8, None)
+        bg = bg / bg.sum()
+        alpha = bg * neff_prior_conc
+        neffs = np.empty(len(distributions), dtype=np.float64)
+        for i, (base, n_seq) in enumerate(zip(distributions, family_num_seq)):
+            neff_i, _ = target_neff(
+                base, alpha, bg, target_bits=neff_target_bits, n_actual=n_seq
+            )
+            distributions[i] = neff_i * base
+            neffs[i] = neff_i
+        num_seq_arr = np.maximum(family_num_seq, 1)
+        ratios = neffs / num_seq_arr
+        # Families that could not reach the entropy target keep Neff = num_seq.
+        # A large share means --neff-prior-conc is too high for this data and the
+        # entropy target has stopped discounting redundancy.
+        clamped = 100.0 * np.mean(neffs >= num_seq_arr - 1e-6)
+        print(
+            f"Neff weighting: per-family Neff min/median/mean/max = "
+            f"{neffs.min():.2f}/{np.median(neffs):.2f}/{neffs.mean():.2f}/"
+            f"{neffs.max():.2f}; mean Neff/num_seq = {ratios.mean():.3f}; "
+            f"{clamped:.1f}% of families clamped at num_seq."
         )
 
     columns = np.concatenate(distributions, axis=0).astype(np.float64)
@@ -875,7 +1152,7 @@ def train(
         validation_data=val_ds,
         epochs=epochs,
         callbacks=[early_stopping],
-        verbose=0,
+        verbose=1,
     )
     best_val_loss = float(np.min(history.history["val_loss"]))
     print(
@@ -964,6 +1241,12 @@ def main() -> None:
 
     dim = len(args.alphabet)
     score_counts = args.score == "counts"
+    # Neff weighting only reshapes the count magnitudes, which is meaningful for
+    # the count-based marginal but cancels out once columns are normalized to
+    # probabilities; it is therefore applied only with --score counts.
+    use_neff = score_counts and not args.no_neff
+    if args.no_neff and not score_counts:
+        print("--no-neff has no effect with --score probabilities.")
     columns, family_of_column, family_accessions = collect_columns(
         input_dir=args.input_dir,
         pattern=args.pattern,
@@ -972,12 +1255,19 @@ def main() -> None:
         replace_with_x=args.replace_with_x,
         min_count=args.min_count,
         min_occupancy=args.min_occupancy,
+        neff=use_neff,
+        neff_target_bits=args.neff_target_bits,
+        neff_prior_conc=args.neff_prior_conc,
     )
-    # collect_columns returns raw counts. The Dirichlet-multinomial marginal
-    # scores counts directly; the Dirichlet density needs probability vectors.
+    # collect_columns returns (Neff-weighted or raw) counts. The Dirichlet-
+    # multinomial marginal scores counts directly; the Dirichlet density needs
+    # probability vectors.
     if not score_counts:
         columns = columns / columns.sum(axis=1, keepdims=True)
-    print(f"Scoring columns as {args.score}.")
+    print(
+        f"Scoring columns as {args.score}"
+        f"{' with Neff weighting' if use_neff else ''}."
+    )
 
     rng = np.random.default_rng(args.seed)
     num_total = columns.shape[0]
