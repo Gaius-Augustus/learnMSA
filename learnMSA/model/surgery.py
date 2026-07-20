@@ -657,8 +657,9 @@ def _get_aa_insert_value(config: PHMMConfig) -> np.ndarray:
 def _get_struct_insert_value(structural_config: StructureConfig) -> np.ndarray:
     if structural_config.use_prior_for_emission_init\
             and structural_config.prior_name:
+        c = structural_config.prior_components
         struct_prior = load_dirichlet(
-            structural_config.prior_name+".weights",
+            f"{structural_config.prior_name}_{c}.weights",
             dim=structural_config.alphabet_size,
             components=structural_config.prior_components,
             states=[1],

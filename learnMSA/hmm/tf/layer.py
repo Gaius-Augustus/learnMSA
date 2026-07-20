@@ -361,8 +361,9 @@ class PHMMLayer(tf.keras.Layer):
 
             # If specified, load and add a Dirichlet prior
             if self.structural_config.prior_name:
+                c = self.structural_config.prior_components
                 struct_prior = load_dirichlet(
-                    self.structural_config.prior_name+".weights",
+                    f"{self.structural_config.prior_name}_{c}.weights",
                     dim=self.structural_config.alphabet_size,
                     components=self.structural_config.prior_components,
                     states=self.states,
@@ -455,8 +456,9 @@ class PHMMLayer(tf.keras.Layer):
             and struct_values is None
 
         if needs_struct_prior:
+            c = self.structural_config.prior_components
             struct_prior = load_dirichlet(
-                self.structural_config.prior_name+".weights",
+                f"{self.structural_config.prior_name}_{c}.weights",
                 dim=self.structural_config.alphabet_size,
                 components=self.structural_config.prior_components,
                 states=self.states,
