@@ -9,10 +9,10 @@ else:
 import numpy as np
 import tensorflow as tf
 from hidten.hmm import HMMConfig
-from hidten.tf.emitter.categorical import (T_initializer, T_shapelike,
+from hidten.tf.util import T_initializer, setup_initializer
+from hidten.tf.emitter.categorical import (T_shapelike,
                                            T_TFTensor, TFCategoricalEmitter,
-                                           n_shared_parameters, safe_log,
-                                           setup_initializer)
+                                           n_shared_parameters, safe_log)
 from hidten.tf.prior import TFPrior
 from hidten.tf.util import zero_row_softmax
 
