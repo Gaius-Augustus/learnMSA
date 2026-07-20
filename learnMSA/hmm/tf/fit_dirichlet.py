@@ -15,7 +15,9 @@ Dirichlets (9 components by default) fit to conserved alignment columns.
 The columns are split into a training and a held-out validation set (80/20 by
 default). Several trainings are run from different random initializations (10
 by default), each stopped early once the validation loss stops improving, and
-the model with the best validation log-likelihood is saved.
+the model with the best validation log-likelihood is saved. With ``--num-runs
+1`` there is no model selection, so validation is skipped and all columns are
+used for training; ``--val-fraction 0`` requires ``--num-runs 1``.
 
 By default every column contributes equally, so large families dominate. Pass
 ``--clans`` with a Pfam-style clan TSV to instead draw the training columns
@@ -163,13 +165,15 @@ def parse_args() -> argparse.Namespace:
         "--val-fraction",
         type=float,
         default=0.2,
-        help="Fraction of columns held out for validation / model selection.",
+        help="Fraction of columns held out for validation / model selection. "
+             "Set to 0 to train on all columns without validation.",
     )
     parser.add_argument(
         "--patience",
         type=int,
         default=3,
-        help="Stop a run after this many epochs without validation improvement.",
+        help="Stop a run after this many epochs without improvement of the "
+             "validation loss (or the training loss if no validation is done).",
     )
     parser.add_argument(
         "--no-map-prior",
@@ -1104,7 +1108,7 @@ def _make_dataset(
 def train(
     model: tf.keras.Model,
     train_columns: np.ndarray,
-    val_columns: np.ndarray,
+    val_columns: np.ndarray | None,
     lr: float,
     epochs: int,
     batch_size: int,
@@ -1115,21 +1119,24 @@ def train(
 
     Training shuffles the columns every epoch and stops early once the
     validation loss has not improved for ``patience`` epochs, restoring the
-    weights of the best epoch.
+    weights of the best epoch. Without validation columns the training loss is
+    monitored instead.
 
     Args:
         model: The trainable Dirichlet model.
         train_columns: Training column distributions of shape ``(M, dim)``.
-        val_columns: Validation column distributions of shape ``(N, dim)``.
+        val_columns: Validation column distributions of shape ``(N, dim)``, or
+            ``None`` to train without validation.
         lr: Learning rate of the Adam optimizer.
         epochs: Maximum number of training epochs.
         batch_size: Number of columns per batch.
-        patience: Epochs without validation improvement before stopping.
+        patience: Epochs without loss improvement before stopping.
         seed: Random seed for dataset shuffling.
 
     Returns:
-        The best (lowest) validation loss reached during the run, i.e. the
-        negative mean validation column log-likelihood.
+        The best (lowest) monitored loss reached during the run, i.e. the
+        negative mean column log-likelihood on the validation columns, or on
+        the training columns if no validation is done.
     """
     optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
     # The model outputs per-column log densities; minimize their negative mean.
@@ -1139,10 +1146,17 @@ def train(
     )
 
     train_ds = _make_dataset(train_columns, batch_size, shuffle=True, seed=seed)
-    val_ds = _make_dataset(val_columns, batch_size, shuffle=False, seed=seed)
+    if val_columns is None:
+        val_ds = None
+        monitor = "loss"
+    else:
+        val_ds = _make_dataset(
+            val_columns, batch_size, shuffle=False, seed=seed
+        )
+        monitor = "val_loss"
 
     early_stopping = tf.keras.callbacks.EarlyStopping(
-        monitor="val_loss",
+        monitor=monitor,
         mode="min",
         patience=patience,
         restore_best_weights=True,
@@ -1152,13 +1166,12 @@ def train(
         validation_data=val_ds,
         epochs=epochs,
         callbacks=[early_stopping],
-        verbose=1,
+        verbose=0,
     )
-    best_val_loss = float(np.min(history.history["val_loss"]))
-    print(
-        f"Best validation mean column log-likelihood: {-best_val_loss:.4f}"
-    )
-    return best_val_loss
+    best_loss = float(np.min(history.history[monitor]))
+    label = "validation" if val_ds is not None else "training"
+    print(f"Best {label} mean column log-likelihood: {-best_loss:.4f}")
+    return best_loss
 
 
 def save(
@@ -1271,14 +1284,35 @@ def main() -> None:
 
     rng = np.random.default_rng(args.seed)
     num_total = columns.shape[0]
-    num_val = int(round(args.val_fraction * num_total))
-    if not 0 < num_val < num_total:
+    if args.val_fraction == 0 and args.num_runs > 1:
         raise ValueError(
-            f"--val-fraction {args.val_fraction} yields {num_val} validation "
-            f"columns out of {num_total}; choose a value in (0, 1)."
+            "--val-fraction 0 disables validation, but --num-runs "
+            f"{args.num_runs} needs a held-out set to select the best run; "
+            "use --num-runs 1 or a positive --val-fraction."
         )
-
-    if args.clans is None:
+    # Validation only serves model selection between runs, so a single run does
+    # not need a held-out set either.
+    validate = args.num_runs > 1
+    if not validate:
+        if args.max_columns is not None and num_total > args.max_columns:
+            if args.clans is None:
+                idx = rng.choice(num_total, size=args.max_columns, replace=False)
+            else:
+                clan_of_family = load_clan_of_family(
+                    args.clans, family_accessions
+                )
+                idx = sample_clan_family_columns(
+                    family_of_column,
+                    clan_of_family,
+                    np.arange(num_total),
+                    args.max_columns,
+                    rng,
+                )
+            columns = columns[idx]
+        train_columns = columns
+        val_columns = None
+        print(f"Training on all {train_columns.shape[0]} columns.")
+    elif args.clans is None:
         # Flat, un-balanced pool: optionally cap, then split by permutation.
         if args.max_columns is not None and num_total > args.max_columns:
             idx = rng.choice(num_total, size=args.max_columns, replace=False)
@@ -1300,6 +1334,13 @@ def main() -> None:
         # pools first (so the with-replacement draws never share a column),
         # then draw each set hierarchically (clan -> family -> column).
         clan_of_family = load_clan_of_family(args.clans, family_accessions)
+        num_val = int(round(args.val_fraction * num_total))
+        if not 0 < num_val < num_total:
+            raise ValueError(
+                f"--val-fraction {args.val_fraction} yields {num_val} "
+                f"validation columns out of {num_total}; choose a value in "
+                f"(0, 1)."
+            )
         perm = rng.permutation(num_total)
         val_pool = perm[:num_val]
         train_pool = perm[num_val:]
@@ -1321,10 +1362,11 @@ def main() -> None:
         train_columns = columns[train_idx]
         val_columns = columns[val_idx]
 
-    print(
-        f"Split into {train_columns.shape[0]} training and "
-        f"{val_columns.shape[0]} validation columns."
-    )
+    if val_columns is not None:
+        print(
+            f"Split into {train_columns.shape[0]} training and "
+            f"{val_columns.shape[0]} validation columns."
+        )
 
     # Frozen background anchor for the MAP prior: the data mean expressed as
     # logits, so softmax(background_init) recovers the mean (which sums to 1).
@@ -1335,7 +1377,8 @@ def main() -> None:
     num_examples = train_columns.shape[0]
 
     # Run several trainings from different random initializations and keep the
-    # model with the lowest validation loss.
+    # model with the lowest validation loss. With a single run there is nothing
+    # to select and the reported loss is the training loss.
     best_val_loss = np.inf
     best_prior_weights: list[np.ndarray] | None = None
     for run in range(args.num_runs):
@@ -1370,12 +1413,13 @@ def main() -> None:
             # Keep only the prior kernel; the MAP-prior hyperparameters are a
             # training-only artifact and are not part of the saved format.
             best_prior_weights = model.prior.get_weights()
-            print(f"New best model (validation loss {val_loss:.4f}).")
+            if validate:
+                print(f"New best model (validation loss {val_loss:.4f}).")
 
     assert best_prior_weights is not None  # num_runs >= 1 guarantees a fit
     print(
-        f"\nBest validation mean column log-likelihood over "
-        f"{args.num_runs} run(s): {-best_val_loss:.4f}"
+        f"\nBest {'validation' if validate else 'training'} mean column "
+        f"log-likelihood over {args.num_runs} run(s): {-best_val_loss:.4f}"
     )
     # Rebuild a clean, prior-only model and load the best prior kernel. This
     # keeps the saved weight layout identical to what make_dirichlet_model /
