@@ -229,8 +229,8 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
                 adds = (encoded_struct, *adds[1:])
         else:
             encoded_seq = sequences_onehot
-            # keep original adds, as structural track uses
-            # encode_as_one_hot=True in its SequenceDataset
+            # keep original adds; the structural track arrives one-hot encoded
+            # from its SequenceDataset (remap=False)
 
         return encoded_seq, *adds
 

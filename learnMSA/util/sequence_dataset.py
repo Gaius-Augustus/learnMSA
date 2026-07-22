@@ -41,7 +41,6 @@ class SequenceDataset(Dataset):
         gap_symbols: str = "-.",
         ignore_symbols: str = "",
         validate_alphabet: bool = True,
-        encode_as_one_hot: bool = False,
         remap: bool = True,
         model_uo: bool = False,
     ) -> None:
@@ -68,16 +67,15 @@ class SequenceDataset(Dataset):
             validate_alphabet (bool): If True, raise an error if any sequence
                 contains characters not in the specified alphabet after
                 standardization.
-            encode_as_one_hot (bool): If True, sequences are encoded as one-hot
-                vectors instead of integer indices (only used when remap is off,
-                e.g. for the 3Di alphabet).
             remap (bool): Amino acid mode only. If True (default),
                 get_encoded_seq returns per-residue distributions over the 20
                 (or 22 with model_uo) standard amino acids, resolving ambiguity
                 codes (B->{D,N}, Z->{E,Q}, J->{I,L}, X->all 20). If False, the
-                sequence is encoded as integer indices over the full render
-                alphabet (standard + non-standard letters + gap), preserving the
-                original residues. Ignored for non-amino-acid alphabets.
+                sequence is one-hot encoded over the full output alphabet
+                (standard + non-standard letters + gap), preserving the original
+                residues. Either way the encoding is a one-hot / distribution
+                matrix, never integer indices. Ignored for non-amino-acid
+                alphabets.
             model_uo (bool): Amino acid mode only. If True, U (selenocysteine)
                 and O (pyrrolysine) are modeled explicitly (22-letter alphabet);
                 otherwise they are resolved like X.
@@ -85,26 +83,25 @@ class SequenceDataset(Dataset):
         self.model_uo = model_uo
         self.remap = remap
         # Amino acid mode is used whenever no explicit alphabet is provided.
-        self._is_aa = alphabet is None
         if alphabet is not None:
             self.alphabet = alphabet
-            self.render_alphabet = alphabet
-            self._aa_dist: dict[str, np.ndarray] | None = None
+            self.output_alphabet = alphabet
         else:
             base = SequenceDataset._default_alphabet  # 20 standard AAs
             self.alphabet = base + ("UO" if model_uo else "")
             # Characters recognized for faithful (remap=False) rendering,
             # appended in a fixed order with the gap symbol last.
             nonstd = "".join(c for c in "XBZJUO" if c not in self.alphabet)
-            self.render_alphabet = self.alphabet + nonstd + "-"
-            self._aa_dist = self._build_aa_dist()
+            self.output_alphabet = self.alphabet + nonstd + "-"
+        # Row-lookup matrix mapping each output-alphabet token to its
+        # distribution over the model alphabet (see alphabet_remap).
+        self._remap_matrix = self.alphabet_remap()
         self.remove_gaps = remove_gaps
         self.gap_symbols = gap_symbols
         self.ignore_symbols = ignore_symbols
         self.validate_alphabet = validate_alphabet
-        self.encode_as_one_hot = encode_as_one_hot
         self._invalid_char_pattern = re.compile(
-            rf"[^{re.escape(self.render_alphabet)}]"
+            rf"[^{re.escape(self.output_alphabet)}]"
         )
 
         self.filepath = Path()
@@ -188,53 +185,34 @@ class SequenceDataset(Dataset):
         """ Get the index of the sequence with the given sequence ID. """
         return self.seq_ids.index(seq_id)
 
-    def get_alphabet_no_gap(self) -> str:
-        """ Get the alphabet without a trailing gap symbol. For amino acids the
-        model alphabet already has no gap; custom alphabets (e.g. AB-) are
-        stripped of their trailing gap. """
-        if self.alphabet.endswith('-'):
-            return self.alphabet[:-1]
-        return self.alphabet
-
-    def _build_aa_dist(self) -> dict[str, np.ndarray]:
-        """Build a lookup from residue character to a probability vector over
-        the model alphabet (20 or 22 amino acids). Ambiguity codes are resolved
-        uniformly over their target set (B->{D,N}, Z->{E,Q}, J->{I,L},
-        X->all 20). U/O map to their own column when modeled, else to X.
+    def alphabet_remap(self) -> np.ndarray:
+        """Matrix of shape (len(output_alphabet), len(alphabet)) mapping each
+        output-alphabet token to its probability distribution over the model
+        alphabet. Standard amino acids map to a one-hot column; ambiguity codes
+        are resolved uniformly over their target set (B->{D,N}, Z->{E,Q},
+        J->{I,L}, X->all 20); U/O map to their own column when modeled, else
+        like X; the gap token maps to an all-zero row. For custom (non-amino-
+        acid) alphabets each token maps to its own one-hot column.
         """
-        aa20 = SequenceDataset._default_alphabet  # 20 standard amino acids
-        dim = len(self.alphabet)
         idx = {c: i for i, c in enumerate(self.alphabet)}
-        dist: dict[str, np.ndarray] = {}
-        # Standard amino acids (and U/O when modeled explicitly)
-        for c in self.alphabet:
-            v = np.zeros(dim, dtype=np.float32)
-            v[idx[c]] = 1.0
-            dist[c] = v
-        # Ambiguity codes as uniform distributions over their target sets
-        for c, targets in (("B", "DN"), ("Z", "EQ"), ("J", "IL"), ("X", aa20)):
-            v = np.zeros(dim, dtype=np.float32)
-            for t in targets:
-                v[idx[t]] = 1.0 / len(targets)
-            dist[c] = v
-        # U/O resolve like X (uniform over the 20 standard) when not modeled
-        if not self.model_uo:
-            dist["U"] = dist["X"].copy()
-            dist["O"] = dist["X"].copy()
-        return dist
-
-    def render_token_distributions(self) -> np.ndarray:
-        """Matrix of shape (len(render_alphabet), len(alphabet)) mapping each
-        integer render token to its distribution over the model alphabet.
-        The gap token maps to an all-zero row. Amino acid mode only.
-        """
         mat = np.zeros(
-            (len(self.render_alphabet), len(self.alphabet)), dtype=np.float32
+            (len(self.output_alphabet), len(self.alphabet)), dtype=np.float32
         )
-        if self._aa_dist is not None:
-            for t, ch in enumerate(self.render_alphabet):
-                if ch in self._aa_dist:
-                    mat[t] = self._aa_dist[ch]
+        # Ambiguity codes as uniform distributions over their target sets. U/O
+        # fold into the 20 standard amino acids (like X) unless modeled.
+        aa20 = SequenceDataset._default_alphabet
+        ambiguity = {"B": "DN", "Z": "EQ", "J": "IL", "X": aa20}
+        if not self.model_uo:
+            ambiguity["U"] = aa20
+            ambiguity["O"] = aa20
+        for t, ch in enumerate(self.output_alphabet):
+            if ch in idx:
+                mat[t, idx[ch]] = 1.0
+            elif ch in ambiguity:
+                targets = ambiguity[ch]
+                for a in targets:
+                    mat[t, idx[a]] = 1.0 / len(targets)
+            # gap and any unmapped symbol stay all-zero
         return mat
 
     def get_standardized_seq(self, i: int):
@@ -262,17 +240,17 @@ class SequenceDataset(Dataset):
         i: int,
         crop_start: int | None = None,
         crop_end: int | None = None,
-        dtype: type[np.integer | np.floating] = np.int16,
         remap: bool | None = None,
     ) -> np.ndarray:
         """
-        Returns sequence i encoded as a numpy array.
+        Returns sequence i one-hot encoded as a float32 numpy array; never as
+        integer indices.
 
-        In amino acid mode with remapping (the default), the result is a
-        float32 array of shape (L, alphabet_size) with one probability
-        distribution over the 20 (or 22) amino acids per residue. With
-        remapping disabled the result is an integer array of indices over the
-        render alphabet (standard + non-standard letters + gap), preserving the
+        With remapping (the default), the result has shape (L, alphabet_size)
+        with one probability distribution over the 20 (or 22) amino acids per
+        residue (soft for ambiguity codes). With remapping disabled the result
+        is a one-hot encoding of shape (L, len(output_alphabet)) over the full
+        output alphabet (standard + non-standard letters + gap), preserving the
         original residues for output.
 
         Args:
@@ -281,8 +259,6 @@ class SequenceDataset(Dataset):
                 If None, defaults to 0.
             crop_end (int | None): Optional exclusive crop end index.
                 If None, defaults to sequence length.
-            dtype (type): Numpy integer type used for the integer encoding.
-                Ignored when a distribution encoding is returned.
             remap (bool | None): Override the encoding mode. If None, the
                 instance default (self.remap) is used.
         """
@@ -295,31 +271,19 @@ class SequenceDataset(Dataset):
                 raise ValueError(
                     "Found unknown character(s) in sequence "\
                     f"{self.seq_ids[i]}. Allowed alphabet: "\
-                    f"{self.render_alphabet}."
+                    f"{self.output_alphabet}."
                 )
 
+        # Integer tokens over the output alphabet, then looked up in a one-hot /
+        # distribution matrix. remap=True folds ambiguity codes into the model
+        # alphabet; remap=False keeps every output token as its own one-hot.
+        tokens = np.array(
+            [self.output_alphabet.index(ch) for ch in seq_str], dtype=int
+        )
         if remap:
-            # Per-residue probability vectors over the model alphabet. Padding
-            # is represented downstream by all-zero vectors.
-            if self._is_aa:
-                assert self._aa_dist is not None
-                if len(seq_str) == 0:
-                    seq = np.zeros((0, len(self.alphabet)), dtype=np.float32)
-                else:
-                    seq = np.stack(
-                        [self._aa_dist[aa] for aa in seq_str], axis=0
-                    )
-            else:
-                # One-hot over the (custom) alphabet.
-                seq = np.zeros(
-                    (len(seq_str), len(self.alphabet)), dtype=np.float32
-                )
-                for k, ch in enumerate(seq_str):
-                    seq[k, self.alphabet.index(ch)] = 1.0
+            seq = self._remap_matrix[tokens]
         else:
-            seq = np.array(
-                [self.render_alphabet.index(aa) for aa in seq_str], dtype=dtype
-            )
+            seq = np.eye(len(self.output_alphabet), dtype=np.float32)[tokens]
 
         start = 0 if crop_start is None else crop_start
         end = seq.shape[0] if crop_end is None else crop_end
@@ -335,16 +299,7 @@ class SequenceDataset(Dataset):
                 f"crop_end {end} exceeds sequence length {seq.shape[0]}."
             )
 
-        seq = seq[start:end]
-
-        if not remap and self.encode_as_one_hot:
-            one_hot = np.zeros(
-                (seq.shape[0], len(self.render_alphabet)), dtype=np.float32
-            )
-            one_hot[np.arange(seq.shape[0]), seq] = 1 # type: ignore
-            return one_hot
-
-        return seq
+        return seq[start:end]
 
     def get_profile(self) -> np.ndarray:
         """
@@ -354,15 +309,9 @@ class SequenceDataset(Dataset):
         """
         profile = np.zeros((len(self.alphabet),), dtype=np.float32)
         for i in range(self.num_seq):
-            if self._is_aa:
-                # Sum the per-residue distributions over the model alphabet
-                seq = self.get_encoded_seq(i, remap=True)
-                profile += np.sum(seq, axis=0)
-            else:
-                seq = self.get_encoded_seq(i, remap=False)
-                profile += np.bincount(
-                    seq, minlength=profile.shape[0]
-                )[:profile.shape[0]]
+            # Sum the per-residue distributions over the model alphabet.
+            seq = self.get_encoded_seq(i, remap=True)
+            profile += np.sum(seq, axis=0)
         total = np.sum(profile)
         if total > 0:
             profile /= total
@@ -377,14 +326,11 @@ class SequenceDataset(Dataset):
             # Vector mode: padding positions are all-zero vectors; the terminal
             # channel is constructed downstream as 1 - sum.
             return np.zeros(shape + (len(self.alphabet),), dtype=np.float32)
-        if self.encode_as_one_hot:
-            alphabet_size = len(self.render_alphabet)
-            one_hot_shape = shape + (alphabet_size,)
-            empty = np.zeros(one_hot_shape, dtype=np.float32)
-            empty[..., alphabet_size - 1] = 1  # Initialize with terminal symbol
-            return empty
-        empty = np.zeros(shape, dtype=dtype)
-        empty += len(self.render_alphabet)-1 # Initialize with terminal symbols
+        # One-hot mode: padding positions are one-hot on the last (terminal)
+        # symbol of the output alphabet.
+        alphabet_size = len(self.output_alphabet)
+        empty = np.zeros(shape + (alphabet_size,), dtype=np.float32)
+        empty[..., alphabet_size - 1] = 1  # Initialize with terminal symbol
         return empty
 
 
@@ -466,7 +412,5 @@ class SequenceDataset(Dataset):
         self.seq_lens = self.seq_lens[perm]
 
     def get_dtype(self) -> type[np.integer | np.floating]:
-        """Return the dtype of the encoded sequences."""
-        if self.remap or self.encode_as_one_hot:
-            return np.float32
-        return np.int16
+        """Return the dtype of the encoded sequences (always one-hot float32)."""
+        return np.float32

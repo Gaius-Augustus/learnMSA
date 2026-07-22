@@ -281,7 +281,6 @@ def load_struct_data(
             indexed=config.training.indexed_data,
             alphabet=config.structure.structural_alphabet,
             remap=False,
-            encode_as_one_hot=True,
         )
         if stack is None:
             struct_data = dataset

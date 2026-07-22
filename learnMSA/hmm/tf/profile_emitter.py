@@ -22,8 +22,8 @@ class ProfileEmitter(TFCategoricalEmitter):
     head_subset : Sequence[int] | None = None
     """If set, only these heads are used in computations."""
 
-    uo_extra_dims: int = 0
-    """Number of trailing emission columns (U/O) that are folded uniformly into
+    extra_dims: int = 0
+    """Number of trailing emission columns that are folded uniformly into
     the leading columns before the (lower-dimensional) Dirichlet prior is
     applied. 0 disables the projection (the common case)."""
 
@@ -172,7 +172,7 @@ class ProfileEmitter(TFCategoricalEmitter):
         return emission_scores
 
     def prior_scores(self) -> T_TFTensor:
-        """Prior scores for the emission matrix. When ``uo_extra_dims`` > 0 the
+        """Prior scores for the emission matrix. When ``extra_dims`` > 0 the
         emission matrix has extra U/O columns that are folded uniformly into the
         leading (standard) columns before applying the lower-dimensional
         Dirichlet prior (treating U/O like X).
@@ -180,8 +180,8 @@ class ProfileEmitter(TFCategoricalEmitter):
         if not hasattr(self, "_prior"):
             return 0.0  # type: ignore[return-value]
         matrix = self.matrix()
-        if self.uo_extra_dims > 0:
-            d = self.matrix_dim - self.uo_extra_dims
+        if self.extra_dims > 0:
+            d = self.matrix_dim - self.extra_dims
             fold = tf.reduce_sum(
                 matrix[..., d:], axis=-1, keepdims=True
             ) / tf.cast(d, matrix.dtype)

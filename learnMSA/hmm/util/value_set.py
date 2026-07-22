@@ -293,7 +293,7 @@ class PHMMValueSet:
         Returns:
             An HMMValueSet object with the counts.
         """
-        gap_idx = data.render_alphabet.index('-')
+        gap_idx = data.output_alphabet.index('-')
 
         # Identify match columns based on occupancy threshold
         gaps = data.msa_matrix == gap_idx
@@ -305,10 +305,10 @@ class PHMMValueSet:
         assert L > 1, "Can not infer HMM from MSA: Not enough match states "\
             " found. Try lowering the match-threshold."
 
-        # Soft emission counts over the model alphabet: map each integer render
+        # Soft emission counts over the model alphabet: map each output-alphabet
         # token to its distribution (ambiguity codes folded, gap -> zeros) and
         # sum over sequences.  (columns, alphabet_size)
-        token_dist = data.render_token_distributions()
+        token_dist = data.alphabet_remap()
         counts = token_dist[data.msa_matrix].sum(axis=0).astype(np.float32)
 
         # Separate counts for match and insert states

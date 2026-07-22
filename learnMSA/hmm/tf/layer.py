@@ -333,7 +333,7 @@ class PHMMLayer(tf.keras.Layer):
         )
         # When U/O are modeled explicitly the emitter is 22-dimensional but the
         # prior is 20-dimensional; fold U/O uniformly into the 20 (like X).
-        profile_emitter.uo_extra_dims = (
+        profile_emitter.extra_dims = (
             len(self.config.alphabet) - len(SequenceDataset._default_alphabet)
         )
         self.hmm.add_emitter(profile_emitter)

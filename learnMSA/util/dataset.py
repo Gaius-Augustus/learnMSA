@@ -50,9 +50,9 @@ class Dataset(ABC):
         i: int,
         crop_start: int | None = None,
         crop_end: int | None = None,
-        dtype: type[np.integer | np.floating] = np.int16,
     ) -> np.ndarray:
-        """Return sequence i encoded as a numpy integer array."""
+        """Return sequence i encoded as a numpy float array (one-hot /
+        per-position distribution), never as integer indices."""
 
     @abstractmethod
     def empty(

@@ -34,19 +34,20 @@ class AlignedDataset(SequenceDataset):
         )
         self.validate_dataset()
 
-        # The gap symbol is the last token of the render alphabet
-        gap_idx = self.render_alphabet.index('-')
+        # The gap symbol is the last token of the output alphabet
+        gap_idx = self.output_alphabet.index('-')
 
-        # Create MSA matrix (integer tokens over the render alphabet)
+        # Create MSA matrix (integer tokens over the output alphabet)
         self._msa_matrix = np.zeros(
             (self.num_seq, len(self.get_record(0))), dtype=np.int16
         )
         for i in range(self.num_seq):
+            # get_encoded_seq returns a one-hot over the output alphabet;
+            # argmax recovers the integer token per column.
             self._msa_matrix[i,:] = self.get_encoded_seq(
                 i,
-                dtype=np.int16,
                 remap=False,
-            )
+            ).argmax(axis=-1) # TODO: optimize one-hot detour
         # Compute a mapping from sequence positions to MSA-column index
         # A-B--C -> 112223
         cumsum = np.cumsum(self._msa_matrix != gap_idx, axis=1)
@@ -149,7 +150,7 @@ class AlignedDataset(SequenceDataset):
         """
         if self.num_seq < 2:
             return 0.0
-        gap_idx = self.render_alphabet.index('-')
+        gap_idx = self.output_alphabet.index('-')
         not_gap = self._msa_matrix != gap_idx  # (num_seq, alignment_len)
         total_psi = 0.0
         for i in range(self.num_seq):

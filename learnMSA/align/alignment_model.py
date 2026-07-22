@@ -111,9 +111,9 @@ class AlignmentModel():
                 (with lowercase letters for inserted amino acids and dots for
                 gaps in insertions).
         """
-        # The render alphabet holds the original residues followed by the gap
+        # The output alphabet holds the original residues followed by the gap
         # as its last symbol; residues are everything but that trailing gap.
-        residues = list(self.data[0].render_alphabet[:-1])
+        residues = list(self.data[0].output_alphabet[:-1])
         if a2m:
             output_alphabet = np.array((
                 residues +
@@ -329,15 +329,15 @@ class AlignmentModel():
         # Gather the sequences for the batch as integer render tokens (original
         # residues preserved). uint8 suffices: render tokens are < 32.
         b = batch_indices.size
-        render_len = len(self.data[0].render_alphabet)
-        term_val = render_len - 1  # gap token (last of the render alphabet)
+        output_len= len(self.data[0].output_alphabet)
+        term_val = output_len- 1  # gap token (last of the render alphabet)
         sequences = np.full((b, self.data[0].max_len), term_val, dtype=np.uint8)
         for i, j in enumerate(batch_indices):
             idx = int(self.indices[j])
             l = self.data[0].seq_lens[idx]
             sequences[i, :l] = self.data[0].get_encoded_seq(
-                idx, dtype=np.uint8, remap=False
-            )
+                idx, remap=False
+            ).argmax(axis=-1)
 
         # Cache expensive metadata properties (each triggers _flat_virt_rep_and_row).
         _ins_lens_total = meta_data.insertion_lens_total          # (num_repeats, M-1)
@@ -359,7 +359,7 @@ class AlignmentModel():
 
         # compute total alignment width so we can pre-allocate the   #
         # output array and write each block directly into it
-        sep_val = 2 * render_len  # separator token value
+        sep_val = 2 * output_len # separator token value
         num_repeats = meta_data.num_repeats
 
         if only_matches:
@@ -408,7 +408,7 @@ class AlignmentModel():
                     meta_data.left_flank_len_for(batch_indices),
                     lf_maxlen,
                     meta_data.left_flank_start_for(batch_indices),
-                    render_len,
+                    output_len,
                     adjust_to_right=True,
                     custom_columns=aligned_insertions.left_flank(batch_indices)
                 )
@@ -429,7 +429,7 @@ class AlignmentModel():
                 ins_len=il_batch,
                 ins_len_total=_ins_lens_total_ext[rep_i],
                 ins_start=is_batch,
-                render_len=render_len,
+                output_len=output_len,
                 is_non_empty=is_non_empty_all[rep_i],
                 custom_columns=aligned_insertions.insertion(batch_indices, rep_i),
                 only_matches=only_matches
@@ -452,7 +452,7 @@ class AlignmentModel():
                         uns_l,
                         uns_maxlen,
                         uns_s,
-                        render_len,
+                        output_len,
                         custom_columns=aligned_insertions.unannotated_segment(
                             batch_indices, rep_i
                         )
@@ -474,7 +474,7 @@ class AlignmentModel():
                     meta_data.right_flank_len_for(batch_indices),
                     rf_maxlen,
                     meta_data.right_flank_start_for(batch_indices),
-                    render_len,
+                    output_len,
                     custom_columns=aligned_insertions.right_flank(batch_indices)
                 )
             col += rf_maxlen
@@ -848,7 +848,7 @@ class AlignmentModel():
         lens,
         maxlen,
         starts,
-        render_len,
+        output_len,
         adjust_to_right=False,
         custom_columns=None
     ):
@@ -856,12 +856,12 @@ class AlignmentModel():
         alignment.
 
         Args:
-            render_len: Size of the render alphabet (residues + gap). Used as
+            output_len: Size of the render alphabet (residues + gap). Used as
                 the lowercase offset and to locate the gap token.
         Returns:
         """
         n = sequences.shape[0]
-        s = render_len
+        s = output_len
         gap_val = s - 1
         seq_max = sequences.shape[1] - 1
 
@@ -913,7 +913,7 @@ class AlignmentModel():
         ins_len,
         ins_len_total,
         ins_start,
-        render_len,
+        output_len,
         is_non_empty=None,
         custom_columns=None,
         only_matches=False,
@@ -923,13 +923,13 @@ class AlignmentModel():
         alignment.
 
         Args:
-            render_len: Size of the render alphabet (residues + gap).
+            output_len: Size of the render alphabet (residues + gap).
 
         Returns:
              block: Shape (num_seq, block_length)
         """
         n = sequences.shape[0]
-        s = render_len
+        s = output_len
         gap_val = s - 1
         num_match = consensus.shape[1]
         A = np.arange(n)
@@ -987,7 +987,7 @@ class AlignmentModel():
                 ins_len[:, c],
                 ins_l_total,
                 ins_start[:, c],
-                render_len,
+                output_len,
                 custom_columns=custom_column
             )
 

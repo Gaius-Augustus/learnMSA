@@ -52,10 +52,12 @@ def test_encoding() -> None:
             assert enc.dtype == np.float32
             np.testing.assert_equal(enc.argmax(axis=1), [13, 6, 10, 9, 11])
             np.testing.assert_almost_equal(enc.sum(axis=1), np.ones(5))
-            # remap=False: integer render tokens (standard AAs keep their index).
-            np.testing.assert_equal(
-                data.get_encoded_seq(0, remap=False), [13, 6, 10, 9, 11]
-            )
+            # remap=False: one-hot over the output alphabet (standard AAs keep
+            # their index).
+            rf = data.get_encoded_seq(0, remap=False)
+            assert rf.shape == (5, len(data.output_alphabet))
+            assert rf.dtype == np.float32
+            np.testing.assert_equal(rf.argmax(axis=1), [13, 6, 10, 9, 11])
 
 
 def test_ambiguous_amino_acids() -> None:
@@ -82,9 +84,9 @@ def test_ambiguous_amino_acids() -> None:
             for pos in (5, 8): check(pos, "EQ")   # Z / z
             for pos in (6, 9): check(pos, "IL")   # J / j
             # remap=False preserves the original (upper-cased) letters
-            ints = data.get_encoded_seq(0, remap=False)
+            tokens = data.get_encoded_seq(0, remap=False).argmax(axis=-1)
             assert "".join(
-                data.render_alphabet[t] for t in ints
+                data.output_alphabet[t] for t in tokens
             ) == "AGCTBZJBZJ"
 
 
@@ -96,15 +98,15 @@ def test_remove_gaps() -> None:
             np.testing.assert_equal(
                 str(data.get_record(5).seq), ref
             )
-            # remap=False integer render tokens; gaps removed by default
+            # remap=False one-hot tokens (via argmax); gaps removed by default
             np.testing.assert_equal(
-                data.get_encoded_seq(5, remap=False),
-                [data.render_alphabet.index(a) for a in ref.replace('-', '')]
+                data.get_encoded_seq(5, remap=False).argmax(axis=-1),
+                [data.output_alphabet.index(a) for a in ref.replace('-', '')]
             )
             data.remove_gaps = False
             np.testing.assert_equal(
-                data.get_encoded_seq(5, remap=False),
-                [data.render_alphabet.index(a) for a in ref]
+                data.get_encoded_seq(5, remap=False).argmax(axis=-1),
+                [data.output_alphabet.index(a) for a in ref]
             )
 
 
@@ -170,12 +172,12 @@ def test_from_sequences() -> None:
         np.testing.assert_equal(enc[:4].argmax(axis=1), [13, 6, 10, 9])
         np.testing.assert_almost_equal(enc[4], np.full(20, 1.0 / 20))  # X
         # remap=False preserves the original letters (incl. X)
-        X = data.render_alphabet.index('X')
+        X = data.output_alphabet.index('X')
         np.testing.assert_equal(
-            data.get_encoded_seq(0, remap=False), [13, 6, 10, 9, X]
+            data.get_encoded_seq(0, remap=False).argmax(axis=-1), [13, 6, 10, 9, X]
         )
         np.testing.assert_equal(
-            data.get_encoded_seq(1, remap=False), [13, 6, 9, X]
+            data.get_encoded_seq(1, remap=False).argmax(axis=-1), [13, 6, 9, X]
         )
 
 
@@ -183,10 +185,14 @@ def test_from_alignment() -> None:
     sequences = [("seq1", "FELIX"), ("seq2", "FE-IX")]
     with AlignedDataset(sequences=sequences) as data:
         assert data.num_seq == 2
-        gap = data.render_alphabet.index('-')
-        X = data.render_alphabet.index('X')
-        np.testing.assert_equal(data.get_encoded_seq(0), [13, 6, 10, 9, X])
-        np.testing.assert_equal(data.get_encoded_seq(1), [13, 6, gap, 9, X])
+        gap = data.output_alphabet.index('-')
+        X = data.output_alphabet.index('X')
+        np.testing.assert_equal(
+            data.get_encoded_seq(0).argmax(axis=-1), [13, 6, 10, 9, X]
+        )
+        np.testing.assert_equal(
+            data.get_encoded_seq(1).argmax(axis=-1), [13, 6, gap, 9, X]
+        )
         np.testing.assert_equal(data.get_column_map(0), [0, 1, 2, 3, 4])
         np.testing.assert_equal(data.get_column_map(1), [0, 1, 3, 4])
 
@@ -207,11 +213,17 @@ def test_file_output_formats() -> None:
     for fmt in ["fasta", "clustal", "stockholm"]:
         with AlignedDataset("example." + fmt, fmt) as data:
             assert data.num_seq == 3
-            gap = data.render_alphabet.index('-')
-            X = data.render_alphabet.index('X')
-            np.testing.assert_equal(data.get_encoded_seq(0), [13, 6, 10, 9, X])
-            np.testing.assert_equal(data.get_encoded_seq(1), [13, 6, gap, 9, X])
-            np.testing.assert_equal(data.get_encoded_seq(2), [gap, 6, 10, 9, gap])
+            gap = data.output_alphabet.index('-')
+            X = data.output_alphabet.index('X')
+            np.testing.assert_equal(
+                data.get_encoded_seq(0).argmax(axis=-1), [13, 6, 10, 9, X]
+            )
+            np.testing.assert_equal(
+                data.get_encoded_seq(1).argmax(axis=-1), [13, 6, gap, 9, X]
+            )
+            np.testing.assert_equal(
+                data.get_encoded_seq(2).argmax(axis=-1), [gap, 6, 10, 9, gap]
+            )
             np.testing.assert_equal(data.get_column_map(0), [0, 1, 2, 3, 4])
             np.testing.assert_equal(data.get_column_map(1), [0, 1, 3, 4])
             np.testing.assert_equal(data.get_column_map(2), [1, 2, 3])
@@ -252,15 +264,6 @@ def test_properties() -> None:
         assert len(data.seq_lens) == 8
         assert data.seq_lens[0] == 5
         assert data.record_dict is not None
-
-
-def test_get_alphabet_no_gap() -> None:
-    """The model alphabet has no gap character."""
-    with SequenceDataset(sequences=[("s1", "FELIX")]) as data:
-        alphabet_no_gap = data.get_alphabet_no_gap()
-        assert alphabet_no_gap == "ARNDCQEGHILKMFPSTWYV"
-        assert "-" not in alphabet_no_gap
-        assert "-" not in SequenceDataset._default_alphabet
 
 
 def test_get_standardized_seq() -> None:
@@ -380,16 +383,19 @@ def test_sp_score() -> None:
             assert 0.0 <= sp < 1.0
 
 
-def test_dtype_parameter() -> None:
-    """Test different dtype parameters for the integer (remap=False) encoding."""
+def test_encoding_is_always_one_hot() -> None:
+    """get_encoded_seq always returns a float32 one-hot / distribution matrix,
+    never integer indices, for either remap mode."""
     sequences = [("s1", "FELIX")]
     with SequenceDataset(sequences=sequences) as data:
-        for dt in (np.int16, np.int32, np.int64):
-            seq = data.get_encoded_seq(0, dtype=dt, remap=False)
-            assert isinstance(seq, np.ndarray)
-            assert seq.dtype == dt
-        # The default (remapped) encoding is always float32 distributions.
-        assert data.get_encoded_seq(0).dtype == np.float32
+        remapped = data.get_encoded_seq(0)  # default remap=True
+        assert remapped.dtype == np.float32
+        assert remapped.shape == (5, len(data.alphabet))
+        faithful = data.get_encoded_seq(0, remap=False)
+        assert faithful.dtype == np.float32
+        assert faithful.shape == (5, len(data.output_alphabet))
+        # Every position is a proper one-hot / distribution (rows sum to 1).
+        np.testing.assert_almost_equal(faithful.sum(axis=1), np.ones(5))
 
 
 def test_string_filepath() -> None:
@@ -475,17 +481,14 @@ def test_custom_alphabet() -> None:
         sequences=sequences, alphabet="AB-"
     ) as data:
         assert data.alphabet == "AB-"
-        # remap=False -> integer indices over the custom alphabet (A=0,B=1,-=2)
+        # remap=False -> one-hot over the custom alphabet (A=0,B=1,-=2)
         np.testing.assert_equal(
-            data.get_encoded_seq(0, remap=False), [0, 0, 1, 1, 0]
+            data.get_encoded_seq(0, remap=False).argmax(axis=-1), [0, 0, 1, 1, 0]
         )
         # remap=True (default) -> one-hot vectors over the custom alphabet
         encoded = data.get_encoded_seq(0)
         assert encoded.shape == (5, 3)
         np.testing.assert_equal(encoded.argmax(axis=1), [0, 0, 1, 1, 0])
-
-        # Test alphabet_no_gap
-        assert data.get_alphabet_no_gap() == "AB"
 
     # Test with aligned dataset
     with AlignedDataset(
@@ -495,7 +498,7 @@ def test_custom_alphabet() -> None:
         assert data.alignment_len == 5
         # seq2 has a gap at position 1
         np.testing.assert_equal(
-            data.get_encoded_seq(1), [0, 2, 1, 1, 0]
+            data.get_encoded_seq(1).argmax(axis=-1), [0, 2, 1, 1, 0]
         )
         np.testing.assert_equal(data.get_column_map(1), [0, 2, 3, 4])
 
@@ -524,8 +527,8 @@ def test_profile() -> None:
 def test_remap_false_preserves_residues() -> None:
     """remap=False keeps the original residues (incl. ambiguity codes)."""
     with SequenceDataset(sequences=[("s", "ACDBZJXUO")]) as data:
-        tokens = data.get_encoded_seq(0, remap=False)
-        assert "".join(data.render_alphabet[t] for t in tokens) == "ACDBZJXUO"
+        tokens = data.get_encoded_seq(0, remap=False).argmax(axis=-1)
+        assert "".join(data.output_alphabet[t] for t in tokens) == "ACDBZJXUO"
         assert "-" not in data.alphabet
 
 
