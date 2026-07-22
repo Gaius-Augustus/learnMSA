@@ -16,10 +16,11 @@ class PHMMPriorConfig(BaseModel):
     use_amino_acid_prior: bool = True
     """Whether to use a Dirichlet prior for emissions."""
 
-    amino_acid_prior_name: str = "amino_acid_dirichlet"
+    amino_acid_prior_name: str = "pfam_aa_neff_conc_3_20"
     """Base name of the amino acid Dirichlet prior weights file. The number of
     components is appended to form the resource name
-    ``{amino_acid_prior_name}_{amino_acid_dirichlet_components}.weights``."""
+    ``{amino_acid_prior_name}_{amino_acid_dirichlet_components}.weights``.
+    The default prior lives on the 20-dimensional amino acid simplex."""
 
     amino_acid_dirichlet_components: int = 1
     """Number of components for the Dirichlet prior. If > 1, a mixture of
@@ -69,12 +70,18 @@ class PHMMConfig(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    alphabet: str = "ARNDCQEGHILKMFPSTWYVXUO"
-    """The alphabet used in the HMM emissions."""
+    alphabet: str = "ARNDCQEGHILKMFPSTWYV"
+    """The alphabet used in the HMM emissions (20 standard amino acids; extended
+    to 22 with U and O when ``model_uo`` is enabled)."""
+
+    model_uo: bool = False
+    """Whether to model the non-standard amino acids U (selenocysteine) and O
+    (pyrrolysine) explicitly as two extra emission columns. When False (the
+    default) they are resolved like X (uniform over the 20 standard AAs)."""
 
     @property
     def alphabet_size(self) -> int:
-        """The size of the alphabet."""
+        """The size of the emission alphabet."""
         return len(self.alphabet)
 
     background_distribution: Sequence[float] | NPArray = [
@@ -82,10 +89,9 @@ class PHMMConfig(BaseModel):
         2.24936164e-02, 5.06824822e-02, 6.29644485e-02, 4.72142352e-02,
         3.34919201e-02, 5.26777168e-02, 7.33173001e-02, 6.35075307e-02,
         3.52617111e-02, 3.60992714e-02, 3.46065678e-02, 7.21237089e-02,
-        6.52571875e-02, 1.77631364e-02, 3.39407154e-02, 6.65086610e-02,
-        7.91449952e-04, 5.83794314e-08, 9.99208434e-33
+        6.52571875e-02, 1.77631364e-02, 3.39407154e-02, 6.65086610e-02
     ]
-    """Default, background distribution over the amino acid alphabet."""
+    """Default background distribution over the 20 amino acids."""
 
     use_prior_for_emission_init: bool = True
     """Whether to use the amino acid prior distribution for initializing
@@ -295,7 +301,9 @@ class PHMMConfig(BaseModel):
             return v
 
         lengths = info.data.get('lengths')
-        alphabet = info.data.get('alphabet', 'ARNDCQEGHILKMFPSTWYVXUO')
+        alphabet = info.data.get('alphabet', 'ARNDCQEGHILKMFPSTWYV')
+        if info.data.get('model_uo') and not alphabet.endswith('UO'):
+            alphabet = alphabet + 'UO'
         alphabet_size = len(alphabet)
 
         # Handle numpy arrays
@@ -412,7 +420,9 @@ class PHMMConfig(BaseModel):
             return v
 
         lengths = info.data.get('lengths')
-        alphabet = info.data.get('alphabet', 'ARNDCQEGHILKMFPSTWYVXUO')
+        alphabet = info.data.get('alphabet', 'ARNDCQEGHILKMFPSTWYV')
+        if info.data.get('model_uo') and not alphabet.endswith('UO'):
+            alphabet = alphabet + 'UO'
         alphabet_size = len(alphabet)
 
         # Handle numpy arrays
@@ -480,6 +490,24 @@ class PHMMConfig(BaseModel):
             "insert_emissions must be None, a sequence of floats, or a sequence "
             "of sequences of floats."
         )
+
+    @model_validator(mode='after')
+    def _apply_model_uo(self):
+        # Extend the emission alphabet with U/O when requested (idempotent),
+        # and size the background distribution to the emission alphabet.
+        if self.model_uo and not self.alphabet.endswith("UO"):
+            self.alphabet = self.alphabet + "UO"
+        size = len(self.alphabet)
+        bg = np.asarray(self.background_distribution, dtype=np.float64)
+        if bg.shape[0] < size:
+            bg = np.concatenate([bg, np.full(size - bg.shape[0], 1e-4)])
+        elif bg.shape[0] > size:
+            bg = bg[:size]
+        total = np.sum(bg)
+        if total > 0:
+            bg = bg / total
+        self.background_distribution = bg.tolist()
+        return self
 
     @model_validator(mode='after')
     def check_shared_flank_transitions(self):

@@ -268,27 +268,27 @@ def test_hmm_config_default_emissions():
 
     assert config.match_emissions is None
     assert config.insert_emissions is None
-    assert len(config.background_distribution) == 23  # Default alphabet size
+    assert len(config.background_distribution) == 20  # Default alphabet size
 
 
 def test_hmm_config_match_emissions_single_distribution():
     """Test HMMConfig with single emission distribution for all match states."""
     # Single distribution applied to all match states in all heads
-    dist = [0.05] * 23
+    dist = [0.05] * 20
     config = PHMMConfig(
         match_emissions=dist,
         use_prior_for_emission_init=False,
     )
 
     assert config.match_emissions is not None
-    assert len(config.match_emissions) == 23
+    assert len(config.match_emissions) == 20
 
 
 def test_hmm_config_match_emissions_head_specific():
     """Test HMMConfig with head-specific match emission distributions."""
     # Different distribution per head, same for all positions within head
-    dist1 = [0.05] * 23
-    dist2 = [0.04] * 23
+    dist1 = [0.05] * 20
+    dist2 = [0.04] * 20
     config = PHMMConfig(
         match_emissions=[dist1, dist2],
         use_prior_for_emission_init=False,
@@ -299,20 +299,20 @@ def test_hmm_config_match_emissions_head_specific():
     # Use casts to satisfy type checker
     match_emissions = cast(Sequence, config.match_emissions)
     assert len(match_emissions) == 2
-    assert len(cast(Sequence, match_emissions[0])) == 23
-    assert len(cast(Sequence, match_emissions[1])) == 23
+    assert len(cast(Sequence, match_emissions[0])) == 20
+    assert len(cast(Sequence, match_emissions[1])) == 20
 
 
 def test_hmm_config_match_emissions_fully_specified():
     """Test HMMConfig with fully specified position-dependent emissions."""
     # Different distribution per position in each head
     # Head 0: 3 match states
-    dist_h0_m1 = [0.05] * 23
-    dist_h0_m2 = [0.04] * 23
-    dist_h0_m3 = [0.06] * 23
+    dist_h0_m1 = [0.05] * 20
+    dist_h0_m2 = [0.04] * 20
+    dist_h0_m3 = [0.06] * 20
     # Head 1: 2 match states
-    dist_h1_m1 = [0.045] * 23
-    dist_h1_m2 = [0.055] * 23
+    dist_h1_m1 = [0.045] * 20
+    dist_h1_m2 = [0.055] * 20
 
     config = PHMMConfig(
         match_emissions=[
@@ -328,37 +328,37 @@ def test_hmm_config_match_emissions_fully_specified():
     assert len(match_emissions) == 2
     assert len(cast(Sequence, match_emissions[0])) == 3
     assert len(cast(Sequence, match_emissions[1])) == 2
-    assert len(cast(Sequence, cast(Sequence, match_emissions[0])[0])) == 23
+    assert len(cast(Sequence, cast(Sequence, match_emissions[0])[0])) == 20
 
 
 def test_hmm_config_insert_emissions_single_distribution():
     """Test HMMConfig with single insertion emission distribution."""
-    dist = [0.05] * 23
+    dist = [0.05] * 20
     config = PHMMConfig(insert_emissions=dist)
 
     assert config.insert_emissions is not None
-    assert len(config.insert_emissions) == 23
+    assert len(config.insert_emissions) == 20
 
 
 def test_hmm_config_insert_emissions_head_specific():
     """Test HMMConfig with head-specific insertion emissions."""
-    dist1 = [0.05] * 23
-    dist2 = [0.04] * 23
-    dist3 = [0.06] * 23
+    dist1 = [0.05] * 20
+    dist2 = [0.04] * 20
+    dist3 = [0.06] * 20
     config = PHMMConfig(insert_emissions=[dist1, dist2, dist3])
 
     assert config.insert_emissions is not None
     assert isinstance(config.insert_emissions, Sequence)
     insert_emissions = cast(Sequence, config.insert_emissions)
     assert len(insert_emissions) == 3
-    assert len(cast(Sequence, insert_emissions[0])) == 23
-    assert len(cast(Sequence, insert_emissions[1])) == 23
-    assert len(cast(Sequence, insert_emissions[2])) == 23
+    assert len(cast(Sequence, insert_emissions[0])) == 20
+    assert len(cast(Sequence, insert_emissions[1])) == 20
+    assert len(cast(Sequence, insert_emissions[2])) == 20
 
 
 def test_hmm_config_emissions_validation_wrong_alphabet_size():
     """Test that emissions with wrong alphabet size are rejected."""
-    dist_wrong_size = [0.05] * 20  # Should be 23
+    dist_wrong_size = [0.05] * 23  # Should be 20
 
     with pytest.raises(ValueError, match="alphabet size"):
         PHMMConfig(match_emissions=dist_wrong_size)
@@ -388,7 +388,7 @@ def test_hmm_config_emissions_with_custom_alphabet():
 
 def test_get_emission_dist_with_none():
     """Test get_emission_dist returns default when param is None."""
-    default = [0.05] * 23
+    default = [0.05] * 20
     result = get_emission_dist(None, head=0, default=default)
     assert result == default
 
@@ -401,7 +401,7 @@ def test_get_emission_dist_with_none_no_default():
 
 def test_get_emission_dist_single_distribution():
     """Test get_emission_dist with single distribution for all."""
-    dist = [0.05] * 23
+    dist = [0.05] * 20
 
     # Should return same distribution regardless of head
     assert get_emission_dist(dist, head=0) == dist
@@ -411,9 +411,9 @@ def test_get_emission_dist_single_distribution():
 
 def test_get_emission_dist_head_specific():
     """Test get_emission_dist with head-specific distributions."""
-    dist1 = [0.05] * 23
-    dist2 = [0.04] * 23
-    dist3 = [0.06] * 23
+    dist1 = [0.05] * 20
+    dist2 = [0.04] * 20
+    dist3 = [0.06] * 20
     param = [dist1, dist2, dist3]
 
     assert get_emission_dist(param, head=0) == dist1
@@ -423,10 +423,10 @@ def test_get_emission_dist_head_specific():
 
 def test_get_emission_dist_position_specific():
     """Test get_emission_dist with position-specific distributions."""
-    dist_h0_m0 = [0.05] * 23
-    dist_h0_m1 = [0.04] * 23
-    dist_h1_m0 = [0.06] * 23
-    dist_h1_m1 = [0.045] * 23
+    dist_h0_m0 = [0.05] * 20
+    dist_h0_m1 = [0.04] * 20
+    dist_h1_m0 = [0.06] * 20
+    dist_h1_m1 = [0.045] * 20
 
     param = [
         [dist_h0_m0, dist_h0_m1],
@@ -442,7 +442,7 @@ def test_get_emission_dist_position_specific():
 def test_get_emission_dist_position_specific_requires_index():
     """Test that get_emission_dist raises error when index missing."""
     param = [
-        [[0.05] * 23, [0.04] * 23],
+        [[0.05] * 20, [0.04] * 20],
     ]
 
     with pytest.raises(ValueError, match="Index must be provided"):
@@ -451,8 +451,8 @@ def test_get_emission_dist_position_specific_requires_index():
 
 def test_hmm_config_combined_emissions_and_transitions():
     """Test HMMConfig with both custom emissions and transitions."""
-    match_dist = [0.05] * 23
-    insert_dist = [0.04] * 23
+    match_dist = [0.05] * 20
+    insert_dist = [0.04] * 20
 
     config = PHMMConfig(
         match_emissions=match_dist,

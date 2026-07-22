@@ -305,11 +305,11 @@ class PHMMLayer(tf.keras.Layer):
         assert self.prior_config is not None,\
             "prior_config must be set before adding amino acid emitter"
         if self.prior_config.use_amino_acid_prior:
-            # Set up the Dirichlet prior for emissions
+            # Set up the Dirichlet prior for emissions (20 aa)
             c = self.prior_config.amino_acid_dirichlet_components
             emission_prior = load_dirichlet(
                 f"{self.prior_config.amino_acid_prior_name}_{c}.weights",
-                dim = len(SequenceDataset._default_alphabet)-1,
+                dim = len(SequenceDataset._default_alphabet),
                 components = c,
                 states = self.states,
             )
@@ -330,6 +330,11 @@ class PHMMLayer(tf.keras.Layer):
         # Add the profile emitter
         profile_emitter = ProfileEmitter(
             values=values, trainable_insertions=trainable_insertions
+        )
+        # When U/O are modeled explicitly the emitter is 22-dimensional but the
+        # prior is 20-dimensional; fold U/O uniformly into the 20 (like X).
+        profile_emitter.uo_extra_dims = (
+            len(self.config.alphabet) - len(SequenceDataset._default_alphabet)
         )
         self.hmm.add_emitter(profile_emitter)
         if self.use_prior and self.prior_config.use_amino_acid_prior:
@@ -417,7 +422,7 @@ class PHMMLayer(tf.keras.Layer):
             c = self.prior_config.amino_acid_dirichlet_components
             emission_prior = load_dirichlet(
                 f"{self.prior_config.amino_acid_prior_name}_{c}.weights",
-                dim = len(SequenceDataset._default_alphabet)-1,
+                dim = len(SequenceDataset._default_alphabet),
                 components = c,
                 states = self.states,
             )
@@ -628,6 +633,18 @@ class PHMMLayer(tf.keras.Layer):
         updated_values = []
         if not override_matches and not override_insertions:
             return list(values)
+        # The prior mean is over the standard alphabet; when the emission
+        # alphabet is larger (U/O modeled explicitly) pad the extra columns with
+        # a small mass and renormalize so U/O are still emittable at init.
+        target_dim = values[0].match_emissions.shape[-1]
+        if prior_dist.shape[0] < target_dim:
+            pad = np.full(
+                target_dim - prior_dist.shape[0],
+                float(prior_dist.min()),
+                dtype=prior_dist.dtype,
+            )
+            prior_dist = np.concatenate([prior_dist, pad])
+            prior_dist = prior_dist / prior_dist.sum()
         for value_set in values:
             if override_matches:
                 match_emissions = np.tile(prior_dist, (value_set.L, 1))

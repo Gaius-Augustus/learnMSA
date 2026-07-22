@@ -29,9 +29,9 @@ def emitter(hmm_config: HidtenHMMConfig) -> ProfileEmitter:
     emitter = ProfileEmitter(values)
 
     # Add the prior for tests that need it
-    alphabet_size = len(SequenceDataset._default_alphabet)-1
+    alphabet_size = len(SequenceDataset._default_alphabet)
     emission_prior = load_dirichlet(
-        "amino_acid_dirichlet_1.weights",
+        "pfam_aa_neff_conc_3_20_1.weights",
         dim=alphabet_size
     )
     emission_prior.share = np.tile(
@@ -49,14 +49,14 @@ def test_matrix(emitter: ProfileEmitter) -> None:
     B = emitter.matrix()
 
     # Check basic matrix properties
-    assert B.shape == (2, 10, 23)
+    assert B.shape == (2, 10, 20)
     np.testing.assert_allclose(np.sum(B[0], axis=-1), 1.0)
     np.testing.assert_allclose(np.sum(B[1, :8], axis=-1), 1.0)
 
 
 def test_call_shapes(emitter: ProfileEmitter) -> None:
     # Create dummy emissions
-    B, T, H, S = 2, 10, 2, 23
+    B, T, H, S = 2, 10, 2, 20
     inputs = np.random.randint(0, S, size=(B, T))
     inputs_with_heads = np.random.randint(0, S, size=(B, T, H))
 
@@ -70,27 +70,23 @@ def test_call_shapes(emitter: ProfileEmitter) -> None:
 
 
 def test_call(emitter: ProfileEmitter, hmm_config: HidtenHMMConfig) -> None:
-    # Create two value sets for different heads
+    # Create two value sets for different heads (20 amino acids)
+    def peak(idx: int, p: float, dim: int = 20) -> list:
+        v = [(1.0 - p) / (dim - 1)] * dim
+        v[idx] = p
+        return v
+
     values_1 = PHMMValueSet(
         L=4,
-        match_emissions=np.array([
-            [0.9]+[0.1/22]*22,
-            [0.1/22] + [0.9] + [0.1/22]*21,
-            [0.1/22]*2 + [0.9] + [0.1/22]*20,
-            [0.1/22]*3 + [0.9] + [0.1/22]*19,
-        ]),
-        insert_emissions=np.array([1./23]*23),
+        match_emissions=np.array([peak(i, 0.9) for i in range(4)]),
+        insert_emissions=np.array([1./20]*20),
         transitions=np.array([]), # not used
         start=np.array([]), # not used
     )
     values_2 = PHMMValueSet(
         L=3,
-        match_emissions=np.array([
-            [0.8]+[0.2/22]*22,
-            [0.2/22] + [0.8] + [0.2/22]*21,
-            [0.2/22]*2 + [0.8] + [0.2/22]*20,
-        ]),
-        insert_emissions=np.array([1./23]*23),
+        match_emissions=np.array([peak(i, 0.8) for i in range(3)]),
+        insert_emissions=np.array([1./20]*20),
         transitions=np.array([]), # not used
         start=np.array([]), # not used
     )
@@ -102,8 +98,8 @@ def test_call(emitter: ProfileEmitter, hmm_config: HidtenHMMConfig) -> None:
 
     inputs_1_list = [0, 1, 2, 3, 9]
     inputs_2_list = [0, 1, 2, 16]
-    inputs_1 = tf.one_hot(inputs_1_list, depth=23)
-    inputs_2 = tf.one_hot(inputs_2_list, depth=23)
+    inputs_1 = tf.one_hot(inputs_1_list, depth=20)
+    inputs_2 = tf.one_hot(inputs_2_list, depth=20)
     # Add padding
     inputs_2 = tf.pad(inputs_2, [[0, 1], [0, 0]], constant_values=0.0)
     inputs = tf.stack([inputs_1, inputs_2], axis=0)  # (B, T, S)
@@ -116,23 +112,23 @@ def test_call(emitter: ProfileEmitter, hmm_config: HidtenHMMConfig) -> None:
         emission_scores[0, range(4), 0, range(4)], 0.9
     )
     np.testing.assert_allclose(
-        emission_scores[0, 4, 0, :4], 0.1/22, atol=1e-6
+        emission_scores[0, 4, 0, :4], 0.1/19, atol=1e-6
     )
     np.testing.assert_allclose(
-        emission_scores[0, :, 0, 4:-1], 1.0/23, atol=1e-6
+        emission_scores[0, :, 0, 4:-1], 1.0/20, atol=1e-6
     )
     # Head 1, sequence 2
     np.testing.assert_allclose(
         emission_scores[1, range(3), 0, range(3)], 0.9
     )
     np.testing.assert_allclose(
-        emission_scores[1, 3, 0, :3], 0.1/22, atol=1e-6
+        emission_scores[1, 3, 0, :3], 0.1/19, atol=1e-6
     )
     np.testing.assert_allclose(
         emission_scores[1, 4, 0, :3], 0.0, atol=1e-6
     )
     np.testing.assert_allclose(
-        emission_scores[1, :-1, 0, 4:-1], 1.0/23, atol=1e-6
+        emission_scores[1, :-1, 0, 4:-1], 1.0/20, atol=1e-6
     )
     np.testing.assert_allclose(
         emission_scores[1, -1, 0, -2], 0.0, atol=1e-6

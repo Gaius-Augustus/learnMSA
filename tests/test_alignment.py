@@ -38,13 +38,13 @@ def simple_config() -> Configuration:
     # Create FELIK model (length 5)
     felik_indices = [alphabet.index(aa) for aa in "FELIK"]
     ahc_indices = [alphabet.index(aa) for aa in "AHC"]
-    match_emissions = np.zeros((2, 5, len(alphabet)-1))
+    match_emissions = np.zeros((2, 5, len(alphabet)))
     for i, aa_idx in enumerate(felik_indices):
         match_emissions[0, i, aa_idx] = 1.0
     for i, aa_idx in enumerate(ahc_indices):
         match_emissions[1, i, aa_idx] = 1.0
     config.hmm.match_emissions = match_emissions
-    config.hmm.insert_emissions = [1/23]*23
+    config.hmm.insert_emissions = [1/len(alphabet)]*len(alphabet)
     config.hmm.use_prior_for_emission_init = False
     config.hmm.p_end_right = 0.2
     config.hmm.p_end_unannot = 0.3
@@ -180,14 +180,16 @@ def test_aligned_insertions() -> None:
     custom_columns = np.array([[0, 1, 2, 3, 4, -1],
                                [0, 1, 4, 5, -1, -1],
                                [2, 3, 4, -1, -1, -1]])
+    render_len = 27  # residues + gap
+    gap = render_len - 1
     block = AlignmentModel.get_insertion_block(
-        sequences, lens, 6, starts, custom_columns=custom_columns
+        sequences, lens, 6, starts, render_len, custom_columns=custom_columns
     )
-    expected_block = np.array([[1, 2, 3, 4, 5, 23],
-                               [7, 8, 23, 23, 9, 10],
-                               [23, 23, 13, 14, 15, 23]])
+    expected_block = np.array([[1, 2, 3, 4, 5, gap],
+                               [7, 8, gap, gap, 9, 10],
+                               [gap, gap, 13, 14, 15, gap]])
     np.testing.assert_array_equal(
-        block, expected_block + len(SequenceDataset._default_alphabet)
+        block, expected_block + render_len
     )
 
 @pytest.fixture
@@ -233,7 +235,9 @@ def test_alignment_decoding(
         (simple_data.num_seq, simple_data.max_len), dtype=np.int32
     )
     for i in range(simple_data.num_seq):
-        sequences[i, :simple_data.seq_lens[i]] = simple_data.get_encoded_seq(i)
+        sequences[i, :simple_data.seq_lens[i]] = simple_data.get_encoded_seq(
+            i, remap=False
+        )
 
     # Convert to model format (transpose for legacy compatibility)
     sequences = [sequences] * 2  # One per model
@@ -374,8 +378,8 @@ def test_alignment_decoding(
         [True, True, True, True, True, True, False, True],
     ])
 
-    # Alphabet indices for alignment block testing
-    s = len(simple_data.alphabet)
+    # Render-alphabet indices for alignment block testing (offset for insertions)
+    s = len(simple_data.render_alphabet)
     A = simple_data.alphabet.index("A")
     H = simple_data.alphabet.index("H")
     C = simple_data.alphabet.index("C")
@@ -586,18 +590,20 @@ def test_alignment_decoding(
         )
 
         # Test conversion to alignment blocks
-        # Prepare sequences array for all sequences
+        # Prepare sequences array (integer render tokens) for all sequences
+        render_len = len(simple_data.render_alphabet)
         sequences_2d = np.zeros((simple_data.num_seq, simple_data.max_len), dtype=np.uint16)
-        sequences_2d += (len(simple_data.alphabet)-1)
+        sequences_2d += (render_len - 1)
         for j in range(simple_data.num_seq):
             l = simple_data.seq_lens[j]
-            sequences_2d[j, :l] = simple_data.get_encoded_seq(j)
+            sequences_2d[j, :l] = simple_data.get_encoded_seq(j, remap=False)
 
         left_flank_block = AlignmentModel.get_insertion_block(
             sequences_2d,
             meta_data.left_flank_len_for(all_rows),
             np.amax(meta_data.left_flank_len_for(all_rows)),
             meta_data.left_flank_start_for(all_rows),
+            render_len,
             adjust_to_right=True
         )
         np.testing.assert_equal(left_flank_block, ref_left_flank_block[i])
@@ -606,7 +612,8 @@ def test_alignment_decoding(
             sequences_2d,
             meta_data.right_flank_len_for(all_rows),
             np.amax(meta_data.right_flank_len_for(all_rows)),
-            meta_data.right_flank_start_for(all_rows)
+            meta_data.right_flank_start_for(all_rows),
+            render_len,
         )
         np.testing.assert_equal(right_flank_block, ref_right_flank_block[i])
 
@@ -618,7 +625,8 @@ def test_alignment_decoding(
             sequences_2d,
             ins_lens,
             np.amax(ins_lens),
-            ins_start
+            ins_start,
+            render_len,
         )
         np.testing.assert_equal(ins_block, ref_ins_block[i])
 
@@ -632,6 +640,7 @@ def test_alignment_decoding(
                 il_ri,
                 np.amax(il_ri, axis=0),
                 is_ri,
+                render_len,
             )
             np.testing.assert_equal(alignment_block, ref)
 
@@ -805,7 +814,7 @@ def test_viterbi(
     ref_right_flank_start = np.array([[5, 8, 5, 13, 4, 8, 11, 8],  # model 1
                                         [5, 3, 8, 14, 5, 5, 10, 11]])  # model 2
 
-    s = len(SequenceDataset._default_alphabet)
+    s = len(simple_data.render_alphabet)
     A = SequenceDataset._default_alphabet.index("A")
     H = SequenceDataset._default_alphabet.index("H")
     C = SequenceDataset._default_alphabet.index("C")
@@ -1006,18 +1015,20 @@ def test_viterbi(
         )
 
         # test conversion of decoded data to an actual alignment in table form
-        # Prepare sequences array for all sequences
+        # Prepare sequences array (integer render tokens) for all sequences
+        render_len = len(simple_data.render_alphabet)
         sequences = np.zeros((simple_data.num_seq, simple_data.max_len), dtype=np.uint16)
-        sequences += (len(simple_data.alphabet)-1)
+        sequences += (render_len - 1)
         for j in range(simple_data.num_seq):
             l = simple_data.seq_lens[j]
-            sequences[j, :l] = simple_data.get_encoded_seq(j)
+            sequences[j, :l] = simple_data.get_encoded_seq(j, remap=False)
 
         left_flank_block = AlignmentModel.get_insertion_block(
             sequences,
             meta_data.left_flank_len_for(all_rows_v),
             np.amax(meta_data.left_flank_len_for(all_rows_v)),
             meta_data.left_flank_start_for(all_rows_v),
+            render_len,
             adjust_to_right=True,
         )
         np.testing.assert_equal(left_flank_block, ref_left_flank_block[i])
@@ -1026,6 +1037,7 @@ def test_viterbi(
             meta_data.right_flank_len_for(all_rows_v),
             np.amax(meta_data.right_flank_len_for(all_rows_v)),
             meta_data.right_flank_start_for(all_rows_v),
+            render_len,
         )
         np.testing.assert_equal(right_flank_block, ref_right_flank_block[i])
         # just check the first insert for simplicity
@@ -1037,6 +1049,7 @@ def test_viterbi(
             ins_lens,
             np.amax(ins_lens),
             ins_start,
+            render_len,
         )
         np.testing.assert_equal(ins_block, ref_ins_block[i])
         for ri, ref in enumerate(ref_core_blocks[i]):
@@ -1047,6 +1060,7 @@ def test_viterbi(
                 il_riv,
                 np.amax(il_riv, axis=0),
                 is_riv,
+                render_len,
             )
             np.testing.assert_equal(alignment_block, ref)
 

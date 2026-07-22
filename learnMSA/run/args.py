@@ -248,6 +248,14 @@ def parse_args(
             "(default: %(default)s)"
     )
     train_group.add_argument(
+        "--model_uo",
+        dest="model_uo",
+        action="store_true",
+        help="Model the non-standard amino acids U (selenocysteine) and O "
+            "(pyrrolysine) explicitly as two extra emission columns. By default "
+            "they are treated like X (unknown). Default: off."
+    )
+    train_group.add_argument(
         "--decode", "--decoding_mode",
         dest="decoding_mode",
         type=str,

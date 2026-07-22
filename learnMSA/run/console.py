@@ -74,6 +74,7 @@ def run_main() -> None:
                 config.input_output.input_file,
                 config.input_output.input_format,
                 indexed=config.training.indexed_data,
+                model_uo=config.hmm.model_uo,
             )
         )
         # rule out issues with the seq file early on

@@ -17,8 +17,8 @@ class AlignedDataset(SequenceDataset):
             indexed: bool = False,
             alphabet: str | None = None,
             gap_symbols: str = "-.",
-            replace_with_x: str = "BZJ",
             validate_alphabet: bool = True,
+            model_uo: bool = False,
     ) -> None:
         super().__init__(
             filepath=filepath,
@@ -28,12 +28,16 @@ class AlignedDataset(SequenceDataset):
             alphabet=alphabet,
             remove_gaps=False,
             gap_symbols=gap_symbols,
-            replace_with_x=replace_with_x,
-            validate_alphabet=validate_alphabet
+            validate_alphabet=validate_alphabet,
+            remap=False,
+            model_uo=model_uo,
         )
         self.validate_dataset()
 
-        # Create MSA matrix
+        # The gap symbol is the last token of the render alphabet
+        gap_idx = self.render_alphabet.index('-')
+
+        # Create MSA matrix (integer tokens over the render alphabet)
         self._msa_matrix = np.zeros(
             (self.num_seq, len(self.get_record(0))), dtype=np.int16
         )
@@ -41,10 +45,11 @@ class AlignedDataset(SequenceDataset):
             self._msa_matrix[i,:] = self.get_encoded_seq(
                 i,
                 dtype=np.int16,
+                remap=False,
             )
         # Compute a mapping from sequence positions to MSA-column index
         # A-B--C -> 112223
-        cumsum = np.cumsum(self._msa_matrix != self.alphabet.index('-'), axis=1)
+        cumsum = np.cumsum(self._msa_matrix != gap_idx, axis=1)
         # 112223 -> 0112223 -> [[(i+1) - i]] -> 101001
         diff = np.diff(np.insert(cumsum, 0, 0.0, axis=1), axis=1)
         diff_where = [
@@ -144,7 +149,7 @@ class AlignedDataset(SequenceDataset):
         """
         if self.num_seq < 2:
             return 0.0
-        gap_idx = self.alphabet.index('-')
+        gap_idx = self.render_alphabet.index('-')
         not_gap = self._msa_matrix != gap_idx  # (num_seq, alignment_len)
         total_psi = 0.0
         for i in range(self.num_seq):

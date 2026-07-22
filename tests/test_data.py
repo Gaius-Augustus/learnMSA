@@ -24,8 +24,13 @@ def test_default_batch_gen() -> None:
             ref = [str(data.get_record(i).seq).upper() for i in ind]
             s, i = batch_gen(ind)
             np.testing.assert_equal(i[:, 0], ind)
-            for i, (r, j) in enumerate(zip(ref, ind)):
-                assert "".join(alphabet[s[i, :data.seq_lens[j], 0]]) == r
+            for k, j in enumerate(ind):
+                # The batch holds per-residue distributions; compare to the
+                # dataset's own encoding.
+                expected = data.get_encoded_seq(j)  # (L, D)
+                np.testing.assert_allclose(
+                    s[k, :data.seq_lens[j], 0], expected, atol=1e-6
+                )
 
 
 def test_static_shape_batch_gen() -> None:
@@ -57,17 +62,15 @@ def test_static_shape_batch_gen() -> None:
             np.testing.assert_equal(i[:, 0], ind)
 
             # Verify sequences are correctly padded/cropped
-            alphabet = np.array(list(SequenceDataset._default_alphabet))
             for batch_idx, seq_idx in enumerate(ind):
-                seq_len = min(data.seq_lens[seq_idx], config.training.crop)
-                ref_seq = str(data.get_record(seq_idx).seq).upper()[:config.training.crop]
-                actual_seq = "".join(alphabet[s[batch_idx, :seq_len, 0]])
-                assert actual_seq == ref_seq
-
-                # Check padding (should be terminal symbols)
+                seq_len = min(int(data.seq_lens[seq_idx]), config.training.crop)
+                # Real positions are valid distributions over the amino acids
+                actual = s[batch_idx, :seq_len, 0]  # (seq_len, D)
+                np.testing.assert_allclose(actual.sum(axis=-1), 1.0, atol=1e-5)
+                # Padding positions are all-zero vectors (terminal)
                 padding = s[batch_idx, seq_len:, 0]
-                assert np.all(padding == len(alphabet) - 1), \
-                    f"Expected padding to be {len(alphabet) - 1}, got {padding}"
+                assert np.all(padding == 0.0), \
+                    f"Expected padding to be all-zero, got {padding}"
 
 
 def test_multi_dataset_batch_gen_returns_multiple_batches() -> None:
@@ -89,11 +92,12 @@ def test_multi_dataset_batch_gen_returns_multiple_batches() -> None:
         assert s_b.shape[2] == 1
         np.testing.assert_equal(ind[:, 0], indices)
 
-        alphabet = np.array(list(SequenceDataset._default_alphabet))
         for row_idx, seq_idx in enumerate(indices):
-            ref = str(data_a.get_record(seq_idx).seq).upper()
             seq_len = data_a.seq_lens[seq_idx]
-            dec_a = "".join(alphabet[s_a[row_idx, :seq_len, 0]])
-            dec_b = "".join(alphabet[s_b[row_idx, :seq_len, 0]])
-            assert dec_a == ref
-            assert dec_b == ref
+            expected = data_a.get_encoded_seq(seq_idx)  # (L, D) distributions
+            np.testing.assert_allclose(
+                s_a[row_idx, :seq_len, 0], expected, atol=1e-6
+            )
+            np.testing.assert_allclose(
+                s_b[row_idx, :seq_len, 0], expected, atol=1e-6
+            )

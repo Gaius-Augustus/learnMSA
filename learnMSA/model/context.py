@@ -350,8 +350,8 @@ class LearnMSAContext:
             # Get amino acid pseudocounts
             c = self.config.hmm_prior.amino_acid_dirichlet_components
             aa_prior = load_dirichlet(
-                f"amino_acid_dirichlet_{c}.weights",
-                dim = len(SequenceDataset._default_alphabet)-1
+                f"{self.config.hmm_prior.amino_acid_prior_name}_{c}.weights",
+                dim = len(SequenceDataset._default_alphabet)
             )
             alpha = aa_prior.matrix().numpy()[0,0]
             C = aa_prior.config.components
@@ -362,6 +362,14 @@ class LearnMSAContext:
                 aa_psc = np.sum(mix_coeff[:, np.newaxis] * alpha, axis=0)
             else:
                 aa_psc = alpha
+            # The prior is 20-dimensional; pad to the emission alphabet size
+            # (small mass for U/O) so pseudocounts broadcast onto the emissions.
+            emission_size = self.config.hmm.alphabet_size
+            if aa_psc.shape[0] < emission_size:
+                pad = np.full(
+                    emission_size - aa_psc.shape[0], float(aa_psc.min())
+                )
+                aa_psc = np.concatenate([aa_psc, pad])
 
             # Get transition pseudocounts
             transition_prior = TFPHMMTransitionPrior(
@@ -381,7 +389,9 @@ class LearnMSAContext:
             del_psc = 1e-2
 
         # Load the MSA and count
-        with AlignedDataset(msa_file, "fasta") as input_msa:
+        with AlignedDataset(
+            msa_file, "fasta", model_uo=self.config.hmm.model_uo
+        ) as input_msa:
             values = PHMMValueSet.from_msa(
                 input_msa,
                 match_threshold=self.config.init_msa.match_threshold,

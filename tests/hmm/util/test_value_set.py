@@ -134,7 +134,7 @@ def test_msa_to_counts_2_global() -> None:
             27 : {"Q" : 1, "E" : 4, "K" : 3, "N" : 1, "V" : 1},
             28 : {"K" : 6, "L" : 1, "A" : 1},
         }
-        assert hmm_values.match_emissions.shape == (L, len(data.alphabet)-1)
+        assert hmm_values.match_emissions.shape == (L, len(data.alphabet))
         for i, col_data in ref_match.items():
             total_counts = sum(col_data.values())
             for aa, count in col_data.items():

@@ -199,15 +199,16 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         else:
             n = self.phmm_layer.heads
         if sequences.shape[2] == 1 and n > 1:
-            sequences = tf.tile(sequences, [1, 1, n])
+            sequences = tf.tile(sequences, [1, 1, n, 1])
             indices = tf.tile(indices, [1, n])
 
-        # Convert to one-hot for AncProbsLayer (now requires 4D input)
-        sequences_onehot = tf.one_hot(
-            tf.cast(sequences, tf.int32),
-            depth=self.context.config.hmm.alphabet_size+1, # including terminal
-            dtype=self.phmm_layer.dtype
-        )
+        # The amino acid track already arrives as per-residue distributions over
+        # the emission alphabet (padding positions are all-zero vectors). Append
+        # the terminal/padding channel (1 - sum) so that padding maps to the
+        # terminal symbol and real residues map to 0 there.
+        sequences = tf.cast(sequences, self.phmm_layer.dtype)
+        terminal = 1.0 - tf.reduce_sum(sequences, axis=-1, keepdims=True)
+        sequences_onehot = tf.concat([sequences, terminal], axis=-1)
         anc_prob_inputs = [sequences_onehot]
 
         if self.context.config.structure.use_structure:
@@ -1096,7 +1097,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             bucket_batch_sizes=bucket_batch_sizes,
         )
 
-        # Prepare the background frequencies
+        # Prepare the background frequencies over the emission alphabet.
         if background_dist is None:
             # Use prior background distribution
             assert self.phmm_layer.profile_emitter is not None
@@ -1106,25 +1107,30 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             dirichlet_alpha = dirichlet_alpha[0,0] # Shared, pick any head and state
             _background_dist = dirichlet_alpha / np.sum(dirichlet_alpha)
 
-            # Append ad-hoc probability for non-standard amino acids
-            _background_dist = np.append(_background_dist, [1e-4]*3)
-            _background_dist /= np.sum(_background_dist) #normalize  # shape (24,)
+            # The prior lives on the 20 standard AAs; pad to the emission
+            # alphabet size (small mass for U/O) when they are modeled.
+            D = self.context.config.hmm.alphabet_size
+            if _background_dist.shape[0] < D:
+                pad = np.full(
+                    D - _background_dist.shape[0], float(_background_dist.min())
+                )
+                _background_dist = np.concatenate([_background_dist, pad])
+                _background_dist /= np.sum(_background_dist)
         else:
-            _background_dist = background_dist
+            _background_dist = np.asarray(background_dist, dtype=np.float32)
 
-        # Add the terminal symbol emissions
-        _background_dist = np.append(_background_dist, [1.0])
-        # Log transition probabilities
-        _background_dist = np.log(_background_dist + 1e-10)
-
-        # Compute emission log probs
+        # Emissions arrive as per-residue distributions; the null likelihood of
+        # a residue is the mixture P = sum_a v_a * bg_a.
         _bg_dist_tf = tf.constant(_background_dist, dtype=tf.float32)
         log_probs = np.zeros((n,))
 
         def compute_batch_emissions(x):
-            tokens = tf.cast(x[:, :, 0], tf.int32)  # (batch, seq_length)
-            gathered = tf.gather(_bg_dist_tf, tokens)  # (batch, seq_length)
-            return tf.reduce_sum(gathered, axis=1)  # (batch,)
+            v = tf.cast(x[:, :, 0], tf.float32)  # (batch, seq_length, D)
+            p = tf.reduce_sum(v * _bg_dist_tf, axis=-1)  # (batch, seq_length)
+            # Padding positions are all-zero vectors -> contribute nothing.
+            mask = tf.reduce_sum(v, axis=-1) > 0
+            logp = tf.where(mask, tf.math.log(p + 1e-10), tf.zeros_like(p))
+            return tf.reduce_sum(logp, axis=1)  # (batch,)
 
         compute_batch_emissions = tf.function(
             compute_batch_emissions,

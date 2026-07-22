@@ -22,7 +22,7 @@ from learnMSA.util.sequence_dataset import SequenceDataset
 def string_to_one_hot(s : str) -> tf.Tensor:
     """Convert a string to one-hot encoded tensor."""
     i = [SequenceDataset._default_alphabet.index(aa) for aa in s]
-    return tf.one_hot(i, len(SequenceDataset._default_alphabet) - 1)
+    return tf.one_hot(i, len(SequenceDataset._default_alphabet))
 
 @pytest.fixture
 def data() -> SequenceDataset:
@@ -36,24 +36,24 @@ def model(data: SequenceDataset) -> LearnMSAModel:
     alphabet = SequenceDataset._default_alphabet
 
     # First head: "FEIK" (4 states)
-    match_emissions_h1 = np.zeros((4, len(alphabet) - 1))
+    match_emissions_h1 = np.zeros((4, len(alphabet)))
     for i, aa in enumerate("FEIK"):
         match_emissions_h1[i, alphabet.index(aa)] = 1.0
 
     # Second head: "FDELIK" (6 states)
-    match_emissions_h2 = np.zeros((6, len(alphabet) - 1))
+    match_emissions_h2 = np.zeros((6, len(alphabet)))
     for i, aa in enumerate("FDELIK"):
         match_emissions_h2[i, alphabet.index(aa)] = 1.0
 
     # Pad the shorter model to match the longer one
     max_len = max(4, 6)
-    match_emissions_h1_padded = np.zeros((max_len, len(alphabet) - 1))
+    match_emissions_h1_padded = np.zeros((max_len, len(alphabet)))
     match_emissions_h1_padded[:4] = match_emissions_h1
 
     # Create 3D array for match emissions
     match_emissions = np.array([match_emissions_h1_padded, match_emissions_h2])
 
-    insert_emissions = np.ones((2, len(alphabet) - 1)) / (len(alphabet) - 1)
+    insert_emissions = np.ones((2, len(alphabet))) / (len(alphabet))
 
     # Create LearnMSAModel
     learnmsa_config = Configuration()
@@ -97,10 +97,10 @@ def data_insert_delete() -> SequenceDataset:
 def model_single_head(data: SequenceDataset) -> LearnMSAModel:
     """Create a single-head test model with FELIC motif for legacy tests."""
     alphabet = SequenceDataset._default_alphabet
-    match_emissions = np.zeros((1, 5, len(alphabet) - 1))
+    match_emissions = np.zeros((1, 5, len(alphabet)))
     for i, aa in enumerate("FELIC"):
         match_emissions[0, i, alphabet.index(aa)] = 1.0
-    insert_emissions = np.zeros((1, len(alphabet) - 1))
+    insert_emissions = np.zeros((1, len(alphabet)))
     for i, aa in enumerate("AN"):
         insert_emissions[0, alphabet.index(aa)] = 0.5
 
@@ -220,7 +220,7 @@ def test_update_kernels(model_single_head: LearnMSAModel) -> None:
 
     # Expanded positions will emit "A"
     alphabet = SequenceDataset._default_alphabet
-    dummy_emission = np.zeros((len(alphabet) - 1,))
+    dummy_emission = np.zeros((len(alphabet),))
     dummy_emission[alphabet.index("A")] = 1.0
 
     config = model_single_head.context.config.hmm.model_copy(deep=True)
@@ -251,7 +251,7 @@ def test_update_kernels(model_single_head: LearnMSAModel) -> None:
     updated_phmm_layer = PHMMLayer(
         [result.length], config, aa_value_sets = [result.aa_values]
     )
-    updated_phmm_layer.build(((None, None, None, 23), (None, None, None, 1)))
+    updated_phmm_layer.build(((None, None, None, 20), (None, None, None, 1)))
 
     assert updated_phmm_layer.profile_emitter is not None
     emissions_new = updated_phmm_layer.profile_emitter.matrix().numpy()[0]
@@ -262,7 +262,7 @@ def test_update_kernels(model_single_head: LearnMSAModel) -> None:
     assert result.length == len(ref_consensus)
 
     # Create expected emissions for the reference consensus
-    expected_emissions = np.zeros((len(ref_consensus), len(alphabet) - 1))
+    expected_emissions = np.zeros((len(ref_consensus), len(alphabet)))
     for i, aa in enumerate(ref_consensus):
         expected_emissions[i, alphabet.index(aa)] = 1.0
 

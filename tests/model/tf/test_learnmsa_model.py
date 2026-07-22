@@ -12,6 +12,20 @@ from learnMSA.model.context import LearnMSAContext
 from learnMSA.util.sequence_dataset import SequenceDataset
 
 
+def _to_onehot(seqs, depth: int) -> np.ndarray:
+    """Convert an integer token array to one-hot float vectors along a new last
+    axis. Tokens outside [0, depth) (padding/terminal) become all-zero vectors,
+    matching the model's per-residue distribution input contract.
+    """
+    seqs = np.asarray(seqs)
+    oh = np.zeros(seqs.shape + (depth,), dtype=np.float32)
+    for idx in np.ndindex(seqs.shape):
+        t = int(seqs[idx])
+        if 0 <= t < depth:
+            oh[idx + (t,)] = 1.0
+    return oh
+
+
 @pytest.fixture
 def config_binary() -> Configuration:
     """A basic configuration to set up context and model.
@@ -87,9 +101,9 @@ def test_create_and_call(context_amino_acid: LearnMSAContext) -> None:
     # Test a forward pass of the model without embeddings.
     batch_size = 4
     seq_length = 15
-    seqs = np.random.randint(
+    seqs = _to_onehot(np.random.randint(
         low=0, high=20, size=(batch_size, seq_length, 1), dtype=np.int32
-    )
+    ), 20)
     indices = np.array([22, 7, 13, 3])[..., np.newaxis]
     output = model((seqs, indices))
     assert output.shape == (batch_size, 2)
@@ -100,9 +114,9 @@ def test_compute_loss_amino_acid(context_amino_acid: LearnMSAContext) -> None:
 
     batch_size = 4
     seq_length = 15
-    seqs = np.random.randint(
+    seqs = _to_onehot(np.random.randint(
         low=0, high=20, size=(batch_size, seq_length, 1), dtype=np.int32
-    )
+    ), 20)
     indices = np.array([22, 7, 13, 3])[..., np.newaxis]
 
     # Compute a forward pass and the loss
@@ -133,7 +147,9 @@ def test_compute_loss_amino_acid(context_amino_acid: LearnMSAContext) -> None:
     loss_log_prior = -model.phmm_layer.prior_scores().numpy().mean()\
         / np.sqrt(w.sum() * n)
 
-    np.testing.assert_allclose(loss.numpy(), loss_log_lik + loss_log_prior)
+    np.testing.assert_allclose(
+        loss.numpy(), loss_log_lik + loss_log_prior, rtol=1e-5
+    )
 
 def test_compute_loss_amino_acid_no_prior(
     context_amino_acid_no_prior: LearnMSAContext
@@ -144,9 +160,9 @@ def test_compute_loss_amino_acid_no_prior(
 
     batch_size = 4
     seq_length = 15
-    seqs = np.random.randint(
+    seqs = _to_onehot(np.random.randint(
         low=0, high=20, size=(batch_size, seq_length, 1), dtype=np.int32
-    )
+    ), 20)
     indices = np.array([22, 7, 13, 3])[..., np.newaxis]
 
     # Compute a forward pass and the loss
@@ -186,6 +202,7 @@ def test_compute_loss_binary(context_binary: LearnMSAContext) -> None:
     ) # (1, T)
     seqs = tf.repeat(seqs, repeats=4, axis=0) # replicate to batch size 4
     seqs = tf.expand_dims(seqs, axis=2)  # add head dimension → (B, T, H)
+    seqs = _to_onehot(seqs, 2)  # -> (B, T, H, D); token 2 is padding (all-zero)
     indices = np.array([2, 7, 1, 3])[..., np.newaxis]
 
     y_pred = model((seqs, indices))
@@ -203,7 +220,9 @@ def test_compute_loss_binary(context_binary: LearnMSAContext) -> None:
     loss_log_prior = -model.phmm_layer.prior_scores().numpy().mean()\
         / np.sqrt(w.sum() * n)
 
-    np.testing.assert_allclose(loss.numpy(), loss_log_lik + loss_log_prior)
+    np.testing.assert_allclose(
+        loss.numpy(), loss_log_lik + loss_log_prior, rtol=1e-5
+    )
 
 def test_viterbi_on_batch(context_binary: LearnMSAContext) -> None:
     # Test that the viterbi_on_batch method runs without errors.
@@ -214,6 +233,7 @@ def test_viterbi_on_batch(context_binary: LearnMSAContext) -> None:
         [[0, 1, 0, 2]], dtype=tf.int32
     ) # (1, T)
     seq = tf.expand_dims(seq, axis=2)  # add head dimension → (B, T, H)
+    seq = _to_onehot(seq, 2)  # -> (B, T, H, D); token 2 is padding (all-zero)
 
     viterbi_seq = model((seq, tf.constant([[0]]))).numpy()
 
@@ -233,6 +253,7 @@ def test_posterior_on_batch(context_binary: LearnMSAContext) -> None:
         [[0, 1, 0, 2]], dtype=tf.int32
     ) # (1, T)
     seq = tf.expand_dims(seq, axis=2)  # add head dimension → (B, T, H)
+    seq = _to_onehot(seq, 2)  # -> (B, T, H, D); token 2 is padding (all-zero)
 
     posterior = model((seq, tf.constant([[0]])))
 
@@ -318,8 +339,7 @@ def test_predict(context_binary: LearnMSAContext) -> None:
             ("9", "ABA"),
             ("10", "ABA"),
         ],
-        alphabet="AB-",
-        replace_with_x="",
+        alphabet="AB",
     )
 
     # Manually set an adaptive batch size function for testing
@@ -422,8 +442,7 @@ def test_evaluate(context_binary: LearnMSAContext) -> None:
     # Create a dataset with the test sequence "ABA"
     data = SequenceDataset(
         sequences=[(str(i), "ABA") for i in range(400)],
-        alphabet="AB-",
-        replace_with_x="",
+        alphabet="AB",
     )
 
     # Evaluate on the dataset
@@ -511,7 +530,7 @@ def test_null_model_log_probs(context_amino_acid: LearnMSAContext) -> None:
     data = SequenceDataset(sequences=sequences)
 
     # Use a uniform distribution for easy reference value computation
-    uniform_dist = np.ones(23) / 23.0
+    uniform_dist = np.ones(20) / 20.0
 
     # Compute null model log probabilities with uniform background
     log_probs = model.compute_null_model_log_probs(

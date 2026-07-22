@@ -187,10 +187,12 @@ def find_long_insertions_and_get_sequences(data : SequenceDataset, lens, starts,
             segment = aa_seq[start[j] : start[j] + lengths[j]]
             #sometimes segments look strange (like ones consisting only of X)
             #this can cause problems in the downstream aligner, omit these segments
-            non_standard_freq = 0
-            for aa in data.alphabet[20:]:
-                non_standard_freq += segment.count(aa)
-            non_standard_freq /= len(segment)
+            # Count residues that are not one of the 20 standard amino acids
+            # (ambiguity codes X/B/Z/J and, unless modeled, U/O).
+            standard = SequenceDataset._default_alphabet
+            non_standard_freq = sum(
+                1 for ch in segment if ch not in standard
+            ) / max(1, len(segment))
             mostly_non_standard_aa = non_standard_freq > 0.5
             if (mostly_non_standard_aa or 
                 (lengths[j] > max_insertions_len and 

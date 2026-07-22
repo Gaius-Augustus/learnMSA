@@ -21,8 +21,8 @@ def hidten_config() -> HidtenHMMConfig:
 @pytest.fixture
 def config() -> Configuration:
     hmm = PHMMConfig()
-    hmm.match_emissions = np.eye(23)[[[0,1,2,3], [0,1,2,-1]]]
-    hmm.insert_emissions = np.eye(23)[7]
+    hmm.match_emissions = np.eye(20)[[[0,1,2,3], [0,1,2,-1]]]
+    hmm.insert_emissions = np.eye(20)[7]
     structure = StructureConfig()
     structure.match_emissions = np.eye(20)[[[10,11,12,13], [10,11,12,-1]]]
     structure.insert_emissions = np.eye(20)[18]
@@ -56,13 +56,13 @@ def make_joint_emitter_from_marginals(
     )
 
     emitter.hmm_config = hidten_config
-    input_shapes = ((None, None, 23), (None, None, 20))
+    input_shapes = ((None, None, 20), (None, None, 20))
     emitter.build(input_shapes)
 
     # add marginal priors for tests that need them
     aa_dirichlet = load_dirichlet(
-        "amino_acid_dirichlet_1.weights",
-        dim=23, components=1, states=[10, 8]
+        "pfam_aa_neff_conc_3_20_1.weights",
+        dim=20, components=1, states=[10, 8]
     )
     struct_dirichlet = load_dirichlet(
         "pfam_35_3Di_1.weights",
@@ -79,7 +79,7 @@ def make_joint_emitter_from_values(
 ) -> JointProfileEmitter:
     lengths = [4, 3]
 
-    aa_head_1 = [21, 11, 3, 6]
+    aa_head_1 = [19, 11, 3, 6]
     struct_head_1 = [10, 11, 12, 13]
     aa_head_2 = [13, 4, 15]
     struct_head_2 = [2, 3, 4]
@@ -89,19 +89,19 @@ def make_joint_emitter_from_values(
     struct_insert_head_2 = 3
     values_1 = PHMMValueSet(
         L=lengths[0],
-        match_emissions=np.eye(20*23)[
+        match_emissions=np.eye(20*20)[
             [aa_head_1[i]*20 + struct_head_1[i] for i in range(4)]
         ],
-        insert_emissions=np.eye(20*23)[
+        insert_emissions=np.eye(20*20)[
             aa_insert_head_1 * 20 + struct_insert_head_1
         ]
     )
     values_2 = PHMMValueSet(
         L=lengths[1],
-        match_emissions=np.eye(20*23)[
+        match_emissions=np.eye(20*20)[
             [aa_head_2[i]*20 + struct_head_2[i] for i in range(3)]
         ],
-        insert_emissions=np.eye(20*23)[
+        insert_emissions=np.eye(20*20)[
             aa_insert_head_2 * 20 + struct_insert_head_2
         ]
     )
@@ -115,7 +115,7 @@ def make_joint_emitter_from_values(
     )
 
     emitter.hmm_config = hidten_config
-    input_shapes = ((None, None, 23), (None, None, 20))
+    input_shapes = ((None, None, 20), (None, None, 20))
     emitter.build(input_shapes)
 
     return emitter
@@ -130,7 +130,7 @@ def test_matrix_from_marginals(
     B = joint_emitter_from_marginals.matrix()
 
     # Check basic matrix properties
-    assert B.shape == (2, 10, 23 * 20)
+    assert B.shape == (2, 10, 20 * 20)
     np.testing.assert_allclose(np.sum(B[0], axis=-1), 1.0, rtol=1e-6)
     np.testing.assert_allclose(np.sum(B[1, :8], axis=-1), 1.0, rtol=1e-6)
 
@@ -165,12 +165,12 @@ def test_matrix_from_values(
     B = joint_emitter_from_values.matrix()
 
     # Check basic matrix properties
-    assert B.shape == (2, 10, 23 * 20)
+    assert B.shape == (2, 10, 20 * 20)
     np.testing.assert_allclose(np.sum(B[0], axis=-1), 1.0, rtol=1e-6)
     np.testing.assert_allclose(np.sum(B[1, :8], axis=-1), 1.0, rtol=1e-6)
 
     # Check match emissions of head 1
-    expected_indices_head_1 = [21*20 + 10, 11*20 + 11, 3*20 + 12, 6*20 + 13]
+    expected_indices_head_1 = [19*20 + 10, 11*20 + 11, 3*20 + 12, 6*20 + 13]
     for i in range(4):
         expected_index = expected_indices_head_1[i]
         np.testing.assert_allclose(B[0, i, expected_index], 1.0, rtol=1e-6)
@@ -196,7 +196,7 @@ def test_marginal_matrix_and_priors(
     )
     # The the marginal matrices
     aa_matrix, struct_matrix = joint_emitter_from_marginals.marginal_matrices()
-    assert aa_matrix.shape == (2, 10, 23)
+    assert aa_matrix.shape == (2, 10, 20)
     assert struct_matrix.shape == (2, 10, 20)
 
     aa_prior = joint_emitter_from_marginals.get_marginal_prior(0)
@@ -222,7 +222,7 @@ def test_call(
         config, hidten_config
     )
 
-    aa_head_1 = [21, 11, 3, 6]
+    aa_head_1 = [19, 11, 3, 6]
     struct_head_1 = [10, 11, 12, 13]
     aa_head_2 = [13, 4, 15]
     struct_head_2 = [2, 3, 4]
@@ -231,9 +231,9 @@ def test_call(
     aa_insert_head_2 = 17
     struct_insert_head_2 = 3
 
-    aa_inputs_1 = np.eye(23)[aa_head_1 + [aa_insert_head_1]]
+    aa_inputs_1 = np.eye(20)[aa_head_1 + [aa_insert_head_1]]
     struct_inputs_1 = np.eye(20)[struct_head_1 + [struct_insert_head_1]]
-    aa_inputs_2 = np.eye(23)[aa_head_2 + [aa_insert_head_2]]
+    aa_inputs_2 = np.eye(20)[aa_head_2 + [aa_insert_head_2]]
     struct_inputs_2 = np.eye(20)[struct_head_2 + [struct_insert_head_2]]
 
     # Add batch dimensions
@@ -291,10 +291,10 @@ def test_matrix_low_rank(
 
     # Check if the kernel has the correct size
     assert emitter.low_rank == low_rank
-    assert emitter.AB_matrix().shape == (2, 10, (20 + 23) * low_rank)
+    assert emitter.AB_matrix().shape == (2, 10, (20 + 20) * low_rank)
 
     # Check basic matrix properties
-    assert B.shape == (2, 10, 23 * 20)
+    assert B.shape == (2, 10, 20 * 20)
     np.testing.assert_allclose(np.sum(B[0], axis=-1), 1.0, rtol=1e-5)
     np.testing.assert_allclose(np.sum(B[1, :8], axis=-1), 1.0, rtol=1e-5)
 
@@ -343,7 +343,7 @@ def test_C_weight(
             aa_values[0].match_emissions[i],
             struct_values[0].match_emissions[i],
         )  # (n1, n2)
-        actual_C = emitter.C_weight.numpy()[0, i, :].reshape(23, 20)
+        actual_C = emitter.C_weight.numpy()[0, i, :].reshape(20, 20)
         np.testing.assert_allclose(actual_C, expected_C, rtol=1e-5)
 
     # Verify insert state C
@@ -351,7 +351,7 @@ def test_C_weight(
         aa_values[0].insert_emissions,
         struct_values[0].insert_emissions,
     )
-    actual_C_ins = emitter.C_weight.numpy()[0, 4, :].reshape(23, 20)
+    actual_C_ins = emitter.C_weight.numpy()[0, 4, :].reshape(20, 20)
     np.testing.assert_allclose(actual_C_ins, expected_C_ins, rtol=1e-5)
 
 
@@ -387,7 +387,7 @@ def make_conditional_emitter(
         conditional=True,
     )
     emitter.hmm_config = hidten_config
-    emitter.build(((None, None, 23), (None, None, 20)))
+    emitter.build(((None, None, 20), (None, None, 20)))
     return emitter
 
 
@@ -399,9 +399,9 @@ def test_conditional_matrix_normalization(
     must sum to 1 for valid states."""
     emitter = make_conditional_emitter(config, hidten_config, low_rank=0)
     B = emitter.matrix()
-    assert B.shape == (2, 10, 23 * 20)
+    assert B.shape == (2, 10, 20 * 20)
 
-    D1, D2 = 23, 20
+    D1, D2 = 20, 20
     B_reshaped = B.numpy().reshape(2, 10, D1, D2)
 
     # Head 0: all 10 states are valid
@@ -430,7 +430,7 @@ def test_conditional_initializes_independent_of_x1(
     emitter = make_conditional_emitter(config, hidten_config, low_rank=0)
     B = emitter.matrix()
 
-    D1, D2 = 23, 20
+    D1, D2 = 20, 20
     B_reshaped = B.numpy().reshape(2, 10, D1, D2)
 
     # Head 0 has 4 match states. The struct marginal for state i is one-hot
@@ -453,11 +453,11 @@ def test_marginal_matrix_from_conditional(
     emitter = make_conditional_emitter(config, hidten_config, low_rank=0)
     B = emitter.matrix()
 
-    D1, D2 = 23, 20
+    D1, D2 = 20, 20
     B_reshaped = B.numpy().reshape(2, 10, D1, D2)
 
     # One-hot prior selects a single row of the conditional
-    for d1_idx in [0, 5, 22]:
+    for d1_idx in [0, 5, 19]:
         prior_onehot = tf.one_hot(d1_idx, D1)
         marginal = emitter.marginal_matrix_from_conditional(prior_onehot, B)
         assert marginal.shape == (2, 10, D2)
@@ -483,9 +483,9 @@ def test_conditional_low_rank_normalization(
     config.structure.joint_emission_low_rank = low_rank
     emitter = make_conditional_emitter(config, hidten_config, low_rank=low_rank)
     B = emitter.matrix()
-    assert B.shape == (2, 10, 23 * 20)
+    assert B.shape == (2, 10, 20 * 20)
 
-    D1, D2 = 23, 20
+    D1, D2 = 20, 20
     B_reshaped = B.numpy().reshape(2, 10, D1, D2)
 
     np.testing.assert_allclose(

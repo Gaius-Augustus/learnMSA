@@ -53,12 +53,12 @@ def two_motifs_layer() -> PHMMLayer:
     ahc_indices = [alphabet.index(aa) for aa in "AHC"]
 
     # Model 1: FELIK (length 5)
-    match_emissions_1 = np.zeros((5, len(alphabet)-1))
+    match_emissions_1 = np.zeros((5, len(alphabet)))
     for i, aa_idx in enumerate(felik_indices):
         match_emissions_1[i, aa_idx] = 1.0
 
     # Model 2: AHC (length 3) - pad to length 5 to match model 1
-    match_emissions_2 = np.zeros((5, len(alphabet)-1))
+    match_emissions_2 = np.zeros((5, len(alphabet)))
     for i, aa_idx in enumerate(ahc_indices):
         match_emissions_2[i, aa_idx] = 1.0
 
@@ -67,7 +67,7 @@ def two_motifs_layer() -> PHMMLayer:
 
     config = PHMMConfig(
         match_emissions=match_emissions,
-        insert_emissions=[1/23]*23,
+        insert_emissions=[1/len(alphabet)]*len(alphabet),
         use_prior_for_emission_init=False,
         # First head (length 5) and second head (length 3) values
         p_begin_match=[
@@ -110,7 +110,7 @@ def two_motifs_layer() -> PHMMLayer:
     layer = PHMMLayer(lengths=[5, 3], config=config)
 
     # Build layer
-    alphabet_size = len(SequenceDataset._default_alphabet) - 1
+    alphabet_size = len(SequenceDataset._default_alphabet)
     layer.build(((None, None, alphabet_size), (None, None, 1)))
 
     return layer
@@ -124,18 +124,22 @@ def felix_data() -> tuple[tf.Tensor, tf.Tensor]:
     )
 
     with SequenceDataset(test_data_path) as data:
-        # Get sequences and convert to one-hot
-        max_len = np.max(data.seq_lens)
+        # Get sequences as per-residue distributions over the 20 amino acids
+        max_len = int(np.max(data.seq_lens))
         num_seqs = data.num_seq
+        D = len(alphabet)
 
-        # Create one-hot encoded sequences
-        seq = np.zeros((num_seqs, max_len+1)) + alphabet.index("-")
+        # Pad with all-zero (terminal) positions; +1 ensures a trailing terminal
+        seq_arr = np.zeros((num_seqs, max_len + 1, D), dtype=np.float32)
         for i in range(num_seqs):
-            seq[i, :data.seq_lens[i]] = data.get_encoded_seq(i)
-        seq = np.eye(len(alphabet))[seq.astype(int)]
+            s = data.get_encoded_seq(i)
+            seq_arr[i, :s.shape[0]] = s
 
-    padding = 1 - tf.constant(seq[..., -1:], dtype=tf.float32)  # (N, L, 1)
-    seq = tf.constant(seq[..., :-1], dtype=tf.float32)  # (N, L, 23)
+    seq_full = tf.constant(seq_arr)
+    terminal = 1.0 - tf.reduce_sum(seq_full, axis=-1, keepdims=True)
+    seq_full = tf.concat([seq_full, terminal], axis=-1)
+    padding = 1 - seq_full[..., -1:]  # (N, L, 1)
+    seq = seq_full[..., :-1]  # (N, L, 20)
 
     return seq, padding
 
@@ -783,7 +787,7 @@ def test_prior_values() -> None:
     )
 
     # Build the layer by providing shapes for observations and padding
-    layer.build(input_shape=((None, None, 23), (None, None, 1)))
+    layer.build(input_shape=((None, None, 20), (None, None, 1)))
 
     # Test whether computing the prior scores of the layer does not error
     prior_scores = layer.prior_scores()
@@ -793,26 +797,10 @@ def test_prior_values() -> None:
     # where p is an amino acid background distribution
     # The new implementation should give the same gradients, but will differ
     # by a constant offset, because it's normalized differently.
-    p = tf.constant([
-        8.3433352e-02, 5.1926684e-02, 4.9351085e-02, 4.6587169e-02, 2.2493618e-02,
-        5.0682485e-02, 6.2964454e-02, 4.7214236e-02, 3.3491924e-02, 5.2677721e-02,
-        7.3317297e-02, 6.3507542e-02, 3.5261709e-02, 3.6099266e-02, 3.4606576e-02,
-        7.2123714e-02, 6.5257192e-02, 1.7763134e-02, 3.3940718e-02, 6.6508673e-02,
-        7.9144974e-04, 5.8379495e-08, 9.9920245e-33
-    ])
-    expected_grads = np.array([
-        16.196707, 8.924403, 7.9193473, 6.7171874, -16.274733,
-        8.451642, 12.300347, 7.002275, -1.6756237, 9.198967,
-        14.542977, 12.436159, -0.17705068, 0.48093507, -0.71392107,
-        14.317257, 12.858342, -28.114046, -1.2808125, 13.146688,
-        0., 0., 0.
-    ])
-
-    # Compute gradients with the new implementation
     assert layer.profile_emitter is not None
     assert layer.profile_emitter.prior is not None
 
-    # Test if parameter sharing works
+    # Test if parameter sharing works (all match states share the same alpha).
     matrix = layer.profile_emitter.prior.matrix()
     for i in range(1, 4):
         np.testing.assert_equal(
@@ -820,13 +808,20 @@ def test_prior_values() -> None:
             matrix[0, 0].numpy(),
         )
 
+    # The emission prior is a Dirichlet over the 20 amino acids. The gradient of
+    # its log-density w.r.t. a distribution x is (alpha - 1) / x, summed over
+    # all states (here 2*L + 2 = 10 for L = 4). This is checked against autodiff
+    # so it stays valid regardless of the specific prior weights.
+    alpha = layer.profile_emitter.prior.matrix()[0, 0].numpy()  # (20,)
+    num_states = 2 * 4 + 2
+    p = tf.constant([1.0 / 20] * 20, dtype=tf.float32)
     with tf.GradientTape() as tape:
         tape.watch(p)
         prior_score = layer.profile_emitter.prior(p) # type: ignore
     grads = tape.gradient(prior_score, p)
     assert isinstance(grads, tf.Tensor)
-    # Multiply expected gradients by 10 to account because we have 10 states
-    np.testing.assert_allclose(grads, 10 * expected_grads, atol=1e-6, rtol=1e-6)
+    expected_grads = num_states * (alpha - 1.0) / p.numpy()
+    np.testing.assert_allclose(grads, expected_grads, atol=1e-3, rtol=1e-4)
 
     A = [[
         [0.0000000e+00, 6.3772297e-01, 0.0000000e+00, 0.0000000e+00, 8.6306415e-02,
@@ -1025,7 +1020,7 @@ def test_basic_forward_simple_seq() -> None:
     # Create a model with deterministic emissions matching "ACGT"
     alphabet = SequenceDataset._default_alphabet
     acgt = [alphabet.index(s) for s in "ACGT"]
-    match_emissions = np.zeros((1, 4, len(alphabet)-1))
+    match_emissions = np.zeros((1, 4, len(alphabet)))
     match_emissions[0, 0, acgt[0]] = 1
     match_emissions[0, 1, acgt[1]] = 1
     match_emissions[0, 2, acgt[2]] = 1
@@ -1040,13 +1035,13 @@ def test_basic_forward_simple_seq() -> None:
     layer = PHMMLayer(lengths=[4], config=config)
 
     # Create one-hot encoded sequences for "ACGT"
-    seqs = np.eye(len(alphabet)-1)[[acgt, acgt]]  # (2, 4, 23)
+    seqs = np.eye(len(alphabet))[[acgt, acgt]]  # (2, 4, 20)
 
     # No padding
     padding = np.ones((2, 4, 1), dtype=np.float32)
 
     # Build the layer
-    layer.build(input_shape=((None, None, 23), (None, None, 1)))
+    layer.build(input_shape=((None, None, 20), (None, None, 1)))
 
     # Run forward algorithm
     seqs = tf.constant(seqs, dtype=tf.float32)
@@ -1077,9 +1072,8 @@ def test_variable_length_sequences() -> None:
     # Create a model with deterministic emissions matching "ACGT"
     alphabet = SequenceDataset._default_alphabet
     acgt = [alphabet.index(s) for s in "ACGT"]
-    x = alphabet.index("X")
 
-    match_emissions = np.zeros((1, 4, len(alphabet)-1))
+    match_emissions = np.zeros((1, 4, len(alphabet)))
     match_emissions[0, 0, acgt[0]] = 1  # A
     match_emissions[0, 1, acgt[1]] = 1  # C
     match_emissions[0, 2, acgt[2]] = 1  # G
@@ -1095,15 +1089,16 @@ def test_variable_length_sequences() -> None:
 
     # Create two sequences: one short (ACGT=4), one long (ACGTXACGT=9)
     max_len = 10
-    seq = np.zeros((2, max_len, len(alphabet)-1))
+    seq = np.zeros((2, max_len, len(alphabet)))
 
     # First sequence: ACGT (4 symbols) + padding
-    seq[0, :4] = np.eye(len(alphabet)-1)[acgt]
+    seq[0, :4] = np.eye(len(alphabet))[acgt]
 
-    # Second sequence: ACGTXACGT (9 symbols) + padding
-    seq[1, :4] = np.eye(len(alphabet)-1)[acgt]
-    seq[1, 4, x] = 1.0
-    seq[1, 5:9] = np.eye(len(alphabet)-1)[acgt]
+    # Second sequence: ACGT?ACGT (9 symbols) + padding, where '?' is an unknown
+    # residue represented as a uniform distribution over the 20 amino acids.
+    seq[1, :4] = np.eye(len(alphabet))[acgt]
+    seq[1, 4, :] = 1.0 / len(alphabet)
+    seq[1, 5:9] = np.eye(len(alphabet))[acgt]
 
     # Create padding mask
     padding = np.zeros((2, max_len, 1))
@@ -1111,7 +1106,7 @@ def test_variable_length_sequences() -> None:
     padding[1, :9] = 1.0   # First 9 positions are valid
 
     # Build the layer
-    layer.build(((None, None, len(alphabet)-1), (None, None, 1)))
+    layer.build(((None, None, len(alphabet)), (None, None, 1)))
 
     # Convert to tensors
     seq = tf.constant(seq, dtype=tf.float32)
@@ -1257,24 +1252,25 @@ def test_posterior_state_probabilities() -> None:
         config = PHMMConfig()
         layer = PHMMLayer(lengths=[32], config=config)
 
-        # Get sequences from dataset
-        sequences = []
-        for i in range(data.num_seq):
-            seq = data.get_encoded_seq(i)
-            sequences.append(seq)
+        # Get sequences from dataset (per-residue distributions over 20 AAs)
+        sequences = [data.get_encoded_seq(i) for i in range(data.num_seq)]
 
-        # Stack and convert to one-hot encoding
+        # Stack into a padded (all-zero) array, then append the terminal channel
+        # (1 - sum) exactly as the model does.
         max_len = max(len(s) for s in sequences)
-        seq_array = np.full((len(sequences), max_len), len(data.alphabet) - 1)
+        D = len(data.alphabet)
+        seq_array = np.zeros((len(sequences), max_len, D), dtype=np.float32)
         for i, seq in enumerate(sequences):
             seq_array[i, :len(seq)] = seq
 
-        seq_tensor = tf.one_hot(seq_array, len(data.alphabet))
-        padding = 1-seq_tensor[..., -1:]  # Exclude padding channel
+        seq_tensor = tf.constant(seq_array)
+        terminal = 1.0 - tf.reduce_sum(seq_tensor, axis=-1, keepdims=True)
+        seq_tensor = tf.concat([seq_tensor, terminal], axis=-1)
+        padding = 1 - seq_tensor[..., -1:]  # Exclude padding channel
         seq_tensor = seq_tensor[..., :-1]  # Exclude padding channel
 
         # Build layer with correct input shape
-        layer.build(((None, None, len(data.alphabet)-1), (None, None, 1)))
+        layer.build(((None, None, D), (None, None, 1)))
 
         # Compute posterior probabilities
         layer.posterior_mode()

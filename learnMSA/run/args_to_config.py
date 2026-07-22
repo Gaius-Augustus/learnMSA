@@ -136,6 +136,7 @@ def args_to_config(
 
     # --- HMM ---
     hmm_d["noise_concentration"] = args.noise_concentration
+    hmm_d["model_uo"] = args.model_uo
 
     # --- HMM prior ---
     hp["amino_acid_prior_name"] = args.aa_prior_name

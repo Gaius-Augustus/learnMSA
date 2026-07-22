@@ -14,7 +14,7 @@ from learnMSA.util.sequence_dataset import SequenceDataset
 
 def string_to_one_hot(s : str) -> tf.Tensor:
     i = [SequenceDataset._default_alphabet.index(aa) for aa in s]
-    return tf.one_hot(i, len(SequenceDataset._default_alphabet)-1)
+    return tf.one_hot(i, len(SequenceDataset._default_alphabet))
 
 
 def test_model_to_file() -> None:
@@ -29,9 +29,9 @@ def test_model_to_file() -> None:
 
     # Make a model with some custom parameters to save
     model_len = 10
-    em_init = np.random.rand(model_len, len(SequenceDataset._default_alphabet)-1)
+    em_init = np.random.rand(model_len, len(SequenceDataset._default_alphabet))
     em_init[2:6] = string_to_one_hot("ACGT").numpy()*20.
-    ins_init = np.random.rand(len(SequenceDataset._default_alphabet)-1)
+    ins_init = np.random.rand(len(SequenceDataset._default_alphabet))
     ins_init /= np.sum(ins_init)
 
     # Set up configuration
@@ -63,8 +63,10 @@ def test_model_to_file() -> None:
 
     # Make a snapshot of parameters and likelihood before saving
     weights = [w.numpy() for w in model.trainable_weights]
-    seq = np.random.randint(20, size=(1,17,1))
-    seq[:,:,-1] = len(SequenceDataset._default_alphabet)-1
+    # Build a one-hot vector input over the 20 amino acids: (batch, len, model, D)
+    idx = np.random.randint(20, size=(17,))
+    seq = np.zeros((1, 17, 1, 20), dtype=np.float32)
+    seq[0, np.arange(17), 0, idx] = 1.0
     loglik = model([seq, np.array([[0]])]).numpy()
 
     #make alignment and save

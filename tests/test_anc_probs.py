@@ -228,7 +228,10 @@ def get_simple_seq(data: SequenceDataset) -> np.ndarray:
         shuffle=False,
     )
     for (seq, _), _ in ds.take(1):
-        sequences = seq.numpy()[:, :-1, :]
+        # The batch now holds one-hot vectors (b, L, num_model, D); recover
+        # integer indices for the standalone AncProbsLayer test and drop the
+        # trailing terminal column.
+        sequences = np.argmax(seq.numpy(), axis=-1)[:, :-1, :]
         break
     return sequences
 
@@ -319,7 +322,8 @@ def test_encoder_model() -> None:
                     L,  # Use original sequence length
                     config.training.num_model,
                     1,
-                    len(SequenceDataset._default_alphabet)
+                    # encoded features include the appended terminal channel
+                    len(SequenceDataset._default_alphabet) + 1
                 )
                 anc_prob_seqs = np.reshape(anc_prob_seqs, shape)
                 break
@@ -337,7 +341,7 @@ def test_encoder_model() -> None:
                     L,
                     config.training.num_model,
                     1,
-                    len(SequenceDataset._default_alphabet),
+                    len(SequenceDataset._default_alphabet) + 1,
                 )
 
 def test_time_reversed() -> None:

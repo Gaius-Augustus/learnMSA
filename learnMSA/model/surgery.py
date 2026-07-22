@@ -642,17 +642,9 @@ def model_surgery(
     )
 
 def _get_aa_insert_value(config: PHMMConfig) -> np.ndarray:
-    if config.use_prior_for_emission_init:
-        # use prior mean as brackground distribution
-        emission_prior = load_dirichlet(
-            f"amino_acid_dirichlet_1.weights", # TODO: use component count from config here
-            dim = len(SequenceDataset._default_alphabet)-1,
-            states = [1],
-        )
-        aa_insert_value = emission_prior.mean()[0,0].numpy()
-    else:
-        aa_insert_value = np.array(config.background_distribution)
-    return aa_insert_value
+    # The background distribution is fitted to the amino acid frequencies and is
+    # already sized to the emission alphabet (20, or 22 with model_uo).
+    return np.array(config.background_distribution, dtype=np.float32)
 
 def _get_struct_insert_value(structural_config: StructureConfig) -> np.ndarray:
     if structural_config.use_prior_for_emission_init\
