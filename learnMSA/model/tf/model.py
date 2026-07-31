@@ -283,8 +283,10 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
                 should be jit-compiled.
 
         """
+        clipnorm = self.context.config.training.gradient_clipnorm
         optimizer = tf.keras.optimizers.Adam(
-            self.context.config.training.learning_rate
+            self.context.config.training.learning_rate,
+            global_clipnorm=clipnorm if clipnorm > 0 else None,
         )
         super().compile(
             optimizer=optimizer,

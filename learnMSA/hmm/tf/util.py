@@ -1,4 +1,5 @@
 import importlib.resources as resources
+import logging
 from typing import Sequence, cast
 
 import numpy as np
@@ -76,7 +77,55 @@ def load_dirichlet(
     )
     resource = resources.files("learnMSA.hmm.weights") / f"{name}.h5"
     model.load_weights(str(resource))
-    return cast(TFDirichletPrior, model.layers[1])
+    prior = cast(TFDirichletPrior, model.layers[1])
+    _warn_if_degenerate(prior, name)
+    return prior
+
+
+#: A concentration below this is treated as a collapsed dimension.
+DEGENERATE_ALPHA: float = 1e-3
+
+#: ...but only within a component that is otherwise informative.
+INFORMATIVE_ALPHA: float = 1.0
+
+
+def _warn_if_degenerate(prior: TFDirichletPrior, name: str) -> None:
+    """Warn about components with a collapsed dimension.
+
+    A concentration below one makes the density diverge at the simplex
+    boundary, which is fine on its own: the flat 3Di priors consist entirely
+    of such values. What is not fine is a concentration of ~0 sitting *inside*
+    an otherwise informative component. It asserts that this letter is never
+    emitted, which is a fitting artifact rather than a modelled belief, and it
+    is what the prior behind the reported NaN run looked like.
+
+    Judged per component, so a dead component of a mixture -- all
+    concentrations tiny, and carrying a near-zero mixture weight -- does not
+    trigger the warning.
+    """
+    matrix = prior.matrix()
+    if prior.config.components > 1:
+        # Drop the trailing mixture coefficients.
+        matrix = prior._slice_concentrations(matrix)
+    alpha = matrix.numpy().reshape(-1, prior.input_dim)
+    # Padding states carry all-zero rows and are not concentrations.
+    alpha = alpha[alpha.sum(axis=-1) > 0]
+    if alpha.size == 0:
+        return
+    degenerate = (
+        (alpha.min(axis=-1) < DEGENERATE_ALPHA)
+        & (alpha.max(axis=-1) > INFORMATIVE_ALPHA)
+    )
+    if not degenerate.any():
+        return
+    bad = alpha[degenerate]
+    logging.warning(
+        "Dirichlet prior '%s' has %d component(s) with a collapsed "
+        "dimension: a concentration of %.3g next to a maximum of %.4g. That "
+        "letter is effectively forbidden, which is usually a fitting "
+        "artifact; consider refitting the prior.",
+        name, int(degenerate.sum()), float(bad.min()), float(bad.max()),
+    )
 
 def make_mvn_model(
     dim: int,

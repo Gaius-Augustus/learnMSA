@@ -26,6 +26,9 @@ class TrainingConfig(BaseModel):
     learning_rate: float = 0.1
     """Learning rate for gradient descent."""
 
+    gradient_clipnorm: float = 1.0
+    """Global norm the gradients are clipped to. Set to 0 to disable."""
+
     epochs: Sequence[int] = [10, 2, 10]
     """Number of training epochs."""
 

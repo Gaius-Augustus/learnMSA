@@ -9,7 +9,7 @@ else:
 import numpy as np
 import tensorflow as tf
 from hidten.tf.prior.dirichlet import T_TFTensor, TFDirichletPrior, TFPrior
-from hidten.tf.util import epsilon, safe_log
+from hidten.tf.util import epsilon, safe_log, safe_norm
 
 from learnMSA.config.hmm import PHMMPriorConfig
 from learnMSA.hmm.tf.util import load_dirichlet
@@ -121,7 +121,8 @@ class TFPHMMTransitionPrior(TFPrior):
         transitions = tf.transpose(transitions) # (sum_L - num_heads, dim)
 
         # Normalize (might be necessary when a subset of out-transitions is used)
-        transitions /= tf.reduce_sum(transitions, axis=-1, keepdims=True)
+        # safe_norm guards the 0/0 that occurs when a triple underflows to zero
+        transitions = safe_norm(transitions)
 
         # Apply the prior to the transitions
         scores = prior.log_dirichlet_pdf(transitions)

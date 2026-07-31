@@ -121,3 +121,32 @@ def test_combined_priors(hmm_config: HidtenHMMConfig) -> None:
     assert tf.reduce_all(tf.math.is_finite(trans_scores))
     assert tf.reduce_all(tf.math.is_finite(start_scores))
     assert tf.reduce_all(tf.math.is_finite(combined))
+
+def test_transition_prior_collapsed_out_transitions(
+    hmm_config: HidtenHMMConfig
+) -> None:
+    """Out-transitions that underflow to zero must score finite, not NaN.
+
+    The triples are renormalized before being handed to the Dirichlet, which
+    used to be a plain division and hence a 0/0 whenever a match state routed
+    all of its probability mass to the end state.
+    """
+    import tensorflow as tf
+
+    lengths = [4, 3]
+    prior = TFPHMMTransitionPrior(lengths, PHMMPriorConfig())
+    prior.hmm_config = HidtenHMMConfig(states=[1])
+    prior.build()
+
+    values = [
+        PHMMValueSet.from_config(L, h, PHMMConfig())
+        for h, L in enumerate(lengths)
+    ]
+    transitioner = PHMMTransitioner(values=values)
+    transitioner.hmm_config = hmm_config
+    transitioner.build()
+    A = tf.zeros_like(transitioner.explicit_transitioner.matrix())
+
+    for type in TFPHMMTransitionPrior.TransitionType:
+        scores = prior.compute_transition_prior(A, type)
+        assert tf.reduce_all(tf.math.is_finite(scores)), type
