@@ -8,9 +8,9 @@ import tensorflow as tf
 from learnMSA import Configuration
 from learnMSA.align.align_hits import HitAlignmentMode
 from learnMSA.config.hmm import PHMMConfig
-from learnMSA.hmm.tf.layer import PHMMLayer
+from learnMSA.hmm.tf.layer import TFPHMMLayer as PHMMLayer
 from learnMSA.hmm.util.transition_index_set import PHMMTransitionIndexSet
-from learnMSA.model.tf.model import LearnMSAModel
+from learnMSA.model.tf.model import TFLearnMSAModel as LearnMSAModel
 from learnMSA.align.alignment_model import AlignmentModel
 from learnMSA.model.context import LearnMSAContext
 from learnMSA.model.surgery import (apply_mods, extend_mods,

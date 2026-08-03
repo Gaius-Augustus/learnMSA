@@ -1,6 +1,6 @@
 import numpy as np
 
-from learnMSA.hmm.tf.layer import PHMMLayer
+from learnMSA.hmm.layer import PHMMLayer
 
 
 class PHMMMixin():

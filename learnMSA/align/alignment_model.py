@@ -6,13 +6,15 @@ from enum import Enum
 from pathlib import Path
 
 import numpy as np
-import tensorflow as tf
 
 from learnMSA.align.align_inserts import AlignedInsertions
 from learnMSA.align.alignment_metadata import AlignmentMetaData
+from learnMSA.backend import get_backend, is_backend_set, set_backend
 from learnMSA.align.align_hits import HitAlignmentMode, hit_alignment
 from learnMSA.model.select import SelectionCriterion, select_model
-from learnMSA.model.tf.model import LearnMSAModel
+from learnMSA.model.model import LearnMSAModel
+from learnMSA.model.checkpoint import (checkpoint_format, load_model,
+                                       save_model)
 from learnMSA.util.aligned_dataset import AlignedDataset, SequenceDataset
 from learnMSA.util.dataset import Dataset
 
@@ -509,10 +511,10 @@ class AlignmentModel():
             self.data, self.data[0].num_seq, reduce=False, models=[model]
         )[:,0]
         # Compute the bitscore
-        A = self.model.phmm_layer.hmm.transitioner.matrix()
+        A = self.model.phmm_layer.transition_matrix()
         assert self.model.phmm_layer.profile_emitter is not None,\
             "Profile emitter is not set. Using no_aa?"
-        B = self.model.phmm_layer.profile_emitter.matrix()
+        B = self.model.phmm_layer.emission_matrix("aa")
         L = self.model.lengths[model]
         log_null = self.model.compute_null_model_log_probs(
             self.data[0],
@@ -553,13 +555,15 @@ class AlignmentModel():
             "gap_symbol" : self.gap_symbol,
             "gap_symbol_insertions" : self.gap_symbol_insertions,
             "best_head" : getattr(self, "best_head", None),
+            "backend" : get_backend(),
+            "format" : checkpoint_format(),
         }
         with open(filepath / "meta.json", "w") as metafile:
             metafile.write(json.dumps(d, indent=4))
         # Serialize indices
         np.savetxt(filepath / "indices", self.indices, fmt='%i')
         # Save the model
-        self.model.save(str(filepath) + ".keras")
+        save_model(self.model, filepath)
         if pack:
             shutil.make_archive(str(filepath), "zip", filepath)
             try:
@@ -596,20 +600,20 @@ class AlignmentModel():
         # Deserialize indices
         indices = np.loadtxt(filepath / "indices", dtype=int)
 
-        # Load the model
-        with warnings.catch_warnings():
-            # Suppress the compile warning since we manually compile right after
-            warnings.filterwarnings(
-                'ignore',
-                message=".*compile.*was not called as part of model loading.*",
-                category=UserWarning
+        # Select the backend the model was saved with before loading it, so
+        # that no framework is imported until the choice is settled. Archives
+        # written before the backend was recorded are TensorFlow ones.
+        saved_backend = d.get("backend", "tensorflow")
+        if is_backend_set() and get_backend() != saved_backend:
+            raise RuntimeError(
+                f"The model at {filepath} was saved with the "
+                f"'{saved_backend}' backend, but the '{get_backend()}' backend "
+                "is active. Rerun with --backend " + saved_backend + "."
             )
-            model = tf.keras.models.load_model(
-                str(filepath) + ".keras",
-            )
+        set_backend(saved_backend)
 
-        # Manually compile the model after loading
-        model.compile()
+        # Load the model
+        model = load_model(filepath)
 
         if from_packed:
             #after loading remove unpacked files and keep only the archive
@@ -1050,7 +1054,7 @@ class AlignmentModel():
 
                 # Re-run Viterbi for all sequences with more than one hit
                 # and a model where multi-hits are forbidden
-                self.model.phmm_layer.hmm.transitioner.enable_multi_hits(False)
+                self.model.phmm_layer.enable_multi_hits(False)
     
                 outputs_single = self.model.predict(
                     self.data, indices=multi_hit_rows, models=models,
@@ -1061,7 +1065,7 @@ class AlignmentModel():
                 )
                 
                 # Restore original behavior
-                self.model.phmm_layer.hmm.transitioner.enable_multi_hits(True)
+                self.model.phmm_layer.enable_multi_hits(True)
 
                 assert all(meta_data_single.num_repeats_per_row == 1)
 

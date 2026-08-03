@@ -9,19 +9,31 @@ description = "learnMSA: Learning and Aligning large Protein Families"
 license-files = ["LICENSE.md"]
 authors = [{ name = "Felix Becker", email = "beckerfelix94@gmail.com" }]
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.11"
+# Framework-free core. Install a backend extra to actually run learnMSA:
+#   pip install learnMSA[tensorflow]   or   pip install learnMSA[pytorch]
 dependencies = [
-    "tensorflow[and-cuda]>=2.17,<2.21",
     "biopython>=1.69",
     "pyfamsa",
     "numpy",
     "pydantic",
-    "pandas", 
-    "hidten[tensorflow]",
-    "evoten[tensorflow]",
+    "pandas",
+    "hidten",
+    "evoten",
 ]
 
 [project.optional-dependencies]
+tensorflow = [
+    "tensorflow[and-cuda]>=2.17,<2.21",
+    "hidten[tensorflow]",
+    "evoten[tensorflow]",
+]
+# NOTE: hidten spells this extra "pytorch" while evoten spells it "torch".
+pytorch = [
+    "torch>=2.13",
+    "hidten[pytorch]",
+    "evoten[torch]",
+]
 test = ["pytest"]
 docs = [
     "sphinx>=7.0",
@@ -29,7 +41,7 @@ docs = [
     "myst-parser>=2.0",
 ]
 plots = [
-    "evoten[tensorflow, plots]",
+    "evoten[plots]",
     "imageio",
     "logomaker",
     "networkx",
@@ -39,6 +51,10 @@ plm = [
     # NOTE: on systems with custom CUDA/NCCL installs (e.g. Blackwell),
     # install torch manually first:
     # pip install torch --index-url https://download.pytorch.org/whl/cpu
+    # FIXME: this upper pin conflicts with the `pytorch` extra (torch>=2.13),
+    # so `pip install learnMSA[pytorch,plm]` is currently unsatisfiable. torch is
+    # only here because HuggingFace transformers wants it present; the language
+    # model code itself uses the TensorFlow API (TFEsmModel, TFT5EncoderModel).
     "torch<=2.7.1",
     "transformers<5.0",
     "tf-keras",

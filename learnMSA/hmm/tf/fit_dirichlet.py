@@ -48,7 +48,8 @@ from hidten.tf.prior.dirichlet import TFDirichletPrior
 
 from learnMSA.config.hmm import PHMMConfig
 from learnMSA.config.structure import StructureConfig
-from learnMSA.hmm.tf.util import make_dirichlet_model
+from learnMSA.hmm.priors import KERNEL_KEY, save_prior_kernel
+from learnMSA.hmm.tf.util import make_dirichlet_model, make_dirichlet_prior
 from learnMSA.util.aligned_dataset import AlignedDataset
 
 AA_ALPHABET: str = PHMMConfig().alphabet
@@ -109,7 +110,7 @@ def parse_args() -> argparse.Namespace:
         "--name",
         type=str,
         default="amino_acid_dirichlet",
-        help="Output base name; the file is <name>_<components>.weights.h5.",
+        help="Output base name; the file is <name>_<components>.npz.",
     )
     parser.add_argument(
         "--min-count",
@@ -1097,19 +1098,22 @@ def save(
 
     Args:
         model: The trained Dirichlet model.
-        output_path: Destination ``.weights.h5`` file.
+        output_path: Destination ``.npz`` file.
         dim: Dimension of the categorical distribution.
         components: Number of mixture components.
     """
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    model.save_weights(str(output_path))
+    prior = model.layers[1]
+    save_prior_kernel(prior.kernel.numpy(), output_path)
     print(f"Saved weights to {output_path}")
 
-    reloaded = make_dirichlet_model(dim=dim, components=components)
-    reloaded.load_weights(str(output_path))
+    reloaded = make_dirichlet_prior(dim=dim, components=components)
+    with np.load(output_path) as data:
+        reloaded.kernel.assign(
+            np.asarray(data[KERNEL_KEY], dtype=reloaded.kernel.dtype)
+        )
     np.testing.assert_allclose(
-        reloaded.layers[1].matrix().numpy(),
-        model.layers[1].matrix().numpy(),
+        reloaded.matrix().numpy(),
+        prior.matrix().numpy(),
         atol=1e-6,
     )
     print("Round-trip verification passed.")
@@ -1368,7 +1372,7 @@ def main() -> None:
     if args.output is not None:
         output_path = Path(args.output)
     else:
-        output_path = WEIGHTS_DIR / f"{args.name}_{args.components}.weights.h5"
+        output_path = WEIGHTS_DIR / f"{args.name}_{args.components}.npz"
     save(best_model, output_path, save_dim, args.components)
 
 

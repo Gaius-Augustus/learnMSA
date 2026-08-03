@@ -11,7 +11,7 @@ from learnMSA.hmm.util.value_set_emb import PHMMEmbeddingValueSet
 import tests.hmm.ref as ref
 from learnMSA.config.hmm import PHMMConfig, PHMMPriorConfig
 from learnMSA.hmm.tf import prior
-from learnMSA.hmm.tf.layer import PHMMLayer
+from learnMSA.hmm.tf.layer import TFPHMMLayer as PHMMLayer
 from learnMSA.util.sequence_dataset import SequenceDataset
 
 

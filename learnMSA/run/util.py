@@ -1,12 +1,15 @@
 import os
 import json
 import subprocess as sp
+import sys
 from argparse import ArgumentParser
 from contextlib import ExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import learnMSA.backend as backend
 from learnMSA import Configuration
+from learnMSA.backend import get_backend
 
 if TYPE_CHECKING:
     from learnMSA.util import EmbeddingDataset, SequenceDataset
@@ -44,17 +47,12 @@ def setup_devices(
     This function should be called after parsing the command line arguments,
     otherwise just showing the help message will be slow.
     """
+    # Honoured by every backend.
     if not cuda_visible_devices == "default":
         os.environ["CUDA_VISIBLE_DEVICES"] = cuda_visible_devices
 
-    # Must be set before any TensorFlow operations
-    os.environ["TF_GPU_ALLOCATOR"] = "cuda_malloc_async"
-
-    if not one_dnn_opts:
-        os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
-
-    import tensorflow as tf
-    from tensorflow.python.client import device_lib
+    if get_backend() == "tensorflow":
+        _setup_tensorflow_env(one_dnn_opts)
 
     # Check if multiple GPUs are installed / set in the environment variable
     if get_num_gpus() > 1:
@@ -66,12 +64,7 @@ def setup_devices(
         )
 
     if verbose:
-        GPUS = [
-            x.physical_device_desc
-            for x in device_lib.list_local_devices()
-            if x.device_type == "GPU"
-        ]
-        if len(GPUS) == 0:
+        if get_num_gpus() == 0:
             if cuda_visible_devices == "-1" or \
                 cuda_visible_devices == "":
                 print(
@@ -86,15 +79,32 @@ def setup_devices(
                 )
         else:
             print("Using GPU.")
-        print("Found tensorflow version", tf.__version__)
+        print(f"Found {get_backend()} version", backend.framework_version())
+
+
+def _setup_tensorflow_env(one_dnn_opts: bool) -> None:
+    """Environment TensorFlow needs set before it is first imported."""
+    # triton segfaults when TensorFlow's CUDA libs load in the same process.
+    # Only poison the module when nothing has imported it yet; the torch
+    # backend needs the real thing (hidten[pytorch] requires triton).
+    if "triton" not in sys.modules:
+        sys.modules["triton"] = None  # type: ignore[assignment]
+
+    os.environ["TF_GPU_ALLOCATOR"] = "cuda_malloc_async"
+    if not one_dnn_opts:
+        os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+
+    # Hide TensorFlow/absl startup logs. Defaults, so users can still override
+    # them through the environment.
+    os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+    os.environ.setdefault("TF_CPP_MIN_VLOG_LEVEL", "3")
+    os.environ.setdefault("GLOG_minloglevel", "3")
+    os.environ.setdefault("ABSL_MIN_LOG_LEVEL", "3")
 
 
 def get_num_gpus() -> int:
-    """Returns the number of GPUs detected by TensorFlow."""
-    # import only if needed
-    import tensorflow as tf
-    num_gpu = len([x.name for x in tf.config.list_logical_devices() if x.device_type == 'GPU'])
-    return num_gpu
+    """Returns the number of GPUs detected by the selected backend."""
+    return backend.num_gpus()
 
 
 def get_batch_multiplicator() -> int:

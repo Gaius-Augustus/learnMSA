@@ -645,6 +645,16 @@ def parse_args(
 
     advanced_group = parser.add_argument_group("Advanced arguments")
     advanced_group.add_argument(
+        "--backend",
+        dest="backend",
+        type=str,
+        choices=["auto", "tensorflow", "pytorch"],
+        default=adv.backend,
+        help="Tensor framework used for training and decoding. By default "\
+            "whichever framework is installed is used, preferring TensorFlow "\
+            "when both are available."
+    )
+    advanced_group.add_argument(
         "--no_jit",
         dest="no_jit",
         action='store_true',

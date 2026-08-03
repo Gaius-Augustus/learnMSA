@@ -159,6 +159,7 @@ def args_to_config(
     st["emitter_temperature"] = args.struct_emitter_temperature
 
     # --- Advanced ---
+    adv["backend"] = args.backend
     adv["dist_out"] = args.dist_out
     adv["initial_distance"] = args.initial_distance
     adv["jit_compile"] = not args.no_jit

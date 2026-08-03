@@ -1,10 +1,13 @@
 from enum import Enum
+from typing import TYPE_CHECKING
 
 import numpy as np
 
-from learnMSA.model.tf.model import LearnMSAModel
 from learnMSA.util.dataset import Dataset
 from learnMSA.util.sequence_dataset import SequenceDataset
+
+if TYPE_CHECKING:
+    from learnMSA.model.model import LearnMSAModel
 
 
 class SelectionCriterion(Enum):
@@ -14,7 +17,7 @@ class SelectionCriterion(Enum):
     CONSENSUS = "consensus"
 
 def select_model(
-    model: LearnMSAModel,
+    model: "LearnMSAModel",
     data: SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]],
     model_criterion: SelectionCriterion,
     sequence_indices: np.ndarray|None = None,
@@ -51,7 +54,7 @@ def select_model(
     return int(best)
 
 def get_model_scores(
-    model: LearnMSAModel,
+    model: "LearnMSAModel",
     data: SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]],
     model_criterion: SelectionCriterion,
     sequence_indices: np.ndarray|None = None,
@@ -96,7 +99,7 @@ def get_model_scores(
             )
 
 def select_model_posterior(
-    model: LearnMSAModel,
+    model: "LearnMSAModel",
     data: SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]],
     sequence_indices: np.ndarray|None = None,
     verbose: bool = False,
@@ -116,7 +119,7 @@ def select_model_posterior(
 # slightly better the default argument should change later to false but keep
 # using prior for now for legacy reasons
 def select_model_loglik(
-    model: LearnMSAModel,
+    model: "LearnMSAModel",
     data: SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]],
     sequence_indices: np.ndarray|None = None,
     use_prior: bool = True,
@@ -141,7 +144,7 @@ def select_model_loglik(
 
 
 def select_model_AIC(
-    model: LearnMSAModel,
+    model: "LearnMSAModel",
     data: SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]],
     sequence_indices: np.ndarray|None = None,
     verbose: bool = False,
@@ -154,7 +157,7 @@ def select_model_AIC(
 
 
 def select_model_consensus(
-    model: LearnMSAModel,
+    model: "LearnMSAModel",
     verbose: bool = False,
 ) -> np.ndarray:
     consensus = model.compute_consensus_score()

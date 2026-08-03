@@ -31,6 +31,16 @@ def compute_embeddings(
     EmbeddingDataset object or it can be used to retrieve the
     embeddings for each sequence in the dataset.
     """
+    from learnMSA.backend import get_backend
+    if get_backend() != "tensorflow":
+        raise NotImplementedError(
+            "Computing protein language model embeddings requires the "
+            f"tensorflow backend, but the '{get_backend()}' backend is active. "
+            "Precompute the embeddings once with "
+            "'learnMSA --backend tensorflow --save-emb <file> ...' and pass "
+            "them to this run with '--emb-file <file>'."
+        )
+
     # TODO: remove the ScoringModelConfig entirely; it's only here for legacy
     # reasons
     scoring_model_config = _get_scoring_model_config(language_model_config)

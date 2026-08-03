@@ -11,18 +11,20 @@ else:
 import numpy as np
 import tensorflow as tf
 
-from learnMSA.hmm.tf.layer import PHMMLayer
+import learnMSA.backend as backend
+
+from learnMSA.hmm.tf.layer import TFPHMMLayer as PHMMLayer
 from learnMSA.model.context import LearnMSAContext
-from learnMSA.model.tf.phmm_mixin import PHMMMixin
+from learnMSA.model.model import LearnMSAModel
+from learnMSA.model.bucketing import make_default_bucket_scheme
 from learnMSA.model.tf.training import (TerminateOnNaNWithCheckpoint,
-                                        make_dataset,
-                                        make_default_bucket_scheme)
+                                        make_dataset)
 from learnMSA.tree.tf.anc_probs_layer import AncProbsLayer
 from learnMSA.util.sequence_dataset import Dataset, SequenceDataset
 from learnMSA.util.clustering import write_sequence_weights
 
 
-class LearnMSAModel(tf.keras.Model, PHMMMixin):
+class TFLearnMSAModel(tf.keras.Model, LearnMSAModel[tf.Tensor]):
     """
     The main model class for LearnMSA, combining a pHMM layer with
     ancestoral probability encoding.
@@ -35,7 +37,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
 
     # enable proper type checking for __new__
     # otherwise the tf type stubs package causes trouble
-    def __new__(cls, *args, **kwargs) -> "LearnMSAModel":
+    def __new__(cls, *args, **kwargs) -> "TFLearnMSAModel":
         instance = super().__new__(cls)
         return instance # type: ignore[return-value]
 
@@ -649,10 +651,9 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
             # Fused GPU step: predict → count repeats → dynamic decode, all
             # within one tf.function so R_max never leaves the GPU as a Python
             # int (no CPU–GPU sync mid-batch).
-            from learnMSA.align.tf.decode import (
-                _get_dynamic_decode_fn, decode_batch_to_arrays,
-                reorder_decode_arrays,
-            )
+            from learnMSA.align.decode_util import (decode_batch_to_arrays,
+                                                    reorder_decode_arrays)
+            from learnMSA.align.tf.decode import _get_dynamic_decode_fn
 
             jit = self.use_jit_compile(steps)
             predict_step_fn = self.predict_step
@@ -983,64 +984,7 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         # Return metrics
         return {m.name: m.result() for m in self.metrics}
 
-    def estimate_loglik(
-        self,
-        data: SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]],
-        max_seq: int = 200000,
-        reduce: bool = True,
-        models: list[int] | None = None
-    ) -> np.ndarray:
-        """ Computes the logarithmic likelihood for each underlying model.
 
-        Args:
-            max_seq: Threshold for the number of sequences used to compute the
-                loglik. If the dataset has more sequences, a random subset is
-                drawn.
-            reduce: If true, the loglik will be averaged over the number of
-                sequences.
-            models: List of model indices for which the loglik should be
-                computed.
-
-        Returns:
-            loglik: Logarithmic likelihoods. If reduce is true, the shape is
-                (num_models,), otherwise (num_sequences, num_models).
-        """
-        if isinstance(data, SequenceDataset):
-            n = data.num_seq
-        else:
-            n = data[0].num_seq
-        if n > max_seq:
-            # estimate the ll only on a subset for efficiency
-            indices = np.arange(n)
-            np.random.shuffle(indices)
-            indices = indices[:max_seq]
-            indices = np.sort(indices)
-        else:
-            indices = np.arange(n)
-        if reduce:
-            return self.evaluate(data, indices=indices, models=models)["loglik"]
-        else:
-            self.loglik_mode()
-            self.compile(total_steps=len(indices))
-            loglik = self.predict(data, indices=indices, models=models)
-            assert isinstance(loglik, np.ndarray)
-            return loglik
-
-    def _pack_datasets(
-        self,
-        data: SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]],
-        method_name: str,
-    ) -> tuple[SequenceDataset, *tuple[Dataset, ...]]:
-        if isinstance(data, SequenceDataset):
-            return (data,)
-        if len(data) == 0:
-            raise ValueError(f"Model.{method_name} requires at least one dataset.")
-        if not isinstance(data[0], SequenceDataset):
-            raise ValueError(
-                f"The first dataset in the tuple passed to Model.{method_name} "
-                "must be a SequenceDataset."
-            )
-        return data
 
     def compute_null_model_log_probs(
         self,
@@ -1167,33 +1111,6 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
 
         return log_probs
 
-    def estimate_AIC(
-        self,
-        data: SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]],
-        max_seq: int = 200000,
-        loglik: np.ndarray | None = None
-    ) -> np.ndarray:
-        """ Computes the Akaike information criterion for each underlying model.
-
-        Args:
-            data: SequenceDataset containing the sequences to evaluate.
-            max_seq: Threshold for the number of sequences used to compute the
-                loglik. If the dataset has more sequences, a random subset is
-                drawn.
-            loglik: This argument can be set if the loglik was computed before
-                via estimate_loglik to avoid overhead. If None, the loglik will
-                be computed internally.
-
-        Returns:
-            aic: Array of AIC values for each model.
-        """
-        if isinstance(data, SequenceDataset):
-            data = (data,)
-        if loglik is None:
-            loglik = self.estimate_loglik(data, max_seq, reduce=True)
-        num_param = 34 * np.array(self.phmm_layer.lengths) + 25
-        aic = -2 * loglik * data[0].num_seq + 2 * num_param
-        return aic
 
     def compute_consensus_score(self) -> tf.Tensor:
         """ Computes a consensus score that rates how plausible each model is
@@ -1252,48 +1169,8 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         consensus_score = tf.reduce_mean(consensus_logliks, axis=1)
         return consensus_score
 
-    def get_batch_size(self, data:SequenceDataset) -> int:
-        if callable(self.context.batch_size):
-            return self.context.batch_size(data)
-        else:
-            return self.context.batch_size
 
-    def get_num_epochs(self, iteration: int) -> int:
-        """
-        Determine the number of epochs for the current training iteration.
 
-        Args:
-            iteration: Current iteration number in the training loop.
-
-        Returns:
-            Number of epochs to train for this iteration.
-        """
-        last_iteration = (
-            iteration == self.context.config.training.max_iterations - 1
-        )
-        epochs = self.context.config.training.epochs[
-            0 if iteration==0 else 1 if not last_iteration else 2
-        ]
-        return epochs
-
-    def get_num_steps(
-        self, num_sequences: int, batch_size: int, min_steps: int = 5
-    ) -> int:
-        """
-        Determine the number of steps per epoch based on the number of sequences
-        and batch size.
-
-        Args:
-            num_sequences: Total number of sequences to train on.
-            batch_size: Number of sequences per batch.
-
-        Returns:
-            Number of steps per epoch.
-        """
-        if num_sequences == 0 or batch_size == 0:
-            return 0
-        steps = int(100*np.sqrt(num_sequences)/batch_size)
-        return min(max(min_steps, steps), 500)
 
     def get_train_callbacks(self) -> list[tf.keras.callbacks.Callback]:
         """
@@ -1309,38 +1186,6 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         early_stopping = tf.keras.callbacks.EarlyStopping("loss", patience=1)
         return [terminate_on_nan, early_stopping]
 
-    def use_jit_compile(self, total_steps: int | None = None) -> bool:
-        """
-        Determine whether to use JIT compilation for training.
-
-        Args:
-            total_steps: The total number of steps the model will be called for
-                (optional). If provided, it is used to decide if JIT should be
-                enabled based on the threshold.
-
-        Returns:
-            True if JIT compilation should be used, False otherwise.
-        """
-        jit_compile = self.context.config.advanced.jit_compile
-        if total_steps is not None:
-            # jit compilation becomes very slow for long HMMs
-            # (say > 450 matches)
-            # make sure we only enable it if we will be running long enough to
-            # benefit from it
-            jit_compile = jit_compile and total_steps >= 20
-            if max(self.context.model_lengths) > 450:
-                jit_compile = jit_compile and total_steps >= 100
-        return jit_compile
-
-    def get_verbosity(self) -> Literal[0, 2]:
-        """
-        Determine the verbosity level for training output.
-
-        Returns:
-            Verbosity level (0 for silent, 2 for verbose).
-        """
-        return 2 if self.context.config.input_output.verbose else 0
-
     def get_config(self):
         """
         Returns the config of the model.
@@ -1353,7 +1198,6 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         base_config = super().get_config()
         base_config["learnmsa_context"] = self.context
         return base_config
-
     @classmethod
     def from_config(cls, config, custom_objects=None):
         """
@@ -1384,100 +1228,5 @@ class LearnMSAModel(tf.keras.Model, PHMMMixin):
         # Keras will restore the model structure and weights from the saved file
         return cls(context, **config_copy)
 
-    def _print_train_header(
-        self, indices: np.ndarray, batch_size: int, data: Dataset
-    ) -> None:
-        if self.context.config.input_output.verbose:
-            print(
-                "Fitting models of lengths",
-                self.context.model_lengths, "on", indices.shape[0], "sequences"
-            )
-            print(
-                "Batch size=", batch_size,
-                "Learning rate=", self.context.config.training.learning_rate
-            )
-            if self.context.sequence_weights is not None:
-                io = self.context.config.input_output
-                input_path = Path(io.input_file)
-                if input_path.name:
-                    weight_path = Path(io.work_dir) /\
-                        input_path.with_suffix(".weights").name
-                else:
-                    weight_path = Path(io.work_dir) / "sequences.weights"
-                print("Using sequence weights and writing them to", weight_path)
-                write_sequence_weights(
-                    data, self.context.sequence_weights, str(weight_path)
-                )
-            else:
-                print("Don't use sequence weights")
-            if int(self.context.batch_gen.crop_long_seqs) < math.inf:
-                num_cropped = np.sum(
-                    data.seq_lens[indices] >\
-                        self.context.batch_gen.crop_long_seqs
-                    )
-                if num_cropped > 0:
-                    print(
-                        f"{num_cropped} sequences are longer than "
-                        f"{self.context.batch_gen.crop_long_seqs} and will be "\
-                        "cropped for training.\nTo disable cropping, use "\
-                        "--crop disable. To change the cropping limit to X, "\
-                        "use --crop X."
-                    )
-            if self.phmm_layer.use_language_model:
-                print("Protein language model support is enabled")
-            num_gpu = len([x.name for x in tf.config.list_logical_devices() if x.device_type == 'GPU'])
-            if num_gpu == 0:
-                print("Using CPU")
-            else:
-                print("Using GPU")
-
-    def _print_predict_header(
-        self, indices: np.ndarray,
-        bucket_boundaries: Sequence[int | float],
-        bucket_batch_sizes: Sequence[int],
-        steps: int,
-    ) -> None:
-        if self.context.config.input_output.verbose:
-            print(
-                "Predicting on", indices.shape[0], "sequences with bucket ",
-                "boundaries", bucket_boundaries, "and batch sizes",
-                bucket_batch_sizes[:-1], "for", steps, "steps"
-            )
-
-    def _print_predict_timing(
-        self,
-        elapsed_seconds: float,
-        num_sequences: int,
-        steps: int,
-    ) -> None:
-        if self.context.config.input_output.verbose:
-            if elapsed_seconds > 0.0:
-                seq_per_s = num_sequences / elapsed_seconds
-                print(
-                    f"Prediction finished in {elapsed_seconds:.3f}s "
-                    f"({seq_per_s:.2f} seq/s, {steps} steps)"
-                )
-            else:
-                print(
-                    f"Prediction finished in {elapsed_seconds:.3f}s "
-                    f"({steps} steps)"
-                )
-
-    def _check_training_complete(
-        self,
-        history: tf.keras.callbacks.History
-    ) -> None:
-        # Check if the last reported loss is NaN and terminate if so
-        if history.history and "loss" in history.history:
-            final_loss = history.history['loss'][-1]
-            if math.isnan(final_loss):
-                error_msg = "Training terminated: Final loss is NaN."\
-                    f" Loss history: {history.history['loss']}"
-                raise ValueError(error_msg)
-
-        if self.context.config.input_output.verbose:
-            print("Fitted model successfully.")
-
-
 # Register custom objects for serialization
-tf.keras.utils.get_custom_objects()["LearnMSAModel"] = LearnMSAModel
+tf.keras.utils.get_custom_objects()["TFLearnMSAModel"] = TFLearnMSAModel

@@ -7,7 +7,7 @@ import learnMSA.model.training_util as training_util
 import tests.hmm.ref as ref
 from learnMSA.config import Configuration, TrainingConfig, TreeConfig
 from learnMSA.config.hmm import PHMMPriorConfig
-from learnMSA.model.tf.model import LearnMSAModel
+from learnMSA.model.tf.model import TFLearnMSAModel as LearnMSAModel
 from learnMSA.model.context import LearnMSAContext
 from learnMSA.util.sequence_dataset import SequenceDataset
 

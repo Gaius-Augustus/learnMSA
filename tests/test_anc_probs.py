@@ -7,6 +7,7 @@ import tensorflow as tf
 
 from learnMSA import Configuration
 from learnMSA.model import LearnMSAModel, LearnMSAContext
+from learnMSA.model.batch_generator import BatchGenerator
 from learnMSA.model.tf import training
 import learnMSA.tree.tf.initializer as Initializers
 from learnMSA.tree.tf.anc_probs_layer import AncProbsLayer
@@ -214,9 +215,8 @@ def make_anc_probs_layer(
 
 def get_simple_seq(data: SequenceDataset) -> np.ndarray:
     """Get simple sequence data for testing."""
-    from learnMSA.model.tf import training
     indices = np.arange(data.num_seq)
-    batch_generator = training.BatchGenerator()
+    batch_generator = BatchGenerator()
     config = Configuration()
     config.training.num_model = 1
     config.training.no_sequence_weights = True
@@ -287,7 +287,7 @@ def test_encoder_model() -> None:
         config = Configuration()
         config.training.num_model = 1
         config.training.no_sequence_weights = True
-        batch_gen = training.BatchGenerator()
+        batch_gen = BatchGenerator()
         batch_gen.configure(data, context=LearnMSAContext(config, data))
         for case in get_test_configs_time_reversed(sequences):
             # The default emitter initializers expect 25 as last dimension

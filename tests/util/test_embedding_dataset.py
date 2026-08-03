@@ -5,7 +5,8 @@ import pytest
 
 from learnMSA.config.config import Configuration
 from learnMSA.model.context import LearnMSAContext
-from learnMSA.model.tf.training import BatchGenerator, make_dataset
+from learnMSA.model.batch_generator import BatchGenerator
+from learnMSA.model.tf.training import make_dataset
 from learnMSA.util import EmbeddingCache, EmbeddingDataset, SequenceDataset
 
 

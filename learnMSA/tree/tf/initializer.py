@@ -1,10 +1,17 @@
+"""TensorFlow initializers and the bridge from backend-neutral init specs.
+
+The neutral :class:`~learnMSA.tree.initializer.InitSpec` family describes what a
+parameter starts at; :func:`to_tf` turns such a description into the keras
+initializer that the TF layers need.
+"""
+
 import numpy as np
 import tensorflow as tf
 
-from learnMSA.tree.tf.util import inverse_softplus
-from learnMSA.util.sequence_dataset import SequenceDataset
+from learnMSA.tree import initializer as spec
+# Re-exported for callers that still build the numeric initial values directly.
+from learnMSA.tree.initializer import make_substitution_model_init  # noqa: F401
 
-from evoten.substitution_models import LG, foldseek_3Di, AF_3Di
 
 class ConstantInitializer(tf.keras.initializers.Constant):
 
@@ -31,46 +38,24 @@ class ConstantInitializer(tf.keras.initializers.Constant):
         return cls(np.array(config["value"]))
 
 
-def make_substitution_model_init(
-    num_models: int,
-    type: str = "LG",
-    num_components: int = 1,
-    shared_equilibrium: bool = True,
-    shared_exchangeabilities: bool = False,
-    alphabet: str = SequenceDataset._default_alphabet[:20],
-) -> tuple[np.ndarray, np.ndarray]:
+def to_tf(
+    initializer: "spec.InitSpec | tf.keras.initializers.Initializer",
+) -> tf.keras.initializers.Initializer:
+    """Materialize a neutral init spec as a keras initializer.
+
+    Keras initializers are passed through unchanged, so layers can accept either
+    form.
     """
-    Constructs initializers for exchangeabilities and equilibrium frequencies
-    based on an existing substitution model.
-    """
-
-    # (D, D), (D,)
-    if type == "LG":
-        R, p = LG(alphabet)
-    elif type == "foldseek_3Di":
-        R, p = foldseek_3Di(alphabet)
-    elif type == "AF_3Di":
-        R, p = AF_3Di(alphabet)
-    else:
-        raise ValueError(f"Unknown substitution model type: {type}")
-
-    # Build exchangeability initializer: (H, 1, K_R, D, D)
-    R_init = inverse_softplus(R + 1e-32).numpy()
-    exchangeability_stack = np.tile(
-        R_init[None, None, None], [num_models, 1, 1, 1, 1]
-    )  # (H, 1, 1, D, D)
-    if not shared_exchangeabilities and num_components > 1:
-        exchangeability_stack = np.tile(
-            exchangeability_stack, [1, 1, num_components, 1, 1]
-        )  # (H, 1, K, D, D)
-
-    # Build equilibrium initializer: (H, 1, K_p, D)
-    log_p_stack = np.tile(
-        np.log(p)[None, None, None], [num_models, 1, 1, 1]
-    )  # (H, 1, 1, D)
-    if not shared_equilibrium and num_components > 1:
-        log_p_stack = np.tile(
-            log_p_stack, [1, 1, num_components, 1]
-        )  # (H, 1, K, D)
-
-    return exchangeability_stack, log_p_stack
+    if isinstance(initializer, spec.Constant):
+        return ConstantInitializer(initializer.value)
+    if isinstance(initializer, spec.RandomNormal):
+        return tf.keras.initializers.RandomNormal(
+            mean=initializer.mean, stddev=initializer.stddev
+        )
+    if isinstance(initializer, spec.Zeros):
+        return tf.keras.initializers.Zeros()
+    if isinstance(initializer, spec.InitSpec):
+        raise TypeError(
+            f"No TensorFlow initializer is defined for {type(initializer).__name__}."
+        )
+    return initializer

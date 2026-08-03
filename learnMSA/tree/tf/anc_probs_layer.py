@@ -117,6 +117,19 @@ class AncProbsLayer(tf.keras.layers.Layer):
                 "model can be learned, since Q can arbitrarily change residues "
                 "to maximize HMM likelihood."
             )
+        # Accept backend-neutral init specs as well as keras initializers, so
+        # that LearnMSAContext can describe the initialization framework-free.
+        def _as_keras(init):
+            return None if init is None else initializer.to_tf(init)
+
+        equilibrium_init = _as_keras(equilibrium_init)
+        exchangeability_init = _as_keras(exchangeability_init)
+        exchangeability_delta_init = _as_keras(exchangeability_delta_init)
+        mixture_init = _as_keras(mixture_init)
+        scale_init = _as_keras(scale_init)
+        rate_init = _as_keras(rate_init)
+        tau_track_init = _as_keras(tau_track_init)
+
         self.substitution_model = SubstitutionModel(
             heads=heads,
             input_tracks=input_tracks,

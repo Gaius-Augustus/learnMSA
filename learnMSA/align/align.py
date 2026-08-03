@@ -4,17 +4,18 @@ import time
 from pathlib import Path
 
 import numpy as np
-import tensorflow as tf
 
+import learnMSA.backend as backend
+import learnMSA.tree.initializer as initializers
 from learnMSA.align.align_hits import HitAlignmentMode
 import learnMSA.model.training_util as training_util
 from learnMSA import Configuration
 from learnMSA.align.alignment_model import AlignmentModel
 from learnMSA.model.surgery import model_surgery
-from learnMSA.model.tf.model import LearnMSAModel
+from learnMSA.model.model import LearnMSAModel, make_learnmsa_model
 from learnMSA.model.context import LearnMSAContext
-from learnMSA.tree.tf.initializer import ConstantInitializer
 from learnMSA.util.sequence_dataset import Dataset, SequenceDataset
+from learnMSA.util.tensor import to_numpy
 
 np.set_printoptions(legacy='1.21')
 
@@ -80,9 +81,13 @@ def align(
         try:
             t_a = time.time()
             if config.visualization.logo_gif:
-                am = _fit_and_align_with_logo_gif(data, context)
-            else:
-                am = _fit_and_align(data, context)
+                # The logo animation depended on LogoPlotterCallback and
+                # make_logo_gif, which no longer exist in learnMSA.util.visualize.
+                raise NotImplementedError(
+                    "--logo_gif is not currently supported: the logo animation "
+                    "callback was removed from learnMSA.util.visualize."
+                )
+            am = _fit_and_align(data, context)
             if config.input_output.verbose:
                 print("Time for alignment:", "%.4f" % (time.time()-t_a))
 
@@ -90,7 +95,7 @@ def align(
             # according to the criterion specified in the config
             am.select_best()
 
-        except tf.errors.ResourceExhaustedError as e:
+        except backend.oom_errors() as e:
             print("Out of memory. A resource was exhausted.")
             runtime_batch_size = context.last_runtime_batch_size
             if runtime_batch_size is None:
@@ -101,7 +106,7 @@ def align(
             )
             sys.exit(e.error_code)
 
-    tf.keras.backend.clear_session()
+    backend.clear_session()
 
     return am
 
@@ -192,11 +197,11 @@ def _fit_and_align(
         # copy the relevant weights across.
         loaded_model = am.model
         if hasattr(loaded_model, 'anc_probs_layer'):
-            context.R_init = ConstantInitializer(
-                loaded_model.anc_probs_layer.exchangeability_const.numpy()
+            context.R_init = initializers.Constant(
+                to_numpy(loaded_model.anc_probs_layer.exchangeability_const)
             )
-            context.R_delta_init = ConstantInitializer(
-                loaded_model.anc_probs_layer.exchangeability_delta_kernel.numpy()
+            context.R_delta_init = initializers.Constant(
+                to_numpy(loaded_model.anc_probs_layer.exchangeability_delta_kernel)
             )
     else:
         loaded_model = None
@@ -226,7 +231,7 @@ def _fit_and_align(
         # Create and compile the model
         context.effective_num_seq = train_indices.shape[0] #todo: workaround
         if model is None:
-            model = LearnMSAModel(context)
+            model = make_learnmsa_model(context)
             model.build(((batch_size,),))
             if loaded_model is not None:
                 _transfer_model_weights(model, loaded_model)
@@ -283,25 +288,25 @@ def _fit_and_align(
         surgery_converged = surgery_result.surgery_converged
         if model.anc_probs_layer is not None:
             if not context.config.advanced.reset_evo_model:
-                context.R_init = ConstantInitializer(
-                    model.anc_probs_layer.exchangeability_const.numpy()
+                context.R_init = initializers.Constant(
+                    to_numpy(model.anc_probs_layer.exchangeability_const)
                 )
-                context.R_delta_init = ConstantInitializer(
-                    model.anc_probs_layer.exchangeability_delta_kernel.numpy()
+                context.R_delta_init = initializers.Constant(
+                    to_numpy(model.anc_probs_layer.exchangeability_delta_kernel)
                 )
-                context.p_init = ConstantInitializer(
-                    model.anc_probs_layer.equilibrium_kernel.numpy()
+                context.p_init = initializers.Constant(
+                    to_numpy(model.anc_probs_layer.equilibrium_kernel)
                 )
                 if model.anc_probs_layer.num_components > 1:
-                    context.mix_init = ConstantInitializer(
-                        model.anc_probs_layer.mixture_kernel.numpy()
+                    context.mix_init = initializers.Constant(
+                        to_numpy(model.anc_probs_layer.mixture_kernel)
                     )
-                    context.scale_init = ConstantInitializer(
-                        model.anc_probs_layer.scale_kernel.numpy()
+                    context.scale_init = initializers.Constant(
+                        to_numpy(model.anc_probs_layer.scale_kernel)
                     )
             if not context.config.advanced.reset_branch_lengths:
-                context.t_init = ConstantInitializer(
-                    model.anc_probs_layer.tau_kernel.numpy()
+                context.t_init = initializers.Constant(
+                    to_numpy(model.anc_probs_layer.tau_kernel)
                 )
 
         if config.input_output.verbose and surgery_converged:
@@ -313,58 +318,11 @@ def _fit_and_align(
         # Free compiled graphs and cached memory
         del model
         model = None
-        tf.keras.backend.clear_session()
+        backend.clear_session()
 
     return am
 
 
-def _fit_and_align_with_logo_gif(
-    data : SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]],
-    context : LearnMSAContext
-) -> AlignmentModel:
-    from learnMSA.util.visualize import LogoPlotterCallback, make_logo_gif
-    config = context.config
-    indices = np.arange(data[0].num_seq)
-    if config.visualization.logo_gif:
-        logo_dir = config.visualization.logo_gif.parent
-    else:
-        logo_dir = ""
-    if callable(context.batch_size):
-        batch_size = context.batch_size(
-            context.model_lengths, # type: ignore
-            min(data[0].max_len, config.training.crop) # type: ignore
-        )
-    else:
-        batch_size = context.batch_size
-
-    logo_plotter_callback = LogoPlotterCallback(
-        logo_dir, data, context.batch_gen, indices, batch_size
-    )
-
-    print(
-        "Running in logo gif mode. A sequence logo will be generated for each "\
-        "training step. This mode is much slower and less accurate (no model "\
-        "surgery and just 1 model) than the default mode and should only be "\
-        "used for visualization and debugging."
-    )
-
-    # Create and compile the model
-    model = LearnMSAModel(context)
-    model.build(((batch_size,),))
-    model.compile()
-
-    # Run training
-    model.fit(
-        data,
-        indices=indices,
-        iteration=0,
-        batch_size=batch_size,
-        callbacks=[logo_plotter_callback],
-    )
-
-    make_logo_gif(logo_plotter_callback.frame_dir, logo_dir / "training.gif") # type: ignore
-    am = AlignmentModel(data, model, indices)
-    return am
 
 
 def _dataset_messages(

@@ -2,9 +2,7 @@
 import tensorflow as tf
 import numpy as np
 
-from evoten.backend_tf import BackendTF
-
-backend = BackendTF()
+from evoten import backend
 
 
 class TreeModel(tf.keras.layers.Layer):

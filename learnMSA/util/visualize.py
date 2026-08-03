@@ -5,7 +5,8 @@ from matplotlib import pyplot as plt
 from matplotlib.gridspec import GridSpec, GridSpecFromSubplotSpec
 
 from learnMSA.util import SequenceDataset
-from learnMSA.hmm.tf.layer import PHMMLayer
+from learnMSA.hmm.layer import PHMMLayer
+from learnMSA.util.tensor import to_numpy
 
 
 def phmm_layout(
@@ -91,6 +92,18 @@ def phmm_layout(
     return pos, labels
 
 
+def _is_phmm_transitioner(transitioner) -> bool:
+    """Whether a transitioner is a pHMM transitioner, backend-independently.
+
+    The concrete classes are backend specific (``TFPHMMTransitioner``,
+    ``TorchPHMMTransitioner``, ...), so the family is derived from the class
+    names in the MRO rather than from an isinstance check.
+    """
+    return any(
+        cls.__name__.endswith("PHMMTransitioner") for cls in type(transitioner).__mro__
+    )
+
+
 def plot_phmm(
     layer: PHMMLayer,
     head: int = 0,
@@ -165,10 +178,8 @@ def plot_phmm(
     Returns:
         The matplotlib Figure.
     """
-    from learnMSA.hmm.tf.transitioner import PHMMTransitioner
-
-    transitioner = layer.hmm.transitioner
-    if not isinstance(transitioner, PHMMTransitioner):
+    transitioner = layer.transitioner
+    if not _is_phmm_transitioner(transitioner):
         raise TypeError(
             "plot_phmm requires an HMM with a PHMMTransitioner, "
             f"got {type(transitioner).__name__}"
@@ -177,7 +188,7 @@ def plot_phmm(
     explicit = transitioner.explicit_transitioner
     L = transitioner.lengths[head]
 
-    effective_h_spacing = h_spacing * (0.45 + 0.2 * (len(layer.hmm.emitter)-1))
+    effective_h_spacing = h_spacing * (0.45 + 0.2 * (len(layer.emitters)-1))
     effective_v_spacing = 0.35 * v_spacing
     pos, labels = phmm_layout(
         L, h_spacing=effective_h_spacing, v_spacing=effective_v_spacing
@@ -219,7 +230,7 @@ def plot_phmm(
         if ax is not None:
             raise ValueError("fast_mode=True requires ax=None.")
 
-        n_active = len(layer.hmm.emitter) - 1 # exclude padding emitter
+        n_active = len(layer.emitters) - 1 # exclude padding emitter
         if layer.joint_emitter:
             n_active += 1
         logo_row_h = 3   # inches per emitter row in the logo panel
@@ -259,8 +270,8 @@ def plot_phmm(
                 )
             else:
                 aa_matrix, struct_matrix = layer.joint_emitter.marginal_matrices()
-            aa_matrix = aa_matrix.numpy()
-            struct_matrix = struct_matrix.numpy()
+            aa_matrix = to_numpy(aa_matrix)
+            struct_matrix = to_numpy(struct_matrix)
             _render_emitter_fast(
                 aa_matrix, "TFCategoricalEmitter", head, L,
                 ax_m, ax_i,
@@ -288,7 +299,7 @@ def plot_phmm(
                 ax_m = fig.add_subplot(top_gs[emitter_row, 0])
                 ax_i = fig.add_subplot(top_gs[emitter_row, 1])
                 assert layer.profile_emitter is not None
-                matrix = layer.profile_emitter.matrix().numpy()
+                matrix = layer.emission_matrix("aa")
                 _render_emitter_fast(
                     matrix, "TFCategoricalEmitter", head, L,
                     ax_m, ax_i,
@@ -305,7 +316,7 @@ def plot_phmm(
                 ax_m = fig.add_subplot(top_gs[emitter_row, 0])
                 ax_i = fig.add_subplot(top_gs[emitter_row, 1])
                 assert layer.struct_emitter is not None
-                matrix = layer.struct_emitter.matrix().numpy()
+                matrix = layer.emission_matrix("struct")
                 _render_emitter_fast(
                     matrix, "TFCategoricalEmitter", head, L,
                     ax_m, ax_i,
@@ -319,7 +330,7 @@ def plot_phmm(
             ax_m = fig.add_subplot(top_gs[emitter_row, 0])
             ax_i = fig.add_subplot(top_gs[emitter_row, 1])
             assert layer.embedding_emitter is not None
-            matrix = layer.embedding_emitter.matrix().numpy()
+            matrix = layer.emission_matrix("emb")
             _render_emitter_fast(
                 matrix, "TFMVNormalEmitter", head, L,
                 ax_m, ax_i,
@@ -487,7 +498,7 @@ def _plot_phmm_emissions(
     col = 0
     if not layer.no_aa:
         plot_emissions(
-            layer.hmm.emitter[emitter_index],
+            layer.emitters[emitter_index],
             head=head,
             pos=pos,
             state_labels="AA",
@@ -503,7 +514,7 @@ def _plot_phmm_emissions(
         col += 1
     if layer.use_language_model:
         plot_emissions(
-            layer.hmm.emitter[emitter_index],
+            layer.emitters[emitter_index],
             head=head,
             pos=pos,
             state_labels="emb",
@@ -522,7 +533,7 @@ def _plot_phmm_emissions(
         assert layer.structural_config is not None, \
             "Structural config must be provided if use_structure is True"
         plot_emissions(
-            layer.hmm.emitter[emitter_index],
+            layer.emitters[emitter_index],
             head=head,
             pos=pos,
             state_labels="3Di",

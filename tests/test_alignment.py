@@ -11,7 +11,7 @@ from learnMSA.align.alignment_metadata import AlignmentMetaData
 from learnMSA.align.alignment_model import AlignmentModel
 from learnMSA.align.tf.decode import decode_core_tf, decode_flank_tf, decode_tf
 from learnMSA.model.context import LearnMSAContext
-from learnMSA.model.tf.model import LearnMSAModel
+from learnMSA.model.tf.model import TFLearnMSAModel as LearnMSAModel
 from learnMSA.util.aligned_dataset import AlignedDataset, SequenceDataset
 
 

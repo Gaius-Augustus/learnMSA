@@ -1,8 +1,14 @@
+from typing import Literal
+
 from pydantic import BaseModel, field_validator
 
 
 class AdvancedConfig(BaseModel):
     """Advanced/Development parameters."""
+
+    backend: Literal["auto", "tensorflow", "pytorch"] = "auto"
+    """Tensor framework used for training and decoding. ``auto`` picks whichever
+    framework is installed, preferring TensorFlow when both are available."""
 
     dist_out: str = ""
     """Distribution output file."""

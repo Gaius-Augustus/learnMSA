@@ -1,12 +1,13 @@
-import importlib.resources as resources
-import logging
-from typing import Sequence, cast
+from typing import Sequence
 
 import numpy as np
 import tensorflow as tf
 from hidten.hmm import HMMConfig as HidtenHMMConfig
 from hidten.tf.prior.dirichlet import TFDirichletPrior
 from hidten.tf.prior.multivariate_normal import TFMVNormalPrior
+
+from learnMSA.hmm.priors import load_prior_kernel, warn_if_degenerate
+from learnMSA.util.tensor import to_numpy
 
 
 def make_model(dim: int, layer : tf.keras.layers.Layer) -> tf.keras.Model:
@@ -20,14 +21,14 @@ def make_model(dim: int, layer : tf.keras.layers.Layer) -> tf.keras.Model:
     model = tf.keras.Model(inputs=[input], outputs=[loglik])
     return model
 
-def make_dirichlet_model(
+def make_dirichlet_prior(
     initializer : np.ndarray | None = None,
     dim: int | None = None,
     components: int = 1,
     states: Sequence[int] = [1],
-) -> tf.keras.Model:
-    """Create a keras model with a TFDirichletPrior layer for the amino acid
-    prior. If an initializer is provided, it is used to initialize the prior
+) -> TFDirichletPrior:
+    """Create and build a :class:`TFDirichletPrior` for the amino acid prior.
+    If an initializer is provided, it is used to initialize the prior
     distribution.
 
     For multi-component priors, ``dim`` must be provided explicitly since
@@ -59,83 +60,65 @@ def make_dirichlet_model(
     prior.share = np.tile(np.arange(n_param), reps=sum(states))
 
     prior.build((None, None, None, n_dim))
-    return make_model(n_dim, prior)
+    return prior
+
+def make_dirichlet_model(
+    initializer : np.ndarray | None = None,
+    dim: int | None = None,
+    components: int = 1,
+    states: Sequence[int] = [1],
+) -> tf.keras.Model:
+    """Wrap a Dirichlet prior in a keras model, for the prior fitting tooling."""
+    prior = make_dirichlet_prior(
+        initializer=initializer, dim=dim, components=components, states=states
+    )
+    return make_model(prior.input_dim, prior)
 
 def load_dirichlet(
     name: str, dim: int, components: int = 1, states: Sequence[int] = [1]
 ) -> TFDirichletPrior:
-    """Load weights from a resource file into the given model.
+    """Load a shipped Dirichlet prior.
+
+    The parameters are read as a plain numpy array (see
+    :func:`learnMSA.hmm.priors.load_prior_kernel`) and assigned to the built
+    layer, so no keras model has to be constructed to deserialize them.
 
     Args:
-        name (str): The name of the weight resource file (without extension).
+        name (str): The name of the parameter resource (without extension).
         dim (int): The dimension of the Dirichlet prior.
         components (int): The number of mixture components.
         states (Sequence[int]): The number of states in each head.
     """
-    model = make_dirichlet_model(
+    prior = make_dirichlet_prior(
         dim = dim, components = components, states = states
     )
-    resource = resources.files("learnMSA.hmm.weights") / f"{name}.h5"
-    model.load_weights(str(resource))
-    prior = cast(TFDirichletPrior, model.layers[1])
+    _assign_kernel(prior, load_prior_kernel(name))
     _warn_if_degenerate(prior, name)
     return prior
 
 
-#: A concentration below this is treated as a collapsed dimension.
-DEGENERATE_ALPHA: float = 1e-3
-
-#: ...but only within a component that is otherwise informative.
-INFORMATIVE_ALPHA: float = 1.0
+def _assign_kernel(prior, kernel: np.ndarray) -> None:
+    """Write a numpy parameter kernel into a built prior layer."""
+    prior.kernel.assign(np.asarray(kernel, dtype=prior.kernel.dtype))
 
 
 def _warn_if_degenerate(prior: TFDirichletPrior, name: str) -> None:
-    """Warn about components with a collapsed dimension.
-
-    A concentration below one makes the density diverge at the simplex
-    boundary, which is fine on its own: the flat 3Di priors consist entirely
-    of such values. What is not fine is a concentration of ~0 sitting *inside*
-    an otherwise informative component. It asserts that this letter is never
-    emitted, which is a fitting artifact rather than a modelled belief, and it
-    is what the prior behind the reported NaN run looked like.
-
-    Judged per component, so a dead component of a mixture -- all
-    concentrations tiny, and carrying a near-zero mixture weight -- does not
-    trigger the warning.
-    """
+    """Extract the concentrations and hand them to the neutral check."""
     matrix = prior.matrix()
     if prior.config.components > 1:
         # Drop the trailing mixture coefficients.
         matrix = prior._slice_concentrations(matrix)
-    alpha = matrix.numpy().reshape(-1, prior.input_dim)
-    # Padding states carry all-zero rows and are not concentrations.
-    alpha = alpha[alpha.sum(axis=-1) > 0]
-    if alpha.size == 0:
-        return
-    degenerate = (
-        (alpha.min(axis=-1) < DEGENERATE_ALPHA)
-        & (alpha.max(axis=-1) > INFORMATIVE_ALPHA)
-    )
-    if not degenerate.any():
-        return
-    bad = alpha[degenerate]
-    logging.warning(
-        "Dirichlet prior '%s' has %d component(s) with a collapsed "
-        "dimension: a concentration of %.3g next to a maximum of %.4g. That "
-        "letter is effectively forbidden, which is usually a fitting "
-        "artifact; consider refitting the prior.",
-        name, int(degenerate.sum()), float(bad.min()), float(bad.max()),
-    )
+    alpha = to_numpy(matrix).reshape(-1, prior.input_dim)
+    warn_if_degenerate(alpha, name)
 
-def make_mvn_model(
+def make_mvn_prior(
     dim: int,
     initializer : np.ndarray | None = None,
     components: int = 1,
     states: Sequence[int] = [1],
-) -> tf.keras.Model:
-    """Create a keras model with a TFMVNormalPrior layer for the multivariate
-    normal prior. If an initializer is provided, it is used to initialize the
-    prior distribution.
+) -> TFMVNormalPrior:
+    """Create and build a :class:`TFMVNormalPrior`. If an initializer is
+    provided, it is used to initialize the prior distribution.
 
     Args:
         initializer: Optional initial parameter values.
@@ -158,20 +141,31 @@ def make_mvn_model(
     prior.share = np.tile(np.arange(n_param), reps=sum(states))
 
     prior.build((None, None, 2 * dim))
+    return prior
+
+def make_mvn_model(
+    dim: int,
+    initializer : np.ndarray | None = None,
+    components: int = 1,
+    states: Sequence[int] = [1],
+) -> tf.keras.Model:
+    """Wrap a multivariate normal prior in a keras model."""
+    prior = make_mvn_prior(
+        dim=dim, initializer=initializer, components=components, states=states
+    )
     return make_model(dim, prior)
 
 def load_mvn(
     name: str, dim: int, components: int = 1, states: Sequence[int] = [1]
 ) -> TFMVNormalPrior:
-    """Load weights from a resource file into the given model.
+    """Load a shipped multivariate normal prior.
 
     Args:
-        name (str): The name of the weight resource file (without extension).
+        name (str): The name of the parameter resource (without extension).
         dim (int): The dimension of the multivariate normal prior.
         components (int): The number of mixture components.
         states (Sequence[int]): The number of states in each head.
     """
-    model = make_mvn_model(dim=dim, components=components, states=states)
-    resource = resources.files("learnMSA.hmm.weights") / f"{name}.h5"
-    model.load_weights(str(resource))
-    return cast(TFMVNormalPrior, model.layers[1])
+    prior = make_mvn_prior(dim=dim, components=components, states=states)
+    _assign_kernel(prior, load_prior_kernel(name))
+    return prior

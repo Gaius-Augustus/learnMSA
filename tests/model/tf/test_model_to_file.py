@@ -8,7 +8,7 @@ import tensorflow as tf
 from learnMSA import Configuration
 from learnMSA.align.alignment_model import AlignmentModel
 from learnMSA.model.context import LearnMSAContext
-from learnMSA.model.tf.model import LearnMSAModel
+from learnMSA.model.tf.model import TFLearnMSAModel as LearnMSAModel
 from learnMSA.util.sequence_dataset import SequenceDataset
 
 

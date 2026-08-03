@@ -1,25 +1,19 @@
 import os
 import sys
 
-# Block triton from being imported - it segfaults when TF CUDA libs are loaded
-sys.modules["triton"] = None  # type: ignore
-
 import time
 from contextlib import ExitStack
 from pathlib import Path
 
 import learnMSA.run.util as util
 from learnMSA import Configuration
+from learnMSA.backend import set_backend
 from learnMSA.run.args_to_config import args_to_config
 from learnMSA.run.help import handle_help_command
 from learnMSA.run.args import parse_args
 
-# Hide TensorFlow/absl startup logs as early as possible.
-# Use defaults so users can still override through environment variables.
-os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
-os.environ.setdefault("TF_CPP_MIN_VLOG_LEVEL", "3")
-os.environ.setdefault("GLOG_minloglevel", "3")
-os.environ.setdefault("ABSL_MIN_LOG_LEVEL", "3")
+# Framework-specific environment (log levels, allocator, the triton guard)
+# is set in learnMSA.run.util.setup_devices, once the backend is known.
 
 
 def run_main() -> None:
@@ -54,6 +48,10 @@ def run_main() -> None:
     if config.input_output.convert:
         convert_file(config)
         return
+
+    # Select the compute backend before anything imports a framework
+    if config.advanced.backend != "auto":
+        set_backend(config.advanced.backend)
 
     # Set up devices (CPU/GPU)
     util.setup_devices(
@@ -99,7 +97,8 @@ def run_main() -> None:
         if (config.language_model.use_language_model
                 or config.language_model.only_embeddings):
             if emb_data is None:
-                from learnMSA.protein_language_models import compute_embeddings
+                from learnMSA.protein_language_models.compute_embeddings \
+                    import compute_embeddings
 
                 # Compute the embeddings if not provided as a file
                 cache = compute_embeddings(

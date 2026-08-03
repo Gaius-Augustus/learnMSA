@@ -2,7 +2,7 @@ import pytest
 
 from learnMSA.config.hmm import PHMMConfig
 from learnMSA.config.structure import StructureConfig
-from learnMSA.hmm.tf.layer import PHMMLayer
+from learnMSA.hmm.tf.layer import TFPHMMLayer as PHMMLayer
 
 
 @pytest.fixture

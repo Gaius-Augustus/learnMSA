@@ -312,8 +312,8 @@ def test_default_batch_generator(
     """Test default batch generator setup."""
     context = LearnMSAContext(config=config, data=simple_data)
 
-    from learnMSA.model.tf import training
-    assert isinstance(context.batch_gen, training.BatchGenerator)
+    from learnMSA.model import batch_generator
+    assert isinstance(context.batch_gen, batch_generator.BatchGenerator)
 
 
 def test_batch_generator_without_data(config: Configuration) -> None:
@@ -324,8 +324,8 @@ def test_batch_generator_without_data(config: Configuration) -> None:
         num_seq=50
     )
 
-    from learnMSA.model.tf import training
-    assert isinstance(context.batch_gen, training.BatchGenerator)
+    from learnMSA.model import batch_generator
+    assert isinstance(context.batch_gen, batch_generator.BatchGenerator)
 
 
 # Serialization Tests

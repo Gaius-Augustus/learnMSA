@@ -16,6 +16,8 @@ from hidten.tf.emitter.categorical import (T_shapelike,
 from hidten.tf.prior import TFPrior
 from hidten.tf.util import zero_row_softmax
 
+from learnMSA.hmm.joint_util import (AB_init, assert_value_sets, flatten_AB,
+                                     tile_conditional)
 from learnMSA.hmm.util.value_set import PHMMValueSet
 
 from .profile_emitter import ProfileEmitter
@@ -100,7 +102,7 @@ class JointProfileEmitter(ProfileEmitter):
             assert values is None, \
                 "`values` is not supported when low_rank > 0; " \
                 "use `marginal_values`."
-            _assert_value_sets(marginal_values)
+            assert_value_sets(marginal_values)
             # Compute and store the constant log-joint bias C from marginals.
             self._c_bias_init = _compute_c_bias_init(marginal_values)
             _values = AB_values if AB_values is not None \
@@ -400,7 +402,7 @@ def product_marginal_values(
     Returns:
         Sequence[PHMMValueSet]: The joint value sets.
     """
-    _assert_value_sets(marginal_values)
+    assert_value_sets(marginal_values)
 
     joint_values: list[PHMMValueSet] = []
     for h in range(len(marginal_values[0])):
@@ -438,7 +440,7 @@ def conditional_marginal_values(
         Sequence[PHMMValueSet]: Value sets whose match/insert emissions contain
             the tiled second marginal, suitable for conditional initialisation.
     """
-    _assert_value_sets(marginal_values)
+    assert_value_sets(marginal_values)
 
     result: list[PHMMValueSet] = []
     for h in range(len(marginal_values[0])):
@@ -485,7 +487,7 @@ def low_rank_marginal_values(
         Sequence[PHMMValueSet]: PHMMValueSets whose match/insert emissions
             contain the flattened near-zero A and B kernel values.
     """
-    _assert_value_sets(marginal_values)
+    assert_value_sets(marginal_values)
     assert len(marginal_values) == 2, \
         "Low-rank initialisation is only supported for exactly two marginals."
 
@@ -527,20 +529,6 @@ def outer_product_flat(*emissions: T_TFTensor | np.ndarray) -> T_TFTensor:
     for obs in emissions[2:]:
         x = outer_product_flat_pw(x, obs)
     return x
-
-def tile_conditional(marginal: np.ndarray, n1: int) -> np.ndarray:
-    """Tiles the second marginal along the first marginal dimension to create
-    a conditional distribution P(x2 | x1, s) = P(x2 | s).
-
-    Args:
-        marginal (Tensor): The second marginal of shape ``(..., D2)``.
-        n1 (int): The size of the first marginal.
-
-    Returns:
-        Tensor: The tiled conditional distribution of shape
-        ``(..., D1 * D2)``.
-    """
-    return np.tile(marginal, n1)
 
 def outer_product_flat_pw(x
     : T_TFTensor | np.ndarray, y: T_TFTensor | np.ndarray
@@ -631,65 +619,3 @@ def _compute_c_bias_init(
         )  # (n1, n2)
         result.append((c_match, c_insert))
     return result
-
-
-def AB_init(
-    n1: int,
-    n2: int,
-    low_rank: int,
-    batch_shape: tuple[int, ...] = (),
-    noise_std: float = 1e-2,
-    seed: int | None = None,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Initialises A and B matrices near zero for low-rank parameterisation.
-
-    A is filled with small Gaussian noise; B is zeros.  Because B = 0,
-    AB^T = 0 exactly at initialisation, so the initial joint distribution
-    is determined entirely by the constant log-joint bias C.
-
-    Args:
-        n1 (int): Size of the first marginal alphabet.
-        n2 (int): Size of the second marginal alphabet.
-        low_rank (int): Rank of the approximation.  Must be >= 1.
-        batch_shape (tuple[int, ...]): Optional leading batch dimensions.
-        noise_std (float): Standard deviation for A's Gaussian noise.
-            Pass 0.0 for exact zeros (e.g. for surgery-inserted positions).
-        seed (int | None): Random seed for reproducibility.
-
-    Returns:
-        tuple[np.ndarray, np.ndarray]: A of shape
-            ``batch_shape + (n1, low_rank)`` and B of shape
-            ``batch_shape + (n2, low_rank)``.
-    """
-    assert low_rank >= 1, "low_rank must be at least 1"
-    rng = np.random.default_rng(seed)
-    A = rng.normal(scale=noise_std,
-                   size=batch_shape + (n1, low_rank)).astype(np.float64)
-    B = np.zeros(batch_shape + (n2, low_rank), dtype=np.float64)
-    return A, B
-
-def flatten_AB(A: np.ndarray, B: np.ndarray) -> np.ndarray:
-    """Flattens the A and B matrices into a single array for use as an
-    initializer.
-
-    Args:
-        A (np.ndarray): The A matrix of shape (..., n1, low_rank).
-        B (np.ndarray): The B matrix of shape (..., n2, low_rank).
-
-    Returns:
-        np.ndarray: The flattened array of shape
-            (..., n1 * low_rank + n2 * low_rank).
-    """
-    batch_shape = A.shape[:-2]
-    A = np.reshape(A, batch_shape + (-1,))
-    B = np.reshape(B, batch_shape + (-1,))
-    return np.concatenate([A, B], axis=-1)
-
-def _assert_value_sets(marginal_values: Sequence[Sequence[PHMMValueSet]]) -> None:
-    assert len(marginal_values) > 1,\
-        "At least two marginal value sets are required."
-    assert all(len(marginal_values[0]) == len(mv) for mv in marginal_values),\
-        "All marginal value sets must have the same number of heads."
-    for h in range(len(marginal_values[0])):
-        assert all(marginal_values[0][h].L == mv[h].L for mv in marginal_values),\
-            "All marginal value sets must have the same length for each head."

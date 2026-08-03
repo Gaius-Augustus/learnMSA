@@ -2,10 +2,8 @@
 import tensorflow as tf
 import numpy as np
 
-from evoten.backend_tf import BackendTF
+from evoten import backend
 from evoten.expm_gtr import expm_gtr, precompute_gtr, expm_gtr_from_decomp
-
-backend = BackendTF()
 
 
 class SubstitutionModel(tf.keras.layers.Layer):

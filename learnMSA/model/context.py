@@ -3,21 +3,18 @@ from pathlib import Path
 from typing import Any, Callable, Sequence
 
 import numpy as np
-import tensorflow as tf
 
 from learnMSA.hmm.util.value_set_emb import PHMMEmbeddingValueSet
-import learnMSA.model.tf.training as train
+from learnMSA.model.batch_generator import BatchGenerator
 import learnMSA.model.training_util as training_util
-import learnMSA.tree.tf.initializer as initializers
+import learnMSA.tree.initializer as initializers
 from learnMSA import Configuration
-from learnMSA.hmm.tf.prior import TFPHMMTransitionPrior
-from learnMSA.hmm.tf.util import load_dirichlet
+from learnMSA.backend import resolve
 from learnMSA.hmm.util.value_set import PHMMValueSet
 from learnMSA.run.util import validate_filepath
 from learnMSA.util import clustering
 
-from ..tree.tf.initializer import ConstantInitializer
-from ..tree.tf.util import inverse_softplus
+from ..tree.initializer import inverse_softplus
 from ..util.aligned_dataset import AlignedDataset
 from ..util.sequence_dataset import SequenceDataset
 
@@ -49,7 +46,7 @@ class LearnMSAContext:
     model_lengths_cb: ModelLengthsCallback
     model_lengths: np.ndarray
     batch_size: int | Callable[[SequenceDataset], int]
-    batch_gen: train.BatchGenerator
+    batch_gen: BatchGenerator
     last_runtime_batch_size: int | None
     sequence_weights: np.ndarray | None
     clusters: Any
@@ -58,11 +55,11 @@ class LearnMSAContext:
     struct_values: Sequence[PHMMValueSet] | None
     emb_values: Sequence[PHMMEmbeddingValueSet] | None
     joint_values: Sequence[PHMMValueSet] | None
-    R_init: tf.keras.initializers.Initializer
-    R_delta_init: tf.keras.initializers.Initializer
-    p_init: tf.keras.initializers.Initializer
-    t_init: tf.keras.initializers.Initializer
-    mix_init: tf.keras.initializers.Initializer
+    R_init: initializers.InitSpec
+    R_delta_init: initializers.InitSpec
+    p_init: initializers.InitSpec
+    t_init: initializers.InitSpec
+    mix_init: initializers.InitSpec
 
     """
     Is created from a Configuration and a SequenceDataset to hold all relevant
@@ -194,32 +191,30 @@ class LearnMSAContext:
                 shared_exchangeabilities=self.config.tree.shared_exchangeabilities,
                 alphabet=self.config.structure.structural_alphabet,
             )
-            self.R_init = ConstantInitializer(
+            self.R_init = initializers.Constant(
                 np.concatenate([R_aa_init, R_st_init], axis=1)
             )
-            self.p_init = ConstantInitializer(
+            self.p_init = initializers.Constant(
                 np.concatenate([p_aa_init, p_st_init], axis=1)
             )
         else:
-            self.R_init = ConstantInitializer(R_aa_init)
-            self.p_init = ConstantInitializer(p_aa_init)
+            self.R_init = initializers.Constant(R_aa_init)
+            self.p_init = initializers.Constant(p_aa_init)
         if R_noise_std > 0.0:
-            self.R_delta_init = tf.keras.initializers.RandomNormal(
-                stddev=R_noise_std
-            )
+            self.R_delta_init = initializers.RandomNormal(stddev=R_noise_std)
         else:
-            self.R_delta_init = tf.keras.initializers.Zeros()
+            self.R_delta_init = initializers.Zeros()
 
         if self.config.training.no_sequence_weights:
             d = self.config.advanced.initial_distance
         else:
             d = (1. - self.config.training.cluster_seq_id) / 2
-        self.t_init = ConstantInitializer(
-            inverse_softplus(np.array(d) + 1e-8).numpy()
+        self.t_init = initializers.Constant(
+            inverse_softplus(np.array(d) + 1e-8)
         )
-        self.mix_init = tf.keras.initializers.RandomNormal(stddev=0.1)
-        self.scale_init = tf.keras.initializers.Constant(
-            float(inverse_softplus(np.array(1.0)).numpy())
+        self.mix_init = initializers.RandomNormal(stddev=0.1)
+        self.scale_init = initializers.Constant(
+            float(inverse_softplus(np.array(1.0)))
         )
 
         # Adjust training settings automatically if skip_training is set
@@ -227,7 +222,7 @@ class LearnMSAContext:
             self.config.training.max_iterations = 1
             self.config.training.epochs = [0]*3
 
-        self.batch_gen = train.BatchGenerator()
+        self.batch_gen = BatchGenerator()
         self.last_runtime_batch_size = None
         if data is not None and not self.config.training.skip_training:
             self.sequence_weights, self.clusters, self.rep = self._get_clustering(data)
@@ -346,41 +341,12 @@ class LearnMSAContext:
     ) -> tuple[ModelLengthsCallback, Sequence[PHMMValueSet]]:
         """Set up model initializers based on configuration."""
         if self.config.init_msa.pseudocounts:
-            # Infer meaningful pseudocounts from Dirichlet priors
-            # Get amino acid pseudocounts
-            c = self.config.hmm_prior.amino_acid_dirichlet_components
-            aa_prior = load_dirichlet(
-                f"{self.config.hmm_prior.amino_acid_prior_name}_{c}.weights",
-                dim = len(SequenceDataset._default_alphabet)
+            # Infer meaningful pseudocounts from the Dirichlet priors. Reading
+            # them means evaluating prior layers, so the backend supplies this.
+            load_pseudocounts = resolve("hmm.pseudocounts", "load_pseudocounts")
+            aa_psc, match_psc, ins_psc, del_psc = load_pseudocounts(
+                self.config.hmm_prior, self.config.hmm.alphabet_size
             )
-            alpha = aa_prior.matrix().numpy()[0,0]
-            C = aa_prior.config.components
-            if C > 1:
-                mix_coeff = alpha[C * aa_prior.input_dim:]
-                alpha = alpha[:C * aa_prior.input_dim]
-                alpha = np.reshape(alpha, (C, aa_prior.input_dim))
-                aa_psc = np.sum(mix_coeff[:, np.newaxis] * alpha, axis=0)
-            else:
-                aa_psc = alpha
-            # The prior is 20-dimensional; pad to the emission alphabet size
-            # (small mass for U/O) so pseudocounts broadcast onto the emissions.
-            emission_size = self.config.hmm.alphabet_size
-            if aa_psc.shape[0] < emission_size:
-                pad = np.full(
-                    emission_size - aa_psc.shape[0], float(aa_psc.min())
-                )
-                aa_psc = np.concatenate([aa_psc, pad])
-
-            # Get transition pseudocounts
-            transition_prior = TFPHMMTransitionPrior(
-                [5], self.config.hmm_prior
-            )
-            match_psc = transition_prior.match_prior.matrix()[0,0].numpy()
-            ins_psc = transition_prior.insert_prior.matrix()[0,0].numpy()
-            del_psc = transition_prior.delete_prior.matrix()[0,0].numpy()
-
-            del aa_prior
-            del transition_prior
         else:
             # Use very small pseudocounts to avoid zero probabilities
             aa_psc = 1e-2
