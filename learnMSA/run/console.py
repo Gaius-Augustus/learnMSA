@@ -219,28 +219,6 @@ def run_main() -> None:
             raise NotImplementedError(
                 "Distribution output is not implemented in this version."
             )
-            # i = [l.name for l in alignment_model.encoder_model.layers].index(
-            #     "anc_probs_layer")
-            # anc_probs_layer = alignment_model.encoder_model.layers[i]
-            # tau_all = []
-            # for (seq, indices), _ in Training.make_dataset(
-            #     alignment_model.indices,
-            #     alignment_model.batch_generator,
-            #     alignment_model.batch_size,
-            #     shuffle=False
-            # ):
-            #     seq = tf.transpose(seq, [1, 0, 2])
-            #     indices = tf.transpose(indices)
-            #     # resolves tf 2.12 issues
-            #     indices.set_shape([alignment_model.num_models, None])
-            #     indices = tf.expand_dims(indices, axis=-1)
-            #     tau = anc_probs_layer.make_tau(seq, indices)[
-            #         alignment_model.best_model]
-            #     tau_all.append(tau.numpy())
-            # tau = np.concatenate(tau_all)
-            # with open(args.dist_out, "w") as file:
-            #     for i, t in zip(alignment_model.data.seq_ids, tau):
-            #         file.write(f"{i}\t{t}\n")
 
 
 def convert_file(config : Configuration) -> None:
