@@ -11,7 +11,7 @@ os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
 import tensorflow as tf
 
 from learnMSA.model.tf import LearnMSAModel as _LearnMSAModel
-from learnMSA.model.tf.training import BatchGenerator
+from learnMSA.model.batch_generator import BatchGenerator
 from learnMSA.util import SequenceDataset
 
 
