@@ -51,11 +51,12 @@ plm = [
     # NOTE: on systems with custom CUDA/NCCL installs (e.g. Blackwell),
     # install torch manually first:
     # pip install torch --index-url https://download.pytorch.org/whl/cpu
-    # FIXME: this upper pin conflicts with the `pytorch` extra (torch>=2.13),
-    # so `pip install learnMSA[pytorch,plm]` is currently unsatisfiable. torch is
-    # only here because HuggingFace transformers wants it present; the language
-    # model code itself uses the TensorFlow API (TFEsmModel, TFT5EncoderModel).
-    "torch<=2.7.1",
+    # torch is listed only because HuggingFace transformers wants it importable;
+    # the language model code itself uses the TensorFlow API (TFEsmModel,
+    # TFT5EncoderModel) and never calls torch. It is therefore left unpinned, so
+    # that `pip install learnMSA[pytorch,plm]` stays satisfiable alongside the
+    # `pytorch` extra's torch>=2.13.
+    "torch",
     "transformers<5.0",
     "tf-keras",
     "SentencePiece"

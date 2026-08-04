@@ -15,7 +15,7 @@ from learnMSA.model.surgery import model_surgery
 from learnMSA.model.model import LearnMSAModel, make_learnmsa_model
 from learnMSA.model.context import LearnMSAContext
 from learnMSA.util.sequence_dataset import Dataset, SequenceDataset
-from learnMSA.util.tensor import to_numpy
+from learnMSA.util.tensor import assign, to_numpy
 
 np.set_printoptions(legacy='1.21')
 
@@ -129,19 +129,17 @@ def _transfer_model_weights(
         src: Previously loaded source model whose weights should be copied.
     """
     dst.phmm_layer.set_weights(src.phmm_layer.get_weights())
-    if hasattr(src, 'anc_probs_layer') and hasattr(dst, 'anc_probs_layer'):
-        dst.anc_probs_layer.exchangeability_delta_kernel.assign(
-            src.anc_probs_layer.exchangeability_delta_kernel
+    src_anc = getattr(src, "anc_probs_layer", None)
+    dst_anc = getattr(dst, "anc_probs_layer", None)
+    if src_anc is not None and dst_anc is not None:
+        assign(
+            dst_anc.exchangeability_delta_kernel,
+            src_anc.exchangeability_delta_kernel,
         )
-        dst.anc_probs_layer.equilibrium_kernel.assign(
-            src.anc_probs_layer.equilibrium_kernel
-        )
+        assign(dst_anc.equilibrium_kernel, src_anc.equilibrium_kernel)
         # tau_kernel is per-sequence; only copy when shapes match (same dataset)
-        if (src.anc_probs_layer.tau_kernel.shape
-                == dst.anc_probs_layer.tau_kernel.shape):
-            dst.anc_probs_layer.tau_kernel.assign(
-                src.anc_probs_layer.tau_kernel
-            )
+        if src_anc.tau_kernel.shape == dst_anc.tau_kernel.shape:
+            assign(dst_anc.tau_kernel, src_anc.tau_kernel)
 
 
 def _fit_and_align(

@@ -11,6 +11,43 @@ because ``hidten.visualize`` pulls in the plotting dependencies.
 import numpy as np
 
 
+def assign(variable, value) -> None:
+    """Write ``value`` into a framework variable, in place.
+
+    The frameworks spell this differently -- ``tf.Variable.assign`` versus
+    writing through a torch parameter's ``.data`` -- and neither name exists on
+    the other. Dispatching on the attribute rather than the type keeps this
+    module free of framework imports, the same trick :func:`to_numpy` uses.
+
+    Args:
+        variable: A ``tf.Variable`` or a ``torch.nn.Parameter``/``Tensor``.
+        value: The new value, of the same shape.
+    """
+    assign_fn = getattr(variable, "assign", None)
+    if callable(assign_fn):
+        assign_fn(value)
+        return
+    data = getattr(variable, "data", None)
+    if data is not None and hasattr(data, "copy_"):
+        # Going through .data writes without recording the assignment on the
+        # autograd tape, which is what tf.Variable.assign does too.
+        data.copy_(_as_same_kind(value, data))
+        return
+    raise TypeError(
+        f"Cannot assign to a {type(variable).__name__}; expected a "
+        "TensorFlow variable or a PyTorch parameter."
+    )
+
+
+def _as_same_kind(value, reference):
+    """Coerce ``value`` into something ``reference.copy_`` accepts."""
+    if hasattr(value, "data") and hasattr(value, "detach"):
+        return value.detach()
+    if hasattr(value, "copy_"):  # already a torch tensor
+        return value
+    return np.asarray(to_numpy(value))
+
+
 def to_numpy(x) -> np.ndarray:
     """Convert a backend tensor to a numpy array.
 

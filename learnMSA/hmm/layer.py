@@ -94,19 +94,26 @@ class PHMMLayer(Generic[T_Tensor]):
 
     # The emitters and the HMM itself are backend classes named by
     # ``components``; the neutral base only relies on their shared interface.
+    #
+    # These are annotations without values on purpose. A class-level ``= None``
+    # would be found by ordinary attribute lookup and so shadow anything a
+    # backend stores elsewhere -- ``torch.nn.Module`` keeps submodules in
+    # ``_modules`` and only reaches them through ``__getattr__``, which is
+    # never consulted while a class attribute of the same name exists.
+    # ``_init_phmm`` sets all four on the instance instead.
     hmm: Any
     """The underlying HMM (``components.HMM``)."""
 
-    profile_emitter: Any = None
+    profile_emitter: Any
     """The profile emitter for amino acid emissions, if used."""
 
-    embedding_emitter: Any = None
+    embedding_emitter: Any
     """The embedding emitter for embedding emissions, if used."""
 
-    struct_emitter: Any = None
+    struct_emitter: Any
     """The profile emitter for structural emissions, if used."""
 
-    joint_emitter: Any = None
+    joint_emitter: Any
     """The joint profile emitter for amino acid and structural emissions, if used."""
 
     use_structure: bool = False
@@ -164,6 +171,14 @@ class PHMMLayer(Generic[T_Tensor]):
         self.use_prior = use_prior
         self.no_aa = no_aa
         self.config = config
+
+        # Declare every optional emitter up front so that "not present" is an
+        # instance attribute rather than a class default (see the annotations
+        # above).
+        self.profile_emitter = None
+        self.embedding_emitter = None
+        self.struct_emitter = None
+        self.joint_emitter = None
 
         if aa_value_sets is not None:
             self.lengths = np.asarray(
@@ -740,6 +755,22 @@ class PHMMLayer(Generic[T_Tensor]):
     @abstractmethod
     def prior_scores(self) -> T_Tensor:
         """Prior scores of all pHMM parameters, of shape ``(H,)``."""
+        ...
+
+    @abstractmethod
+    def get_weights(self) -> list[np.ndarray]:
+        """All of the layer's parameters, as numpy arrays.
+
+        The order is stable for a given architecture, which is what lets
+        :func:`set_weights` accept the result of this call on another instance
+        of the same shape.
+        """
+        ...
+
+    @abstractmethod
+    def set_weights(self, weights: list[np.ndarray]) -> None:
+        """Overwrite all of the layer's parameters, in :func:`get_weights`
+        order."""
         ...
 
     # --- neutral numpy views ----------------------------------------------

@@ -5,6 +5,7 @@ import time
 from contextlib import ExitStack
 from pathlib import Path
 
+import learnMSA.backend as backend
 import learnMSA.run.util as util
 from learnMSA import Configuration
 from learnMSA.backend import set_backend
@@ -97,6 +98,22 @@ def run_main() -> None:
         if (config.language_model.use_language_model
                 or config.language_model.only_embeddings):
             if emb_data is None:
+                # The protein language models are TensorFlow-only: they use
+                # TFEsmModel / TFT5EncoderModel, the keras proteinbert package
+                # and TF SavedModel scoring weights. Embeddings computed once
+                # under TensorFlow load fine under any backend, so point at
+                # that route rather than failing outright.
+                if backend.get_backend() != "tensorflow":
+                    raise NotImplementedError(
+                        "Computing protein language model embeddings requires "
+                        f"the tensorflow backend, but '{backend.get_backend()}'"
+                        " is selected. Either precompute them once with\n"
+                        "    learnMSA --backend tensorflow --save_emb "
+                        "embeddings.h5 ...\n"
+                        "and pass --load_emb embeddings.h5, or rerun with "
+                        "--backend tensorflow."
+                    )
+
                 from learnMSA.protein_language_models.compute_embeddings \
                     import compute_embeddings
 

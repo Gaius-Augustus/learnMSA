@@ -14,6 +14,7 @@ module. These tests pin both halves of that contract.
 """
 
 import importlib
+import importlib.util
 import types
 
 import pytest
@@ -30,6 +31,18 @@ COLLIDING_NAMES = [
     ("learnMSA.align", "align"),
     ("learnMSA.protein_language_models", "compute_embeddings"),
 ]
+
+#: Packages whose submodules can only be imported under the TensorFlow
+#: backend. The protein language models run on TensorFlow only; under the
+#: PyTorch backend embeddings are supplied through ``--emb-file`` instead.
+TENSORFLOW_ONLY_PACKAGES = {"learnMSA.protein_language_models"}
+
+_HAS_TENSORFLOW = importlib.util.find_spec("tensorflow") is not None
+
+
+def _skip_if_tensorflow_only(package: str) -> None:
+    if package in TENSORFLOW_ONLY_PACKAGES and not _HAS_TENSORFLOW:
+        pytest.skip(f"{package} requires TensorFlow")
 
 
 @pytest.mark.parametrize("package,attribute", LAZY_CALLABLES)
@@ -49,6 +62,7 @@ def test_colliding_name_is_importable_from_its_own_module(
     package: str, name: str
 ) -> None:
     """The submodule always provides the callable, whatever import order ran."""
+    _skip_if_tensorflow_only(package)
     submodule = importlib.import_module(f"{package}.{name}")
     resolved = getattr(submodule, name)
     assert callable(resolved), (
@@ -63,6 +77,7 @@ def test_colliding_name_is_not_reexported(package: str, name: str) -> None:
     Importing the submodule first is what makes the shadowing permanent, so do
     that here before checking.
     """
+    _skip_if_tensorflow_only(package)
     importlib.import_module(f"{package}.{name}")
     module = importlib.import_module(package)
     exported = getattr(module, name, None)
@@ -73,6 +88,10 @@ def test_colliding_name_is_not_reexported(package: str, name: str) -> None:
     assert name not in getattr(module, "__all__", ())
 
 
+@pytest.mark.tf
+@pytest.mark.skipif(
+    not _HAS_TENSORFLOW, reason="protein language models require TensorFlow"
+)
 def test_cli_imports_compute_embeddings_callably() -> None:
     """The exact import the CLI performs must yield the function."""
     from learnMSA.protein_language_models.compute_embeddings import \

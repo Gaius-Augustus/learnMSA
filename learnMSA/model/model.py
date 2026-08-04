@@ -41,8 +41,16 @@ class LearnMSAModel(PHMMMixin, Generic[T_Tensor]):
     context: LearnMSAContext
     """Data-dependent configuration this model was built from."""
 
-    anc_probs_layer: Any = None
-    """The ancestral probabilities layer, if evolutionary times are modeled."""
+    anc_probs_layer: Any
+    """The ancestral probabilities layer, if evolutionary times are modeled.
+
+    An annotation without a value on purpose: a class-level ``= None`` here
+    would be found by ordinary attribute lookup and so shadow whatever a
+    backend stores elsewhere. ``torch.nn.Module`` keeps submodules in
+    ``_modules`` and only reaches them through ``__getattr__``, which is never
+    consulted while a class attribute of the same name exists. Each backend
+    sets this on the instance instead.
+    """
 
     def estimate_loglik(
         self,

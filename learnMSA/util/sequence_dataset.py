@@ -128,9 +128,15 @@ class SequenceDataset(Dataset):
                     self.record_dict = SeqIO.index(filepath, fmt)
                 else:
                     with open(filepath, "rt", encoding="utf-8") as handle:
-                        self.record_dict = SeqIO.to_dict(
-                            SeqIO.parse(handle, fmt)
-                        )
+                        try:
+                            self.record_dict = SeqIO.to_dict(
+                                SeqIO.parse(handle, fmt)
+                            )
+                        except ValueError as err:
+                            # Biopython raises ValueError for empty files
+                            raise ValueError(
+                                f"Could not parse any sequences from {filepath}."
+                            ) from err
                 self.parsing_ok = True
             except ValueError as err:
                 self.parsing_ok = False

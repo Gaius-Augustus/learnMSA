@@ -1,7 +1,12 @@
 import numpy as np
-import tensorflow as tf
 
 from learnMSA.config.hmm import PHMMConfig
+
+# TensorFlow is imported lazily inside make_transition_init_A/B, the only two
+# functions that need it. Everything else in this module is analytic reference
+# data -- likelihoods, Viterbi paths, the pHMM configuration they belong to --
+# which both backends are checked against, so the module has to stay importable
+# in the PyTorch environment too.
 
 
 config: PHMMConfig = PHMMConfig(
@@ -348,6 +353,8 @@ def make_transition_init_A():
                "end_to_unannotated_segment" : [0.2],
               "end_to_right_flank" : [0.7],
               "end_to_terminal" : [0.1]}
+    import tensorflow as tf
+
     return {part_name : tf.constant_initializer(np.log(p))
                               for part_name,p in d.items()}
 
@@ -371,5 +378,7 @@ def make_transition_init_B():
                "end_to_unannotated_segment" : [0.2],
               "end_to_right_flank" : [0.7],
               "end_to_terminal" : [0.1]}
+    import tensorflow as tf
+
     return {part_name : tf.constant_initializer(np.log(p))
                               for part_name,p in d.items()}
