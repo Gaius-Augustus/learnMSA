@@ -1,16 +1,20 @@
-"""Tests for model surgery operations (expanding/discarding positions)."""
+"""Tests for model surgery operations (expanding/discarding positions).
+
+``learnMSA/model/surgery.py`` is backend-neutral, so this goes through the
+neutral factories (:func:`make_phmm_layer`, :func:`make_learnmsa_model`) rather
+than importing a backend class, and runs under whichever backend is installed.
+"""
 import os
 
 import numpy as np
 import pytest
-import tensorflow as tf
 
 from learnMSA import Configuration
 from learnMSA.align.align_hits import HitAlignmentMode
 from learnMSA.config.hmm import PHMMConfig
-from learnMSA.hmm.tf.layer import TFPHMMLayer as PHMMLayer
+from learnMSA.hmm.layer import make_phmm_layer
 from learnMSA.hmm.util.transition_index_set import PHMMTransitionIndexSet
-from learnMSA.model.tf.model import TFLearnMSAModel as LearnMSAModel
+from learnMSA.model.model import LearnMSAModel, make_learnmsa_model
 from learnMSA.align.alignment_model import AlignmentModel
 from learnMSA.model.context import LearnMSAContext
 from learnMSA.model.surgery import (apply_mods, distribute_entry_mass,
@@ -19,12 +23,13 @@ from learnMSA.model.surgery import (apply_mods, distribute_entry_mass,
                                             remaining_entry_mass,
                                             update_kernels, model_surgery)
 from learnMSA.util.sequence_dataset import SequenceDataset
+from learnMSA.util.tensor import to_numpy
 
 
-def string_to_one_hot(s : str) -> tf.Tensor:
-    """Convert a string to one-hot encoded tensor."""
+def string_to_one_hot(s : str) -> np.ndarray:
+    """Convert a string to a one-hot encoded array."""
     i = [SequenceDataset._default_alphabet.index(aa) for aa in s]
-    return tf.one_hot(i, len(SequenceDataset._default_alphabet))
+    return np.eye(len(SequenceDataset._default_alphabet), dtype=np.float32)[i]
 
 @pytest.fixture
 def data() -> SequenceDataset:
@@ -81,7 +86,7 @@ def model(data: SequenceDataset) -> LearnMSAModel:
 
     context = LearnMSAContext(learnmsa_config, data)
 
-    model = LearnMSAModel(context)
+    model = make_learnmsa_model(context)
     model.build()
 
     return model
@@ -133,7 +138,7 @@ def model_single_head(data: SequenceDataset) -> LearnMSAModel:
 
     context = LearnMSAContext(learnmsa_config, data)
 
-    model = LearnMSAModel(context)
+    model = make_learnmsa_model(context)
     model.build()
 
     return model
@@ -250,15 +255,16 @@ def test_update_kernels(model_single_head: LearnMSAModel) -> None:
     )
 
     # Create a new HMM layer from the config
-    updated_phmm_layer = PHMMLayer(
+    updated_phmm_layer = make_phmm_layer(
         [result.length], config, aa_value_sets = [result.aa_values]
     )
     updated_phmm_layer.build(((None, None, None, 20), (None, None, None, 1)))
 
     assert updated_phmm_layer.profile_emitter is not None
-    emissions_new = updated_phmm_layer.profile_emitter.matrix().numpy()[0]
-    transitions_new = updated_phmm_layer.hmm.transitioner\
-        .explicit_transitioner.matrix().numpy()[0]
+    emissions_new = to_numpy(updated_phmm_layer.profile_emitter.matrix())[0]
+    transitions_new = to_numpy(
+        updated_phmm_layer.hmm.transitioner.explicit_transitioner.matrix()
+    )[0]
 
     ref_consensus = "FE" + "A" * 2 + "LAI" + "A" * 3
     assert result.length == len(ref_consensus)
@@ -554,11 +560,12 @@ def test_update_kernels_degenerate_entry_distribution(
     learnmsa_config.training.length_init = [L]
     learnmsa_config.hmm.use_prior_for_emission_init = False
     learnmsa_config.hmm.p_begin_match = p_begin_match
-    model = LearnMSAModel(LearnMSAContext(learnmsa_config, data))
+    model = make_learnmsa_model(LearnMSAContext(learnmsa_config, data))
     model.build()
 
-    A = model.phmm_layer.hmm.transitioner.explicit_transitioner\
-        .matrix().numpy()[0]
+    A = to_numpy(
+        model.phmm_layer.hmm.transitioner.explicit_transitioner.matrix()
+    )[0]
     begin_match_1 = A[ind.begin_to_match[0, 0], ind.begin_to_match[0, 1]]
 
     # Discard most of the match states and expand elsewhere
@@ -624,9 +631,9 @@ def test_model_surgery(data: SequenceDataset, model: LearnMSAModel) -> None:
     assert not result.surgery_converged
 
     # Verify that the amino acid values were updated correctly
-    expected_aa_values_head_1 = string_to_one_hot("FELIK").numpy()
+    expected_aa_values_head_1 = string_to_one_hot("FELIK")
     expected_aa_values_head_1[2] = model.context.config.hmm.background_distribution  # Position 2 is expanded, should be background
-    expected_aa_values_head_2 = string_to_one_hot("FELIK").numpy()
+    expected_aa_values_head_2 = string_to_one_hot("FELIK")
 
     np.testing.assert_allclose(
         result.aa_values[0].match_emissions, expected_aa_values_head_1

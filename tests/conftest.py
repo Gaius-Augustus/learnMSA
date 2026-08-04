@@ -7,8 +7,12 @@ a module that imports the absent framework -- an ImportError at collection time
 aborts the whole run, so `skipif` markers inside those modules would be too
 late.
 
-The two lists below are the single place that records which tests are tied to a
-framework. Everything not listed is expected to run in both environments.
+The rule is the directory a test lives in, and nothing else: a test under a
+``tf/`` package needs TensorFlow, a test under a ``torch/`` package needs
+PyTorch, and everything else must run under whichever backend is present. Tests
+of backend-neutral code therefore belong outside both, and reach the framework
+through the neutral factories (``make_learnmsa_model``, ``make_phmm_layer``)
+rather than importing a backend class directly.
 """
 
 import functools
@@ -17,19 +21,10 @@ import os
 import subprocess
 import sys
 
-#: Test paths that require the TensorFlow backend, because they import
-#: TensorFlow directly or through a ``learnMSA.*.tf`` module. Globs are
-#: relative to this directory.
+#: Test paths that require the TensorFlow backend. Globs are relative to this
+#: directory and mirror the ``learnMSA.*.tf`` subpackages they exercise.
 TF_ONLY = [
     "*/tf/*.py",
-    "model/test_surgery.py",
-    "protein_language_models/test_compute_embeddings.py",
-    "test_alignment.py",
-    "test_anc_probs.py",
-    "test_data.py",
-    "test_embedding_pretraining_datapipeline.py",
-    "tree/test_initializer.py",
-    "util/test_embedding_dataset.py",
 ]
 
 #: Test paths that require the PyTorch backend.
@@ -94,3 +89,20 @@ def pytest_configure(config) -> None:
     config.addinivalue_line(
         "markers", "torch: test exercises the PyTorch backend"
     )
+
+
+def pytest_collection_modifyitems(items) -> None:
+    """Mark every item by the backend package it lives in.
+
+    Applying the marker here rather than writing ``pytestmark`` into each file
+    keeps it from drifting away from the directory, which is what actually
+    decides whether the test is collected.
+    """
+    import pytest
+
+    for item in items:
+        parts = item.path.parts
+        if "tf" in parts:
+            item.add_marker(pytest.mark.tf)
+        elif "torch" in parts:
+            item.add_marker(pytest.mark.torch)

@@ -9,20 +9,15 @@ stronger statement than either backend agreeing with the other.
 
 import numpy as np
 import pytest
+import torch
 
-torch = pytest.importorskip("torch")
-
-import learnMSA.model.training_util as training_util  # noqa: E402
-import tests.hmm.ref as ref  # noqa: E402
-from learnMSA.config import (Configuration, TrainingConfig,  # noqa: E402
-                             TreeConfig)
-from learnMSA.config.hmm import PHMMPriorConfig  # noqa: E402
-from learnMSA.model.context import LearnMSAContext  # noqa: E402
-from learnMSA.model.torch.model import \
-    TorchLearnMSAModel as LearnMSAModel  # noqa: E402
-from learnMSA.util.sequence_dataset import SequenceDataset  # noqa: E402
-
-pytestmark = pytest.mark.torch
+import learnMSA.model.training_util as training_util
+import tests.hmm.ref as ref
+from learnMSA.config import Configuration, TrainingConfig, TreeConfig
+from learnMSA.config.hmm import PHMMPriorConfig
+from learnMSA.model.context import LearnMSAContext
+from learnMSA.model.torch.model import TorchLearnMSAModel as LearnMSAModel
+from learnMSA.util.sequence_dataset import SequenceDataset
 
 
 def _to_onehot(seqs, depth: int) -> np.ndarray:

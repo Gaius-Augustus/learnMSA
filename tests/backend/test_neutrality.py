@@ -1,26 +1,26 @@
 """Guards the backend-neutrality invariant.
 
-learnMSA supports more than one tensor framework. Running one backend must never
-import the other, and the neutral parts of the package must import without any
-framework at all.
+learnMSA supports more than one tensor framework, and the neutral parts of the
+package must import without any framework at all.
 
 These checks run in subprocesses on purpose: the pytest session itself imports
-TensorFlow through other test modules, so an in-process
+a framework through other test modules, so an in-process
 ``assert "tensorflow" not in sys.modules`` would be meaningless.
 
 The ``NEUTRAL_MODULES`` list is a ratchet. Every refactoring stage that frees a
 module from its framework dependency adds it here, and it can never be removed.
+
+The other half of the invariant -- that running one backend never imports the
+other -- can only be checked where that backend is installed, so it lives in
+``tests/backend/tf`` and ``tests/backend/torch``.
 """
 
-import functools
 import re
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
-
-from tests.conftest import BACKENDS, backend_is_usable
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -94,106 +94,12 @@ def _run(code: str, *args: str) -> subprocess.CompletedProcess:
     )
 
 
-@functools.lru_cache(maxsize=None)
-def _framework_installed(backend_name: str) -> bool:
-    """Whether the backend's framework can be imported at all.
-
-    ``set_backend`` drives evoten's facade, which imports the framework
-    eagerly, so selecting a backend whose framework is missing raises. This is
-    weaker than :func:`_backend_is_usable`: the framework can be importable
-    while the backend as a whole is not.
-    """
-    module, _ = BACKENDS[backend_name]
-    return _run(f"import {module}").returncode == 0
-
-
 @pytest.mark.parametrize("module", NEUTRAL_MODULES)
 def test_neutral_module_imports_no_framework(module: str) -> None:
     result = _run(_IMPORT_PROBE, module)
     assert result.returncode == 0, (
         f"{module} is not backend-neutral:\n{result.stdout}{result.stderr}"
     )
-
-
-@pytest.mark.tf
-def test_tensorflow_backend_does_not_import_torch() -> None:
-    if not backend_is_usable("tensorflow"):
-        pytest.skip("the TensorFlow backend is not usable in this environment")
-    probe = """
-import sys
-import learnMSA.backend as backend
-backend.set_backend("tensorflow")
-import learnMSA.model.tf.model  # noqa: F401
-leaked = sorted(m for m in sys.modules if m == "torch" or m.startswith("torch."))
-if leaked:
-    raise SystemExit(f"tensorflow backend imported torch: {leaked[:10]}")
-"""
-    result = _run(probe)
-    assert result.returncode == 0, f"{result.stdout}{result.stderr}"
-
-
-@pytest.mark.torch
-def test_pytorch_backend_does_not_import_tensorflow() -> None:
-    if not backend_is_usable("pytorch"):
-        pytest.skip("the PyTorch backend is not usable in this environment")
-    probe = """
-import sys
-import learnMSA.backend as backend
-backend.set_backend("pytorch")
-import learnMSA.model.torch.model  # noqa: F401
-leaked = sorted(
-    m for m in sys.modules if m == "tensorflow" or m.startswith("tensorflow.")
-)
-if leaked:
-    raise SystemExit(f"pytorch backend imported tensorflow: {leaked[:10]}")
-"""
-    result = _run(probe)
-    assert result.returncode == 0, f"{result.stdout}{result.stderr}"
-
-
-@pytest.mark.parametrize("selected", list(BACKENDS))
-def test_backend_refuses_to_switch(selected: str) -> None:
-    # set_backend drives evoten's facade, which imports the framework, so
-    # this can only be exercised for a backend that is actually installed.
-    if not _framework_installed(selected):
-        pytest.skip(f"the {selected} framework is not installed")
-    other = next(name for name in BACKENDS if name != selected)
-    probe = f"""
-import learnMSA.backend as backend
-backend.set_backend({selected!r})
-try:
-    backend.set_backend({other!r})
-except RuntimeError:
-    pass
-else:
-    raise SystemExit("switching backends should have raised RuntimeError")
-"""
-    result = _run(probe)
-    assert result.returncode == 0, f"{result.stdout}{result.stderr}"
-
-
-@pytest.mark.parametrize("backend_name", list(BACKENDS))
-def test_backend_env_var_is_honored(backend_name: str) -> None:
-    # get_backend() resolves the default through set_backend, which drives
-    # evoten's facade and so imports the framework -- same constraint as
-    # test_backend_refuses_to_switch.
-    if not _framework_installed(backend_name):
-        pytest.skip(f"the {backend_name} framework is not installed")
-    probe = f"""
-import learnMSA.backend as backend
-assert backend.get_backend() == {backend_name!r}, backend.get_backend()
-"""
-    result = subprocess.run(
-        [sys.executable, "-c", probe],
-        capture_output=True,
-        text=True,
-        cwd=REPO_ROOT,
-        env={
-            **dict(__import__("os").environ),
-            "LEARNMSA_BACKEND": backend_name,
-        },
-    )
-    assert result.returncode == 0, f"{result.stdout}{result.stderr}"
 
 
 # --- static guards -------------------------------------------------------

@@ -238,7 +238,7 @@ def get_simple_seq(data: SequenceDataset) -> np.ndarray:
 
 def test_anc_probs_layer() -> None:
     """Test ancestral probability calculations."""
-    filename = os.path.dirname(__file__) + "/../tests/data/simple.fa"
+    filename = os.path.dirname(__file__) + "/../../data/simple.fa"
     with SequenceDataset(filename) as data:
         sequences = get_simple_seq(data)  # Shape: (b, L, num_model)
     n = sequences.shape[0]
@@ -275,7 +275,7 @@ def test_anc_probs_layer() -> None:
 
 def test_encoder_model() -> None:
     """Test encoder model with ancestral probabilities layer."""
-    filename = os.path.dirname(__file__) + "/../tests/data/simple.fa"
+    filename = os.path.dirname(__file__) + "/../../data/simple.fa"
     with SequenceDataset(filename) as data:
         sequences = get_simple_seq(data)  # Shape: (b, L, num_model)
         n = sequences.shape[0]
@@ -359,7 +359,7 @@ def test_time_reversed() -> None:
     )
 
     # Get sequence data
-    filename = os.path.dirname(__file__) + "/../tests/data/simple.fa"
+    filename = os.path.dirname(__file__) + "/../../data/simple.fa"
     with SequenceDataset(filename) as data:
         sequences = get_simple_seq(data)  # Shape: (b, L, num_model)
     n = sequences.shape[0]
@@ -394,7 +394,7 @@ def test_mixture_model() -> None:
     )
 
     # Get sequence data
-    filename = os.path.dirname(__file__) + "/../tests/data/simple.fa"
+    filename = os.path.dirname(__file__) + "/../../data/simple.fa"
     with SequenceDataset(filename) as data:
         sequences = get_simple_seq(data)
     n = sequences.shape[0]
@@ -447,7 +447,7 @@ def test_shared_equilibrium() -> None:
         config.training.num_model, num_components=num_components
     )
 
-    filename = os.path.dirname(__file__) + "/../tests/data/simple.fa"
+    filename = os.path.dirname(__file__) + "/../../data/simple.fa"
     with SequenceDataset(filename) as data:
         sequences = get_simple_seq(data)
     n = sequences.shape[0]
@@ -500,7 +500,7 @@ def test_two_input_tracks() -> None:
     the output of track 1 must equal the output of track 0 reindexed by the
     same permutation.
     """
-    filename = os.path.dirname(__file__) + "/../tests/data/simple.fa"
+    filename = os.path.dirname(__file__) + "/../../data/simple.fa"
     with SequenceDataset(filename) as data:
         sequences = get_simple_seq(data)  # (B, L, 1) integer indices
     n = sequences.shape[0]

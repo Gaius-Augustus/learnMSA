@@ -8,21 +8,17 @@ the reloaded model has the same parameters *and* computes the same thing.
 
 import numpy as np
 import pytest
+import torch
 
-torch = pytest.importorskip("torch")
-
-import tests.hmm.ref as ref  # noqa: E402
-from learnMSA.config import (Configuration, TrainingConfig,  # noqa: E402
-                             TreeConfig)
-from learnMSA.config.hmm import PHMMPriorConfig  # noqa: E402
-from learnMSA.model.checkpoint import checkpoint_format  # noqa: E402
-from learnMSA.model.context import LearnMSAContext  # noqa: E402
-from learnMSA.model.torch.checkpoint import (SUFFIX, load_model,  # noqa: E402
+import tests.hmm.ref as ref
+from learnMSA.config import Configuration, TrainingConfig, TreeConfig
+from learnMSA.config.hmm import PHMMPriorConfig
+from learnMSA.model.checkpoint import checkpoint_format
+from learnMSA.model.context import LearnMSAContext
+from learnMSA.model.torch.checkpoint import (SUFFIX, load_model,
                                              save_model)
-from learnMSA.model.torch.model import TorchLearnMSAModel  # noqa: E402
-from learnMSA.util.sequence_dataset import SequenceDataset  # noqa: E402
-
-pytestmark = pytest.mark.torch
+from learnMSA.model.torch.model import TorchLearnMSAModel
+from learnMSA.util.sequence_dataset import SequenceDataset
 
 
 @pytest.fixture

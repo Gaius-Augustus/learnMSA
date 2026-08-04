@@ -10,14 +10,17 @@ onto ``learnMSA.align``, after which ``__getattr__`` is never consulted and
 ``TypeError: 'module' object is not callable``.
 
 So colliding names are not re-exported at all; they are imported from their own
-module. These tests pin both halves of that contract.
+module. These tests pin both halves of that contract for the neutral packages;
+``learnMSA.protein_language_models`` has the same shape but only imports under
+TensorFlow, so it is checked in
+``tests/protein_language_models/tf/test_lazy_exports.py``.
 """
 
 import importlib
-import importlib.util
-import types
 
 import pytest
+
+from tests.backend import lazy_exports
 
 #: (package, attribute) pairs that must resolve to something callable.
 LAZY_CALLABLES = [
@@ -29,20 +32,7 @@ LAZY_CALLABLES = [
 #: the same name exists and would shadow them.
 COLLIDING_NAMES = [
     ("learnMSA.align", "align"),
-    ("learnMSA.protein_language_models", "compute_embeddings"),
 ]
-
-#: Packages whose submodules can only be imported under the TensorFlow
-#: backend. The protein language models run on TensorFlow only; under the
-#: PyTorch backend embeddings are supplied through ``--emb-file`` instead.
-TENSORFLOW_ONLY_PACKAGES = {"learnMSA.protein_language_models"}
-
-_HAS_TENSORFLOW = importlib.util.find_spec("tensorflow") is not None
-
-
-def _skip_if_tensorflow_only(package: str) -> None:
-    if package in TENSORFLOW_ONLY_PACKAGES and not _HAS_TENSORFLOW:
-        pytest.skip(f"{package} requires TensorFlow")
 
 
 @pytest.mark.parametrize("package,attribute", LAZY_CALLABLES)
@@ -62,42 +52,13 @@ def test_colliding_name_is_importable_from_its_own_module(
     package: str, name: str
 ) -> None:
     """The submodule always provides the callable, whatever import order ran."""
-    _skip_if_tensorflow_only(package)
-    submodule = importlib.import_module(f"{package}.{name}")
-    resolved = getattr(submodule, name)
-    assert callable(resolved), (
-        f"{package}.{name}.{name} should be the callable to import."
-    )
+    lazy_exports.check_importable_from_own_module(package, name)
 
 
 @pytest.mark.parametrize("package,name", COLLIDING_NAMES)
 def test_colliding_name_is_not_reexported(package: str, name: str) -> None:
-    """Re-exporting it would be a latent 'module is not callable' bug.
-
-    Importing the submodule first is what makes the shadowing permanent, so do
-    that here before checking.
-    """
-    _skip_if_tensorflow_only(package)
-    importlib.import_module(f"{package}.{name}")
-    module = importlib.import_module(package)
-    exported = getattr(module, name, None)
-    assert exported is None or isinstance(exported, types.ModuleType), (
-        f"{package} re-exports {name!r}, which collides with its submodule. "
-        "Import it from its own module instead."
-    )
-    assert name not in getattr(module, "__all__", ())
-
-
-@pytest.mark.tf
-@pytest.mark.skipif(
-    not _HAS_TENSORFLOW, reason="protein language models require TensorFlow"
-)
-def test_cli_imports_compute_embeddings_callably() -> None:
-    """The exact import the CLI performs must yield the function."""
-    from learnMSA.protein_language_models.compute_embeddings import \
-        compute_embeddings
-
-    assert callable(compute_embeddings)
+    """Re-exporting it would be a latent 'module is not callable' bug."""
+    lazy_exports.check_not_reexported(package, name)
 
 
 def test_unknown_attribute_still_raises() -> None:

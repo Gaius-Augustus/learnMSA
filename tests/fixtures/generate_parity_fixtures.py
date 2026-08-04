@@ -65,6 +65,24 @@ def make_configs(scenario: str):
 #: second categorical track, "joint" replaces both with the joint emitter.
 SCENARIOS = ["aa", "struct", "joint"]
 
+#: The emission tracks each scenario has, in the spelling
+#: ``PHMMLayer.emission_matrix`` takes. Stated rather than discovered, so that
+#: an emitter which silently fails to build shows up as a missing fixture key
+#: instead of as one fewer comparison, and so the torch test can parametrize
+#: over exactly the combinations that exist.
+EMISSION_TRACKS = {
+    "aa": ("aa",),
+    "struct": ("aa", "struct"),
+    "joint": ("aa", "joint"),
+}
+
+#: (scenario, track) pairs, flattened for ``pytest.mark.parametrize``.
+EMISSION_CASES = [
+    (scenario, track)
+    for scenario, tracks in EMISSION_TRACKS.items()
+    for track in tracks
+]
+
 
 def input_shapes(struct_config, batch: int | None = None):
     """The ``build`` input shapes for a scenario, matching the model's."""
@@ -120,7 +138,9 @@ def kernel_paths(layer) -> dict[str, object]:
     return kernels
 
 
-def reference_outputs(layer, inputs: dict[str, np.ndarray]) -> dict:
+def reference_outputs(
+    layer, scenario: str, inputs: dict[str, np.ndarray]
+) -> dict:
     """The tensors the torch backend has to reproduce."""
     from learnMSA.util.tensor import to_numpy
 
@@ -137,11 +157,8 @@ def reference_outputs(layer, inputs: dict[str, np.ndarray]) -> dict:
         ),
         "prior_scores": to_numpy(layer.prior_scores()),
     }
-    for track in ("aa", "struct", "joint"):
-        try:
-            outputs[f"emission_matrix.{track}"] = layer.emission_matrix(track)
-        except AttributeError:
-            pass
+    for track in EMISSION_TRACKS[scenario]:
+        outputs[f"emission_matrix.{track}"] = layer.emission_matrix(track)
 
     adds = ("struct",) if "struct" in inputs else ()
     call_adds = tuple(inputs[name] for name in adds) or None
@@ -208,7 +225,9 @@ def collect() -> dict[str, np.ndarray]:
             fixture[f"{scenario}/input.{name}"] = array
         for name, kernel in kernel_paths(layer).items():
             fixture[f"{scenario}/kernel.{name}"] = to_numpy(kernel)
-        for name, value in reference_outputs(layer, inputs).items():
+        for name, value in reference_outputs(
+            layer, scenario, inputs
+        ).items():
             fixture[f"{scenario}/output.{name}"] = np.asarray(value)
     return fixture
 

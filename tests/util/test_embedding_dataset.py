@@ -3,39 +3,17 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from learnMSA.config.config import Configuration
-from learnMSA.model.context import LearnMSAContext
-from learnMSA.model.batch_generator import BatchGenerator
-from learnMSA.model.tf.training import make_dataset
 from learnMSA.util import EmbeddingCache, EmbeddingDataset, SequenceDataset
+from tests.embedding_data import make_aa_dataset, make_embedding_dataset
 
 
 @pytest.fixture
 def embedding_dataset() -> EmbeddingDataset:
-    """Helper: build a small EmbeddingDataset from scratch."""
-    seq_lens = np.array([5, 11, 17, 4, 5])
-    dim = 8
-    rows = []
-    for i, L in enumerate(seq_lens):
-        rows.append((i + 1) * np.ones((L, dim), dtype=np.float32))
-    cache_array = np.concatenate(rows, axis=0)
-    cache = EmbeddingCache(seq_lens, dim, cache=cache_array)
-    seq_ids = [f"seq_{i}" for i in range(len(seq_lens))]
-    ds = EmbeddingDataset(embedding_cache=cache, seq_ids=seq_ids)
-    return ds
+    return make_embedding_dataset()
 
 @pytest.fixture
 def aa_dataset() -> SequenceDataset:
-    """Helper: build a small SequenceDataset from scratch."""
-    seqs = [
-        ("seq1", "ACDEG"),
-        ("seq2", "ACDEFGHIKLM"),
-        ("seq3", "ACDEFGHIKLMNPQRSM"),
-        ("seq4", "ACDE"),
-        ("seq5", "ACDEF"),
-    ]
-    ds = SequenceDataset(sequences=seqs)
-    return ds
+    return make_aa_dataset()
 
 
 def test_write_and_read_roundtrip(
@@ -114,24 +92,6 @@ def test_npz_suffix_fallback(
     loaded = EmbeddingDataset(filepath=emb_path)
     assert loaded.parsing_ok
     assert loaded.num_seq == embedding_dataset.num_seq
-
-
-def test_make_dataset_aa_plus_embedding(
-    aa_dataset: SequenceDataset,
-    embedding_dataset: EmbeddingDataset,
-) -> None:
-    """Test that we can create an EmbeddingDataset from a SequenceDataset and
-    an EmbeddingCache."""
-    config = Configuration()
-    context = LearnMSAContext(config, aa_dataset)
-    batch_gen = BatchGenerator()
-    batch_gen.configure((aa_dataset, embedding_dataset), context)
-    dataset,_ = make_dataset(np.array([0, 2, 3]), batch_gen, batch_size=3)
-    for (s,e,i),_ in dataset:
-        break
-    assert s.shape == (3, 18, 4, 20)  # aa track: per-residue distributions
-    assert e.shape == (3, 18, 4, 8)
-    assert i.shape == (3, 4)
 
 
 def test_reorder_embedding_dataset(embedding_dataset: EmbeddingDataset) -> None:

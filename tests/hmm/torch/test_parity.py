@@ -13,13 +13,12 @@ in an emitter, the transitioner or a prior shows up.
 
 import numpy as np
 import pytest
+import torch
 
-torch = pytest.importorskip("torch")
-
-from tests.fixtures.generate_parity_fixtures import (  # noqa: E402
-    FIXTURE, LENGTHS, SCENARIOS, input_shapes, make_configs)
-
-pytestmark = pytest.mark.torch
+from tests.fixtures.generate_parity_fixtures import (EMISSION_CASES, FIXTURE,
+                                                     LENGTHS, SCENARIOS,
+                                                     input_shapes,
+                                                     make_configs)
 
 #: Relative tolerance for probabilities and matrices.
 RTOL = 1e-5
@@ -36,12 +35,11 @@ PRIOR_RTOL = 1e-4
 
 @pytest.fixture(scope="module")
 def fixture_data():
-    if not FIXTURE.exists():
-        pytest.skip(
-            f"{FIXTURE.name} is missing; regenerate it with "
-            "'python tests/fixtures/generate_parity_fixtures.py' under the "
-            "TensorFlow environment."
-        )
+    assert FIXTURE.exists(), (
+        f"{FIXTURE.name} is committed to the repository but is missing here. "
+        "Regenerate it with 'python tests/fixtures/"
+        "generate_parity_fixtures.py' under the TensorFlow environment."
+    )
     with np.load(FIXTURE) as archive:
         yield {key: archive[key] for key in archive.files}
 
@@ -105,8 +103,10 @@ def _load_scenario(scenario: str, data: dict):
     return layer, struct_config, inputs
 
 
-def _expected(data: dict, scenario: str, name: str) -> np.ndarray | None:
-    return data.get(f"{scenario}/output.{name}")
+def _expected(data: dict, scenario: str, name: str) -> np.ndarray:
+    key = f"{scenario}/output.{name}"
+    assert key in data, f"the fixture has no {key}"
+    return data[key]
 
 
 @pytest.mark.parametrize("scenario", SCENARIOS)
@@ -118,28 +118,26 @@ def test_kernel_shapes_match(scenario: str, fixture_data) -> None:
 
 @pytest.mark.parametrize("scenario", SCENARIOS)
 @pytest.mark.parametrize(
-    "name",
-    [
-        "transition_matrix",
-        "explicit_transition_matrix",
-        "emission_matrix.aa",
-        "emission_matrix.struct",
-        "emission_matrix.joint",
-    ],
+    "name", ["transition_matrix", "explicit_transition_matrix"]
 )
-def test_matrices_match(scenario: str, name: str, fixture_data) -> None:
-    expected = _expected(fixture_data, scenario, name)
-    if expected is None:
-        pytest.skip(f"the {scenario} layer has no {name}")
-
+def test_transition_matrices_match(
+    scenario: str, name: str, fixture_data
+) -> None:
     layer, _, _ = _load_scenario(scenario, fixture_data)
-    if name == "transition_matrix":
-        got = layer.transition_matrix()
-    elif name == "explicit_transition_matrix":
-        got = layer.explicit_transition_matrix()
-    else:
-        got = layer.emission_matrix(name.split(".", 1)[1])
+    got = getattr(layer, name)()
+    expected = _expected(fixture_data, scenario, name)
+    np.testing.assert_allclose(got, expected, rtol=RTOL, atol=ATOL)
 
+
+@pytest.mark.parametrize("scenario,track", EMISSION_CASES)
+def test_emission_matrices_match(
+    scenario: str, track: str, fixture_data
+) -> None:
+    """Only the tracks a scenario actually has, so every case is a real
+    comparison rather than a combination that does not exist."""
+    layer, _, _ = _load_scenario(scenario, fixture_data)
+    got = layer.emission_matrix(track)
+    expected = _expected(fixture_data, scenario, f"emission_matrix.{track}")
     np.testing.assert_allclose(got, expected, rtol=RTOL, atol=ATOL)
 
 

@@ -1,8 +1,4 @@
 """The PyTorch learnMSA model.
-
-Everything that is the same whichever framework runs it -- the batching and
-epoch heuristics, the derived likelihood/AIC estimates, the console reporting
--- lives in the backend-neutral :class:`learnMSA.model.model.LearnMSAModel`.
 This module adds the torch module type and the methods that touch tensors.
 
 The one genuinely new piece compared to the TensorFlow backend is the training

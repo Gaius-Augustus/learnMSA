@@ -8,13 +8,10 @@ both frameworks.
 
 import numpy as np
 import pytest
+import torch
 
-torch = pytest.importorskip("torch")
-
-from tests.fixtures.generate_anc_probs_fixtures import (  # noqa: E402
-    FIXTURE, SCENARIOS, make_inputs, scenario_kwargs)
-
-pytestmark = pytest.mark.torch
+from tests.fixtures.generate_anc_probs_fixtures import (FIXTURE, SCENARIOS,
+                                                        scenario_kwargs)
 
 RTOL = 1e-5
 ATOL = 1e-6
@@ -22,12 +19,11 @@ ATOL = 1e-6
 
 @pytest.fixture(scope="module")
 def fixture_data():
-    if not FIXTURE.exists():
-        pytest.skip(
-            f"{FIXTURE.name} is missing; regenerate it with "
-            "'python tests/fixtures/generate_anc_probs_fixtures.py' under the "
-            "TensorFlow environment."
-        )
+    assert FIXTURE.exists(), (
+        f"{FIXTURE.name} is committed to the repository but is missing here. "
+        "Regenerate it with 'python tests/fixtures/"
+        "generate_anc_probs_fixtures.py' under the TensorFlow environment."
+    )
     with np.load(FIXTURE) as archive:
         yield {key: archive[key] for key in archive.files}
 

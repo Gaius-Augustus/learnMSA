@@ -9,12 +9,7 @@ torch parity tests are supposed to be compared against.
 import numpy as np
 import pytest
 
-pytest.importorskip("tensorflow")
-
-from tests.fixtures.generate_anc_probs_fixtures import (  # noqa: E402
-    FIXTURE, collect)
-
-pytestmark = pytest.mark.tf
+from tests.fixtures.generate_anc_probs_fixtures import FIXTURE, collect
 
 RTOL = 1e-6
 ATOL = 1e-6

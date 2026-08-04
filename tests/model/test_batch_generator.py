@@ -5,13 +5,12 @@ import pytest
 
 from learnMSA import Configuration
 from learnMSA.model import batch_generator
-from learnMSA.model.tf import training
 from learnMSA.model.context import LearnMSAContext
 from learnMSA.util.sequence_dataset import SequenceDataset
 
 
 def test_default_batch_gen() -> None:
-    filename = os.path.dirname(__file__) + "/../tests/data/felix_insert_delete.fa"
+    filename = os.path.dirname(__file__) + "/../data/felix_insert_delete.fa"
     with SequenceDataset(filename) as data:
         batch_gen = batch_generator.BatchGenerator(shuffle=False)
         config = Configuration()
@@ -36,7 +35,7 @@ def test_default_batch_gen() -> None:
 
 def test_static_shape_batch_gen() -> None:
     """Test BatchGenerator with static_shape_mode enabled."""
-    filename = os.path.dirname(__file__) + "/../tests/data/felix_insert_delete.fa"
+    filename = os.path.dirname(__file__) + "/../data/felix_insert_delete.fa"
     with SequenceDataset(filename) as data:
         # Set up batch generator with static shape mode
         batch_gen = batch_generator.BatchGenerator(shuffle=False, static_shape_mode=True)
@@ -76,7 +75,7 @@ def test_static_shape_batch_gen() -> None:
 
 def test_multi_dataset_batch_gen_returns_multiple_batches() -> None:
     fn = (os.path.dirname(__file__)
-            + "/../tests/data/felix_insert_delete.fa")
+            + "/../data/felix_insert_delete.fa")
     with SequenceDataset(fn) as data_a, SequenceDataset(fn) as data_b:
         batch_gen = batch_generator.BatchGenerator(shuffle=False)
         config = Configuration()
