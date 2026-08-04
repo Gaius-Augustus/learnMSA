@@ -77,12 +77,20 @@ class PHMMValueSet:
                 isinstance(config.p_begin_match[h], (Sequence, np.ndarray)):
             p_begin_match_head = config.p_begin_match[h]
             assert isinstance(p_begin_match_head, (Sequence, np.ndarray))  # Type guard
+            # Clip float32 rounding noise (e.g. from parameters that were
+            # carried over by model surgery) to keep the begin state's
+            # distribution valid
+            p_begin_match_head = np.clip(
+                np.asarray(p_begin_match_head[:L], dtype=np.float64), 0., 1.
+            )
+            transitions[ind.begin_to_match[0, 0], ind.begin_to_match[0, 1]] = \
+                p_begin_match_head[0]
             p_begin_match_inner = p_begin_match_head[1:L]
-            p_sum_prob_begin_match = sum(p_begin_match_head)
-            assert p_sum_prob_begin_match <= 1, (
+            p_sum_prob_begin_match = p_begin_match_head.sum()
+            assert p_sum_prob_begin_match <= 1 + 1e-6, (
                 f"Sum of p_begin_match is {p_sum_prob_begin_match}, which is > 1"
             )
-            p_begin_delete = 1 - p_sum_prob_begin_match
+            p_begin_delete = max(0., 1 - p_sum_prob_begin_match)
         else:
             p = get_value(config.p_begin_match, h, 0)
             p_begin_delete = get_value(config.p_begin_delete, h)
