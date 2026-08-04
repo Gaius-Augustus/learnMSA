@@ -9,6 +9,7 @@ class TrainingConfig(BaseModel):
     batch_size: int
     tokens_per_batch: int
     learning_rate: float
+    gradient_clipnorm: float
     epochs: Sequence[int]
     max_iterations: int
     length_init: Sequence[int] | None
@@ -47,6 +48,7 @@ class TrainingConfig(BaseModel):
         batch_size: int = -1,
         tokens_per_batch: int = -1,
         learning_rate: float = 0.1,
+        gradient_clipnorm: float = 1.0,
         epochs: int | Sequence[int] = ...,
         max_iterations: int = 2,
         length_init: Sequence[int] | None = None,

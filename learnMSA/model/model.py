@@ -86,6 +86,7 @@ class LearnMSAModel(PHMMMixin, Generic[T_Tensor]):
             loglik = self.predict(data, indices=indices, models=models)
             assert isinstance(loglik, np.ndarray)
             return loglik
+
     def _pack_datasets(
         self,
         data: SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]],
@@ -101,6 +102,7 @@ class LearnMSAModel(PHMMMixin, Generic[T_Tensor]):
                 "must be a SequenceDataset."
             )
         return data
+
     def estimate_AIC(
         self,
         data: SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]],
@@ -128,11 +130,13 @@ class LearnMSAModel(PHMMMixin, Generic[T_Tensor]):
         num_param = 34 * np.array(self.phmm_layer.lengths) + 25
         aic = -2 * loglik * data[0].num_seq + 2 * num_param
         return aic
+
     def get_batch_size(self, data:SequenceDataset) -> int:
         if callable(self.context.batch_size):
             return self.context.batch_size(data)
         else:
             return self.context.batch_size
+
     def get_num_epochs(self, iteration: int) -> int:
         """
         Determine the number of epochs for the current training iteration.
@@ -150,6 +154,7 @@ class LearnMSAModel(PHMMMixin, Generic[T_Tensor]):
             0 if iteration==0 else 1 if not last_iteration else 2
         ]
         return epochs
+
     def get_num_steps(
         self, num_sequences: int, batch_size: int, min_steps: int = 5
     ) -> int:
@@ -168,6 +173,7 @@ class LearnMSAModel(PHMMMixin, Generic[T_Tensor]):
             return 0
         steps = int(100*np.sqrt(num_sequences)/batch_size)
         return min(max(min_steps, steps), 500)
+
     def use_jit_compile(self, total_steps: int | None = None) -> bool:
         """
         Determine whether to use JIT compilation for training.
@@ -190,6 +196,7 @@ class LearnMSAModel(PHMMMixin, Generic[T_Tensor]):
             if max(self.context.model_lengths) > 450:
                 jit_compile = jit_compile and total_steps >= 100
         return jit_compile
+
     def get_verbosity(self) -> Literal[0, 2]:
         """
         Determine the verbosity level for training output.
@@ -198,6 +205,7 @@ class LearnMSAModel(PHMMMixin, Generic[T_Tensor]):
             Verbosity level (0 for silent, 2 for verbose).
         """
         return 2 if self.context.config.input_output.verbose else 0
+
     def _print_train_header(
         self, indices: np.ndarray, batch_size: int, data: Dataset
     ) -> None:
@@ -244,6 +252,7 @@ class LearnMSAModel(PHMMMixin, Generic[T_Tensor]):
                 print("Using CPU")
             else:
                 print("Using GPU")
+
     def _print_predict_header(
         self, indices: np.ndarray,
         bucket_boundaries: Sequence[int | float],
@@ -256,6 +265,7 @@ class LearnMSAModel(PHMMMixin, Generic[T_Tensor]):
                 "boundaries", bucket_boundaries, "and batch sizes",
                 bucket_batch_sizes[:-1], "for", steps, "steps"
             )
+
     def _print_predict_timing(
         self,
         elapsed_seconds: float,
@@ -274,6 +284,7 @@ class LearnMSAModel(PHMMMixin, Generic[T_Tensor]):
                     f"Prediction finished in {elapsed_seconds:.3f}s "
                     f"({steps} steps)"
                 )
+
     def _check_training_complete(
         self,
         history: Any
@@ -289,9 +300,7 @@ class LearnMSAModel(PHMMMixin, Generic[T_Tensor]):
         if self.context.config.input_output.verbose:
             print("Fitted model successfully.")
 
-    # --- backend-specific -------------------------------------------------
-    # Implemented by the backend subclass; listed here as the contract that a
-    # backend has to satisfy.
+    # Backend interface that must be implemented by subclasses
 
     @abstractmethod
     def build(self, input_shapes=((None,),)) -> None: ...
@@ -300,14 +309,20 @@ class LearnMSAModel(PHMMMixin, Generic[T_Tensor]):
     def compile(self, total_steps: int | None = None) -> None: ...
 
     @abstractmethod
-    def fit(self, data, indices=None, iteration=0, batch_size=None,
-            epochs=None, steps_per_epoch=None, callbacks=None): ...
+    def fit(
+        self, data, indices=None, iteration=0, batch_size=None,
+        epochs=None, steps_per_epoch=None, callbacks=None
+    ) -> Any: ...
 
     @abstractmethod
-    def predict(self, data, indices=None, **kwargs): ...
+    def predict(
+        self, data, indices=None, **kwargs
+    ) -> np.ndarray | list[tuple[np.ndarray, np.ndarray]]: ...
 
     @abstractmethod
-    def evaluate(self, data, indices=None, models=None): ...
+    def evaluate(
+        self, data, indices=None, models=None
+    ) -> dict[str, np.ndarray]: ...
 
     @abstractmethod
     def compute_null_model_log_probs(self, data, background_dist=None,

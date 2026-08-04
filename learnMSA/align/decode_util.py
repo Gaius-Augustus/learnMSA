@@ -9,8 +9,13 @@ reorder them when the input was sorted. Pure numpy, no framework involved.
 import numpy as np
 
 
+DecodeArrays = dict[str, np.ndarray]
+"""Flat numpy arrays keyed by :class:`AlignmentMetaData` field name."""
 
-def reorder_decode_arrays(flat_dict: dict, sorted_order: np.ndarray) -> dict:
+
+def reorder_decode_arrays(
+    flat_dict: DecodeArrays, sorted_order: np.ndarray
+) -> DecodeArrays:
     """Reorder all arrays in a flat-dict (as returned by
     :func:`decode_batch_to_arrays`) so that new row ``i`` comes from old row
     ``sorted_order[i]``.
@@ -66,22 +71,24 @@ def reorder_decode_arrays(flat_dict: dict, sorted_order: np.ndarray) -> dict:
         ul_new = np.zeros(0, dtype=flat_dict['unannotated_segments_len'].dtype)
         us_new = np.zeros(0, dtype=flat_dict['unannotated_segments_start'].dtype)
 
-    return dict(
-        num_repeats_per_row        = nrpr_new,
-        domain_hit                 = dh_new,
-        domain_loc                 = dl_new,
-        insertion_lens             = il_new,
-        insertion_start            = is_new,
-        left_flank_len             = flat_dict['left_flank_len'][perm],
-        left_flank_start           = flat_dict['left_flank_start'][perm],
-        right_flank_len            = flat_dict['right_flank_len'][perm],
-        right_flank_start          = flat_dict['right_flank_start'][perm],
-        unannotated_segments_len   = ul_new,
-        unannotated_segments_start = us_new,
-    )
+    return {
+        "num_repeats_per_row" : nrpr_new,
+        "domain_hit" : dh_new,
+        "domain_loc" : dl_new,
+        "insertion_lens" : il_new,
+        "insertion_start" : is_new,
+        "left_flank_len" : flat_dict['left_flank_len'][perm],
+        "left_flank_start" : flat_dict['left_flank_start'][perm],
+        "right_flank_len" : flat_dict['right_flank_len'][perm],
+        "right_flank_start" : flat_dict['right_flank_start'][perm],
+        "unannotated_segments_len" : ul_new,
+        "unannotated_segments_start" : us_new,
+    }
 
 
-def decode_batch_to_arrays(outputs_np: tuple, model_length: int) -> dict:
+def decode_batch_to_arrays(
+    outputs_np: tuple, model_length: int
+) -> DecodeArrays:
     """Convert the dense GPU output of :func:`_get_decode_batch_fn` to the
     flat numpy arrays used by
     :class:`~learnMSA.align.alignment_metadata.AlignmentMetaData`.
@@ -195,16 +202,16 @@ def decode_batch_to_arrays(outputs_np: tuple, model_length: int) -> dict:
             uns_len_flat   = np.zeros(0, dtype=np.int16)
             uns_start_flat = np.zeros(0, dtype=np.int32)
 
-    return dict(
-        num_repeats_per_row        = num_repeats_per_row,
-        domain_hit                 = domain_hit_flat,
-        domain_loc                 = domain_loc_flat,
-        insertion_lens             = ins_lens_flat,
-        insertion_start            = ins_start_flat,
-        left_flank_len             = lfl.astype(np.int16),
-        left_flank_start           = lfs.astype(np.int32),
-        right_flank_len            = rfl.astype(np.int16),
-        right_flank_start          = rfs.astype(np.int32),
-        unannotated_segments_len   = uns_len_flat,
-        unannotated_segments_start = uns_start_flat,
-    )
+    return {
+        "num_repeats_per_row" : num_repeats_per_row,
+        "domain_hit" : domain_hit_flat,
+        "domain_loc" : domain_loc_flat,
+        "insertion_lens" : ins_lens_flat,
+        "insertion_start" : ins_start_flat,
+        "left_flank_len" : lfl.astype(np.int16),
+        "left_flank_start" : lfs.astype(np.int32),
+        "right_flank_len" : rfl.astype(np.int16),
+        "right_flank_start" : rfs.astype(np.int32),
+        "unannotated_segments_len" : uns_len_flat,
+        "unannotated_segments_start" : uns_start_flat,
+    }

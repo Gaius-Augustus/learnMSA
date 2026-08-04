@@ -13,6 +13,8 @@ import tensorflow as tf
 
 import learnMSA.backend as backend
 
+from learnMSA.align.decode_util import (DecodeArrays, decode_batch_to_arrays,
+                                        reorder_decode_arrays)
 from learnMSA.hmm.tf.layer import TFPHMMLayer as PHMMLayer
 from learnMSA.model.context import LearnMSAContext
 from learnMSA.model.model import LearnMSAModel
@@ -25,7 +27,7 @@ from learnMSA.util.clustering import write_sequence_weights
 
 
 class TFLearnMSAModel(tf.keras.Model, LearnMSAModel[tf.Tensor]):
-    """
+    """evaluate
     The main model class for LearnMSA, combining a pHMM layer with
     ancestoral probability encoding.
     Provides methods for training, evaluation, and prediction.
@@ -507,7 +509,7 @@ class TFLearnMSAModel(tf.keras.Model, LearnMSAModel[tf.Tensor]):
         bucket_batch_sizes: Sequence[int] | None = None,
         reduce: bool = False,
         ragged_output: bool = False,
-    ) -> np.ndarray | list[tuple[np.ndarray, np.ndarray]]:
+    ) -> np.ndarray | list[tuple[np.ndarray, np.ndarray]] | DecodeArrays:
         """
         Computes predictions for all sequences specified by indices in data.
         Buckets sequences by length for efficiency and determines appropriate
@@ -549,6 +551,10 @@ class TFLearnMSAModel(tf.keras.Model, LearnMSAModel[tf.Tensor]):
             - Posterior mode (reduce=True): (num_models, max_num_states)
                 with the expected number of visits per state, averaged over
                 sequences.
+            - Decoding modes (`viterbi_decode_mode`, `mea_decode_mode`): a
+                `DecodeArrays` dict of flat numpy arrays keyed by
+                :class:`~learnMSA.align.alignment_metadata.AlignmentMetaData`
+                field name, in the original sequence order.
         """
         data = self._pack_datasets(data, "predict")
 
@@ -651,8 +657,6 @@ class TFLearnMSAModel(tf.keras.Model, LearnMSAModel[tf.Tensor]):
             # Fused GPU step: predict → count repeats → dynamic decode, all
             # within one tf.function so R_max never leaves the GPU as a Python
             # int (no CPU–GPU sync mid-batch).
-            from learnMSA.align.decode_util import (decode_batch_to_arrays,
-                                                    reorder_decode_arrays)
             from learnMSA.align.tf.decode import _get_dynamic_decode_fn
 
             jit = self.use_jit_compile(steps)
