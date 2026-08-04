@@ -120,6 +120,62 @@ def apply_mods(
     return x
 
 
+def remaining_entry_mass(begin_match_1: float, begin_delete: float) -> float:
+    """
+    Computes the probability mass that is left for entering the profile at a
+    match state other than the first one.
+
+    Clipping is required: `begin_match_1 + begin_delete` can exceed 1 by a small
+    amount because both are read from a trained (float32) transition matrix.
+    A negative remaining mass would result in negative entry probabilities.
+
+    Args:
+        begin_match_1 (float): ``P(Match 1 | Begin)``.
+        begin_delete (float): ``P(Delete 1 | Begin)``.
+
+    Returns:
+        (float): ``1 - begin_match_1 - begin_delete`` clipped to `[0, 1]`.
+    """
+    return float(np.clip(1. - begin_match_1 - begin_delete, 0., 1.))
+
+
+def distribute_entry_mass(
+    begin_match: np.ndarray, entry_mass: float
+) -> np.ndarray:
+    """
+    Distributes the remaining entry probability mass over the match states
+    2..L, preserving their relative weights. The first entry (the transition
+    from the begin state to the first match state) is left untouched.
+
+    Rescaling with `entry_mass / sum(weights)` (rather than dividing by
+    `sum(weights) / entry_mass`) keeps the result in `[0, 1]` even if the
+    weights are numerically zero, which happens when the trained model enters
+    the profile at the first match (or delete) state almost surely.
+
+    Args:
+        begin_match (np.ndarray): Entry weights of shape ``(L,)``.
+        entry_mass (float): The probability mass to distribute over the
+            weights ``begin_match[1:]``.
+
+    Returns:
+        (np.ndarray): A copy of `begin_match` whose entries `1..L-1` are
+            non-negative and sum to `entry_mass`.
+    """
+    begin_match = np.copy(begin_match)
+    # (float64 avoids overflow when the weights are close to zero)
+    weights = np.maximum(
+        begin_match[1:].astype(np.float64), 0. # remove float32 noise
+    )
+    weight_sum = weights.sum()
+    if weight_sum > 0:
+        weights *= entry_mass / weight_sum
+    elif weights.size > 0:
+        # No preference left, enter uniformly
+        weights[:] = entry_mass / weights.size
+    begin_match[1:] = weights
+    return begin_match
+
+
 def extend_mods(
     pos_expand: np.ndarray,
     expansion_lens: np.ndarray,
@@ -439,8 +495,10 @@ def update_kernels(
             begin_delete = get_value(config.p_begin_delete, h, 0)
         else:
             begin_match_1 = begin_match[0]
+
+        entry_mass = remaining_entry_mass(begin_match_1, begin_delete)
         if L_new > 1:
-            begin_to_match_insert = (1 - begin_match_1 - begin_delete) / (L_new-1)
+            begin_to_match_insert = entry_mass / (L_new-1)
         else:
             begin_to_match_insert = 0.0
 
@@ -458,8 +516,7 @@ def update_kernels(
             insert_value = begin_to_match_insert,
         )
 
-        # re-normalize begin probabilities
-        begin_match[1:] /= begin_match[1:].sum() / (1 - begin_match[0] - begin_delete)
+        begin_match = distribute_entry_mass(begin_match, entry_mass)
 
     new_config = config.model_copy(deep=True)
     if aa_emissions_new is not None:

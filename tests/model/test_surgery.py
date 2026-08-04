@@ -13,8 +13,10 @@ from learnMSA.hmm.util.transition_index_set import PHMMTransitionIndexSet
 from learnMSA.model.tf.model import LearnMSAModel
 from learnMSA.align.alignment_model import AlignmentModel
 from learnMSA.model.context import LearnMSAContext
-from learnMSA.model.surgery import (apply_mods, extend_mods,
+from learnMSA.model.surgery import (apply_mods, distribute_entry_mass,
+                                            extend_mods,
                                             get_discard_or_expand_positions,
+                                            remaining_entry_mass,
                                             update_kernels, model_surgery)
 from learnMSA.util.sequence_dataset import SequenceDataset
 
@@ -336,6 +338,38 @@ def test_apply_mods() -> None:
     )
     np.testing.assert_equal(x2, [[1, 2, 3], [4, 5, 6], [1, 2, 3]])
 
+def test_remaining_entry_mass() -> None:
+    """The remaining entry mass must always be a valid probability."""
+    np.testing.assert_almost_equal(remaining_entry_mass(0.5, 0.38), 0.12)
+    # P(M1|B) + P(D1|B) can slightly exceed 1 due to the float32 rounding of a
+    # trained transition matrix
+    assert remaining_entry_mass(np.float32(0.83030486),
+                                np.float32(0.16969517)) == 0.
+    assert remaining_entry_mass(1., 0.) == 0.
+
+
+def test_distribute_entry_mass() -> None:
+    """Entry probabilities must stay valid for degenerate weights."""
+    # Weights are preserved up to a scaling factor
+    begin_match = distribute_entry_mass(np.array([0.5, 0.1, 0.2, 0.1]), 0.2)
+    np.testing.assert_almost_equal(begin_match, [0.5, 0.05, 0.1, 0.05])
+
+    # Vanishing weights (a model that always enters at M1 or D1) must not
+    # blow up. Note that the trained weights are clipped at 1e-16.
+    weights = np.array([0.83, 1e-16, 1e-16, 1e-16, 1e-16], dtype=np.float32)
+    begin_match = distribute_entry_mass(weights, 3e-8)
+    assert np.all(begin_match >= 0), begin_match
+    np.testing.assert_almost_equal(begin_match[1:].sum(), 3e-8)
+
+    # Weights that are exactly zero: enter uniformly
+    begin_match = distribute_entry_mass(np.array([0.6, 0., 0., 0.]), 0.3)
+    np.testing.assert_almost_equal(begin_match, [0.6, 0.1, 0.1, 0.1])
+
+    # Zero mass to distribute
+    begin_match = distribute_entry_mass(np.array([1., 0.5, 0.5]), 0.)
+    np.testing.assert_almost_equal(begin_match, [1., 0., 0.])
+
+
 def test_extend_mods() -> None:
     """Test extension of modification positions."""
     pos_expand = np.array([2, 3, 5])
@@ -496,6 +530,70 @@ def test_checked_concat() -> None:
     np.testing.assert_equal(e, [0, 9])
     np.testing.assert_equal(l, [4, 5])
     np.testing.assert_equal(d, np.arange(9))
+
+
+def test_update_kernels_degenerate_entry_distribution(
+    data: SequenceDataset
+) -> None:
+    """Surgery of a model that enters the profile at M1 (or D1) almost surely.
+
+    The remaining entry mass 1 - P(M1|B) - P(D1|B) is then dominated by the
+    float32 rounding of the trained transition matrix and can even be negative,
+    which must not result in negative entry probabilities.
+    """
+    L = 50
+    ind = PHMMTransitionIndexSet(L)
+
+    # All entry mass on M1 and D1, the other entry probabilities vanish
+    p_begin_match = np.full((1, L), 1e-12)
+    p_begin_match[0, 0] = 0.83
+
+    learnmsa_config = Configuration()
+    learnmsa_config.training.num_model = 1
+    learnmsa_config.training.no_sequence_weights = True
+    learnmsa_config.training.length_init = [L]
+    learnmsa_config.hmm.use_prior_for_emission_init = False
+    learnmsa_config.hmm.p_begin_match = p_begin_match
+    model = LearnMSAModel(LearnMSAContext(learnmsa_config, data))
+    model.build()
+
+    A = model.phmm_layer.hmm.transitioner.explicit_transitioner\
+        .matrix().numpy()[0]
+    begin_match_1 = A[ind.begin_to_match[0, 0], ind.begin_to_match[0, 1]]
+
+    # Discard most of the match states and expand elsewhere
+    result = update_kernels(
+        model.phmm_layer, 0,
+        pos_expand=np.array([L-1], dtype=np.int32),
+        expansion_lens=np.array([4], dtype=np.int32),
+        pos_discard=np.arange(1, 41, dtype=np.int32),
+        config=model.context.config.hmm,
+        training_config=model.context.config.training,
+    )
+
+    assert result.aa_values is not None
+    transitions = result.aa_values.transitions
+    assert transitions is not None
+    ind_new = PHMMTransitionIndexSet(result.length)
+    begin_match_new = transitions[
+        ind_new.begin_to_match[:, 0], ind_new.begin_to_match[:, 1]
+    ]
+    begin_delete_new = transitions[
+        ind_new.begin_to_delete[0, 0], ind_new.begin_to_delete[0, 1]
+    ]
+
+    # All entry probabilities must be valid and the begin state's distribution
+    # must be normalized
+    assert np.all(begin_match_new >= 0), \
+        f"negative entry probabilities: {begin_match_new}"
+    np.testing.assert_allclose(begin_match_new[0], begin_match_1, rtol=1e-6)
+    np.testing.assert_allclose(
+        begin_match_new.sum() + begin_delete_new, 1., atol=1e-6
+    )
+    # No probability mass is lost anywhere else either
+    np.testing.assert_allclose(
+        transitions.sum(-1)[:3*result.length+5], 1., atol=1e-4
+    )
 
 
 def test_model_surgery(data: SequenceDataset, model: LearnMSAModel) -> None:
