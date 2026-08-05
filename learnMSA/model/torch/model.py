@@ -383,7 +383,7 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
             return
         if want:
             _raise_dynamo_limits()
-            torch.nn.Module.compile(self, fullgraph=True)
+            torch.nn.Module.compile(self, fullgraph=True, dynamic=False)
         else:
             self._compiled_call_impl = None
         self._graph_compiled = want
