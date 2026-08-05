@@ -364,7 +364,8 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
         implementation is called explicitly. It installs the compiled callable
         as ``_compiled_call_impl``, which ``Module.__call__`` prefers over
         ``forward`` -- so training and inference are covered without changing
-        any call site, and the backward pass is compiled along with the forward.
+        any call site, and the backward pass is compiled along with the
+        forward.
 
         Compilation is deliberately strict (``fullgraph=True``): a graph break
         raises instead of silently degrading, and ``--no_jit`` is the way out.

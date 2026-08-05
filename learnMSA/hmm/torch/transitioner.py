@@ -280,13 +280,99 @@ class TorchPHMMTransitioner(TorchTransitioner):
         self.allow = np.vstack(transitions)
         self.allow_start = np.vstack(start)
 
-        # The explicit index sets are pure structure: they depend only on the
-        # head lengths, so they are built once here rather than on every call.
-        # Rebuilding them per call is wasted work eagerly, and a graph compiler
-        # cannot trace their construction at all.
-        self._explicit_index_sets = [
-            PHMMTransitionIndexSet(L, folded=False) for L in self.lengths
+        self._build_gather_buffers()
+
+    #: The explicit-matrix index groups the folding reads, in the order in
+    #: which they are concatenated into the gather buffers.
+    _EXPLICIT_GROUPS = (
+        "begin_to_match", "match_to_end", "end", "match_to_match",
+        "match_to_insert", "insert_to_insert", "insert_to_match",
+        "left_flank", "right_flank", "unannotated", "terminal",
+        "match_to_delete", "delete_to_delete", "delete_to_match",
+        "begin_to_delete", "delete_to_end",
+    )
+
+    def _build_gather_buffers(self) -> None:
+        """Resolve every explicit-matrix index once, as tensors.
+
+        The indices are pure structure: they depend only on the head lengths.
+        All groups of all heads are concatenated so that the folding reads the
+        explicit matrix with a *single* gather. Resolving them per call instead
+        repeats the same numpy work on every forward pass, and under
+        ``torch.compile`` it lands in the graph as hundreds of tensor ops --
+        more than half of the model's forward graph.
+
+        The buffers are non-persistent: they are structure derived from the
+        head lengths, not state, and must stay out of ``state_dict`` so that
+        saved models keep loading.
+        """
+        max_states = PHMMTransitionIndexSet.num_states_unfolded(
+            max(self.lengths)
+        )
+        self._group_offsets: list[dict[str, tuple[int, int]]] = []
+        self._mskip_offsets: list[tuple[int, int]] = []
+        heads, rows_cols, mskip_flat = [], [], []
+        start, mskip_start = 0, 0
+
+        for h, L in enumerate(self.lengths):
+            index_set = PHMMTransitionIndexSet(L, folded=False)
+            offsets = {}
+            for group in self._EXPLICIT_GROUPS:
+                indices = np.asarray(getattr(index_set, group))
+                rows_cols.append(indices)
+                heads.append(np.full(indices.shape[0], h))
+                offsets[group] = (start, start + indices.shape[0])
+                start += indices.shape[0]
+            self._group_offsets.append(offsets)
+
+            # The folded match-skip probabilities read the ragged upper
+            # triangle M_skip[i, i:-1] for i in 1..L-2. One flat gather
+            # replaces that Python loop, which unrolls into L-2 slices.
+            flat = (
+                np.concatenate([
+                    np.arange(i, L - 1) + i * L for i in range(1, L - 1)
+                ]) if L > 2 else np.zeros(0)
+            )
+            mskip_flat.append(flat)
+            self._mskip_offsets.append((mskip_start, mskip_start + flat.size))
+            mskip_start += flat.size
+
+        indices = np.concatenate(rows_cols, axis=0)
+        # Negative indices count from the end of the explicit matrix, which is
+        # square, so resolving them here matches torch's own semantics.
+        indices = np.where(indices < 0, indices + max_states, indices)
+        for name, values in (
+            ("_gather_heads", np.concatenate(heads)),
+            ("_gather_rows", indices[:, 0]),
+            ("_gather_cols", indices[:, 1]),
+            ("_mskip_flat", np.concatenate(mskip_flat)),
+        ):
+            self.register_buffer(
+                name,
+                torch.as_tensor(
+                    np.ascontiguousarray(values), dtype=torch.int64
+                ),
+                persistent=False,
+            )
+
+    def _gather_explicit(
+        self, log_explicit_matrix: T_TorchTensor
+    ) -> T_TorchTensor:
+        """Read every index group of every head in one gather.
+
+        Slice the result with :meth:`_group`.
+        """
+        return log_explicit_matrix[
+            self._gather_heads, self._gather_rows, self._gather_cols
         ]
+
+    def _group(
+        self, values: T_TorchTensor, h: int, group: str
+    ) -> T_TorchTensor:
+        """One index group of head ``h`` out of a :meth:`_gather_explicit`
+        result."""
+        start, stop = self._group_offsets[h][group]
+        return values[start:stop]
 
     def enable_multi_hits(self, enable: bool = True) -> None:
         """Enable or disable multiple hits by setting the corresponding
@@ -470,26 +556,21 @@ class TorchPHMMTransitioner(TorchTransitioner):
             according to self.allow and self.allow_start respectively.
         """
         explicit_start = safe_log(self.explicit_transitioner.start_dist())
-        max_states = PHMMTransitionIndexSet.num_states_unfolded(
-            max(self.lengths)
-        )
+        gathered = self._gather_explicit(log_explicit_matrix)
 
         folded_transition_probs = []
         folded_start_probs = []
 
         for h, L in enumerate(self.lengths):
-            idx = self._explicit_index_sets[h]
             log_mat = log_explicit_matrix[h]
-            M_skip = self._compute_match_skip_matrix(h, log_mat=log_mat)
+            M_skip = self._compute_match_skip_matrix(h, gathered=gathered)
 
-            def get(indices, log_mat=log_mat):
-                gather_indices = np.array(indices, copy=True)
-                gather_indices[gather_indices < 0] += max_states
-                return log_mat[gather_indices[:, 0], gather_indices[:, 1]]
+            def get(group, h=h):
+                return self._group(gathered, h, group)
 
-            BM = get(idx.begin_to_match)
-            ME = get(idx.match_to_end)
-            E = get(idx.end)
+            BM = get("begin_to_match")
+            ME = get("match_to_end")
+            E = get("end")
 
             log_z = log_zero(log_mat)
             entry_add = logsumexp(
@@ -506,21 +587,27 @@ class TorchPHMMTransitioner(TorchTransitioner):
             )
 
             # Folded transition probabilities
-            MM = get(idx.match_to_match)
-            MI = get(idx.match_to_insert)
-            II = get(idx.insert_to_insert)
-            IM = get(idx.insert_to_match)
+            MM = get("match_to_match")
+            MI = get("match_to_insert")
+            II = get("insert_to_insert")
+            IM = get("insert_to_match")
             folded_transition_probs.extend([MM, MI, II, IM])
 
-            for i in range(1, L - 1):
-                folded_transition_probs.append(M_skip[i, i:-1])
+            # M_skip[i, i:-1] for i in 1..L-2, read in one gather.
+            mskip_start, mskip_stop = self._mskip_offsets[h]
+            if mskip_stop > mskip_start:
+                folded_transition_probs.append(
+                    M_skip.reshape(-1)[
+                        self._mskip_flat[mskip_start:mskip_stop]
+                    ]
+                )
 
             MU = exit_add + E[0]
             MR = exit_add + E[1]
             MT = exit_add + E[2]
             folded_transition_probs.extend([MU, MR, MT])
 
-            LF = get(idx.left_flank)
+            LF = get("left_flank")
             folded_transition_probs.append(LF[:1])
             folded_transition_probs.append(LF[1:2] + entry_add)
 
@@ -529,13 +616,13 @@ class TorchPHMMTransitioner(TorchTransitioner):
             folded_transition_probs.append(LFE + E[1])
             folded_transition_probs.append(LFE + E[2])
 
-            p_right_flank = get(idx.right_flank)
+            p_right_flank = get("right_flank")
             folded_transition_probs.extend([
                 p_right_flank[0].unsqueeze(0),
                 p_right_flank[1].unsqueeze(0),
             ])
 
-            U = get(idx.unannotated)
+            U = get("unannotated")
             UE = U[1] + M_skip[0, -1]
             UU = logsumexp(U[0], UE + E[0])
             folded_transition_probs.append(UU.unsqueeze(0))
@@ -543,7 +630,7 @@ class TorchPHMMTransitioner(TorchTransitioner):
             folded_transition_probs.append((UE + E[1]).unsqueeze(0))
             folded_transition_probs.append((UE + E[2]).unsqueeze(0))
 
-            folded_transition_probs.append(get(idx.terminal))
+            folded_transition_probs.append(get("terminal"))
 
             # Folded start probabilities
             start_left = explicit_start[h, 3 * L - 1]
@@ -564,33 +651,33 @@ class TorchPHMMTransitioner(TorchTransitioner):
     def _compute_match_skip_matrix(
         self,
         h: int,
-        log_mat: T_TorchTensor | None = None,
+        gathered: T_TorchTensor | None = None,
     ) -> T_TorchTensor:
         """
         Utility method that computes the `L x L` match skip transition matrix
         for head `h` with `match_skip(i,j) = P(Mj+2 | Mi)`.
         With `M0 := Begin` and `ML+1 := End`.
+
+        Args:
+            gathered: The result of :meth:`_gather_explicit`, if the caller has
+                one already. Otherwise the explicit matrix is read here.
         """
-        L = self.lengths[h]
-        if log_mat is None:
-            log_mat = safe_log(self.explicit_transitioner.matrix())[h]
+        if gathered is None:
+            gathered = self._gather_explicit(
+                safe_log(self.explicit_transitioner.matrix())
+            )
 
-        # Create index sets for explicit and folded models
-        idx = self._explicit_index_sets[h]
-
-        # Helper to extract log prob from matrix
-        def get(indices):
-            indices = np.asarray(indices)
-            return log_mat[indices[:, 0], indices[:, 1]]
+        def get(group):
+            return self._group(gathered, h, group)
 
         # Get transition log probabilities
-        MD = get(idx.match_to_delete)  # Shape: (L-1,)
-        DD = get(idx.delete_to_delete)  # Shape: (L-1,)
-        DM = get(idx.delete_to_match)  # Shape: (L-1,)
+        MD = get("match_to_delete")  # Shape: (L-1,)
+        DD = get("delete_to_delete")  # Shape: (L-1,)
+        DM = get("delete_to_match")  # Shape: (L-1,)
 
         # Concatenate B -> D1 and DL -> E transitions
-        begin_to_delete = get(idx.begin_to_delete)  # Shape: scalar
-        delete_to_end = get(idx.delete_to_end)  # Shape: scalar
+        begin_to_delete = get("begin_to_delete")  # Shape: scalar
+        delete_to_end = get("delete_to_end")  # Shape: scalar
 
         MD = torch.cat([begin_to_delete, MD], dim=0)  # Shape: (L,)
         DM = torch.cat([DM, delete_to_end], dim=0)    # Shape: (L,)
