@@ -139,6 +139,22 @@ def class_prefix() -> str:
     return {"tensorflow": "TF", "pytorch": "Torch"}[get_backend()]
 
 
+def configure_runtime() -> None:
+    """Apply global framework settings before the first kernel runs.
+
+    TensorFlow is configured through environment variables that must be set
+    before it is imported, so there is nothing left to do here for it.
+    """
+    if get_backend() == "tensorflow":
+        return
+    import torch
+
+    # Use the tensor cores for float32 matrix multiplication on Ampere and
+    # newer. TensorFlow does this by default, so both backends now agree on
+    # matmul precision; torch otherwise warns about it on every compilation.
+    torch.set_float32_matmul_precision("high")
+
+
 def clear_session() -> None:
     """Release framework-held memory between training runs."""
     if get_backend() == "tensorflow":

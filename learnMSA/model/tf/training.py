@@ -94,10 +94,10 @@ def make_dataset(
             element_length_func=cast(Any, lambda i, L, j: L),
             bucket_boundaries=_bucket_boundaries,
             bucket_batch_sizes=bucket_batch_sizes,
-            # when jit-compiling, make sure compilation only happens once
+            # when compiling, make sure compilation only happens once
             # for each bucket
             pad_to_bucket_boundary=\
-                batch_generator.context.config.advanced.jit_compile,
+                batch_generator.context.config.advanced.compile != "off",
         )
 
         batch_func_out_types = _tf_out_types(batch_generator) + (tf.int64,)

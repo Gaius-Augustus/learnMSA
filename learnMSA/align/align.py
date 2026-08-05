@@ -64,7 +64,9 @@ def align(
     if config.input_output.load_model and \
             config.training.skip_training:
         # Load a model without any training
-        am = AlignmentModel.load(config.input_output.load_model, data)
+        am = AlignmentModel.load(
+            config.input_output.load_model, data, config=config
+        )
         # Override indices
         am.indices = np.arange(data[0].num_seq)
         am.hit_alignment_mode = HitAlignmentMode.from_str(
@@ -175,7 +177,9 @@ def _fit_and_align(
 
     if config.input_output.load_model:
         # Load the alignment model from file and use it as initialization
-        am = AlignmentModel.load(config.input_output.load_model, data[0])
+        am = AlignmentModel.load(
+            config.input_output.load_model, data[0], config=config
+        )
         if config.input_output.verbose:
             print("Loaded model from file", config.input_output.load_model)
 

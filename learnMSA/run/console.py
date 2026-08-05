@@ -61,6 +61,15 @@ def run_main() -> None:
         config.advanced.one_dnn_opts,
     )
 
+    # --backend may be "auto", so this can only be checked once setup_devices
+    # has resolved which framework is actually in use.
+    if config.advanced.compile == "jit" and \
+            backend.get_backend() == "pytorch":
+        parser.error(
+            "--compile jit selects TensorFlow's XLA JIT and is not available "
+            "under the pytorch backend. Use --compile on for torch.compile."
+        )
+
     from learnMSA.align.align import align
     from learnMSA.align.alignment_model import AlignmentModel
     from learnMSA.align.align_inserts import make_aligned_insertions

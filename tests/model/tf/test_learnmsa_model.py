@@ -657,3 +657,51 @@ def test_init_msa(
 
     assert np.allclose(A[0], A[1])
     assert np.allclose(B[0], B[1])
+
+
+@pytest.mark.parametrize(
+    "setting,steps,train,inference",
+    [
+        # auto weighs the run length: below the threshold it stays with the
+        # plain Keras graph, and leaves inference eager entirely.
+        ("auto", 5, "graph", "eager"),
+        ("auto", 100, "jit", "jit"),
+        # The explicit settings mean the same thing however long the run is.
+        ("on", 5, "graph", "graph"),
+        ("on", 100, "graph", "graph"),
+        ("off", 5, "eager", "eager"),
+        ("off", 100, "eager", "eager"),
+        ("jit", 5, "jit", "jit"),
+        ("jit", 100, "jit", "jit"),
+    ],
+)
+def test_compile_mode_matrix(
+    context_binary: LearnMSAContext, setting, steps, train, inference
+) -> None:
+    """``--compile`` resolved onto TensorFlow's three tiers."""
+    context_binary.config.advanced.compile = setting
+    model = LearnMSAModel(context_binary)
+
+    assert model._compile_mode(steps) == train
+    assert model._inference_compile_mode(steps) == inference
+
+
+def test_compile_off_runs_eagerly(context_binary: LearnMSAContext) -> None:
+    """``--compile off`` has to reach Keras itself, not just our wrappers."""
+    context_binary.config.advanced.compile = "off"
+    model = LearnMSAModel(context_binary)
+    model.build()
+    model.compile(total_steps=100)
+
+    assert model.run_eagerly is True
+    assert model.jit_compile is False
+
+
+def test_compile_jit_forces_xla(context_binary: LearnMSAContext) -> None:
+    context_binary.config.advanced.compile = "jit"
+    model = LearnMSAModel(context_binary)
+    model.build()
+    model.compile(total_steps=5)
+
+    assert model.run_eagerly is False
+    assert model.jit_compile is True

@@ -324,31 +324,51 @@ def _force_compilation(model: LearnMSAModel) -> None:
     """Take the compile decision a real run would take.
 
     The reference datasets in this module are far below the step counts at
-    which ``use_jit_compile`` considers compiling worthwhile.
+    which ``--compile auto`` considers compiling worthwhile, so ask for it
+    outright.
     """
-    model.use_jit_compile = lambda total_steps=None: True  # type: ignore
+    model.context.config.advanced.compile = "on"
 
 
-def test_graph_compilation_follows_jit_policy(
+def test_graph_compilation_follows_compile_policy(
     context_binary: LearnMSAContext, fresh_dynamo
 ) -> None:
-    """``compile`` installs the compiled callable exactly when
-    ``use_jit_compile`` says so -- which is what ``--no_jit`` controls."""
+    """``compile`` installs the compiled callable exactly when ``--compile``
+    says so."""
     model = LearnMSAModel(context_binary)
     model.build()
     model.loglik_mode()
 
-    # Too few steps to amortize the compilation.
+    # --compile auto: too few steps to amortize the compilation.
     model.compile(total_steps=5)
     assert model._compiled_call_impl is None
 
     model.compile(total_steps=100)
     assert model._compiled_call_impl is not None
 
-    # --no_jit
-    context_binary.config.advanced.jit_compile = False
+    # --compile off never compiles, however long the run.
+    context_binary.config.advanced.compile = "off"
     model.compile(total_steps=100)
     assert model._compiled_call_impl is None
+
+    # --compile on always does, however short.
+    context_binary.config.advanced.compile = "on"
+    model.compile(total_steps=5)
+    assert model._compiled_call_impl is not None
+
+
+def test_compile_jit_is_rejected_under_torch(
+    context_binary: LearnMSAContext, fresh_dynamo
+) -> None:
+    """``jit`` names TensorFlow's XLA JIT, which torch has no equivalent for.
+    The CLI catches it, but a library caller must not get it silently."""
+    model = LearnMSAModel(context_binary)
+    model.build()
+    model.loglik_mode()
+
+    context_binary.config.advanced.compile = "jit"
+    with pytest.raises(ValueError, match="no PyTorch equivalent"):
+        model.compile(total_steps=100)
 
 
 def test_compiled_predict_matches_reference(

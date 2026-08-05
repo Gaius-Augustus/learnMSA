@@ -11,6 +11,8 @@ from pathlib import Path
 
 import torch
 
+from learnMSA.config import Configuration
+from learnMSA.model.checkpoint import apply_runtime_config
 from learnMSA.model.context import LearnMSAContext
 from learnMSA.model.torch.model import TorchLearnMSAModel
 
@@ -33,8 +35,17 @@ def save_model(model: TorchLearnMSAModel, filepath: str | Path) -> None:
     )
 
 
-def load_model(filepath: str | Path) -> TorchLearnMSAModel:
-    """Rebuild a model from a checkpoint and load its parameters."""
+def load_model(
+    filepath: str | Path,
+    config: Configuration | None = None,
+) -> TorchLearnMSAModel:
+    """Rebuild a model from a checkpoint and load its parameters.
+
+    Args:
+        filepath: Path of the checkpoint, without :data:`SUFFIX`.
+        config: Configuration of the current run, whose runtime settings
+            override the checkpoint's (see :func:`apply_runtime_config`).
+    """
     # The checkpoint holds learnMSA's own config objects rather than plain
     # tensors, so it has to be unpickled fully; these files are written by
     # learnMSA itself.
@@ -50,6 +61,9 @@ def load_model(filepath: str | Path) -> TorchLearnMSAModel:
         )
 
     context = LearnMSAContext.from_config(checkpoint["context"])
+    # Before the model is built: the pHMM layer reads ``advanced.no_triton``
+    # when it is constructed, not when it is called.
+    apply_runtime_config(context.config, config)
     model = TorchLearnMSAModel(context)
     # The parameters do not exist until the layers are built, so build before
     # loading rather than after.

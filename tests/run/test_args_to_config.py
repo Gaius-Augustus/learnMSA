@@ -1,6 +1,8 @@
 from pathlib import Path
 import sys
 
+import pytest
+
 from learnMSA.run.args import parse_args
 from learnMSA.run.args_to_config import args_to_config
 
@@ -255,21 +257,55 @@ class TestArgsToConfig:
         assert config.language_model.inverse_gamma_beta == 1.0
         assert config.advanced.initial_distance == 0.1
         assert config.tree.trainable_rates is False
-        # Graph compilation is on unless --no_jit is given.
-        assert config.advanced.jit_compile is True
+        # Graph compilation is decided per run unless --compile says otherwise.
+        assert config.advanced.compile == "auto"
 
-    def test_args_to_config_no_jit(self):
-        """--no_jit disables graph compilation on either backend."""
+    @pytest.mark.parametrize("value", ["auto", "on", "off", "jit"])
+    def test_args_to_config_compile(self, value):
+        """--compile reaches the config verbatim, for every accepted value."""
         parser = parse_args("test_version")
         args = parser.parse_args([
             "-i", "input.fasta",
             "-o", "output.a2m",
-            "--no_jit",
+            "--compile", value,
         ])
 
         config = args_to_config(args)
 
-        assert config.advanced.jit_compile is False
+        assert config.advanced.compile == value
+
+    def test_compile_rejects_unknown_value(self):
+        """argparse guards the enum, so a typo fails before anything runs."""
+        parser = parse_args("test_version")
+        with pytest.raises(SystemExit):
+            parser.parse_args([
+                "-i", "input.fasta",
+                "-o", "output.a2m",
+                "--compile", "yes",
+            ])
+
+    def test_args_to_config_no_triton(self):
+        """--no_triton switches the torch HMM over to the plain scan."""
+        parser = parse_args("test_version")
+        base = parser.parse_args(["-i", "input.fasta", "-o", "output.a2m"])
+        args = parser.parse_args([
+            "-i", "input.fasta",
+            "-o", "output.a2m",
+            "--no_triton",
+        ])
+
+        assert args_to_config(base).advanced.no_triton is False
+        assert args_to_config(args).advanced.no_triton is True
+
+    def test_no_jit_is_gone(self):
+        """--no_jit was replaced by --compile off."""
+        parser = parse_args("test_version")
+        with pytest.raises(SystemExit):
+            parser.parse_args([
+                "-i", "input.fasta",
+                "-o", "output.a2m",
+                "--no_jit",
+            ])
 
     def test_args_to_config_num_model_from_length_init(self):
         """Test that num_model is computed from length_init when provided."""

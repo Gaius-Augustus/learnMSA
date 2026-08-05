@@ -158,6 +158,7 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
             emb_value_sets=context.emb_values,
             joint_aa_struct_value_sets=context.joint_values,
             no_aa=train_cfg.no_aa,
+            use_triton=False if context.config.advanced.no_triton else "auto",
         )
 
         # Metrics trackers
@@ -347,7 +348,7 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
         Args:
             total_steps: The number of steps the model will be called for, used
                 to decide whether compiling pays off (see
-                :meth:`~learnMSA.model.model.LearnMSAModel.use_jit_compile`).
+                :meth:`_want_compile`).
         """
         self.optimizer = torch.optim.Adam(
             [p for p in self.parameters() if p.requires_grad],
@@ -355,10 +356,26 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
         )
         self._setup_graph_compile(total_steps)
 
+    def _want_compile(self, total_steps: int | None = None) -> bool:
+        """``advanced.compile`` resolved for this backend.
+
+        PyTorch has no tier between eager and ``torch.compile`` -- the latter
+        *is* its graph mode -- so ``on`` means compiling, unlike under
+        TensorFlow where it stops short of XLA.
+        """
+        mode = self.context.config.advanced.compile
+        if mode == "jit":
+            raise ValueError(
+                "advanced.compile='jit' selects TensorFlow's XLA JIT and has "
+                "no PyTorch equivalent. Use 'on' for torch.compile."
+            )
+        return mode == "on" or (
+            mode == "auto" and self.compilation_pays_off(total_steps)
+        )
+
     def _setup_graph_compile(self, total_steps: int | None = None) -> None:
         """Enable or disable ``torch.compile`` for the forward and backward
-        pass, following the backend-neutral :meth:`use_jit_compile` policy
-        (and therefore ``--no_jit``).
+        pass, following :meth:`_want_compile` (and therefore ``--compile``).
 
         This class shadows ``torch.nn.Module.compile``, so the base
         implementation is called explicitly. It installs the compiled callable
@@ -368,9 +385,10 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
         forward.
 
         Compilation is deliberately strict (``fullgraph=True``): a graph break
-        raises instead of silently degrading, and ``--no_jit`` is the way out.
+        raises instead of silently degrading, and ``--compile off`` is the way
+        out.
         """
-        want = self.use_jit_compile(total_steps)
+        want = self._want_compile(total_steps)
         if want and not getattr(self.phmm_layer.hmm, "_built", False):
             # The HMM builds lazily on its first call. Creating parameters
             # while dynamo traces breaks a full graph, so wait for build().
@@ -438,7 +456,7 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
             steps_per_epoch = self.get_num_steps(indices.shape[0], batch_size)
 
         s = steps_per_epoch
-        self.context.batch_gen.static_shape_mode = self.use_jit_compile(s)
+        self.context.batch_gen.static_shape_mode = self._want_compile(s)
         self.compile(total_steps=steps_per_epoch)
 
         self._print_train_header(indices, batch_size, data[0])

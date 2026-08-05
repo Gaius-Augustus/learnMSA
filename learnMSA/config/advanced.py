@@ -10,6 +10,18 @@ class AdvancedConfig(BaseModel):
     """Tensor framework used for training and decoding. ``auto`` picks whichever
     framework is installed, preferring TensorFlow when both are available."""
 
+    compile: Literal["auto", "on", "off", "jit"] = "auto"
+    """Graph compilation policy. ``auto`` compiles only when the run is long
+    enough to pay for it. ``on`` always builds a graph (``tf.function`` without
+    XLA under TensorFlow, ``torch.compile(fullgraph=True)`` under PyTorch),
+    ``off`` never does, and ``jit`` forces XLA -- TensorFlow only."""
+
+    no_triton: bool = False
+    """Whether to run the HMM's forward and Viterbi recursions with the plain
+    torch scan instead of the Triton kernels. PyTorch only; the Triton kernels
+    are usually faster, but the scan is a fallback when they are unavailable or
+    misbehave."""
+
     dist_out: str = ""
     """Distribution output file."""
 
@@ -23,9 +35,6 @@ class AdvancedConfig(BaseModel):
 
     aligner_threads: int = 0
     """Number of threads to use for the aligner."""
-
-    jit_compile: bool = True
-    """Enable XLA JIT compilation in TensorFlow."""
 
     one_dnn_opts: bool = False
     """Whether to use oneDNN optimizations in TensorFlow. This can improve

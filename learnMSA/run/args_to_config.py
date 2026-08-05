@@ -162,7 +162,8 @@ def args_to_config(
     adv["backend"] = args.backend
     adv["dist_out"] = args.dist_out
     adv["initial_distance"] = args.initial_distance
-    adv["jit_compile"] = not args.no_jit
+    adv["compile"] = args.compile
+    adv["no_triton"] = args.no_triton
 
     # Deprecated checks
     if args.noA2M:

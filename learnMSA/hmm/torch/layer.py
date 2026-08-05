@@ -7,6 +7,7 @@ classes, and the three methods that actually touch tensors.
 """
 
 from collections.abc import Sequence
+from typing import Literal
 
 import numpy as np
 import torch
@@ -62,13 +63,20 @@ class TorchPHMMLayer(torch.nn.Module, PHMMLayer[T_TorchTensor]):
         struct_value_sets: Sequence[PHMMValueSet] | None = None,
         joint_aa_struct_value_sets: Sequence[PHMMValueSet] | None = None,
         no_aa: bool = False,
+        use_triton: bool | Literal["auto"] = "auto",
         **kwargs
     ) -> None:
         """See :meth:`learnMSA.hmm.layer.PHMMLayer._init_phmm` for the
         arguments; ``kwargs`` are accepted for signature parity with the
         TensorFlow layer and ignored.
+
+        Args:
+            use_triton: Whether the recursions use the Triton kernels. ``False``
+                falls back to the torch scan; the default ``"auto"`` lets
+                hidten decide (see ``advanced.no_triton``).
         """
         torch.nn.Module.__init__(self)
+        self.use_triton = use_triton
         self._init_phmm(
             lengths=lengths,
             config=config,
@@ -97,7 +105,12 @@ class TorchPHMMLayer(torch.nn.Module, PHMMLayer[T_TorchTensor]):
         if adds is not None:
             args += tuple(adds)
         args += (padding,)
-        return self.hmm(*args, mode=self._mode, output_dtype=torch.int32)
+        return self.hmm(
+            *args,
+            mode=self._mode,
+            use_triton=self.use_triton,
+            output_dtype=torch.int32,
+        )
 
     #: The neutral base and its callers use ``call``; torch modules use
     #: ``forward``. They are the same method.

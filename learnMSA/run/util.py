@@ -54,8 +54,7 @@ def setup_devices(
 
     if get_backend() == "tensorflow":
         _setup_tensorflow_env(one_dnn_opts)
-    else:
-        _setup_torch_env()
+    backend.configure_runtime()
 
     # Check if multiple GPUs are installed / set in the environment variable
     if get_num_gpus() > 1:
@@ -103,16 +102,6 @@ def _setup_tensorflow_env(one_dnn_opts: bool) -> None:
     os.environ.setdefault("TF_CPP_MIN_VLOG_LEVEL", "3")
     os.environ.setdefault("GLOG_minloglevel", "3")
     os.environ.setdefault("ABSL_MIN_LOG_LEVEL", "3")
-
-
-def _setup_torch_env() -> None:
-    """Global torch settings that must be in place before the first kernel."""
-    import torch
-
-    # Use the tensor cores for float32 matrix multiplication on Ampere and
-    # newer. TensorFlow does this by default, so both backends now agree on
-    # matmul precision; torch otherwise warns about it on every compilation.
-    torch.set_float32_matmul_precision("high")
 
 
 def get_num_gpus() -> int:

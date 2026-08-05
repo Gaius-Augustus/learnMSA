@@ -182,28 +182,27 @@ class LearnMSAModel(PHMMMixin, Generic[T_Tensor]):
         steps = int(100*np.sqrt(num_sequences)/batch_size)
         return min(max(min_steps, steps), 500)
 
-    def use_jit_compile(self, total_steps: int | None = None) -> bool:
+    def compilation_pays_off(self, total_steps: int | None = None) -> bool:
         """
-        Determine whether to use JIT compilation for training.
+        The threshold behind ``--compile auto``: is the run long enough that
+        compiling it earns its cost back? The other ``--compile`` settings say
+        what to do outright and never consult this.
 
         Args:
             total_steps: The total number of steps the model will be called for
-                (optional). If provided, it is used to decide if JIT should be
-                enabled based on the threshold.
+                (optional). Without it there is nothing to weigh the compile
+                against, so compiling is assumed to pay off.
 
         Returns:
-            True if JIT compilation should be used, False otherwise.
+            True if the run is long enough to compile, False otherwise.
         """
-        jit_compile = self.context.config.advanced.jit_compile
-        if total_steps is not None:
-            # jit compilation becomes very slow for long HMMs
-            # (say > 450 matches)
-            # make sure we only enable it if we will be running long enough to
-            # benefit from it
-            jit_compile = jit_compile and total_steps >= 20
-            if max(self.context.model_lengths) > 450:
-                jit_compile = jit_compile and total_steps >= 100
-        return jit_compile
+        if total_steps is None:
+            return True
+        # Compilation becomes very slow for long HMMs (say > 450 matches), so
+        # those need a longer run before it is worth it.
+        if max(self.context.model_lengths) > 450:
+            return total_steps >= 100
+        return total_steps >= 20
 
     def get_verbosity(self) -> Literal[0, 2]:
         """

@@ -273,6 +273,41 @@ class TFLearnMSAModel(tf.keras.Model, LearnMSAModel[tf.Tensor]):
         input_shape += ((B, None, n, 1),) # padding
         self.phmm_layer.build(input_shape = input_shape)
 
+    def _compile_mode(
+        self, total_steps: int | None = None
+    ) -> Literal["eager", "graph", "jit"]:
+        """``advanced.compile`` resolved for the training graph.
+
+        TensorFlow has three tiers, so the setting maps onto them directly:
+        ``off`` runs eagerly, ``on`` builds a ``tf.function`` without XLA and
+        ``jit`` adds XLA. ``auto`` picks XLA when the run is long enough to pay
+        for it and falls back to the plain graph, which is what Keras does by
+        default.
+        """
+        mode = self.context.config.advanced.compile
+        if mode == "off":
+            return "eager"
+        if mode == "on":
+            return "graph"
+        if mode == "jit":
+            return "jit"
+        return "jit" if self.compilation_pays_off(total_steps) else "graph"
+
+    def _inference_compile_mode(
+        self, total_steps: int | None = None
+    ) -> Literal["eager", "graph", "jit"]:
+        """:meth:`_compile_mode` for predict and evaluate.
+
+        Only ``auto`` differs: it has never wrapped inference in a
+        ``tf.function`` unless it reached XLA, since a single traced graph
+        rarely earns its cost back over a handful of prediction batches. The
+        explicit settings mean what they say on every path.
+        """
+        mode = self._compile_mode(total_steps)
+        if self.context.config.advanced.compile == "auto" and mode != "jit":
+            return "eager"
+        return mode
+
     @override
     def compile(self, total_steps: int | None = None) -> None:
         """
@@ -292,9 +327,11 @@ class TFLearnMSAModel(tf.keras.Model, LearnMSAModel[tf.Tensor]):
             self.context.config.training.learning_rate,
             global_clipnorm=clipnorm if clipnorm > 0 else None,
         )
+        compile_mode = self._compile_mode(total_steps)
         super().compile(
             optimizer=optimizer,
-            jit_compile=self.use_jit_compile(total_steps),
+            jit_compile=compile_mode == "jit",
+            run_eagerly=compile_mode == "eager",
         )
 
     @override
@@ -353,7 +390,8 @@ class TFLearnMSAModel(tf.keras.Model, LearnMSAModel[tf.Tensor]):
 
         # use static shapes when JIT is enabled
         s = steps_per_epoch
-        self.context.batch_gen.static_shape_mode = self.use_jit_compile(s)
+        self.context.batch_gen.static_shape_mode = \
+            self._compile_mode(s) == "jit"
         self.compile(total_steps=s)
 
         self._print_train_header(indices, batch_size, data[0])
@@ -627,8 +665,11 @@ class TFLearnMSAModel(tf.keras.Model, LearnMSAModel[tf.Tensor]):
                 # Sum over sequence positions (axis 1) and batch (axis 0)
                 return tf.reduce_sum(y, axis=[0, 1])
 
-            if self.use_jit_compile(steps):
-                reduce_batch = tf.function(reduce_batch, jit_compile=True)
+            compile_mode = self._inference_compile_mode(steps)
+            if compile_mode != "eager":
+                reduce_batch = tf.function(
+                    reduce_batch, jit_compile=compile_mode == "jit"
+                )
 
             for batch_data in ds.take(steps):
                 y = reduce_batch(batch_data)
@@ -659,10 +700,12 @@ class TFLearnMSAModel(tf.keras.Model, LearnMSAModel[tf.Tensor]):
             # int (no CPU–GPU sync mid-batch).
             from learnMSA.align.tf.decode import _get_dynamic_decode_fn
 
-            jit = self.use_jit_compile(steps)
+            compile_mode = self._inference_compile_mode(steps)
             predict_step_fn = self.predict_step
-            if jit:
-                predict_step_fn = tf.function(predict_step_fn, jit_compile=True)
+            if compile_mode != "eager":
+                predict_step_fn = tf.function(
+                    predict_step_fn, jit_compile=compile_mode == "jit"
+                )
 
             model_j = _models[0]
             c = int(self.phmm_layer.lengths[model_j])
@@ -684,7 +727,11 @@ class TFLearnMSAModel(tf.keras.Model, LearnMSAModel[tf.Tensor]):
                 outputs_t = dynamic_decode_fn(ss_t, R_max_t)
                 return outputs_t, batch_j_t
 
-            fused_step_fn = tf.function(_fused_step, jit_compile=False)
+            # Never XLA-compiled: the dynamic decode inside has a data
+            # dependent shape. It is still worth a plain tf.function.
+            fused_step_fn = _fused_step
+            if compile_mode != "eager":
+                fused_step_fn = tf.function(_fused_step, jit_compile=False)
 
             all_raw: list[dict] = []
             all_j: list[np.ndarray] = []
@@ -715,8 +762,11 @@ class TFLearnMSAModel(tf.keras.Model, LearnMSAModel[tf.Tensor]):
             return reorder_decode_arrays(concat_dict, sorted_order)
 
         predict_batch = self.predict_step
-        if self.use_jit_compile(steps):
-            predict_batch = tf.function(self.predict_step, jit_compile=True)
+        compile_mode = self._inference_compile_mode(steps)
+        if compile_mode != "eager":
+            predict_batch = tf.function(
+                self.predict_step, jit_compile=compile_mode == "jit"
+            )
 
         is_posterior = self.phmm_layer.is_posterior_mode()
         is_decoding = self.phmm_layer.is_decoding_mode()
@@ -1082,10 +1132,12 @@ class TFLearnMSAModel(tf.keras.Model, LearnMSAModel[tf.Tensor]):
             logp = tf.where(mask, tf.math.log(p + 1e-10), tf.zeros_like(p))
             return tf.reduce_sum(logp, axis=1)  # (batch,)
 
-        compute_batch_emissions = tf.function(
-            compute_batch_emissions,
-            jit_compile=self.use_jit_compile(steps),
-        )
+        compile_mode = self._inference_compile_mode(steps)
+        if compile_mode != "eager":
+            compute_batch_emissions = tf.function(
+                compute_batch_emissions,
+                jit_compile=compile_mode == "jit",
+            )
 
         for batch_data, _ in ds:
             # Handle bucketed datasets

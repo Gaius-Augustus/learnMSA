@@ -655,11 +655,25 @@ def parse_args(
             "when both are available."
     )
     advanced_group.add_argument(
-        "--no_jit",
-        dest="no_jit",
-        action='store_true',
-        help="Disable graph compilation (XLA JIT with TensorFlow, "
-            "torch.compile with PyTorch)."
+        "--compile",
+        dest="compile",
+        type=str,
+        choices=["auto", "on", "off", "jit"],
+        default=adv.compile,
+        help="Graph compilation policy. By default ('auto') the model is "\
+            "compiled only when the run is long enough to pay for it. 'on' "\
+            "always compiles (a tf.function without XLA with TensorFlow, "\
+            "torch.compile with PyTorch), 'off' always runs eagerly, and "\
+            "'jit' forces XLA JIT compilation, which TensorFlow supports "\
+            "and PyTorch does not."
+    )
+    advanced_group.add_argument(
+        "--no_triton",
+        dest="no_triton",
+        action="store_true",
+        help="Run the HMM recursions with the torch scan instead of the "\
+            "Triton kernels. PyTorch only; the kernels are usually faster, so "\
+            "this is a fallback when they are unavailable or misbehave."
     )
 
     deprecated_group = parser.add_argument_group("Deprecated arguments")

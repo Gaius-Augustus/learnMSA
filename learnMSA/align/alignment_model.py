@@ -10,6 +10,7 @@ import numpy as np
 from learnMSA.align.align_inserts import AlignedInsertions
 from learnMSA.align.alignment_metadata import AlignmentMetaData
 from learnMSA.backend import get_backend, is_backend_set, set_backend
+from learnMSA.config import Configuration
 from learnMSA.align.align_hits import HitAlignmentMode, hit_alignment
 from learnMSA.model.select import SelectionCriterion, select_model
 from learnMSA.model.model import LearnMSAModel
@@ -577,6 +578,7 @@ class AlignmentModel():
         filepath: str | Path,
         data: SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]],
         from_packed: bool = True,
+        config: Configuration | None = None,
     ):
         """ Loads an AlignmentModel instance from a file.
 
@@ -584,6 +586,9 @@ class AlignmentModel():
             filepath: Path of the file to load.
             from_packed: Pass true or false depending on the pack argument used
                 with write_models_to_file.
+            config: Configuration of the current run. Settings that describe
+                how a run executes rather than what the model is (``--compile``,
+                ``--no_triton``) are taken from it instead of from the file.
 
         Returns:
             An AlignmentModel instance with equivalent behavior as the
@@ -613,7 +618,7 @@ class AlignmentModel():
         set_backend(saved_backend)
 
         # Load the model
-        model = load_model(filepath)
+        model = load_model(filepath, config)
 
         if from_packed:
             #after loading remove unpacked files and keep only the archive

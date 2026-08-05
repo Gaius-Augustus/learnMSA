@@ -1,5 +1,7 @@
 import subprocess
 
+import pytest
+
 from learnMSA.util.sequence_dataset import SequenceDataset
 
 
@@ -94,3 +96,26 @@ def test_file_conversion_and_input_format() -> None:
     subprocess.Popen(
         ["rm", output_clustal, output_fasta],stderr=subprocess.PIPE
     ).communicate()
+
+
+def test_compile_jit_rejected_under_torch() -> None:
+    """--compile jit names TensorFlow's XLA JIT. The backend is only known
+    after the framework has been selected, so this is caught in the console
+    rather than by argparse."""
+    pytest.importorskip("torch")
+
+    expected_err = (
+        "--compile jit selects TensorFlow's XLA JIT and is not available "
+        "under the pytorch backend. Use --compile on for torch.compile."
+    )
+    test = subprocess.Popen(
+        [
+            "python", "learnMSA.py", "--silent",
+            "-i", "tests/data/egf.fasta", "-o", "test.out",
+            "--backend", "pytorch", "--compile", "jit",
+        ],
+        stderr=subprocess.PIPE
+    )
+    output = test.communicate()[1].strip().decode('ascii')
+    assert test.returncode != 0
+    assert expected_err in output
