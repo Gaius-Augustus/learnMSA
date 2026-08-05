@@ -305,3 +305,105 @@ def test_decode_modes_are_refused(context_binary: LearnMSAContext) -> None:
 
     with pytest.raises(NotImplementedError, match="TensorFlow"):
         model.predict(data)
+
+
+@pytest.fixture
+def fresh_dynamo():
+    """Compile from a clean Dynamo cache.
+
+    All compiled tests here trace the same code object under different guards
+    (call mode, shapes), so without a reset they share one cache entry budget.
+    Under ``fullgraph=True`` running out surfaces as a hard failure.
+    """
+    torch._dynamo.reset()
+    yield
+    torch._dynamo.reset()
+
+
+def _force_compilation(model: LearnMSAModel) -> None:
+    """Take the compile decision a real run would take.
+
+    The reference datasets in this module are far below the step counts at
+    which ``use_jit_compile`` considers compiling worthwhile.
+    """
+    model.use_jit_compile = lambda total_steps=None: True  # type: ignore
+
+
+def test_graph_compilation_follows_jit_policy(
+    context_binary: LearnMSAContext, fresh_dynamo
+) -> None:
+    """``compile`` installs the compiled callable exactly when
+    ``use_jit_compile`` says so -- which is what ``--no_jit`` controls."""
+    model = LearnMSAModel(context_binary)
+    model.build()
+    model.loglik_mode()
+
+    # Too few steps to amortize the compilation.
+    model.compile(total_steps=5)
+    assert model._compiled_call_impl is None
+
+    model.compile(total_steps=100)
+    assert model._compiled_call_impl is not None
+
+    # --no_jit
+    context_binary.config.advanced.jit_compile = False
+    model.compile(total_steps=100)
+    assert model._compiled_call_impl is None
+
+
+def test_compiled_predict_matches_reference(
+    context_binary: LearnMSAContext, fresh_dynamo
+) -> None:
+    """Compiled log-likelihoods must equal the analytic reference, so that
+    ``fullgraph=True`` is not silently changing the model."""
+    model = LearnMSAModel(context_binary)
+    model.build()
+    model.loglik_mode()
+    _force_compilation(model)
+    model.compile()
+    assert model._compiled_call_impl is not None
+
+    data = SequenceDataset(
+        sequences=[(str(i), "ABA") for i in range(4)], alphabet="AB"
+    )
+    predictions = model.predict(
+        data, bucket_boundaries=[4], bucket_batch_sizes=[2, 2]
+    )
+
+    expected_loglik = np.log(ref.likelihoods).reshape((1, 2)).repeat(4, axis=0)
+    np.testing.assert_allclose(
+        predictions,
+        expected_loglik,
+        rtol=1e-3,
+        atol=1e-4,
+        err_msg="Compiled log-likelihoods do not match reference values",
+    )
+
+
+def test_compiled_fit_increases_target_emission(
+    context_amino_acid: LearnMSAContext, fresh_dynamo
+) -> None:
+    """Gradients must still flow when the backward pass is compiled too."""
+    model = LearnMSAModel(context_amino_acid)
+    model.build()
+    _force_compilation(model)
+
+    data = SequenceDataset(sequences=[
+        ("1", "AAAAAAAAAAAAAAAAAAAA"),
+        ("2", "AAAAAAAAAAAAAAAAAA"),
+        ("3", "AAAAAAAAAAAAA"),
+        ("4", "AAAAAAAAAAAAAAAAAA"),
+    ])
+
+    assert model.phmm_layer.profile_emitter is not None
+    with torch.no_grad():
+        before = model.phmm_layer.profile_emitter.matrix().cpu().numpy()
+
+    model.fit(data, batch_size=4, epochs=1, steps_per_epoch=3)
+    assert model._compiled_call_impl is not None
+
+    with torch.no_grad():
+        after = model.phmm_layer.profile_emitter.matrix().cpu().numpy()
+
+    assert after[:, :10, 0].mean() > before[:, :10, 0].mean(), \
+        "Emission probability for A did not increase under compiled training"

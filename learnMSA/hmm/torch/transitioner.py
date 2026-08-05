@@ -58,7 +58,10 @@ class TorchPHMMExplicitTransitioner(TorchTransitioner):
         allow_list, value_list, shared_list = [], [], []
         start, start_values = [], []
         states = []
-        self.lengths = [value_set.L for value_set in values]
+        # Plain ints, not numpy scalars: the lengths drive Python-level control
+        # flow (range, slicing), which a graph compiler models as tensor
+        # operations when they are numpy types.
+        self.lengths = [int(value_set.L) for value_set in values]
         max_states = PHMMTransitionIndexSet.num_states_unfolded(
             max(self.lengths)
         )
@@ -244,7 +247,8 @@ class TorchPHMMTransitioner(TorchTransitioner):
             shared_flanks=shared_flanks,
             allow_multi_hits=allow_multi_hits,
         )
-        self.lengths = [value_set.L for value_set in values]
+        # See TorchPHMMExplicitTransitioner.__init__ on why these are ints.
+        self.lengths = [int(value_set.L) for value_set in values]
 
         # Construct allow indices for the folded models
         transitions, start = [], []
@@ -275,6 +279,14 @@ class TorchPHMMTransitioner(TorchTransitioner):
 
         self.allow = np.vstack(transitions)
         self.allow_start = np.vstack(start)
+
+        # The explicit index sets are pure structure: they depend only on the
+        # head lengths, so they are built once here rather than on every call.
+        # Rebuilding them per call is wasted work eagerly, and a graph compiler
+        # cannot trace their construction at all.
+        self._explicit_index_sets = [
+            PHMMTransitionIndexSet(L, folded=False) for L in self.lengths
+        ]
 
     def enable_multi_hits(self, enable: bool = True) -> None:
         """Enable or disable multiple hits by setting the corresponding
@@ -466,7 +478,7 @@ class TorchPHMMTransitioner(TorchTransitioner):
         folded_start_probs = []
 
         for h, L in enumerate(self.lengths):
-            idx = PHMMTransitionIndexSet(L, folded=False)
+            idx = self._explicit_index_sets[h]
             log_mat = log_explicit_matrix[h]
             M_skip = self._compute_match_skip_matrix(h, log_mat=log_mat)
 
@@ -564,7 +576,7 @@ class TorchPHMMTransitioner(TorchTransitioner):
             log_mat = safe_log(self.explicit_transitioner.matrix())[h]
 
         # Create index sets for explicit and folded models
-        idx = PHMMTransitionIndexSet(L, folded=False)
+        idx = self._explicit_index_sets[h]
 
         # Helper to extract log prob from matrix
         def get(indices):

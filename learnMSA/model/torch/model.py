@@ -30,6 +30,31 @@ from learnMSA.model.torch.training import make_dataset
 from learnMSA.tree.torch.anc_probs_layer import TorchAncProbsLayer
 from learnMSA.util.sequence_dataset import Dataset, SequenceDataset
 
+#: Dynamo caches one compiled graph per distinct guard set. TorchPHMMLayer
+#: passes its call mode into the HMM, whose dispatch dynamo specializes on, so
+#: loglik / viterbi / mea / posterior each get their own entry -- on top of the
+#: head subset and the batch/length shapes. Torch's default of 8 is reached
+#: quickly and exceeding it is a hard error under ``fullgraph=True``.
+_DYNAMO_RECOMPILE_LIMIT = 64
+
+#: The budget across all cache entries of one code object (torch default 256).
+#: Model surgery builds a fresh model per iteration and the guards key on that
+#: instance, so entries accumulate over a run.
+_DYNAMO_ACCUMULATED_RECOMPILE_LIMIT = 512
+
+
+def _raise_dynamo_limits() -> None:
+    """Lift the recompilation limits to what learnMSA's guard sets need."""
+    cfg = torch._dynamo.config
+    for name, minimum in (
+        ("recompile_limit", _DYNAMO_RECOMPILE_LIMIT),
+        ("accumulated_recompile_limit", _DYNAMO_ACCUMULATED_RECOMPILE_LIMIT),
+    ):
+        # torch 2.7 renamed cache_size_limit -> recompile_limit.
+        if not hasattr(cfg, name):
+            name = name.replace("recompile_limit", "cache_size_limit")
+        setattr(cfg, name, max(getattr(cfg, name), minimum))
+
 
 class RunningMean:
     """The torch stand-in for ``keras.metrics.Mean``."""
@@ -153,6 +178,7 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
         self.encode_hmm_inputs = tree_cfg.use_anc_probs
 
         self.optimizer: torch.optim.Optimizer | None = None
+        self._graph_compiled = False
         self._device = torch.device(
             "cuda" if backend.num_gpus() > 0 else "cpu"
         )
@@ -190,12 +216,6 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
             raise ValueError(
                 "inputs must contain at least sequences and indices"
             )
-        sequences, *_ = inputs
-
-        # Keep track of the runtime batch sizes for more verbose OOM error
-        # handling
-        self.context.last_runtime_batch_size = int(sequences.shape[0])
-
         # Pass through encoder layers
         forward_seq, *adds = self.encode_batch(inputs, training=training)
 
@@ -211,6 +231,15 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
 
     #: The neutral base calls this ``call``; torch modules use ``forward``.
     call = forward
+
+    def _record_batch_size(self, batch: Sequence[torch.Tensor]) -> None:
+        """Keep track of the runtime batch size for verbose OOM messages.
+
+        Deliberately outside :meth:`forward`: reading a shape as a Python int
+        specializes the batch dimension when the model is graph-compiled, and
+        writing to the context mutates a plain Python object mid-graph.
+        """
+        self.context.last_runtime_batch_size = int(batch[0].shape[0])
 
     def encode_batch(
         self,
@@ -313,16 +342,50 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
     @override
     def compile(self, total_steps: int | None = None) -> None:
         """
-        Set up the Adam optimizer.
+        Set up the Adam optimizer and switch graph compilation on or off.
 
         Args:
-            total_steps: Accepted for signature parity with the TensorFlow
-                model, which uses it to decide on JIT compilation.
+            total_steps: The number of steps the model will be called for, used
+                to decide whether compiling pays off (see
+                :meth:`~learnMSA.model.model.LearnMSAModel.use_jit_compile`).
         """
         self.optimizer = torch.optim.Adam(
             [p for p in self.parameters() if p.requires_grad],
             lr=self.context.config.training.learning_rate,
         )
+        self._setup_graph_compile(total_steps)
+
+    def _setup_graph_compile(self, total_steps: int | None = None) -> None:
+        """Enable or disable ``torch.compile`` for the forward and backward
+        pass, following the backend-neutral :meth:`use_jit_compile` policy
+        (and therefore ``--no_jit``).
+
+        This class shadows ``torch.nn.Module.compile``, so the base
+        implementation is called explicitly. It installs the compiled callable
+        as ``_compiled_call_impl``, which ``Module.__call__`` prefers over
+        ``forward`` -- so training and inference are covered without changing
+        any call site, and the backward pass is compiled along with the forward.
+
+        Compilation is deliberately strict (``fullgraph=True``): a graph break
+        raises instead of silently degrading, and ``--no_jit`` is the way out.
+        """
+        want = self.use_jit_compile(total_steps)
+        if want and not getattr(self.phmm_layer.hmm, "_built", False):
+            # The HMM builds lazily on its first call. Creating parameters
+            # while dynamo traces breaks a full graph, so wait for build().
+            return
+        if want == self._graph_compiled:
+            # compile() runs once per fit, predict and evaluate. Re-wrapping
+            # would only throw away the graphs that are already cached; a
+            # changed pHMM call mode is handled by dynamo itself, which traces
+            # the new mode into an additional cache entry.
+            return
+        if want:
+            _raise_dynamo_limits()
+            torch.nn.Module.compile(self, fullgraph=True)
+        else:
+            self._compiled_call_impl = None
+        self._graph_compiled = want
 
     @override
     def fit(
@@ -373,7 +436,8 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
         if steps_per_epoch is None:
             steps_per_epoch = self.get_num_steps(indices.shape[0], batch_size)
 
-        self.context.batch_gen.static_shape_mode = False
+        s = steps_per_epoch
+        self.context.batch_gen.static_shape_mode = self.use_jit_compile(s)
         self.compile(total_steps=steps_per_epoch)
 
         self._print_train_header(indices, batch_size, data[0])
@@ -423,6 +487,7 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
         """One optimizer step on a single batch. Returns the loss."""
         assert self.optimizer is not None, "compile() must run before fit()."
         x = tuple(t.to(self._device) for t in batch)
+        self._record_batch_size(x)
         self.optimizer.zero_grad(set_to_none=True)
         y_pred = self(x)
         loss = self.compute_loss(x, None, y_pred)
@@ -811,6 +876,7 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
             ``(predictions, j)`` so the caller can restore the original order.
         """
         x = tuple(t.to(self._device) for t in batch)
+        self._record_batch_size(x)
         *inputs, j = x
         return self(tuple(inputs)), j
 
@@ -859,6 +925,7 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
         with torch.no_grad():
             for batch in loader:
                 x = tuple(t.to(self._device) for t in batch)
+                self._record_batch_size(x)
                 *inputs, _j = x
                 y_pred = self(tuple(inputs))
                 self.compute_loss(tuple(inputs), None, y_pred)

@@ -658,7 +658,8 @@ def parse_args(
         "--no_jit",
         dest="no_jit",
         action='store_true',
-        help="Disable XLA JIT compilation in TensorFlow."
+        help="Disable graph compilation (XLA JIT with TensorFlow, "
+            "torch.compile with PyTorch)."
     )
 
     deprecated_group = parser.add_argument_group("Deprecated arguments")

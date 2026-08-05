@@ -255,6 +255,21 @@ class TestArgsToConfig:
         assert config.language_model.inverse_gamma_beta == 1.0
         assert config.advanced.initial_distance == 0.1
         assert config.tree.trainable_rates is False
+        # Graph compilation is on unless --no_jit is given.
+        assert config.advanced.jit_compile is True
+
+    def test_args_to_config_no_jit(self):
+        """--no_jit disables graph compilation on either backend."""
+        parser = parse_args("test_version")
+        args = parser.parse_args([
+            "-i", "input.fasta",
+            "-o", "output.a2m",
+            "--no_jit",
+        ])
+
+        config = args_to_config(args)
+
+        assert config.advanced.jit_compile is False
 
     def test_args_to_config_num_model_from_length_init(self):
         """Test that num_model is computed from length_init when provided."""
