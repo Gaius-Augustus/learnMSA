@@ -149,10 +149,11 @@ def configure_runtime() -> None:
         return
     import torch
 
-    # Use the tensor cores for float32 matrix multiplication on Ampere and
-    # newer. TensorFlow does this by default, so both backends now agree on
-    # matmul precision; torch otherwise warns about it on every compilation.
-    torch.set_float32_matmul_precision("high")
+    # Use the tensor cores for float32 matrix multiplication
+    # Currently disabled because it brings no measurable speedup and
+    # to prevent numerical problems due to lower precision in (probability space)
+    # matrix multiplications.
+    # torch.set_float32_matmul_precision("high")
 
 
 def clear_session() -> None:

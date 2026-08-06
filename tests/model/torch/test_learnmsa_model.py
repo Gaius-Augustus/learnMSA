@@ -218,6 +218,63 @@ def test_fit_returns_history(context_amino_acid: LearnMSAContext) -> None:
     assert all(np.isfinite(history.history["loss"]))
 
 
+def _stub_flat_loss_train_step(
+    model: LearnMSAModel, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Replace ``_train_step`` with a stub that reports a constant loss,
+    so the epoch loop's early-stopping logic can be tested in isolation
+    from actual optimization."""
+    def fake_train_step(batch, clipnorm):
+        model.loss_tracker.update_state(1.0)
+        model.loglik_tracker.update_state(0.0)
+        model.prior_tracker.update_state(0.0)
+        return 1.0
+
+    monkeypatch.setattr(model, "_train_step", fake_train_step)
+
+
+def test_fit_early_stopping(
+    context_amino_acid: LearnMSAContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A non-improving loss must stop training after `patience` epochs,
+    mirroring the TensorFlow backend's EarlyStopping("loss", patience=...)."""
+    model = LearnMSAModel(context_amino_acid)
+    model.build()
+    model.compile()
+    data = SequenceDataset(
+        sequences=[(str(i), "ACDEFGHIKLMNPQRSTVWY") for i in range(4)]
+    )
+    _stub_flat_loss_train_step(model, monkeypatch)
+
+    history = model.fit(
+        data, batch_size=2, epochs=5, steps_per_epoch=1, patience=1
+    )
+
+    # Epoch 1 always "improves" over the initial best of inf; epoch 2 does
+    # not improve on a constant loss, so patience=1 stops right after it.
+    assert len(history.history["loss"]) == 2
+
+
+def test_fit_patience_delays_stopping(
+    context_amino_acid: LearnMSAContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A higher patience must tolerate more non-improving epochs before
+    stopping, confirming the parameter is respected rather than hardcoded."""
+    model = LearnMSAModel(context_amino_acid)
+    model.build()
+    model.compile()
+    data = SequenceDataset(
+        sequences=[(str(i), "ACDEFGHIKLMNPQRSTVWY") for i in range(4)]
+    )
+    _stub_flat_loss_train_step(model, monkeypatch)
+
+    history = model.fit(
+        data, batch_size=2, epochs=5, steps_per_epoch=1, patience=2
+    )
+
+    assert len(history.history["loss"]) == 3
+
+
 def test_evaluate_reports_per_model_metrics(
     context_binary: LearnMSAContext
 ) -> None:

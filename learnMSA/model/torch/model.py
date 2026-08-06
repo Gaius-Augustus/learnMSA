@@ -416,6 +416,7 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
         epochs: int | None = None,
         steps_per_epoch: int | None = None,
         callbacks: list = [],
+        patience: int = 1,
     ) -> History:
         """
         Fit the LearnMSA model on the specified sequences.
@@ -432,6 +433,8 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
                 setting).
             callbacks: Accepted for signature parity with the TensorFlow
                 model; the torch loop has no callback protocol.
+            patience: Number of epochs without a strict improvement in the
+                training loss before stopping early.
 
         Returns:
             A History object containing the per-epoch loss and metrics.
@@ -470,6 +473,8 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
         history = History()
         clipnorm = self.context.config.training.gradient_clipnorm
         verbose = self.context.config.input_output.verbose
+        best_loss = math.inf
+        wait = 0
         self.train()
         batches = iter(loader)
         for epoch in range(epochs):
@@ -497,6 +502,13 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
                 )
             if not math.isfinite(logs["loss"]):
                 break
+            if logs["loss"] < best_loss:
+                best_loss = logs["loss"]
+                wait = 0
+            else:
+                wait += 1
+                if wait >= patience:
+                    break
         self.eval()
 
         self._check_training_complete(history)
