@@ -11,8 +11,8 @@ import torch
 from hidten.hmm import HMMConfig as HidtenHMMConfig
 from hidten.prior import Prior
 from hidten.torch.transitioner import (T_shapelike, T_TorchTensor,
-                                       TorchTransitioner, TransitionMode,
-                                       shared_tensor)
+                                       TorchTransitioner, TransitionerState,
+                                       TransitionMode, shared_tensor)
 from hidten.torch.util import (log_zero, safe_log, tiny, to_tensor,
                                zero_row_softmax)
 
@@ -386,50 +386,47 @@ class TorchPHMMTransitioner(TorchTransitioner):
         self.explicit_transitioner.build()
 
     @override
-    def _launch(
+    def launch(
         self,
         transition_delta: T_TorchTensor | None = None,
         mode: TransitionMode = TransitionMode.SUM,
         use_padding: bool = True,  # not used
-    ) -> T_TorchTensor:
+    ) -> tuple[T_TorchTensor, TransitionerState]:
         # The HMM may pass use_padding=True, but this transitioner already
         # manages the terminal/padding semantics explicitly.
         # Keep the folded matrix/start dimensions at Q (no extra padding
         # row/col).
-        self.mode = mode
-
         log_explicit_matrix = safe_log(
             self.explicit_transitioner.matrix(transition_delta)
         )
         folded_transition_probs, folded_start_probs = \
             self._compute_folded_prob_vectors(log_explicit_matrix)
 
-        self._A = self._build_folded_matrix(folded_transition_probs)
+        A = self._build_folded_matrix(folded_transition_probs)
 
-        H, Q, _ = self._A.shape
+        H, Q, _ = A.shape
 
         # Compute a starting distribution depending on the mode
         if TransitionMode.REVERSE in mode:
             start_dist = torch.ones(
-                (H, Q), dtype=self._A.dtype, device=self._A.device
+                (H, Q), dtype=A.dtype, device=A.device
             )
         else:
             start_dist = self._build_folded_start_dist(folded_start_probs)
 
         if TransitionMode.ALLOWED in mode:
-            self._A = torch.where(self._A > tiny(self._A), 1., 0.)
+            A = torch.where(A > tiny(A), 1., 0.)
             start_dist = torch.where(
                 start_dist > tiny(start_dist), 1., 0.
             )
 
+        A_log = A_log_T = None
         if TransitionMode.LOG_SUM_EXP in mode or TransitionMode.MAX in mode:
-            # Build _A_log directly from the log-space folded_transition_probs
-            self._A_log = self._build_folded_log_matrix(
-                folded_transition_probs
-            )
-            self._A_log_T = self._A_log.transpose(-2, -1)
+            # Build A_log directly from the log-space folded_transition_probs
+            A_log = self._build_folded_log_matrix(folded_transition_probs)
+            A_log_T = A_log.transpose(-2, -1)
 
-        return start_dist
+        return start_dist, TransitionerState(A, A_log, A_log_T, mode)
 
     def _build_folded_log_matrix(
         self, folded_transition_log_probs: T_TorchTensor

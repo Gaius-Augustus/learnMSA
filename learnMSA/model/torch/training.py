@@ -52,6 +52,13 @@ class _RepeatingShuffleSampler(Sampler[list[int]]):
     torch sampler is asked for its length up front. Training instead runs for a
     fixed number of steps per epoch, so this sampler simply never stops, and
     :func:`make_dataset` reports ``-1`` steps for it.
+
+    Every batch has exactly ``batch_size`` entries. TF gets that for free by
+    repeating *before* batching, which leaves no end for a short batch to form
+    at; here the leftover of each permutation opens the next one instead.
+    Batching each permutation on its own would emit a ``size % batch_size``
+    remainder every pass, and under ``torch.compile(dynamic=False)`` that odd
+    shape costs a full second compile of the training graph.
     """
 
     def __init__(self, size: int, batch_size: int) -> None:
@@ -59,12 +66,14 @@ class _RepeatingShuffleSampler(Sampler[list[int]]):
         self.batch_size = batch_size
 
     def __iter__(self) -> Iterator[list[int]]:
+        carry: list[int] = []
         while True:
-            order = np.random.permutation(self.size)
-            for start in range(0, self.size, self.batch_size):
-                batch = order[start:start + self.batch_size]
-                if len(batch) > 0:
-                    yield batch.tolist()
+            order = carry + np.random.permutation(self.size).tolist()
+            n_full = len(order) // self.batch_size
+            for i in range(n_full):
+                yield order[i * self.batch_size:(i + 1) * self.batch_size]
+            # short of a batch: hand these to the head of the next permutation
+            carry = order[n_full * self.batch_size:]
 
     def __len__(self) -> int:
         return math.ceil(self.size / self.batch_size)

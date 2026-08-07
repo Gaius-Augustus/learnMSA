@@ -180,6 +180,8 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
 
         self.optimizer: torch.optim.Optimizer | None = None
         self._graph_compiled = False
+        # bucket shape -> that bucket's full batch size, see _pad_batch
+        self._predict_batch_sizes: dict[torch.Size, int] = {}
         self._device = torch.device(
             "cuda" if backend.num_gpus() > 0 else "cpu"
         )
@@ -844,6 +846,8 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
         self.context.batch_gen.configure(data, context=self.context)
         # Don't use static shapes for prediction - we'll use bucketing
         self.context.batch_gen.static_shape_mode = False
+        # the bucket scheme is rebuilt below, so last run's sizes do not apply
+        self._predict_batch_sizes = {}
         old_crop_long_seqs = self.context.batch_gen.crop_long_seqs
         # do not crop sequences
         self.context.batch_gen.crop_long_seqs = math.inf
@@ -909,7 +913,41 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
         x = tuple(t.to(self._device) for t in batch)
         self._record_batch_size(x)
         *inputs, j = x
-        return self(tuple(inputs)), j
+        inputs, n_padded = self._pad_batch(tuple(inputs))
+        pred = self(inputs)
+        if n_padded:
+            pred = pred[:-n_padded]
+        return pred, j
+
+    def _pad_batch(
+        self, inputs: tuple[torch.Tensor, ...]
+    ) -> tuple[tuple[torch.Tensor, ...], int]:
+        """Grows a short final batch back to its bucket's batch size.
+
+        Bucketing pads the sequence length but not the batch: the last batch
+        of a bucket holds the remainder, and under
+        ``torch.compile(dynamic=False)`` that second shape costs a full extra
+        compile of the prediction graph. Every input is padded together --
+        padding only the sequences leaves the anc-probs einsum with
+        mismatched leading dims. The rows are copies of the first sequence and
+        their predictions are dropped by the caller, so the result is
+        unchanged.
+
+        Returns:
+            The padded inputs and the number of rows added.
+        """
+        batch_size = inputs[0].shape[0]
+        target = self._predict_batch_sizes.get(inputs[0].shape[1:], 0)
+        if batch_size >= target:
+            # the first batch of a bucket is a full one, and defines the target
+            self._predict_batch_sizes[inputs[0].shape[1:]] = batch_size
+            return inputs, 0
+        n_padded = target - batch_size
+        padded = tuple(
+            torch.cat([t, t[:1].expand(n_padded, *t.shape[1:])], dim=0)
+            for t in inputs
+        )
+        return padded, n_padded
 
     def evaluate(
         self,

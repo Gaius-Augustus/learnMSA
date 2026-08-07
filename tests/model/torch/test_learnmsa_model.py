@@ -484,3 +484,38 @@ def test_compiled_fit_increases_target_emission(
 
     assert after[:, :10, 0].mean() > before[:, :10, 0].mean(), \
         "Emission probability for A did not increase under compiled training"
+
+
+def test_predict_padding_does_not_change_results(
+    context_binary: LearnMSAContext
+) -> None:
+    """Padding a short trailing batch must be invisible in the output.
+
+    The last batch of a bucket holds ``size % batch_size`` sequences. That
+    second shape costs a full extra compile under
+    ``torch.compile(dynamic=False)``, so :meth:`_pad_batch` grows it back to
+    the bucket's batch size and drops the extra rows again. This pins the
+    "drops them again" half.
+    """
+    model = LearnMSAModel(context_binary)
+    model.build()
+    model.compile()
+
+    # 7 sequences in one bucket of batch size 3 -> a trailing batch of 1
+    data = SequenceDataset(
+        sequences=[(str(i), "ABA") for i in range(7)], alphabet="AB"
+    )
+    kwargs = dict(bucket_boundaries=[4], bucket_batch_sizes=[3, 3])
+
+    padded = model.predict(data, **kwargs)
+
+    # same run with padding disabled
+    original = type(model)._pad_batch
+    try:
+        type(model)._pad_batch = lambda self, inputs: (inputs, 0)
+        unpadded = model.predict(data, **kwargs)
+    finally:
+        type(model)._pad_batch = original
+
+    assert padded.shape == unpadded.shape == (7, 2)
+    np.testing.assert_allclose(padded, unpadded, rtol=1e-6, atol=1e-6)
