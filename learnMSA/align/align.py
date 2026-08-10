@@ -106,7 +106,9 @@ def align(
                 "Try reducing the batch size (-b). The current batch size "\
                 "was: "+str(runtime_batch_size)+"."
             )
-            sys.exit(e.error_code)
+            # tf.errors.ResourceExhaustedError carries an error_code,
+            # torch.cuda.OutOfMemoryError does not
+            sys.exit(getattr(e, "error_code", 1))
 
     backend.clear_session()
 
