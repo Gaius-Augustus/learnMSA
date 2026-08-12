@@ -3,10 +3,46 @@ import numpy as np
 
 from learnMSA.run.util import get_batch_multiplicator, get_avail_memory_bytes
 
-DEFAULT_IMPL_FACTOR = 0.25
 MAX_BATCH_SIZE = 1_024
 MAX_TOKENS_PER_BATCH = 700_000
 MEMORY_DAMP = 0.5
+
+# Implementation factors for the adaptive batch size, per backend.
+#
+# To recalibrate use util/calibrate_impl_factor.py.
+IMPL_FACTORS: dict[str, dict[str, float]] = {
+    "tensorflow": {
+        "train": 27.0,
+        "inference": 13.0,
+        "language_model_train": 54.0,
+        "language_model_inference": 195.0,
+        "structure_train": 19.0,
+        "structure_inference": 9.0,
+    },
+    "pytorch": {
+        "train": 26.0,
+        "inference": 18.0,
+        "language_model_train": 173.0,
+        "language_model_inference": 386.0,
+        "structure_train": 61.0,
+        "structure_inference": 18.0,
+    },
+}
+
+
+def get_impl_factors(backend_name: str) -> dict[str, float]:
+    """
+    Returns the implementation factors of a backend.
+
+    Args:
+        backend_name: One of the names in IMPL_FACTORS, i.e. "tensorflow" or
+            "pytorch".
+
+    Returns:
+        The factor dictionary of that backend. Falls back to the TensorFlow
+        factors for an unknown backend.
+    """
+    return IMPL_FACTORS.get(backend_name, IMPL_FACTORS["tensorflow"])
 
 
 def get_initial_model_lengths(
@@ -106,8 +142,8 @@ def get_adaptive_batch_size(
         model_len: (int) The maximum number of match states.
         num_model: (int) The number of models.
         seq_len: (int) The maximum sequence length.
-        impl_factor: (float) An empirical factor to account for
-            implementation-specific memory overhead.
+        impl_factor: (float) Specific factor that can vary depending on the
+            context.
         safety_margin: (float) A safety margin to reduce the batch size to
             avoid OOM from edge cases.
         data_type_size: (int) The size of the data type in bytes
@@ -123,8 +159,8 @@ def get_adaptive_batch_size(
     mem_avail = REFERENCE_MEM * scale
     # large model numbers can cause OOM if not damped
     num_model_factor = num_model if num_model <= 4 else num_model ** 1.1
-    denominator = num_model_factor * float(model_len) ** 2 * float(seq_len)
-    denominator *= impl_factor * DEFAULT_IMPL_FACTOR * data_type_size
+    denominator = num_model_factor * float(model_len) * float(seq_len)
+    denominator *= impl_factor * data_type_size
     if denominator <= 0.0:
         return 1
     batch_size = int(np.floor(safety_margin * mem_avail / denominator))
@@ -135,7 +171,6 @@ def get_adaptive_batch_size(
 def tokens_per_batch_to_batch_size(
     tokens_per_batch: int,
     seq_len: int,
-    impl_factor: float = 1.0,
     max_batch_size: int = MAX_BATCH_SIZE,
 ) -> int:
     """
@@ -144,11 +179,7 @@ def tokens_per_batch_to_batch_size(
     Args:
         tokens_per_batch: (int) The desired number of tokens per batch.
         seq_len: (int) The maximum sequence length.
-        impl_factor: (float) An empirical factor to account for
-            implementation-specific memory overhead.
     """
     tokens_per_batch = min(tokens_per_batch, MAX_TOKENS_PER_BATCH)
-    batch_size = tokens_per_batch /\
-        (impl_factor * seq_len * DEFAULT_IMPL_FACTOR)
-    batch_size = int(np.floor(batch_size))
+    batch_size = int(tokens_per_batch // seq_len)
     return min(max(batch_size, 1), max_batch_size)

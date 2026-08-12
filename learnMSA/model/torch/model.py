@@ -1060,8 +1060,8 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
             indices=null_indices,
             batch_generator=self.context.batch_gen,
             model_lengths=self.phmm_layer.lengths,
-            # effectively doubles the batch size compared to training
-            batch_size_impl_factor=0.1,
+            # roughly triples the batch size compared to training
+            batch_size_impl_factor=8.7,
             max_batch_size_override=10000,
         )
 

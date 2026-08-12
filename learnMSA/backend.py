@@ -170,6 +170,32 @@ def clear_session() -> None:
             torch.cuda.empty_cache()
 
 
+def reset_peak_memory() -> None:
+    """Reset the framework's peak device-memory counter.
+    """
+    if num_gpus() == 0:
+        return
+    if get_backend() == "tensorflow":
+        import tensorflow as tf
+        tf.config.experimental.reset_memory_stats("GPU:0")
+        return
+    import torch
+    torch.cuda.reset_peak_memory_stats()
+
+
+def peak_memory_bytes() -> int:
+    """The peak device memory held by the framework since the last reset.
+    Returns 0 when no GPU is visible.
+    """
+    if num_gpus() == 0:
+        return 0
+    if get_backend() == "tensorflow":
+        import tensorflow as tf
+        return int(tf.config.experimental.get_memory_info("GPU:0")["peak"])
+    import torch
+    return int(torch.cuda.max_memory_reserved())
+
+
 def oom_errors() -> tuple[type[BaseException], ...]:
     """Exception types the backend raises when it runs out of device memory."""
     if get_backend() == "tensorflow":

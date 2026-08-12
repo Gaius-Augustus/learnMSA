@@ -417,15 +417,12 @@ class LearnMSAContext:
         If not, setup a callback to automatically scale the batch size based
         on sequence lengths and available GPU memory.
         """
-        use_language_model = self.config.language_model.use_language_model
-
         if self.config.training.tokens_per_batch > 0:
             def _batch_size_cb_with_tokens(data: SequenceDataset):
                 seq_len = min(data.max_len, int(self.config.training.crop)) + 1
                 return training_util.tokens_per_batch_to_batch_size(
                     tokens_per_batch=self.config.training.tokens_per_batch,
                     seq_len=seq_len,
-                    impl_factor=self._get_impl_factor(),
                 )
             return _batch_size_cb_with_tokens
 
@@ -447,18 +444,24 @@ class LearnMSAContext:
     def _get_impl_factor(self, inference: bool = False) -> float:
         """Get implementation factor for batch size scaling based on model
         type."""
+        # The factors are backend-specific.
+        from learnMSA.backend import get_backend
+
+        factors = training_util.get_impl_factors(get_backend())
+        suffix = "inference" if inference else "train"
+
         # Base implementation factor is smaller for inference, because we
         # don't need gradient (roughly halfes the memory usage).
-        impl_factor = 0.5 if inference else 1.0
+        impl_factor = factors[suffix]
 
         # Increase the implementation factor (smaller batches) when pLMs are
         # used. The factor need to be especially high for inference, because
         # the batch size limit for inference is larger than for training.
         if self.config.language_model.use_language_model:
-            impl_factor += 7.5 if inference else 2.0
+            impl_factor += factors[f"language_model_{suffix}"]
 
         if self.config.structure.use_structure:
-            impl_factor += 0.35 if inference else 0.7
+            impl_factor += factors[f"structure_{suffix}"]
 
         return impl_factor
 
