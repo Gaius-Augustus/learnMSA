@@ -31,6 +31,26 @@ process each, and reports the factor each probe implies plus a recommended
 aggregate. Nothing here is specific to a backend: pass ``--backend tensorflow``
 to recalibrate the TensorFlow column with the same code.
 
+``--features`` selects which input tracks a sweep probes, and therefore which
+key of ``IMPL_FACTORS`` it measures. The factors are absolute per
+configuration, so each value is measured on its own and no arithmetic relates
+them:
+
+===================== ==========================================
+``--features``        key in ``IMPL_FACTORS``
+===================== ==========================================
+``aa``                ``train`` / ``inference``
+``structure``         ``structure_*``
+``language_model``    ``language_model_*``
+``both``              ``language_model_and_structure_*``
+===================== ==========================================
+
+The struct and embedding tracks are fabricated the same way the amino acid one
+is -- a 3Di ``SequenceDataset`` and an in-memory ``EmbeddingCache`` of width
+``language_model.scoring_model_dim``. No protein language model is loaded:
+learnMSA consumes only the *reduced* embeddings, which the cache supplies
+directly.
+
 Probes are deterministic by construction: the probe dataset is a seeded draw of
 uniform-length random sequences of exactly ``S - 1`` residues, so every batch
 pads to ``S`` no matter how the batch generator permutes it, and ``L`` is
@@ -40,6 +60,7 @@ Example::
 
     python util/calibrate_impl_factor.py \\
         --backend pytorch --compile off --no-triton \\
+        --features aa,structure,language_model,both \\
         -o util/impl_factor_calibration.json
 """
 
@@ -63,12 +84,43 @@ DEFAULT_L: tuple[int, ...] = (20, 50, 100, 200, 300, 500, 700, 1000)
 DEFAULT_SEQ_LEN_FACTORS: tuple[float, ...] = (1.42, 3.0)
 DEFAULT_BATCH_SIZES: tuple[int, ...] = (4, 8, 32, 64, 128, 256, 512)
 DEFAULT_PHASES: tuple[str, ...] = ("train", "inference")
+DEFAULT_FEATURES: tuple[str, ...] = ("aa",)
 DEFAULT_STEPS: int = 3
 # Successful probes finish in seconds; anything near this is an allocator
 # thrashing on a workload that does not fit.
 DEFAULT_PROBE_TIMEOUT: float = 300.0
 PROBE_SEED: int = 0
 MIN_PROBE_SEQUENCES: int = 64
+
+#: The input tracks each ``--features`` value switches on, and the prefix of
+#: the ``IMPL_FACTORS`` key it measures. ``aa`` carries no prefix because the
+#: amino-acid-only factors are the unqualified ``train``/``inference``.
+FEATURES: dict[str, tuple[bool, bool, str]] = {
+    #                use_structure, use_language_model, key prefix
+    "aa": (False, False, ""),
+    "structure": (True, False, "structure"),
+    "language_model": (False, True, "language_model"),
+    "both": (True, True, "language_model_and_structure"),
+}
+
+
+def factor_key(features: str, phase: str) -> str:
+    """The ``IMPL_FACTORS`` key a sweep over ``features`` measures.
+
+    Args:
+        features: One of the keys of :data:`FEATURES`.
+        phase: ``"train"`` or ``"inference"``.
+
+    Returns:
+        The key to paste the measured factor under, so that a report can be
+        transcribed into ``IMPL_FACTORS`` without renaming anything.
+    """
+    if features not in FEATURES:
+        raise ValueError(
+            f"Unknown features '{features}'. Choose one of {sorted(FEATURES)}."
+        )
+    prefix = FEATURES[features][2]
+    return f"{prefix}_{phase}" if prefix else phase
 
 
 def default_shapes() -> list[tuple[int, int]]:
@@ -98,11 +150,17 @@ class ProbeSpec:
     compile_mode: str
     no_triton: bool
     inference_mode: str = "viterbi"
+    features: str = "aa"
 
     @property
     def label(self) -> str:
-        """The shape this probe belongs to."""
-        return f"L{self.model_len}xS{self.seq_len}"
+        """The workload this probe belongs to.
+
+        The features are part of it: the same ``L x S`` costs a different
+        amount of memory per track combination, so those measurements must
+        never be aggregated together.
+        """
+        return f"{self.features}/L{self.model_len}xS{self.seq_len}"
 
     def key(self) -> str:
         return f"{self.label}/{self.phase}/B{self.batch_size}"
@@ -217,7 +275,9 @@ def plan_probes(args: argparse.Namespace) -> list[ProbeSpec]:
             compile_mode=args.compile,
             no_triton=args.no_triton,
             inference_mode=args.inference_mode,
+            features=features,
         )
+        for features in args.features
         for model_len, seq_len in args.shapes
         for phase in args.phases
         for batch_size in args.batch_sizes
@@ -286,9 +346,9 @@ def _looks_like_oom(output: str) -> bool:
 
 
 def select_probes(
-    results: Iterable[ProbeResult], phase: str
+    results: Iterable[ProbeResult], phase: str, features: str = "aa"
 ) -> list[ProbeResult]:
-    """The probe that speaks for each shape in one phase.
+    """The probe that speaks for each shape in one phase and feature set.
 
     Two filters, and the order matters. First pick the largest batch size that
     ran: the measured ratio falls with the batch size, because the
@@ -304,7 +364,9 @@ def select_probes(
     """
     per_shape: dict[str, ProbeResult] = {}
     for r in results:
-        if r.spec.phase != phase or r.status != "ok":
+        if r.spec.phase != phase or r.spec.features != features:
+            continue
+        if r.status != "ok":
             continue
         best = per_shape.get(r.spec.label)
         if best is None or r.effective_batch_size > best.effective_batch_size:
@@ -314,21 +376,24 @@ def select_probes(
     ]
 
 
-def derive_factor(results: Iterable[ProbeResult], phase: str) -> float | None:
-    """The recommended implementation factor for one phase.
+def derive_factor(
+    results: Iterable[ProbeResult], phase: str, features: str = "aa"
+) -> float | None:
+    """The recommended implementation factor for one phase and feature set.
 
     The maximum over the per-shape operating points, i.e. the worst case among
     the workloads that are actually memory-bound.
     """
-    selected = select_probes(results, phase)
+    selected = select_probes(results, phase, features)
     return max(r.impl_factor for r in selected) if selected else None
 
 
 def print_table(results: Sequence[ProbeResult]) -> None:
     """Print the per-probe table."""
     header = (
-        f"{'phase':<11}{'L':>6}{'S':>6}{'B':>6}{'B_eff':>7}{'peak MiB':>10}"
-        f"{'ratio':>9}{'factor':>9}{'B_fit':>7}{'cap':>6}  status"
+        f"{'features':<16}{'phase':<11}{'L':>6}{'S':>6}{'B':>6}{'B_eff':>7}"
+        f"{'peak MiB':>10}{'ratio':>9}{'factor':>9}{'B_fit':>7}{'cap':>6}"
+        "  status"
     )
     print(header)
     print("-" * len(header))
@@ -338,7 +403,8 @@ def print_table(results: Sequence[ProbeResult]) -> None:
             "cap-bound" if r.cap_bound else "ok"
         )
         print(
-            f"{s.phase:<11}{s.model_len:>6}{s.seq_len:>6}{s.batch_size:>6}"
+            f"{s.features:<16}{s.phase:<11}{s.model_len:>6}{s.seq_len:>6}"
+            f"{s.batch_size:>6}"
             f"{r.effective_batch_size:>7}{r.peak_bytes / 1024 ** 2:>10.0f}"
             f"{r.ratio:>9.4f}{r.impl_factor:>9.3f}"
             f"{r.resulting_batch_size:>7}{r.batch_size_cap:>6}  {note}"
@@ -378,10 +444,11 @@ def build_report(
             for r in results
         ],
     )
-    for phase in args.phases:
-        factor = derive_factor(results, phase)
-        if factor is not None:
-            report.factors[phase] = factor
+    for features in args.features:
+        for phase in args.phases:
+            factor = derive_factor(results, phase, features)
+            if factor is not None:
+                report.factors[factor_key(features, phase)] = factor
     return report
 
 
@@ -399,10 +466,22 @@ def _learnmsa_version() -> str:
 
 
 def make_probe_config(spec: ProbeSpec) -> Any:
-    """A Configuration that pins every variable the formula depends on."""
+    """A Configuration that pins every variable the formula depends on.
+
+    Only the two track switches are set for ``--features``; every other
+    track-related setting stays at its default, which is what a real run uses
+    and what the probe datasets are built to match. Note that
+    ``use_language_model`` makes ``LearnMSAContext`` force
+    ``trainable_insertions=False`` -- that override is part of the workload
+    being measured, so it is deliberately left in place.
+    """
     from learnMSA import Configuration
 
+    use_structure, use_language_model, _ = FEATURES[spec.features]
+
     return Configuration(**{
+        "structure": {"use_structure": use_structure},
+        "language_model": {"use_language_model": use_language_model},
         "training": {
             # length_init pins L and implies num_model.
             "length_init": [spec.model_len] * spec.num_model,
@@ -421,25 +500,67 @@ def make_probe_config(spec: ProbeSpec) -> Any:
     })
 
 
-def make_probe_dataset(spec: ProbeSpec) -> Any:
-    """A dataset of uniform-length random sequences.
+def make_probe_datasets(spec: ProbeSpec, config: Any) -> tuple:
+    """The dataset tuple of uniform-length random sequences to probe with.
 
     Peak memory does not depend on the residues, only on the shape. Uniform
     lengths make the padded batch shape ``seq_len`` regardless of how the batch
     generator permutes or crops, which is what makes a probe reproducible.
-    """
-    from learnMSA.util.sequence_dataset import SequenceDataset
 
-    alphabet = np.frombuffer(
-        SequenceDataset._default_alphabet.encode(), dtype="S1"
-    )
+    The tuple is ordered ``(amino acids, [structure], [embeddings])``, the
+    order ``learnMSA.run.console.run_main`` assembles and the only one the
+    model understands. All tracks share the sequence lengths, because the batch
+    generator derives the crop bounds and the padded length from the first
+    dataset alone.
+    """
+    from learnMSA.util import EmbeddingCache, EmbeddingDataset, SequenceDataset
+
+    use_structure, use_language_model, _ = FEATURES[spec.features]
     num_seq = max(2 * spec.steps * spec.batch_size, MIN_PROBE_SEQUENCES)
+    residues_per_seq = spec.seq_len - 1
     rng = np.random.default_rng(PROBE_SEED)
-    residues = rng.choice(alphabet, size=(num_seq, spec.seq_len - 1))
-    return SequenceDataset(sequences=[
-        (f"probe_{i}", row.tobytes().decode())
-        for i, row in enumerate(residues)
-    ])
+    seq_ids = [f"probe_{i}" for i in range(num_seq)]
+
+    def draw(alphabet: str) -> list[str]:
+        letters = np.frombuffer(alphabet.encode(), dtype="S1")
+        drawn = rng.choice(letters, size=(num_seq, residues_per_seq))
+        return [row.tobytes().decode() for row in drawn]
+
+    aa_data = SequenceDataset(sequences=list(zip(
+        seq_ids, draw(SequenceDataset._default_alphabet)
+    )))
+    datasets: tuple = (aa_data, )
+
+    if use_structure:
+        # Same construction as learnMSA.run.util.load_struct_data: an ordinary
+        # SequenceDataset over the 3Di alphabet, with the amino acid remapping
+        # disabled.
+        datasets += (SequenceDataset(
+            sequences=list(zip(
+                seq_ids, draw(config.structure.structural_alphabet)
+            )),
+            alphabet=config.structure.structural_alphabet,
+            remap=False,
+        ), )
+
+    if use_language_model:
+        # learnMSA only ever sees the embeddings the scoring model has already
+        # reduced to scoring_model_dim, so a filled cache of that width is a
+        # complete stand-in and no protein language model has to be loaded.
+        dim = config.language_model.scoring_model_dim
+        seq_lens = aa_data.seq_lens
+        cache = EmbeddingCache(
+            seq_lens,
+            dim,
+            cache=rng.standard_normal(
+                (int(seq_lens.sum()), dim)
+            ).astype(np.float16),
+        )
+        datasets += (
+            EmbeddingDataset(embedding_cache=cache, seq_ids=seq_ids),
+        )
+
+    return datasets
 
 
 def probe_main(spec: ProbeSpec, result_path: Path) -> None:
@@ -462,8 +583,8 @@ def probe_main(spec: ProbeSpec, result_path: Path) -> None:
         )
 
     config = make_probe_config(spec)
-    data = make_probe_dataset(spec)
-    context = LearnMSAContext(config=config, data=data)
+    datasets = make_probe_datasets(spec, config)
+    context = LearnMSAContext(config=config, data=datasets[0])
 
     model = make_learnmsa_model(context)
     model.build(((spec.batch_size,),))
@@ -473,10 +594,11 @@ def probe_main(spec: ProbeSpec, result_path: Path) -> None:
     backend.reset_peak_memory()
     start = time.perf_counter()
 
+    num_seq = datasets[0].num_seq
     if spec.phase == "train":
         model.fit(
-            data,
-            indices=np.arange(data.num_seq),
+            datasets,
+            indices=np.arange(num_seq),
             batch_size=spec.batch_size,
             epochs=1,
             steps_per_epoch=spec.steps,
@@ -485,9 +607,9 @@ def probe_main(spec: ProbeSpec, result_path: Path) -> None:
             or spec.batch_size
     else:
         _set_inference_mode(model, spec.inference_mode)
-        indices = np.arange(min(data.num_seq, spec.steps * spec.batch_size))
+        indices = np.arange(min(num_seq, spec.steps * spec.batch_size))
         model.predict(
-            data,
+            datasets,
             indices=indices,
             # A single bucket wide enough for every sequence, so the bucketing
             # cannot override the probe's batch size or padded length.
@@ -591,6 +713,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Comma-separated phases to probe: train and/or inference.",
     )
     parser.add_argument(
+        "--features", type=_features_list, default=list(DEFAULT_FEATURES),
+        help="Comma-separated input track combinations to probe: "
+             f"{', '.join(sorted(FEATURES))}. Each one measures its own key of "
+             "IMPL_FACTORS.",
+    )
+    parser.add_argument(
         "--steps", type=int, default=DEFAULT_STEPS,
         help="Number of batches per probe.",
     )
@@ -629,6 +757,16 @@ def _int_list(value: str) -> list[int]:
 
 def _str_list(value: str) -> list[str]:
     return [v for v in value.replace(" ", "").split(",") if v]
+
+
+def _features_list(value: str) -> list[str]:
+    features = _str_list(value)
+    unknown = [f for f in features if f not in FEATURES]
+    if unknown:
+        raise argparse.ArgumentTypeError(
+            f"Unknown features {unknown}. Choose from {sorted(FEATURES)}."
+        )
+    return features
 
 
 def _shape_list(value: str) -> list[tuple[int, int]]:
@@ -678,23 +816,27 @@ def main(argv: Sequence[str] | None = None) -> int:
     print()
 
     report = build_report(args, results)
-    for phase, factor in report.factors.items():
-        selected = select_probes(results, phase)
-        speakers = ", ".join(
-            f"{r.spec.label}@B{r.effective_batch_size}" for r in selected
-        )
-        print(
-            f"recommended {phase} implementation factor: {factor:.3f} "
-            f"(from {speakers})"
-        )
-        for r in selected:
-            if r.effective_batch_size * 2 < r.resulting_batch_size:
-                print(
-                    f"  warning: {r.spec.label} was probed at "
-                    f"B={r.effective_batch_size} but would run at "
-                    f"B={r.resulting_batch_size}. Extend --batch-sizes for a "
-                    f"tighter estimate."
-                )
+    for features in args.features:
+        for phase in args.phases:
+            key = factor_key(features, phase)
+            if key not in report.factors:
+                continue
+            selected = select_probes(results, phase, features)
+            speakers = ", ".join(
+                f"{r.spec.label}@B{r.effective_batch_size}" for r in selected
+            )
+            print(
+                f"recommended IMPL_FACTORS['{args.backend}']['{key}']: "
+                f"{report.factors[key]:.3f} (from {speakers})"
+            )
+            for r in selected:
+                if r.effective_batch_size * 2 < r.resulting_batch_size:
+                    print(
+                        f"  warning: {r.spec.label} was probed at "
+                        f"B={r.effective_batch_size} but would run at "
+                        f"B={r.resulting_batch_size}. Extend --batch-sizes for "
+                        f"a tighter estimate."
+                    )
     if not report.factors:
         print(
             "No informative probe: every workload was cap-bound. Probe longer "

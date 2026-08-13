@@ -8,24 +8,27 @@ MAX_TOKENS_PER_BATCH = 700_000
 MEMORY_DAMP = 0.5
 
 # Implementation factors for the adaptive batch size, per backend.
-#
 # To recalibrate use util/calibrate_impl_factor.py.
 IMPL_FACTORS: dict[str, dict[str, float]] = {
     "tensorflow": {
-        "train": 27.0,
-        "inference": 13.0,
-        "language_model_train": 54.0,
-        "language_model_inference": 195.0,
-        "structure_train": 19.0,
-        "structure_inference": 9.0,
+        "train": 27.0,                                    # 26.30
+        "inference": 13.0,                                # 12.31
+        "language_model_train": 83.0,                     # 82.99
+        "language_model_inference": 54.0,                 # 53.19
+        "structure_train": 33.0,                          # 32.46
+        "structure_inference": 13.0,                      # 12.51
+        "language_model_and_structure_train": 90.0,       # 89.37
+        "language_model_and_structure_inference": 56.0,   # 55.54
     },
     "pytorch": {
-        "train": 26.0,
-        "inference": 18.0,
-        "language_model_train": 173.0,
-        "language_model_inference": 386.0,
-        "structure_train": 61.0,
-        "structure_inference": 18.0,
+        "train": 26.0,                                    # 25.93
+        "inference": 18.0,                                # 17.38
+        "language_model_train": 113.0,                    # 112.18
+        "language_model_inference": 40.0,                 # 39.28
+        "structure_train": 31.0,                          # 30.09
+        "structure_inference": 18.0,                      # 17.59
+        "language_model_and_structure_train": 117.0,      # 116.51
+        "language_model_and_structure_inference": 43.0,   # 42.71
     },
 }
 

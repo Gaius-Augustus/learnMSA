@@ -442,28 +442,27 @@ class LearnMSAContext:
             return _batch_size_cb
 
     def _get_impl_factor(self, inference: bool = False) -> float:
-        """Get implementation factor for batch size scaling based on model
-        type."""
+        """The implementation factor for batch size scaling, depending on
+        which input tracks and whether gradients are used.
+        """
         # The factors are backend-specific.
         from learnMSA.backend import get_backend
 
         factors = training_util.get_impl_factors(get_backend())
         suffix = "inference" if inference else "train"
 
-        # Base implementation factor is smaller for inference, because we
-        # don't need gradient (roughly halfes the memory usage).
-        impl_factor = factors[suffix]
+        use_lm = self.config.language_model.use_language_model
+        use_struct = self.config.structure.use_structure
+        if use_lm and use_struct:
+            key = f"language_model_and_structure_{suffix}"
+        elif use_lm:
+            key = f"language_model_{suffix}"
+        elif use_struct:
+            key = f"structure_{suffix}"
+        else:
+            key = suffix
 
-        # Increase the implementation factor (smaller batches) when pLMs are
-        # used. The factor need to be especially high for inference, because
-        # the batch size limit for inference is larger than for training.
-        if self.config.language_model.use_language_model:
-            impl_factor += factors[f"language_model_{suffix}"]
-
-        if self.config.structure.use_structure:
-            impl_factor += factors[f"structure_{suffix}"]
-
-        return impl_factor
+        return factors[key]
 
     def _setup_visualization(self) -> None:
         """Set up visualization file paths based on configuration."""

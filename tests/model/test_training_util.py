@@ -94,22 +94,34 @@ def test_tokens_per_batch_never_exceeds_the_token_budget():
     assert tokens_per_batch_to_batch_size(tokens, seq_len) * seq_len <= tokens
 
 
+#: The IMPL_FACTORS key prefix of every input configuration, "" being the
+#: amino-acid-only one.
+CONFIGURATIONS = (
+    "", "language_model", "structure", "language_model_and_structure",
+)
+
+
+def _key(prefix, phase):
+    return f"{prefix}_{phase}" if prefix else phase
+
+
 @pytest.mark.parametrize("backend", sorted(IMPL_FACTORS))
 def test_impl_factors_are_complete_and_positive(backend):
     factors = get_impl_factors(backend)
     assert set(factors) == {
-        "train", "inference",
-        "language_model_train", "language_model_inference",
-        "structure_train", "structure_inference",
+        _key(prefix, phase)
+        for prefix in CONFIGURATIONS
+        for phase in ("train", "inference")
     }
     assert all(v > 0 for v in factors.values())
 
 
 @pytest.mark.parametrize("backend", sorted(IMPL_FACTORS))
-def test_inference_is_cheaper_than_training(backend):
+@pytest.mark.parametrize("prefix", CONFIGURATIONS)
+def test_inference_is_cheaper_than_training(backend, prefix):
     """Inference holds no gradients, so it must not ask for more memory."""
     factors = get_impl_factors(backend)
-    assert factors["inference"] < factors["train"]
+    assert factors[_key(prefix, "inference")] < factors[_key(prefix, "train")]
 
 
 def test_unknown_backend_falls_back_to_tensorflow():
