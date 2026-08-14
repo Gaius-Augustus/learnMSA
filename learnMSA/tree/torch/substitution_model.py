@@ -261,9 +261,16 @@ class TorchSubstitutionModel(torch.nn.Module):
                 H_active, IK, self.alphabet_size, self.alphabet_size
             )
             p_IK = p.reshape(H_active, IK, self.alphabet_size)
-            decomp = precompute_gtr(Q.unsqueeze(0), p_IK.unsqueeze(0))
+            # The eigendecomposition runs on the CPU: the matrices are tiny and
+            # this happens once per head subset, while a CUDA eigh would create
+            # a cuSOLVER handle, whose allocation bypasses torch's caching
+            # allocator and can fail when the device is under memory pressure
+            device = self.equilibrium_kernel.device
+            decomp = precompute_gtr(
+                Q.unsqueeze(0).cpu(), p_IK.unsqueeze(0).cpu()
+            )
             for name, value in zip(_GTR_BUFFERS, decomp):
-                setattr(self, name, value.detach().clone())
+                setattr(self, name, value.detach().clone().to(device))
 
     def _gather_heads(self, tensor: torch.Tensor, dim: int) -> torch.Tensor:
         subset = torch.as_tensor(
