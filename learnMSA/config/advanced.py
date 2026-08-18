@@ -10,17 +10,17 @@ class AdvancedConfig(BaseModel):
     """Tensor framework used for training and decoding. ``auto`` picks whichever
     framework is installed, preferring TensorFlow when both are available."""
 
-    compile: Literal["auto", "on", "off", "jit"] = "auto"
+    compile: Literal["auto", "on", "off", "jit"] = "off"
     """Graph compilation policy. ``auto`` compiles only when the run is long
     enough to pay for it. ``on`` always builds a graph (``tf.function`` without
     XLA under TensorFlow, ``torch.compile(fullgraph=True)`` under PyTorch),
     ``off`` never does, and ``jit`` forces XLA -- TensorFlow only."""
 
-    no_triton: bool = False
-    """Whether to run the HMM's forward and Viterbi recursions with the plain
-    torch scan instead of the Triton kernels. PyTorch only; the Triton kernels
-    are usually faster, but the scan is a fallback when they are unavailable or
-    misbehave."""
+    use_triton: bool = False
+    """Whether to run the HMM's forward and Viterbi recursions with the Triton
+    kernels instead of the plain torch scan. PyTorch only; the kernels are
+    usually faster, but they are opt-in because they are not available
+    everywhere and can misbehave."""
 
     dist_out: str = ""
     """Distribution output file."""

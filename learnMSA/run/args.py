@@ -668,12 +668,12 @@ def parse_args(
             "and PyTorch does not."
     )
     advanced_group.add_argument(
-        "--no_triton",
-        dest="no_triton",
+        "--triton",
+        dest="use_triton",
         action="store_true",
-        help="Run the HMM recursions with the torch scan instead of the "\
-            "Triton kernels. PyTorch only; the kernels are usually faster, so "\
-            "this is a fallback when they are unavailable or misbehave."
+        help="Run the HMM recursions with the Triton kernels instead of the "\
+            "torch scan. PyTorch only; the kernels are usually faster, but "\
+            "they are opt-in because they are not available everywhere."
     )
 
     deprecated_group = parser.add_argument_group("Deprecated arguments")

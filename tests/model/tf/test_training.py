@@ -24,10 +24,19 @@ def test_make_dataset_aa_plus_embedding() -> None:
     batch_gen = BatchGenerator()
     batch_gen.configure((aa_dataset, embedding_dataset), context)
 
-    dataset, _ = make_dataset(np.array([0, 2, 3]), batch_gen, batch_size=3)
+    # shuffle=False: with the per-model permutation on, the batch holds four
+    # random 3-subsets of the dataset rather than sequences 0/2/3, so the
+    # padded length -- and the routing checked below -- would be random.
+    dataset, _ = make_dataset(
+        np.array([0, 2, 3]), batch_gen, batch_size=3, shuffle=False
+    )
     for (s, e, i), _ in dataset:
         break
 
     assert s.shape == (3, 18, 4, 20)  # aa track: per-residue distributions
     assert e.shape == (3, 18, 4, 8)
     assert i.shape == (3, 4)
+    # The tracks are aligned: make_embedding_dataset fills sequence j with
+    # j + 1, and every model column holds the same sequence here.
+    assert np.all(i.numpy() == np.array([[0], [2], [3]]))
+    assert np.all(e[:, 0].numpy() == np.array([1.0, 3.0, 4.0])[:, None, None])

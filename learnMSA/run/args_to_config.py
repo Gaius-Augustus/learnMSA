@@ -163,7 +163,7 @@ def args_to_config(
     adv["dist_out"] = args.dist_out
     adv["initial_distance"] = args.initial_distance
     adv["compile"] = args.compile
-    adv["no_triton"] = args.no_triton
+    adv["use_triton"] = args.use_triton
 
     # Deprecated checks
     if args.noA2M:

@@ -588,7 +588,7 @@ class AlignmentModel():
                 with write_models_to_file.
             config: Configuration of the current run. Settings that describe
                 how a run executes rather than what the model is (``--compile``,
-                ``--no_triton``) are taken from it instead of from the file.
+                ``--triton``) are taken from it instead of from the file.
 
         Returns:
             An AlignmentModel instance with equivalent behavior as the

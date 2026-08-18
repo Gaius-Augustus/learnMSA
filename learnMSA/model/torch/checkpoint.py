@@ -61,7 +61,7 @@ def load_model(
         )
 
     context = LearnMSAContext.from_config(checkpoint["context"])
-    # Before the model is built: the pHMM layer reads ``advanced.no_triton``
+    # Before the model is built: the pHMM layer reads ``advanced.use_triton``
     # when it is constructed, not when it is called.
     apply_runtime_config(context.config, config)
     model = TorchLearnMSAModel(context)

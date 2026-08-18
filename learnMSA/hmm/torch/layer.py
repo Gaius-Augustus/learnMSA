@@ -73,7 +73,7 @@ class TorchPHMMLayer(torch.nn.Module, PHMMLayer[T_TorchTensor]):
         Args:
             use_triton: Whether the recursions use the Triton kernels. ``False``
                 falls back to the torch scan; the default ``"auto"`` lets
-                hidten decide (see ``advanced.no_triton``).
+                hidten decide (see ``advanced.use_triton``).
         """
         torch.nn.Module.__init__(self)
         self.use_triton = use_triton

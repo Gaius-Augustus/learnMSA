@@ -105,25 +105,25 @@ def test_round_trip_preserves_context(
 def test_runtime_settings_come_from_the_current_run(
     model: TorchLearnMSAModel, tmp_path
 ) -> None:
-    """``--compile`` and ``--no_triton`` say how *this* run executes, so the
+    """``--compile`` and ``--triton`` say how *this* run executes, so the
     values a checkpoint was trained with must not carry over."""
-    model.context.config.advanced.no_triton = True
+    model.context.config.advanced.use_triton = False
     model.context.config.advanced.compile = "off"
     path = tmp_path / "model"
     save_model(model, path)
 
     # Without a run config, the checkpoint's own settings stand.
     kept = load_model(path)
-    assert kept.context.config.advanced.no_triton is True
+    assert kept.context.config.advanced.use_triton is False
     assert kept.context.config.advanced.compile == "off"
     assert kept.phmm_layer.use_triton is False
 
     run_config = model.context.config.model_copy(deep=True)
-    run_config.advanced.no_triton = False
+    run_config.advanced.use_triton = True
     run_config.advanced.compile = "on"
     loaded = load_model(path, run_config)
 
-    assert loaded.context.config.advanced.no_triton is False
+    assert loaded.context.config.advanced.use_triton is True
     assert loaded.context.config.advanced.compile == "on"
     assert loaded.phmm_layer.use_triton == "auto"
     # The rest of the checkpoint's configuration is untouched.

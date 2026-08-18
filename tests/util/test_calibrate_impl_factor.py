@@ -44,7 +44,7 @@ def make_spec(features: str, **kwargs):
         steps=1,
         backend="pytorch",
         compile_mode="off",
-        no_triton=True,
+        use_triton=False,
         features=features,
     )
     defaults.update(kwargs)

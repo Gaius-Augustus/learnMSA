@@ -258,7 +258,7 @@ class TestArgsToConfig:
         assert config.advanced.initial_distance == 0.1
         assert config.tree.trainable_rates is False
         # Graph compilation is decided per run unless --compile says otherwise.
-        assert config.advanced.compile == "auto"
+        assert config.advanced.compile == "off"
 
     @pytest.mark.parametrize("value", ["auto", "on", "off", "jit"])
     def test_args_to_config_compile(self, value):
@@ -284,18 +284,18 @@ class TestArgsToConfig:
                 "--compile", "yes",
             ])
 
-    def test_args_to_config_no_triton(self):
-        """--no_triton switches the torch HMM over to the plain scan."""
+    def test_args_to_config_triton(self):
+        """--triton switches the torch HMM over to the Triton kernels."""
         parser = parse_args("test_version")
         base = parser.parse_args(["-i", "input.fasta", "-o", "output.a2m"])
         args = parser.parse_args([
             "-i", "input.fasta",
             "-o", "output.a2m",
-            "--no_triton",
+            "--triton",
         ])
 
-        assert args_to_config(base).advanced.no_triton is False
-        assert args_to_config(args).advanced.no_triton is True
+        assert args_to_config(base).advanced.use_triton is False
+        assert args_to_config(args).advanced.use_triton is True
 
     def test_no_jit_is_gone(self):
         """--no_jit was replaced by --compile off."""

@@ -59,7 +59,7 @@ pinned with ``training.length_init``.
 Example::
 
     python util/calibrate_impl_factor.py \\
-        --backend pytorch --compile off --no-triton \\
+        --backend pytorch --compile off --triton \\
         --features aa,structure,language_model,both \\
         -o util/impl_factor_calibration.json
 """
@@ -148,7 +148,7 @@ class ProbeSpec:
     steps: int
     backend: str
     compile_mode: str
-    no_triton: bool
+    use_triton: bool
     inference_mode: str = "viterbi"
     features: str = "aa"
 
@@ -273,7 +273,7 @@ def plan_probes(args: argparse.Namespace) -> list[ProbeSpec]:
             steps=args.steps,
             backend=args.backend,
             compile_mode=args.compile,
-            no_triton=args.no_triton,
+            use_triton=args.use_triton,
             inference_mode=args.inference_mode,
             features=features,
         )
@@ -495,7 +495,7 @@ def make_probe_config(spec: ProbeSpec) -> Any:
         "advanced": {
             "backend": spec.backend,
             "compile": spec.compile_mode,
-            "no_triton": spec.no_triton,
+            "use_triton": spec.use_triton,
         },
     })
 
@@ -697,8 +697,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Value of advanced.compile used for the probes.",
     )
     parser.add_argument(
-        "--no-triton", action="store_true",
-        help="Disable Triton kernels in the probes (PyTorch only).",
+        "--triton", dest="use_triton", action="store_true",
+        help="Enable Triton kernels in the probes (PyTorch only).",
     )
     parser.add_argument(
         "--num-model", type=int, default=4,

@@ -158,7 +158,7 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
             emb_value_sets=context.emb_values,
             joint_aa_struct_value_sets=context.joint_values,
             no_aa=train_cfg.no_aa,
-            use_triton=False if context.config.advanced.no_triton else "auto",
+            use_triton="auto" if context.config.advanced.use_triton else False,
         )
 
         # Metrics trackers

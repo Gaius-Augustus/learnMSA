@@ -397,6 +397,7 @@ def test_graph_compilation_follows_compile_policy(
     model.loglik_mode()
 
     # --compile auto: too few steps to amortize the compilation.
+    context_binary.config.advanced.compile = "auto"
     model.compile(total_steps=5)
     assert model._compiled_call_impl is None
 
