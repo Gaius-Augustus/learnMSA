@@ -498,3 +498,113 @@ def test_conditional_low_rank_normalization(
         np.ones((8, D1)),
         rtol=1e-5,
     )
+
+
+def make_conditional_prior_emitter(
+    config: Configuration,
+    hidten_config: HidtenHMMConfig,
+    low_rank: int = 0,
+    components: int = 1,
+    with_prior: bool = True,
+) -> JointProfileEmitter:
+    """A conditional emitter with background (non-degenerate) emissions and a
+    structural Dirichlet prior on its conditional rows."""
+    lengths = [4, 3]
+    plain = Configuration(hmm=PHMMConfig(), structure=StructureConfig())
+    aa_values = [
+        PHMMValueSet.from_config(L, h, plain.hmm)
+        for h, L in enumerate(lengths)
+    ]
+    struct_values = [
+        PHMMValueSet.from_structural_config(L, h, plain.structure)
+        for h, L in enumerate(lengths)
+    ]
+    emitter = JointProfileEmitter(
+        marginal_values=[aa_values, struct_values],
+        low_rank=low_rank,
+        conditional=True,
+    )
+    emitter.hmm_config = hidten_config
+    if with_prior:
+        # Keras refuses new sub-layers on a built layer, so the prior is
+        # attached first -- the same order PHMMLayer uses.
+        emitter.prior = load_dirichlet(
+            f"pfam_35_3Di_{components}.weights",
+            dim=20, components=components, states=[10, 8],
+        )
+    emitter.build(((None, None, 20), (None, None, 20)))
+    return emitter
+
+
+@pytest.mark.parametrize("low_rank", [0, 2])
+@pytest.mark.parametrize("components", [1, 9])
+def test_conditional_prior_scores_sum_over_rows(
+    low_rank: int,
+    components: int,
+    config: Configuration,
+    hidten_config: HidtenHMMConfig,
+) -> None:
+    """The prior is applied to each of the D1 conditional rows and summed."""
+    emitter = make_conditional_prior_emitter(
+        config, hidten_config, low_rank=low_rank, components=components
+    )
+    B = emitter.matrix()
+    rows = tf.reshape(B, [2, 10, 20, 20])
+    expected = sum(emitter._prior(rows[:, :, i]) for i in range(20))
+
+    scores = emitter.prior_scores()
+    assert scores.shape == (2,)
+    assert np.all(np.isfinite(scores.numpy()))
+    np.testing.assert_allclose(
+        scores.numpy(), expected.numpy(),
+        rtol=1e-4,  # float32 accumulation over the 20 rows
+    )
+
+
+@pytest.mark.parametrize("low_rank", [0, 2])
+def test_conditional_prior_scores_at_init(
+    low_rank: int,
+    config: Configuration,
+    hidten_config: HidtenHMMConfig,
+) -> None:
+    """At initialisation every row equals the structural marginal, so the score
+    is exactly D1 times the score of a single row."""
+    emitter = make_conditional_prior_emitter(
+        config, hidten_config, low_rank=low_rank
+    )
+    B = emitter.matrix()
+    rows = tf.reshape(B, [2, 10, 20, 20])
+    single_row = emitter._prior(rows[:, :, 0])
+    np.testing.assert_allclose(
+        emitter.prior_scores().numpy(),
+        (20 * single_row).numpy(),
+        rtol=1e-4,  # float32 accumulation over the 20 rows
+    )
+
+
+def test_conditional_prior_ignores_padding_states(
+    config: Configuration,
+    hidten_config: HidtenHMMConfig,
+) -> None:
+    """Head 1 has 8 of the 10 padded states. With identical emissions in every
+    state the two heads' scores must be in a 10:8 ratio -- padded rows sum to
+    zero and are masked out by the prior."""
+    emitter = make_conditional_prior_emitter(config, hidten_config)
+    scores = emitter.prior_scores().numpy()
+    np.testing.assert_allclose(scores[0] / scores[1], 10 / 8, rtol=1e-5)
+
+
+def test_marginal_prior_rejected_when_conditional(
+    config: Configuration,
+    hidten_config: HidtenHMMConfig,
+) -> None:
+    """Marginal priors need the joint parameterisation; the conditional table
+    has no marginals to score."""
+    emitter = make_conditional_prior_emitter(
+        config, hidten_config, with_prior=False
+    )
+    prior = load_dirichlet(
+        "pfam_35_3Di_1.weights", dim=20, components=1, states=[10, 8]
+    )
+    with pytest.raises(AssertionError):
+        emitter.add_marginal_prior(1, prior)

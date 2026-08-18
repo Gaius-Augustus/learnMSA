@@ -208,7 +208,36 @@ def build_layer(scenario: str):
         struct_config=struct_config,
     )
     layer.build(input_shape=input_shapes(struct_config))
+    break_structural_symmetry(layer)
     return layer, struct_config
+
+
+def break_structural_symmetry(layer) -> None:
+    """Give every state its own structural emission distribution.
+
+    The structural emissions are initialised from a single distribution -- the
+    prior mean, or the background -- so out of the box every state emits the
+    same structural token distribution. That constant factor cancels out of the
+    Viterbi recursion, which leaves alignments that differ only in where the
+    flank positions sit exactly tied, and the two backends break such ties
+    differently. Perturbing the kernel makes the structural track carry
+    positional information, which is both what the scenario is meant to test
+    and what makes the recorded path well defined.
+
+    The kernel is recorded into the fixture and copied into the torch layer, so
+    the perturbation is part of the reference parameters, not a source of
+    divergence. It draws from its own generator to leave the global stream --
+    which the value sets use for their noise -- untouched.
+    """
+    rng = np.random.default_rng(SEED)
+    for name in ("struct_emitter", "joint_emitter"):
+        emitter = getattr(layer, name, None)
+        if emitter is None:
+            continue
+        noise = rng.normal(
+            scale=0.5, size=emitter.kernel.shape
+        ).astype(np.float32)
+        emitter.kernel.assign(emitter.kernel + noise)
 
 
 def collect() -> dict[str, np.ndarray]:

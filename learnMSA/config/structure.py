@@ -29,7 +29,7 @@ class StructureConfig(BaseModel):
     """Default, background distribution over the structural alphabet based on
     (AF2 SwissProt). Source: hmmer3di repository."""
 
-    prior_name: str = ""
+    prior_name: str = "scop_3Di_3_20"
     """Specifies the path to weights for a Dirichlet prior over the
     structural alphabet."""
 
@@ -44,7 +44,7 @@ class StructureConfig(BaseModel):
     """Whether to use the prior distribution for initializing the structural
     emission parameters."""
 
-    emitter_temperature: float = 2.0
+    emitter_temperature: float = 8.0
     """Temperature applied as an exponent (1/temperature) to the structural
     emission scores."""
 

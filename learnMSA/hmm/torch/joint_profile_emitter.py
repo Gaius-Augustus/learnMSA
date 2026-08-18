@@ -136,6 +136,9 @@ class TorchJointProfileEmitter(TorchProfileEmitter):
             marginal_index: The index of the marginal distribution.
             prior: The prior to add.
         """
+        assert not self.conditional, \
+            "Marginal priors require conditional=False; a conditional " \
+            "emitter takes a prior on its conditional rows instead."
         # Set hmm_config if available, otherwise it will be set when hmm_config
         # is set
         if hasattr(self, "_hmm_config"):
@@ -379,7 +382,11 @@ class TorchJointProfileEmitter(TorchProfileEmitter):
 
         # Apply a prior to the joint distribution if it exists
         if hasattr(self, "_prior"):
-            log_prior_scores = log_prior_scores + self._prior(matrix)
+            if self.conditional:
+                log_prior_scores = log_prior_scores \
+                    + self._conditional_prior_scores(matrix)
+            else:
+                log_prior_scores = log_prior_scores + self._prior(matrix)
 
         # Apply L2 regularization to the raw kernel (A and B matrices)
         if self.low_rank > 0 and self.l2_reg > 0.0:
@@ -389,6 +396,24 @@ class TorchJointProfileEmitter(TorchProfileEmitter):
             log_prior_scores = log_prior_scores - self.l2_reg * ab_sq_sum
 
         return log_prior_scores
+
+    def _conditional_prior_scores(
+        self, matrix: T_TorchTensor
+    ) -> T_TorchTensor:
+        """Scores every row of the conditional matrix with ``self._prior``.
+
+        Args:
+            matrix: The conditional matrix of shape ``(H, Q, D1 * D2)``.
+
+        Returns:
+            The summed prior scores of shape ``(H)``.
+        """
+        H, Q = matrix.shape[0], matrix.shape[1]
+        rows = matrix.reshape([H, Q] + self.marginal_dims)
+        scores = self._prior(rows[:, :, 0])
+        for i in range(1, self.marginal_dims[0]):
+            scores = scores + self._prior(rows[:, :, i])
+        return scores
 
 
 def _identity(x: T_TorchTensor) -> T_TorchTensor:

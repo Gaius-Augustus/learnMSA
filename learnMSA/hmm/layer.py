@@ -499,6 +499,7 @@ class PHMMLayer(Generic[T_Tensor]):
                 components=self.structural_config.prior_components,
                 states=self.states,
             )
+            struct_prior.temperature = self.structural_config.prior_temperature
 
         # Override emission values with prior distribution if requested
         if self.config.use_prior_for_emission_init:
@@ -514,16 +515,22 @@ class PHMMLayer(Generic[T_Tensor]):
                 override_matches=self.config.match_emissions is None,
                 override_insertions=self.config.insert_emissions is None,
             )
-            # Override structural emissions with prior distribution if specified
-            if self.structural_config.prior_name and struct_values is not None:
-                struct_prior.temperature = self.structural_config.prior_temperature
+            # Override structural emissions with prior distribution if
+            # specified. Only the value sets built from the config are
+            # overridden: supplied ones come from surgery, and _struct_values
+            # is None when the full joint kernel is restored instead.
+            if self.structural_config.prior_name \
+                    and self.structural_config.use_prior_for_emission_init \
+                    and struct_values is None \
+                    and _struct_values is not None:
                 _struct_values = self._override_emissions_with_prior(
-                    _struct_values, # type: ignore
+                    _struct_values,
                     struct_prior,
                     override_matches=self.structural_config.match_emissions is None,
                     override_insertions=self.structural_config.insert_emissions is None,
                 )
 
+        conditional = True
         if joint_values is None:
             assert aa_values is not None
             assert _struct_values is not None
@@ -531,7 +538,7 @@ class PHMMLayer(Generic[T_Tensor]):
                 marginal_values=[aa_values, _struct_values],
                 trainable_insertions=trainable_insertions,
                 low_rank=self.structural_config.joint_emission_low_rank,
-                conditional=True
+                conditional=conditional
             )
         elif self.structural_config.joint_emission_low_rank > 0:
             # Coming from surgery: C is recomputed from current marginals;
@@ -543,7 +550,7 @@ class PHMMLayer(Generic[T_Tensor]):
                 AB_values=joint_values,
                 trainable_insertions=trainable_insertions,
                 low_rank=self.structural_config.joint_emission_low_rank,
-                conditional=True
+                conditional=conditional
             )
         else:
             # Coming from surgery (full joint case): joint_values holds
@@ -552,19 +559,27 @@ class PHMMLayer(Generic[T_Tensor]):
                 values=joint_values,
                 trainable_insertions=trainable_insertions,
                 low_rank=self.structural_config.joint_emission_low_rank,
-                conditional=True
+                conditional=conditional
             )
-        # TODO: don't use an aa prior with conditional = True
-        # if self.prior_config.use_amino_acid_prior and self.use_prior:
-        #     joint_emitter.add_marginal_prior(0, emission_prior)
-        if self.structural_config.prior_name and self.use_prior:
-            # TODO: this needs a fix for the conditional=True case,
-            # but the Dirichlet prior for 3Di does not work well anyway
-            raise NotImplementedError(
-                "Adding a structural prior to a joint amino acid and structural "
-                "emitter is not implemented yet."
-            )
-            joint_emitter.add_marginal_prior(1, struct_prior)
+
+        if self.use_prior:
+            if conditional:
+                # The emitter models P(struct | aa, state), so P(aa | state) is
+                # already covered by the amino acid profile emitter and its own
+                # prior; adding a marginal amino acid prior here would
+                # double-count it. The structural prior is added as a normal
+                # prior: the emitter applies it to every row of the conditional
+                # table.
+                if self.structural_config.prior_name:
+                    joint_emitter.prior = struct_prior
+            else:
+                # Add priors on both marginals
+                if self.prior_config.use_amino_acid_prior:
+                    joint_emitter.add_marginal_prior(0, emission_prior)
+
+                if self.structural_config.prior_name:
+                    joint_emitter.add_marginal_prior(1, struct_prior)
+
         self.hmm.add_emitter(joint_emitter, observations=(0,1))
         self.joint_emitter = joint_emitter
 
