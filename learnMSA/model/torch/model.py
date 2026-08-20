@@ -517,7 +517,12 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
         return history
 
     def _train_step(self, batch, clipnorm: float) -> float:
-        """One optimizer step on a single batch. Returns the loss."""
+        """One optimizer step on a single batch. Returns the loss.
+
+        A step whose loss or gradients are not finite is skipped rather than
+        applied. ``clip_grad_norm_`` clips on the GLOBAL norm, so a single
+        inf gradient makes that norm inf.
+        """
         assert self.optimizer is not None, "compile() must run before fit()."
         x = tuple(t.to(self._device) for t in batch)
         self._record_batch_size(x)
@@ -525,10 +530,18 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
         y_pred = self(x)
         loss = self.compute_loss(x, None, y_pred)
         loss.backward()
-        if clipnorm > 0:
-            torch.nn.utils.clip_grad_norm_(self.parameters(), clipnorm)
+        grad_norm = torch.nn.utils.clip_grad_norm_(
+            self.parameters(), clipnorm if clipnorm > 0 else math.inf
+        )
+        loss_value = float(loss.detach())
+        if not (math.isfinite(loss_value) and math.isfinite(float(grad_norm))):
+            self.optimizer.zero_grad(set_to_none=True)
+            if self.context.config.input_output.verbose:
+                what = "loss" if not math.isfinite(loss_value) else "gradient"
+                print(f"Skipping a training step with a non-finite {what}.")
+            return loss_value
         self.optimizer.step()
-        return float(loss.detach())
+        return loss_value
 
     def compute_loss(
         self,
