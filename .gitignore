@@ -30,3 +30,5 @@ util/prepare_build.py
 
 # Sphinx documentation
 docs/_build/
+# calibration sweep logs (the JSON reports are committed, these are not)
+util/calib_logs/

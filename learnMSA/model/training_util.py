@@ -8,6 +8,13 @@ MAX_TOKENS_PER_BATCH = 700_000
 MEMORY_DAMP = 0.5
 
 # Implementation factors for the adaptive batch size, per backend.
+#
+# Keys are "<prefix>_<workload>", the prefix naming the active input tracks
+# ("" for amino acids alone) and the workload being either "train" or one of
+# the inference modes. "<prefix>_inference" is the fallback for any inference
+# mode that has no key of its own; the calibration derives it as the maximum
+# over the measured modes, so falling back never underestimates.
+#
 # To recalibrate use util/calibrate_impl_factor.py.
 IMPL_FACTORS: dict[str, dict[str, float]] = {
     "tensorflow": {
@@ -21,16 +28,34 @@ IMPL_FACTORS: dict[str, dict[str, float]] = {
         "language_model_and_structure_inference": 56.0,   # 55.54
     },
     "pytorch": {
-        "train": 26.0,                                    # 25.93
-        "inference": 18.0,                                # 17.38
-        "language_model_train": 113.0,                    # 112.18
-        "language_model_inference": 40.0,                 # 39.28
-        "structure_train": 31.0,                          # 30.09
-        "structure_inference": 18.0,                      # 17.59
-        "language_model_and_structure_train": 117.0,      # 116.51
-        "language_model_and_structure_inference": 43.0,   # 42.71
+        "train": 17.0,                                  # 16.22
+        "inference": 17.0,                              # 16.24
+        "viterbi": 12.0,                                # 11.12
+        "posterior": 17.0,                              # 16.24
+        "loglik": 9.0,                                  # 8.46
+        "structure_train": 25.0,                        # 24.61
+        "structure_inference": 17.0,                    # 16.17
+        "structure_viterbi": 12.0,                      # 11.34
+        "structure_posterior": 17.0,                    # 16.17
+        "structure_loglik": 9.0,                        # 8.47
+        "language_model_train": 101.0,                  # 100.88
+        "language_model_inference": 40.0,               # 39.36
+        "language_model_viterbi": 37.0,                 # 36.65
+        "language_model_posterior": 40.0,               # 39.36
+        "language_model_loglik": 37.0,                  # 36.65
+        "language_model_and_structure_train": 106.0,    # 105.02
+        "language_model_and_structure_inference": 45.0, # 44.22
+        "language_model_and_structure_viterbi": 43.0,   # 42.00
+        "language_model_and_structure_posterior": 45.0, # 44.22
+        "language_model_and_structure_loglik": 43.0,    # 42.01
     },
 }
+
+
+#: Inference modes that are not calibrated in their own right, and the
+#: calibrated mode whose cost they share. MEA computes state posteriors and
+#: then decodes them, so it is a posterior workload plus a decoding tail.
+MODE_FALLBACK: dict[str, str] = {"mea": "posterior"}
 
 
 def get_impl_factors(backend_name: str) -> dict[str, float]:

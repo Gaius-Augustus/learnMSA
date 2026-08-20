@@ -31,19 +31,31 @@ process each, and reports the factor each probe implies plus a recommended
 aggregate. Nothing here is specific to a backend: pass ``--backend tensorflow``
 to recalibrate the TensorFlow column with the same code.
 
-``--features`` selects which input tracks a sweep probes, and therefore which
-key of ``IMPL_FACTORS`` it measures. The factors are absolute per
-configuration, so each value is measured on its own and no arithmetic relates
-them:
+``--features`` selects which input tracks a sweep probes and ``--workloads``
+what the probes compute; together they name the key of ``IMPL_FACTORS`` being
+measured, ``<prefix>_<workload>``. The factors are absolute per configuration,
+so each value is measured on its own and no arithmetic relates them:
 
 ===================== ==========================================
-``--features``        key in ``IMPL_FACTORS``
+``--features``        prefix in ``IMPL_FACTORS``
 ===================== ==========================================
-``aa``                ``train`` / ``inference``
+``aa``                none, the bare workload name
 ``structure``         ``structure_*``
 ``language_model``    ``language_model_*``
 ``both``              ``language_model_and_structure_*``
 ===================== ==========================================
+
+The workloads are ``train`` plus the pHMM call modes inference runs in:
+``viterbi``, ``posterior`` and ``loglik``. They differ enough to deserve their
+own factors -- Viterbi keeps a backtrace, the posterior runs the backward sweep
+as well as the forward one, and the log-likelihood keeps only the final carry.
+Each sweep additionally reports ``<prefix>_inference``, the maximum over the
+measured modes, which ``IMPL_FACTORS`` uses as the fallback for any mode
+without a key of its own (MEA, via ``training_util.MODE_FALLBACK``).
+
+Only the largest batch size that fits speaks for a shape, and peak memory grows
+monotonically with the batch size, so each ``(features, shape, workload)`` group
+is bisected rather than walked: three probes for the default seven-rung ladder.
 
 The struct and embedding tracks are fabricated the same way the amino acid one
 is -- a 3Di ``SequenceDataset`` and an in-memory ``EmbeddingCache`` of width
@@ -59,8 +71,9 @@ pinned with ``training.length_init``.
 Example::
 
     python util/calibrate_impl_factor.py \\
-        --backend pytorch --compile off --triton \\
+        --backend pytorch --compile off \\
         --features aa,structure,language_model,both \\
+        --workloads train,viterbi,posterior,loglik \\
         -o util/impl_factor_calibration.json
 """
 
@@ -68,6 +81,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import subprocess
 import sys
@@ -80,10 +94,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import numpy as np  # noqa: E402
 
-DEFAULT_L: tuple[int, ...] = (20, 50, 100, 200, 300, 500, 700, 1000)
+# Model lengths 20 and 50 are deliberately absent. In the calibration this grid
+# replaces, they were cap-bound in all 32 measured (features, phase) groups
+# across both backends, so they can never constrain a factor. 100 stays: it won
+# both language model inference sweeps.
+DEFAULT_L: tuple[int, ...] = (100, 200, 300, 500, 700, 1000)
 DEFAULT_SEQ_LEN_FACTORS: tuple[float, ...] = (1.42, 3.0)
 DEFAULT_BATCH_SIZES: tuple[int, ...] = (4, 8, 32, 64, 128, 256, 512)
-DEFAULT_PHASES: tuple[str, ...] = ("train", "inference")
+#: What a probe computes. ``train`` holds gradients; the rest are the pHMM
+#: call modes that inference runs in. MEA is absent on purpose: it computes
+#: posteriors and then decodes them, so it borrows the posterior factor
+#: through ``training_util.MODE_FALLBACK`` instead of being measured.
+INFERENCE_WORKLOADS: tuple[str, ...] = ("viterbi", "posterior", "loglik")
+WORKLOADS: tuple[str, ...] = ("train", *INFERENCE_WORKLOADS)
+DEFAULT_WORKLOADS: tuple[str, ...] = WORKLOADS
 DEFAULT_FEATURES: tuple[str, ...] = ("aa",)
 DEFAULT_STEPS: int = 3
 # Successful probes finish in seconds; anything near this is an allocator
@@ -104,12 +128,13 @@ FEATURES: dict[str, tuple[bool, bool, str]] = {
 }
 
 
-def factor_key(features: str, phase: str) -> str:
+def factor_key(features: str, workload: str) -> str:
     """The ``IMPL_FACTORS`` key a sweep over ``features`` measures.
 
     Args:
         features: One of the keys of :data:`FEATURES`.
-        phase: ``"train"`` or ``"inference"``.
+        workload: One of :data:`WORKLOADS`, or ``"inference"`` for the
+            aggregate fallback key.
 
     Returns:
         The key to paste the measured factor under, so that a report can be
@@ -120,7 +145,7 @@ def factor_key(features: str, phase: str) -> str:
             f"Unknown features '{features}'. Choose one of {sorted(FEATURES)}."
         )
     prefix = FEATURES[features][2]
-    return f"{prefix}_{phase}" if prefix else phase
+    return f"{prefix}_{workload}" if prefix else workload
 
 
 def default_shapes() -> list[tuple[int, int]]:
@@ -140,7 +165,7 @@ def default_shapes() -> list[tuple[int, int]]:
 class ProbeSpec:
     """One measurement: a workload of known shape at a known batch size."""
 
-    phase: str
+    workload: str
     batch_size: int
     num_model: int
     model_len: int
@@ -149,12 +174,16 @@ class ProbeSpec:
     backend: str
     compile_mode: str
     use_triton: bool
-    inference_mode: str = "viterbi"
     features: str = "aa"
 
     @property
+    def phase(self) -> str:
+        """Whether gradients are held, which is all the clamps care about."""
+        return "train" if self.workload == "train" else "inference"
+
+    @property
     def label(self) -> str:
-        """The workload this probe belongs to.
+        """The shape this probe belongs to.
 
         The features are part of it: the same ``L x S`` costs a different
         amount of memory per track combination, so those measurements must
@@ -163,7 +192,7 @@ class ProbeSpec:
         return f"{self.features}/L{self.model_len}xS{self.seq_len}"
 
     def key(self) -> str:
-        return f"{self.label}/{self.phase}/B{self.batch_size}"
+        return f"{self.label}/{self.workload}/B{self.batch_size}"
 
 
 @dataclass
@@ -261,26 +290,33 @@ def batch_size_cap(seq_len: int, phase: str) -> int:
 # ---------------------------------------------------------------------------
 
 
-def plan_probes(args: argparse.Namespace) -> list[ProbeSpec]:
-    """Build the full probe grid."""
+def plan_probes(args: argparse.Namespace) -> list[list[ProbeSpec]]:
+    """Build the probe grid, grouped by the ladder each group searches.
+
+    One group is one ``(features, shape, workload)`` combination, holding its
+    batch size ladder in ascending order. Only the largest batch size that runs
+    speaks for the group, so :func:`search_group` probes a group rather than
+    every rung of its ladder.
+    """
     return [
-        ProbeSpec(
-            phase=phase,
-            batch_size=batch_size,
-            num_model=args.num_model,
-            model_len=model_len,
-            seq_len=seq_len,
-            steps=args.steps,
-            backend=args.backend,
-            compile_mode=args.compile,
-            use_triton=args.use_triton,
-            inference_mode=args.inference_mode,
-            features=features,
-        )
+        [
+            ProbeSpec(
+                workload=workload,
+                batch_size=batch_size,
+                num_model=args.num_model,
+                model_len=model_len,
+                seq_len=seq_len,
+                steps=args.steps,
+                backend=args.backend,
+                compile_mode=args.compile,
+                use_triton=args.use_triton,
+                features=features,
+            )
+            for batch_size in sorted(args.batch_sizes)
+        ]
         for features in args.features
         for model_len, seq_len in args.shapes
-        for phase in args.phases
-        for batch_size in args.batch_sizes
+        for workload in args.workloads
     ]
 
 
@@ -338,6 +374,41 @@ def run_probe(
     )
 
 
+def search_group(
+    ladder: Sequence[ProbeSpec], timeout: float, verbose: bool = False
+) -> list[ProbeResult]:
+    """Probe one group for the largest batch size that runs.
+
+    Peak memory grows monotonically with the batch size, so "does this batch
+    size fit" is a monotone predicate and the largest fitting rung can be
+    bisected for. That costs ``ceil(log2(len(ladder) + 1))`` probes -- three for
+    the default seven-rung ladder -- instead of walking the ladder from the
+    bottom until it breaks. The winner is identical either way, because
+    :func:`select_probes` only ever keeps the largest batch size that ran.
+
+    Args:
+        ladder: The group's probes, ascending by batch size.
+        timeout: Seconds before a probe counts as a device limit.
+        verbose: Echo the output of failing probes.
+
+    Returns:
+        The probes that were actually run, in the order they were run.
+    """
+    results: list[ProbeResult] = []
+    lo, hi = 0, len(ladder) - 1
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        spec = ladder[mid]
+        print(f"probing {spec.key()} ...", flush=True)
+        result = run_probe(spec, timeout, verbose=verbose)
+        results.append(result)
+        if result.status == "ok":
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    return results
+
+
 def _looks_like_oom(output: str) -> bool:
     lowered = output.lower()
     return any(marker in lowered for marker in (
@@ -346,9 +417,9 @@ def _looks_like_oom(output: str) -> bool:
 
 
 def select_probes(
-    results: Iterable[ProbeResult], phase: str, features: str = "aa"
+    results: Iterable[ProbeResult], workload: str, features: str = "aa"
 ) -> list[ProbeResult]:
-    """The probe that speaks for each shape in one phase and feature set.
+    """The probe that speaks for each shape in one workload and feature set.
 
     Two filters, and the order matters. First pick the largest batch size that
     ran: the measured ratio falls with the batch size, because the
@@ -364,7 +435,7 @@ def select_probes(
     """
     per_shape: dict[str, ProbeResult] = {}
     for r in results:
-        if r.spec.phase != phase or r.spec.features != features:
+        if r.spec.workload != workload or r.spec.features != features:
             continue
         if r.status != "ok":
             continue
@@ -377,21 +448,43 @@ def select_probes(
 
 
 def derive_factor(
-    results: Iterable[ProbeResult], phase: str, features: str = "aa"
+    results: Iterable[ProbeResult], workload: str, features: str = "aa"
 ) -> float | None:
-    """The recommended implementation factor for one phase and feature set.
+    """The recommended implementation factor for one workload and feature set.
 
     The maximum over the per-shape operating points, i.e. the worst case among
-    the workloads that are actually memory-bound.
+    the shapes that are actually memory-bound.
     """
-    selected = select_probes(results, phase, features)
+    selected = select_probes(results, workload, features)
     return max(r.impl_factor for r in selected) if selected else None
+
+
+def derive_inference_factor(
+    results: Iterable[ProbeResult],
+    workloads: Iterable[str],
+    features: str = "aa",
+) -> float | None:
+    """The aggregate ``<prefix>_inference`` factor for one feature set.
+
+    ``IMPL_FACTORS`` keeps this key as the fallback for any inference mode that
+    has none of its own, so it has to be the most expensive measured mode -- a
+    fallback that underestimates would hand out a batch size that does not fit.
+    """
+    results = list(results)
+    measured = []
+    for workload in workloads:
+        if workload == "train":
+            continue
+        factor = derive_factor(results, workload, features)
+        if factor is not None:
+            measured.append(factor)
+    return max(measured) if measured else None
 
 
 def print_table(results: Sequence[ProbeResult]) -> None:
     """Print the per-probe table."""
     header = (
-        f"{'features':<16}{'phase':<11}{'L':>6}{'S':>6}{'B':>6}{'B_eff':>7}"
+        f"{'features':<16}{'workload':<11}{'L':>6}{'S':>6}{'B':>6}{'B_eff':>7}"
         f"{'peak MiB':>10}{'ratio':>9}{'factor':>9}{'B_fit':>7}{'cap':>6}"
         "  status"
     )
@@ -403,7 +496,7 @@ def print_table(results: Sequence[ProbeResult]) -> None:
             "cap-bound" if r.cap_bound else "ok"
         )
         print(
-            f"{s.features:<16}{s.phase:<11}{s.model_len:>6}{s.seq_len:>6}"
+            f"{s.features:<16}{s.workload:<11}{s.model_len:>6}{s.seq_len:>6}"
             f"{s.batch_size:>6}"
             f"{r.effective_batch_size:>7}{r.peak_bytes / 1024 ** 2:>10.0f}"
             f"{r.ratio:>9.4f}{r.impl_factor:>9.3f}"
@@ -445,10 +538,13 @@ def build_report(
         ],
     )
     for features in args.features:
-        for phase in args.phases:
-            factor = derive_factor(results, phase, features)
+        for workload in args.workloads:
+            factor = derive_factor(results, workload, features)
             if factor is not None:
-                report.factors[factor_key(features, phase)] = factor
+                report.factors[factor_key(features, workload)] = factor
+        aggregate = derive_inference_factor(results, args.workloads, features)
+        if aggregate is not None:
+            report.factors[factor_key(features, "inference")] = aggregate
     return report
 
 
@@ -606,8 +702,15 @@ def probe_main(spec: ProbeSpec, result_path: Path) -> None:
         effective_batch_size = context.last_runtime_batch_size \
             or spec.batch_size
     else:
-        _set_inference_mode(model, spec.inference_mode)
+        _set_inference_mode(model, spec.workload)
         indices = np.arange(min(num_seq, spec.steps * spec.batch_size))
+        predict_kwargs: dict[str, Any] = {}
+        if spec.workload == "posterior":
+            # Every real posterior caller reduces -- model surgery and model
+            # selection both want expected state counts, not per-sequence
+            # posteriors -- and the unreduced array would not fit in host
+            # memory at a large batch size anyway.
+            predict_kwargs["reduce"] = True
         model.predict(
             datasets,
             indices=indices,
@@ -615,6 +718,7 @@ def probe_main(spec: ProbeSpec, result_path: Path) -> None:
             # cannot override the probe's batch size or padded length.
             bucket_boundaries=[spec.seq_len],
             bucket_batch_sizes=[spec.batch_size, spec.batch_size],
+            **predict_kwargs,
         )
         effective_batch_size = spec.batch_size
 
@@ -647,20 +751,23 @@ def probe_main(spec: ProbeSpec, result_path: Path) -> None:
     result_path.write_text(json.dumps(result))
 
 
-def _set_inference_mode(model: Any, mode: str) -> None:
-    """Select what the prediction pass computes."""
+def _set_inference_mode(model: Any, workload: str) -> None:
+    """Select what the prediction pass computes.
+
+    MEA is absent by design: it is not calibrated in its own right and takes
+    the posterior factor through ``training_util.MODE_FALLBACK``.
+    """
     modes = {
         "viterbi": model.viterbi_mode,
-        "mea": model.mea_mode,
         "posterior": model.posterior_mode,
         "loglik": model.loglik_mode,
     }
-    if mode not in modes:
+    if workload not in modes:
         raise ValueError(
-            f"Unknown inference mode '{mode}'. "
+            f"'{workload}' is not an inference workload. "
             f"Choose one of {sorted(modes)}."
         )
-    modes[mode]()
+    modes[workload]()
 
 
 def _resulting_batch_size(spec: ProbeSpec, impl_factor: float) -> int:
@@ -709,8 +816,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Comma-separated batch size ladder, ascending.",
     )
     parser.add_argument(
-        "--phases", type=_str_list, default=list(DEFAULT_PHASES),
-        help="Comma-separated phases to probe: train and/or inference.",
+        "--workloads", type=_workload_list, default=list(DEFAULT_WORKLOADS),
+        help="Comma-separated workloads to probe: "
+             f"{', '.join(WORKLOADS)}. Each one measures its own key of "
+             "IMPL_FACTORS, and the inference ones additionally aggregate "
+             "into the '<prefix>_inference' fallback key.",
     )
     parser.add_argument(
         "--features", type=_features_list, default=list(DEFAULT_FEATURES),
@@ -733,11 +843,6 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
              "'330:465,360:505'.",
     )
     parser.add_argument(
-        "--inference-mode", default="viterbi",
-        choices=["viterbi", "mea", "posterior", "loglik"],
-        help="What the inference probes compute.",
-    )
-    parser.add_argument(
         "-o", "--output", default="",
         help="Path of the JSON report.",
     )
@@ -757,6 +862,16 @@ def _int_list(value: str) -> list[int]:
 
 def _str_list(value: str) -> list[str]:
     return [v for v in value.replace(" ", "").split(",") if v]
+
+
+def _workload_list(value: str) -> list[str]:
+    workloads = _str_list(value)
+    unknown = [w for w in workloads if w not in WORKLOADS]
+    if unknown:
+        raise argparse.ArgumentTypeError(
+            f"Unknown workloads {unknown}. Choose from {list(WORKLOADS)}."
+        )
+    return workloads
 
 
 def _features_list(value: str) -> list[str]:
@@ -795,21 +910,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     # but auto-detection would import whichever framework it finds first.
     os.environ["LEARNMSA_BACKEND"] = args.backend
 
-    specs = plan_probes(args)
+    groups = plan_probes(args)
+    print(
+        f"{len(groups)} groups, at most "
+        f"{math.ceil(math.log2(len(args.batch_sizes) + 1))} probes each",
+        flush=True,
+    )
 
     results: list[ProbeResult] = []
-    stopped: set[tuple[str, str]] = set()
-    for spec in specs:
-        group = (spec.label, spec.phase)
-        if group in stopped:
-            # A smaller batch size already hit the device limit.
-            results.append(ProbeResult(spec=spec, status="skipped"))
-            continue
-        print(f"probing {spec.key()} ...", flush=True)
-        result = run_probe(spec, args.probe_timeout, verbose=args.verbose)
-        if result.status != "ok":
-            stopped.add(group)
-        results.append(result)
+    for ladder in groups:
+        results.extend(
+            search_group(ladder, args.probe_timeout, verbose=args.verbose)
+        )
 
     print()
     print_table(results)
@@ -817,11 +929,19 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     report = build_report(args, results)
     for features in args.features:
-        for phase in args.phases:
-            key = factor_key(features, phase)
+        for workload in [*args.workloads, "inference"]:
+            key = factor_key(features, workload)
             if key not in report.factors:
                 continue
-            selected = select_probes(results, phase, features)
+            if workload == "inference":
+                print(
+                    f"recommended IMPL_FACTORS['{args.backend}']['{key}']: "
+                    f"{report.factors[key]:.3f} (max over "
+                    f"{', '.join(w for w in args.workloads if w != 'train')}, "
+                    "the fallback for uncalibrated modes)"
+                )
+                continue
+            selected = select_probes(results, workload, features)
             speakers = ", ".join(
                 f"{r.spec.label}@B{r.effective_batch_size}" for r in selected
             )

@@ -628,7 +628,9 @@ class TFLearnMSAModel(tf.keras.Model, LearnMSAModel[tf.Tensor]):
                 indices=indices,
                 batch_generator=self.context.batch_gen,
                 model_lengths=[self.phmm_layer.lengths[m] for m in _models],
-                batch_size_impl_factor=self.context._get_impl_factor(True),
+                batch_size_impl_factor=self.context._get_impl_factor(
+                    self.phmm_layer.mode_name()
+                ),
             )
 
         # Create dataset and get number of steps
@@ -949,7 +951,9 @@ class TFLearnMSAModel(tf.keras.Model, LearnMSAModel[tf.Tensor]):
             indices=indices,
             batch_generator=self.context.batch_gen,
             model_lengths=[self.phmm_layer.lengths[m] for m in _models],
-            batch_size_impl_factor=self.context._get_impl_factor(True),
+            batch_size_impl_factor=self.context._get_impl_factor(
+                self.phmm_layer.mode_name()
+            ),
         )
 
         ds, steps = make_dataset(

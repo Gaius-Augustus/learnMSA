@@ -441,28 +441,48 @@ class LearnMSAContext:
                 )
             return _batch_size_cb
 
-    def _get_impl_factor(self, inference: bool = False) -> float:
-        """The implementation factor for batch size scaling, depending on
-        which input tracks and whether gradients are used.
+    def _get_impl_factor(self, mode: str = "train") -> float:
+        """The implementation factor for batch size scaling.
+
+        It depends on which input tracks are active and on what the pass
+        computes: training holds gradients, and the inference modes differ
+        among themselves (Viterbi keeps a backtrace, the posterior runs the
+        backward sweep as well as the forward one, and the log-likelihood
+        keeps only the final carry).
+
+        Args:
+            mode: ``"train"`` or an inference mode as named by
+                :meth:`learnMSA.hmm.layer.PHMMLayer.mode_name`. A mode without
+                a calibrated key of its own falls back through
+                :data:`~learnMSA.model.training_util.MODE_FALLBACK` and then to
+                the aggregate ``inference`` factor, which is the maximum over
+                the calibrated modes and therefore never too small.
+
+        Returns:
+            The implementation factor to pass to
+            :func:`~learnMSA.model.training_util.get_adaptive_batch_size`.
         """
         # The factors are backend-specific.
         from learnMSA.backend import get_backend
 
         factors = training_util.get_impl_factors(get_backend())
-        suffix = "inference" if inference else "train"
 
         use_lm = self.config.language_model.use_language_model
         use_struct = self.config.structure.use_structure
         if use_lm and use_struct:
-            key = f"language_model_and_structure_{suffix}"
+            prefix = "language_model_and_structure_"
         elif use_lm:
-            key = f"language_model_{suffix}"
+            prefix = "language_model_"
         elif use_struct:
-            key = f"structure_{suffix}"
+            prefix = "structure_"
         else:
-            key = suffix
+            prefix = ""
 
-        return factors[key]
+        if mode == "train":
+            return factors[f"{prefix}train"]
+
+        mode = training_util.MODE_FALLBACK.get(mode, mode)
+        return factors.get(f"{prefix}{mode}", factors[f"{prefix}inference"])
 
     def _setup_visualization(self) -> None:
         """Set up visualization file paths based on configuration."""

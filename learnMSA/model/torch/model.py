@@ -876,7 +876,9 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
                 indices=indices,
                 batch_generator=self.context.batch_gen,
                 model_lengths=[self.phmm_layer.lengths[m] for m in models],
-                batch_size_impl_factor=self.context._get_impl_factor(True),
+                batch_size_impl_factor=self.context._get_impl_factor(
+                    self.phmm_layer.mode_name()
+                ),
             )
 
         loader, steps = make_dataset(

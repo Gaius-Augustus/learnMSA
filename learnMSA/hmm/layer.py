@@ -285,6 +285,15 @@ class PHMMLayer(Generic[T_Tensor]):
         """
         return self._mode == HMMMode.POSTERIOR
 
+    def mode_name(self) -> str:
+        if self.is_viterbi_mode():
+            return "viterbi"
+        if self.is_mea_mode():
+            return "mea"
+        if self.is_posterior_mode():
+            return "posterior"
+        return "loglik"
+
     def _add_transitioner(
         self,
         aa_value_sets: Sequence[PHMMValueSet] | None,
