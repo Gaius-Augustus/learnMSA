@@ -147,6 +147,23 @@ def configure_runtime() -> None:
     """
     if get_backend() == "tensorflow":
         return
+
+    # Let the caching allocator grow one virtual segment per size class
+    # instead of reserving a fresh block whenever a request does not fit an
+    # existing one. learnMSA cycles through several large, differently shaped
+    # (B, T, H, Q) tensors per step, which fragments the default allocator
+    # badly: measured on an RTX 3090 at L=362, S=480, this cuts the training
+    # high-water mark by ~15% and, more importantly, makes it consistent
+    # across batch sizes (impl factor 16.9/18.6/17.1 at B=128/256/512 becomes
+    # 14.7/14.5/14.5), which is what the adaptive batch sizer assumes. Timing
+    # is unchanged. setdefault so the setting stays overridable.
+    #
+    # Read when the CUDA allocator first initializes, not at import, so
+    # setting it here is in time as long as nothing has allocated yet.
+    os.environ.setdefault(
+        "PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True"
+    )
+
     import torch
 
     # Use the tensor cores for float32 matrix multiplication
