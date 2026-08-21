@@ -410,9 +410,20 @@ def search_group(
 
 
 def _looks_like_oom(output: str) -> bool:
+    """Whether a failed probe failed for want of device memory.
+
+    Only the label depends on this -- every non-ok status is treated the same
+    way by :func:`search_group` -- but a report that calls an OOM an "error"
+    invites someone to go hunting for a bug that is not there.
+
+    The last two markers are TensorFlow's: it dumps its allocator state and can
+    die on the spot without ever raising a Python-level exception, in which case
+    the traceback markers above never appear.
+    """
     lowered = output.lower()
     return any(marker in lowered for marker in (
         "out of memory", "outofmemoryerror", "resourceexhausted",
+        "oom when allocating", "largestfreeblock",
     ))
 
 
