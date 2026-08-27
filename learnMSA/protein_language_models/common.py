@@ -1,161 +1,275 @@
+from abc import abstractmethod
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Generic, Sequence, TypeVar
 
-import tensorflow as tf
 import numpy as np
-import os
 
-
+#: Package-relative directory holding the shipped scoring model weights.
 SCORING_MODEL_PATH = "scoring_models"
-PRIOR_DEFAULT_COMPONENTS = 32
 
-class ScoringModelConfig():
-    def __init__(
-        self,
-        lm_name="protT5",
-        dim=16,
-        activation="sigmoid",
-        use_aa=False,
-        scaled=False,
-        suffix="",
-    ):
-        self.lm_name = lm_name
-        self.dim = dim
-        self.activation = activation
-        self.use_aa = use_aa
-        self.scaled = scaled
-        self.suffix = suffix
+#: Embedding dimension each supported language model produces. ``zeros`` is a
+#: stand-in whose dimension is chosen by the caller; the entry is its default.
+dims: dict[str, int] = {
+    "proteinBERT": 1562,
+    "esm2": 2560,
+    "protT5": 1024,
+    "zeros": 16,
+}
 
-    def __repr__(self):
-        return f"ScoringModelConfig(lm_name={self.lm_name}, dim={self.dim}, "\
-            f"activation={self.activation}, suffix={self.suffix})"
+#: Language models that only the TensorFlow backend can run. ProteinBERT ships
+#: as a Keras model in the ``proteinbert`` package and has no PyTorch port.
+TF_ONLY_LANGUAGE_MODELS: tuple[str, ...] = ("proteinBERT",)
 
-    def to_dict(self):
-        return {
-            "lm_name" : self.lm_name,
-            "dim" : self.dim,
-            "activation" : self.activation,
-            "use_aa" : self.use_aa,
-            "scaled" : self.scaled,
-            "suffix" : self.suffix}
+#: The tensor type of the selected backend.
+T_Tensor = TypeVar("T_Tensor")
 
 
-def get_scoring_model_path(config : ScoringModelConfig):
-    return f"{SCORING_MODEL_PATH}/{config.lm_name}_{config.dim}_"\
+@dataclass(frozen=True)
+class ScoringModelConfig:
+    """Identifies one of the shipped bilinear scoring models.
+
+    Attributes:
+        lm_name: Name of the language model the scoring model was fitted for.
+        dim: Reduced embedding dimension the scoring model projects to.
+        activation: Output activation, ``"sigmoid"`` or ``"softmax"``.
+        scaled: Whether scores are rescaled to roughly unit variance.
+        suffix: Optional suffix identifying a non-default scoring model.
+    """
+
+    lm_name: str = "protT5"
+    dim: int = 16
+    activation: str = "sigmoid"
+    scaled: bool = False
+    suffix: str = ""
+
+
+def get_scoring_model_path(config: ScoringModelConfig) -> str:
+    """Package-relative path of a scoring model's legacy Keras weight file.
+
+    Kept for the legacy pretraining tooling, which still writes ``.h5``. The
+    production loader goes through
+    :mod:`learnMSA.protein_language_models.scoring_weights`.
+    """
+    return (
+        f"{SCORING_MODEL_PATH}/{config.lm_name}_{config.dim}_"
         f"{config.activation}{config.suffix}.h5"
+    )
 
 
-## Constructs and loads a language model with contextual imports.
-def get_language_model(
-    name,
-    max_len=512,
-    trainable=False,
-    cache_dir=None,
-    embedding_dim=None,
-):
-    if name == "proteinBERT":
-        import learnMSA.protein_language_models.proteinBERT as proteinBERT
-        language_model, encoder = proteinBERT.get_proteinBERT_model_and_encoder(
-            max_len = max_len+2, trainable=trainable, cache_dir=cache_dir
-        )
-    elif name == "esm2":
-        import learnMSA.protein_language_models.esm2 as esm2
-        language_model = esm2.ESM2LanguageModel(
-            trainable=trainable, cache_dir=cache_dir
-        )
-        encoder = esm2.ESM2InputEncoder(cache_dir=cache_dir)
-    elif name == "esm2s":
-        import learnMSA.protein_language_models.esm2 as esm2
-        language_model = esm2.ESM2LanguageModel(
-            trainable=trainable, small=True, cache_dir=cache_dir
-        )
-        encoder = esm2.ESM2InputEncoder(small=True, cache_dir=cache_dir)
-    elif name == "protT5":
-        import learnMSA.protein_language_models.protT5 as protT5
-        language_model = protT5.ProtT5LanguageModel(
-            trainable=trainable, cache_dir=cache_dir
-        )
-        encoder = protT5.ProtT5InputEncoder(cache_dir=cache_dir)
-    elif name == "zeros":
-        import learnMSA.protein_language_models.zeros as zeros
-        if embedding_dim is None:
-            embedding_dim = 16
-        language_model = zeros.ZerosLanguageModel(embedding_dim=embedding_dim)
-        encoder = zeros.ZerosInputEncoder()
-    else:
-        raise ValueError(f"Language model {name} not supported.")
-    return language_model, encoder
+def make_cache_dir(path: str | Path | None, model_id: str) -> str:
+    """Create and return the download cache directory for a language model.
 
+    Args:
+        path: Cache root. Defaults to ``~/.cache/learnmsa``.
+        model_id: Subdirectory name identifying the model.
 
-class LanguageModel(tf.keras.layers.Layer):
-    """ Base class for language models that generate residual-level embeddings
-    of the input sequences.
+    Returns:
+        The cache path for this model, as a string.
     """
-    def call(self, inputs):
-        pass
+    if path is None:
+        path = Path.home() / ".cache" / "learnmsa"
 
-    def eliminate_start_stop_tokens(self, embeddings, crop, mask):
-        mask = tf.cast(mask, embeddings.dtype)
-        mask_crop_1 = tf.concat([mask[:, 1:], tf.zeros_like(mask[:, :1])], 1)
-        mask_crop_2 = tf.concat([mask[:, 2:], tf.zeros_like(mask[:, :2])], 1)
-        # both tokens
-        mask_no_start_stop = mask_crop_2 * (1 - crop[:, :1]) * (1 - crop[:, 1:])
-        # only start token
-        mask_no_start_stop += mask_crop_1 * crop[:, :1] * (1 - crop[:, 1:])
-        # only end token
-        mask_no_start_stop += mask_crop_1 * (1 - crop[:, :1]) * crop[:, 1:]
-        # no start- or end-token
-        mask_no_start_stop += mask * crop[:, :1] * crop[:, 1:]
-        # shift sequences with a start token by 1
-        embeddings_no_start = tf.concat(
-            [embeddings[:,1:], tf.zeros_like(embeddings[:,:1])], 1
-        )
-        embeddings_no_start_stop = (embeddings_no_start * crop[:, :1, tf.newaxis]
-            + embeddings * (1 - crop[:, :1, tf.newaxis]))
-        embeddings_no_start_stop *= mask_no_start_stop[:,:,tf.newaxis]
-        # crop all padding-only columns
-        max_len = tf.reduce_max(tf.reduce_sum(
-            tf.cast(mask_no_start_stop, tf.int32),
-        -1))
-        embeddings_no_start_stop = embeddings_no_start_stop[:,:max_len]
-        return embeddings_no_start_stop
+    path = Path(path)
+    path.mkdir(parents=True, exist_ok=True)
+    return str(path / model_id)
 
 
-class InputEncoder():
-    """ Base class for encoders that map proteins as strings to input tensors
-        compatible with the specific language model.
-        The output of the encoder should be the input to the corresponding
-        language model.
+class LanguageModel(Generic[T_Tensor]):
+    """Base class for language models producing residue-level embeddings.
+
+    The backend wrappers inherit framework-type-first, e.g.
+    ``TorchLanguageModel(torch.nn.Module, LanguageModel[torch.Tensor])``. This
+    class deliberately does not use ``ABCMeta``: it would clash with the keras
+    and torch module metaclasses.
     """
-    def __call__(self, str_seq, crop):
-        pass
 
-    def get_signature(self):
-        pass
+    # These are annotations without values on purpose. A class-level ``= None``
+    # would be found by ordinary attribute lookup and so shadow anything a
+    # backend stores elsewhere -- ``torch.nn.Module`` keeps submodules in
+    # ``_modules`` and only reaches them through ``__getattr__``, which is
+    # never consulted while a class attribute of the same name exists.
+    dim: int
+    model: Any
 
-    def modify_cropped(self, x, crop, lens, pad_id):
-        for i,(cs,ce) in enumerate(crop):
+    @abstractmethod
+    def call(self, inputs: Sequence[Any]) -> T_Tensor:
+        """Embed one batch of encoded sequences.
+
+        Args:
+            inputs: The tuple an :class:`InputEncoder` produced, already moved
+                onto the backend's tensor type.
+
+        Returns:
+            Embeddings of shape ``(batch, max_len, dim)``, start- and
+            end-tokens removed and trailing padding-only columns cropped.
+        """
+
+    @abstractmethod
+    def eliminate_start_stop_tokens(
+        self, embeddings: T_Tensor, crop: T_Tensor, mask: T_Tensor
+    ) -> T_Tensor:
+        """Strip the tokenizer's start- and end-tokens from a padded batch.
+
+        Runs inside the compiled embedding call, so it must be written in the
+        backend's own tensor ops -- hence one implementation per backend.
+
+        Args:
+            embeddings: Shape ``(batch, max_len, dim)``.
+            crop: Shape ``(batch, 2)``, ``1`` where the sequence was cropped at
+                the start / at the end and therefore carries no such token.
+            mask: Shape ``(batch, max_len)``, ``1`` on non-padding positions.
+
+        Returns:
+            Embeddings with both special tokens removed, left-aligned, and
+            trailing all-padding columns dropped.
+        """
+
+    def clear_internal_model(self) -> None:
+        """Release the wrapped framework model."""
+        if hasattr(self, "model"):
+            del self.model
+
+
+class InputEncoder:
+    """Base class for encoders mapping protein strings to model inputs.
+
+    Encoders are backend-neutral: they return numpy arrays, and the backend's
+    embedding call converts them to its own tensor type.
+    """
+
+    @abstractmethod
+    def __call__(
+        self, str_seq: Sequence[str], crop: np.ndarray
+    ) -> tuple[np.ndarray, ...]:
+        """Encode a batch of sequences.
+
+        Args:
+            str_seq: The sequences as plain strings.
+            crop: Shape ``(batch, 2)`` of booleans, ``True`` where the sequence
+                was cropped at the start / at the end.
+
+        Returns:
+            The tensors the matching :class:`LanguageModel` expects, as numpy
+            arrays. The dtypes are set explicitly, because the backends
+            convert them verbatim.
+        """
+
+    def modify_cropped(
+        self,
+        x: np.ndarray,
+        crop: np.ndarray,
+        lens: Sequence[int],
+        pad_id: int,
+    ) -> None:
+        """Drop the special tokens of cropped sequences, in place.
+
+        A sequence cropped at the start carries no start token, so everything
+        shifts left by one; a sequence cropped at the end carries no end token.
+
+        Args:
+            x: Token ids or mask of shape ``(batch, max_len)``, modified in
+                place.
+            crop: Shape ``(batch, 2)`` of booleans.
+            lens: Unpadded length of each sequence.
+            pad_id: Value written into the freed positions.
+        """
+        for i, (cs, ce) in enumerate(crop):
             if cs:
                 x[i] = np.roll(x[i], -1)
                 x[i, -1] = pad_id
                 if ce:
                     x[i, lens[i]] = pad_id
             elif ce:
-                x[i, lens[i]+1] = pad_id
+                x[i, lens[i] + 1] = pad_id
 
 
-def make_cache_dir(path, model_id):
-    if path is None:
-        path = Path.home() / ".cache" / "learnmsa"
-    
-    path = Path(path)
-    path.mkdir(parents=True, exist_ok=True)
-    return str(path / model_id)
+def get_language_model(
+    name: str,
+    max_len: int = 512,
+    trainable: bool = False,
+    cache_dir: str | Path | None = None,
+    embedding_dim: int | None = None,
+) -> tuple[LanguageModel, InputEncoder]:
+    """Construct a language model and its input encoder for the active backend.
+
+    The wrapper class comes from the backend subpackage via
+    :func:`learnMSA.backend.resolve`; the encoder is backend-neutral and is
+    constructed directly.
+
+    Args:
+        name: One of ``"proteinBERT"``, ``"esm2"``, ``"esm2s"``, ``"protT5"``
+            or ``"zeros"``.
+        max_len: Maximum sequence length. Only ProteinBERT needs it.
+        trainable: Whether the language model's weights are trainable.
+        cache_dir: Where to cache the downloaded model.
+        embedding_dim: Embedding width of the ``"zeros"`` stand-in.
+
+    Returns:
+        The language model and its input encoder.
+
+    Raises:
+        ValueError: If ``name`` is not a supported language model.
+        NotImplementedError: If ``name`` is TensorFlow-only and another backend
+            is active.
+    """
+    from learnMSA import backend
+
+    _check_backend_supports(name)
+
+    if name == "proteinBERT":
+        make_protein_bert = backend.resolve(
+            "protein_language_models.protein_bert", "make_protein_bert"
+        )
+        return make_protein_bert(
+            max_len=max_len + 2, trainable=trainable, cache_dir=cache_dir
+        )
+
+    if name in ("esm2", "esm2s"):
+        from learnMSA.protein_language_models import esm2
+
+        small = name == "esm2s"
+        language_model = backend.resolve(
+            "protein_language_models.esm2", "ESM2LanguageModel"
+        )(trainable=trainable, small=small, cache_dir=cache_dir)
+        return language_model, esm2.ESM2InputEncoder(
+            small=small, cache_dir=cache_dir
+        )
+
+    if name == "protT5":
+        from learnMSA.protein_language_models import prot_t5
+
+        language_model = backend.resolve(
+            "protein_language_models.prot_t5", "ProtT5LanguageModel"
+        )(trainable=trainable, cache_dir=cache_dir)
+        return language_model, prot_t5.ProtT5InputEncoder(cache_dir=cache_dir)
+
+    if name == "zeros":
+        from learnMSA.protein_language_models import zeros
+
+        dim = dims["zeros"] if embedding_dim is None else embedding_dim
+        language_model = backend.resolve(
+            "protein_language_models.zeros", "ZerosLanguageModel"
+        )(embedding_dim=dim)
+        return language_model, zeros.ZerosInputEncoder()
+
+    raise ValueError(f"Language model {name} not supported.")
 
 
-# for convenience
-dims = {
-    "proteinBERT" : 1562,
-    "esm2" : 2560,
-    "protT5" : 1024,
-    "zeros" : 16,
-}
+def _check_backend_supports(name: str) -> None:
+    """Fail early and with a useful message on a TensorFlow-only model."""
+    if name not in TF_ONLY_LANGUAGE_MODELS:
+        return
+
+    from learnMSA.backend import get_backend
+
+    if get_backend() == "tensorflow":
+        return
+
+    raise NotImplementedError(
+        f"The '{name}' language model is only available with the tensorflow "
+        f"backend, but the '{get_backend()}' backend is active. Either pick "
+        "another language model, or precompute the embeddings once with "
+        f"'learnMSA --backend tensorflow --save-emb <file> ...' and pass them "
+        "to this run with '--load-emb <file>'."
+    )

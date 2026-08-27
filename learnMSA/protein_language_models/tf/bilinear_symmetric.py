@@ -1,5 +1,8 @@
 import tensorflow as tf
+
 import learnMSA.protein_language_models.common as common
+from learnMSA.protein_language_models.scoring_weights import \
+    load_scoring_weights
 
 
 class SymmetricBilinearReduction(tf.keras.layers.Layer):
@@ -28,6 +31,16 @@ class SymmetricBilinearReduction(tf.keras.layers.Layer):
         self.b = self.add_weight(shape=(1,), initializer=tf.constant_initializer(-3), trainable=self.trainable, name="b")
         self.dropout = tf.keras.layers.Dropout(self.dropout_prob)
         
+    def reduce(self, embeddings, training=False):
+        """Project embeddings onto the reduced space.
+
+        The public name, matching ``TorchSymmetricBilinearReduction.reduce``,
+        so that both backends' ``make_reduction_layer`` return the same
+        interface. ``_reduce`` stays as the internal name the legacy
+        pretraining tooling calls.
+        """
+        return self._reduce(embeddings, training)
+
     def _reduce(self, embeddings, training):
         embeddings = self.dropout(embeddings, training=training)
         reduced_emb = tf.matmul(embeddings, self.R) #(..., reduced_dim)
@@ -89,13 +102,7 @@ class BackgroundEmbedding(tf.keras.layers.Layer):
 
     
 def make_scoring_model(config : common.ScoringModelConfig, dropout=0.0, trainable=False):
-    # string mapping to allowed functions for conveniece
-    if config.activation == "softmax":
-        act = tf.nn.softmax
-    elif config.activation == "sigmoid":
-        act = tf.math.sigmoid
-    else:
-        act = config.activation
+    act = _get_activation(config.activation)
     input_dim = config.dim if config.lm_name == "zeros" else common.dims[config.lm_name]
     emb1 = tf.keras.layers.Input(shape=(None, input_dim))
     emb2 = tf.keras.layers.Input(shape=(None, input_dim))
@@ -109,3 +116,42 @@ def make_scoring_model(config : common.ScoringModelConfig, dropout=0.0, trainabl
     model = tf.keras.models.Model(inputs=[emb1, emb2], outputs=output)
     return model
     
+
+def make_reduction_layer(
+    config: common.ScoringModelConfig,
+) -> SymmetricBilinearReduction:
+    """Build a frozen reduction layer with the shipped parameters loaded.
+
+    This is what :mod:`learnMSA.protein_language_models.compute_embeddings`
+    calls. Only ``reduce`` is used downstream, so the layer is built directly
+    instead of going through :func:`make_scoring_model` and ``load_weights``.
+
+    Args:
+        config: Identifies the scoring model.
+
+    Returns:
+        A built, non-trainable :class:`SymmetricBilinearReduction`.
+    """
+    weights = load_scoring_weights(config)
+    input_dim = int(weights["R"].shape[0])
+    layer = SymmetricBilinearReduction(
+        config.dim,
+        dropout=0.0,
+        trainable=False,
+        activation=_get_activation(config.activation),
+        scaled=config.scaled,
+    )
+    layer.build((None, None, input_dim))
+    layer.R.assign(weights["R"])
+    layer.b.assign(weights["b"])
+    layer.trainable = False  # don't forget to freeze the scoring model!
+    return layer
+
+
+def _get_activation(activation):
+    """Map an activation name to a callable, passing callables through."""
+    if activation == "softmax":
+        return tf.nn.softmax
+    if activation == "sigmoid":
+        return tf.math.sigmoid
+    return activation

@@ -2,7 +2,7 @@
 import sys
 sys.path.insert(0, "../..")
 import learnMSA.protein_language_models.common as common
-from learnMSA.protein_language_models.bilinear_symmetric import make_scoring_model
+from learnMSA.protein_language_models.tf.bilinear_symmetric import make_scoring_model
 from MvnPrior import make_pdf_model
 
 
