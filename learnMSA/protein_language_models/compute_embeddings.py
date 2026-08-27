@@ -1,143 +1,135 @@
-import importlib.resources as resources
 import gc
-import os
 from functools import partial
+from typing import Callable
 
 import numpy as np
-import tensorflow as tf
 
-from learnMSA.model.context import LearnMSAContext
-from learnMSA.protein_language_models import common
-from learnMSA.protein_language_models.bilinear_symmetric import \
-    make_scoring_model
+from learnMSA import backend
+from learnMSA.config import LanguageModelConfig
 from learnMSA.protein_language_models.common import (InputEncoder,
-                                                     LanguageModel,
-                                                     get_language_model,
-                                                     get_scoring_model_path)
+                                                     ScoringModelConfig,
+                                                     get_language_model)
 from learnMSA.run.util import get_avail_memory_bytes
 from learnMSA.util import EmbeddingCache, SequenceDataset
-from learnMSA.config import LanguageModelConfig
+
+#: Ad hoc scaling constant of the adaptive batch size.
+# TODO: make pLM-dependent and fine tune
+IMPL_FACTOR = 1000.0
 
 
 def compute_embeddings(
     data: SequenceDataset,
-    language_model_config : LanguageModelConfig,
-    verbose: bool=False,
+    language_model_config: LanguageModelConfig,
+    verbose: bool = False,
 ) -> EmbeddingCache:
-    """
-    Computes off-the-shelf embeddings for alignments with learnMSA.
+    """Compute off-the-shelf embeddings for alignments with learnMSA.
 
-    Returns an EmbeddingCache object that can turned into an
-    EmbeddingDataset object or it can be used to retrieve the
-    embeddings for each sequence in the dataset.
-    """
-    from learnMSA.backend import get_backend
-    if get_backend() != "tensorflow":
-        raise NotImplementedError(
-            "Computing protein language model embeddings requires the "
-            f"tensorflow backend, but the '{get_backend()}' backend is active. "
-            "Precompute the embeddings once with "
-            "'learnMSA --backend tensorflow --save-emb <file> ...' and pass "
-            "them to this run with '--emb-file <file>'."
-        )
+    Args:
+        data: The sequences to embed. Must have ``remove_gaps=True``.
+        language_model_config: Selects the language model and the scoring model
+            that reduces its embedding dimension.
+        verbose: Print progress.
 
+    Returns:
+        An :class:`~learnMSA.util.embedding_cache.EmbeddingCache` that can be
+        turned into an ``EmbeddingDataset`` or queried per sequence.
+    """
     # TODO: remove the ScoringModelConfig entirely; it's only here for legacy
     # reasons
     scoring_model_config = _get_scoring_model_config(language_model_config)
 
-    # load the language model and the scoring model
-    # initialize the weights correctly and make sure they are not trainable
+    # Load the language model and its encoder. The weights are initialized
+    # correctly and frozen -- this is inference only.
     language_model, encoder = get_language_model(
         language_model_config.language_model,
-        max_len = data.max_len+2,
+        max_len=data.max_len + 2,
         trainable=False,
         cache_dir=language_model_config.plm_cache_dir,
         embedding_dim=scoring_model_config.dim,
     )
 
-    # Load the scoring model and its weights.
-    # The scoring model is used to reduce the embedding dimension.
+    # The scoring model reduces the language model's embedding dimension. The
+    # "zeros" stand-in already emits the reduced width, so it needs none.
     # TODO: remove scoring model config and make the whole codebase use
     # the language model config instead
     if language_model_config.language_model == "zeros":
-        scoring_layer = None
+        reduction_layer = None
     else:
-        scoring_model = make_scoring_model(
-            scoring_model_config, dropout=0.0, trainable=False
+        make_reduction_layer = backend.resolve(
+            "protein_language_models.bilinear_symmetric",
+            "make_reduction_layer",
         )
-        scoring_model_path = get_scoring_model_path(scoring_model_config)
-        scoring_model.load_weights(
-            os.path.dirname(__file__)
-            + f"/../protein_language_models/"
-            + scoring_model_path
-        )
-        scoring_layer = scoring_model.layers[-1]
-        scoring_layer.trainable = False #don't forget to freeze the scoring model!
+        reduction_layer = make_reduction_layer(scoring_model_config)
 
-    cache = EmbeddingCache(data.seq_lens, language_model_config.scoring_model_dim)
-    lm_scoring_call = _make_lm_scoring_call(language_model, encoder, scoring_layer)
+    make_embedding_fn = backend.resolve(
+        "protein_language_models.embed", "make_embedding_fn"
+    )
+    embedding_fn = make_embedding_fn(language_model, reduction_layer)
+
+    cache = EmbeddingCache(
+        data.seq_lens, language_model_config.scoring_model_dim
+    )
     compute_emb_func = partial(
         _compute_reduced_embeddings,
-        data = data,
-        encoder = encoder,
-        lm_scoring_call = lm_scoring_call,
+        data=data,
+        encoder=encoder,
+        embedding_fn=embedding_fn,
     )
-    impl_factor = 1000.0 # TODO: ad hoc; make pLM-dependent and fine tune
     batch_size_callback = partial(
-        get_adaptive_batch_size, impl_factor=impl_factor
+        get_adaptive_batch_size, impl_factor=IMPL_FACTOR
     )
 
     if verbose:
         print(
-            f"Computing embeddings for {len(data)} sequences. " \
-            "This may take a moment...")
+            f"Computing embeddings for {len(data)} sequences. "
+            "This may take a moment..."
+        )
 
     cache.fill_cache(compute_emb_func, batch_size_callback, verbose=verbose)
 
-    # cleanup to erase the LM from memory
+    # Erase the language model from memory again; it is by far the largest
+    # thing this process holds and nothing downstream needs it.
     del language_model
     del encoder
-    del scoring_layer
-    tf.keras.backend.clear_session()
+    del reduction_layer
+    del embedding_fn
+    backend.clear_session()
     gc.collect()
 
     return cache
-
-
-def _make_lm_scoring_call(language_model, encoder, scoring_layer):
-    @tf.function(input_signature=(encoder.get_signature(),))
-    def _call_lm_scoring_model(lm_inputs):
-        emb = language_model(lm_inputs)
-        if scoring_layer is None:
-            return emb
-        return scoring_layer._reduce(emb, training=False)
-
-    return _call_lm_scoring_model
 
 
 def _compute_reduced_embeddings(
     indices: np.ndarray,
     data: SequenceDataset,
     encoder: InputEncoder,
-    lm_scoring_call,
+    embedding_fn: Callable[[tuple[np.ndarray, ...]], np.ndarray],
 ) -> np.ndarray:
-    assert data.remove_gaps,\
+    """Embed the sequences at ``indices`` and reduce their dimension."""
+    assert data.remove_gaps, \
         "Embeddings can only be computed for datasets with remove_gaps=True"
     seq_batch = [data.get_standardized_seq(i) for i in indices]
     lm_inputs = encoder(
         seq_batch, np.repeat([[False, False]], len(seq_batch), axis=0)
     )
-    return lm_scoring_call(lm_inputs).numpy()
+    return embedding_fn(lm_inputs)
 
 
 def get_adaptive_batch_size(
     seq_len: int, impl_factor: float = 1.0, safety_margin: float = 0.75
 ) -> int:
-    """
-    Computes an adaptive batch size.
+    """Compute a batch size that fits into the available memory.
+
+    Args:
+        seq_len: Length of the longest sequence in the batch.
+        impl_factor: Implementation-dependent memory scaling constant.
+        safety_margin: Fraction of the available memory to actually use.
+
+    Returns:
+        A batch size in ``[1, 1024]``.
     """
     mem_avail = get_avail_memory_bytes()
-    denominator = float(seq_len) ** 2 # accounts for quadratic scaling of pLMs
+    denominator = float(seq_len) ** 2  # pLMs scale quadratically in length
     denominator *= impl_factor
     if denominator <= 0.0:
         return 1
@@ -147,13 +139,13 @@ def get_adaptive_batch_size(
 
 
 def _get_scoring_model_config(
-    language_model_config : LanguageModelConfig
-) -> common.ScoringModelConfig:
-    scoring_model_config = common.ScoringModelConfig(
+    language_model_config: LanguageModelConfig,
+) -> ScoringModelConfig:
+    """Derive the legacy scoring model config from the user-facing config."""
+    return ScoringModelConfig(
         lm_name=language_model_config.language_model,
         dim=language_model_config.scoring_model_dim,
         activation=language_model_config.scoring_model_activation,
         suffix=language_model_config.scoring_model_suffix,
-        scaled=False
+        scaled=False,
     )
-    return scoring_model_config

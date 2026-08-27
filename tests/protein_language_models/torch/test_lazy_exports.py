@@ -1,8 +1,9 @@
 """The lazy-export contract for ``learnMSA.protein_language_models``.
 
-Same shape as ``tests/backend/test_lazy_exports.py``. The package itself is
-backend-neutral, so the same checks run under PyTorch in
-``tests/protein_language_models/torch/test_lazy_exports.py``.
+The mirror of ``tests/protein_language_models/tf/test_lazy_exports.py``. The
+contract itself is backend-neutral, but it is worth pinning under both backends
+because the failure mode -- a submodule shadowing a same-named function -- can
+be introduced by either backend subpackage.
 """
 
 from tests.backend import lazy_exports

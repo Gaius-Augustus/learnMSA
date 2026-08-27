@@ -47,7 +47,7 @@ plots = [
     "networkx",
     "scipy"
 ]
-plm = [
+plm-tf = [
     # NOTE: on systems with custom CUDA/NCCL installs (e.g. Blackwell),
     # install torch manually first:
     # pip install torch --index-url https://download.pytorch.org/whl/cpu
@@ -59,6 +59,10 @@ plm = [
     "torch",
     "transformers<5.0",
     "tf-keras",
+    "SentencePiece"
+]
+plm-torch = [
+    "transformers<5.0",
     "SentencePiece"
 ]
 
