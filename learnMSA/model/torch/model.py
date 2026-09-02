@@ -524,7 +524,7 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
         inf gradient makes that norm inf.
         """
         assert self.optimizer is not None, "compile() must run before fit()."
-        x = tuple(t.to(self._device) for t in batch)
+        x = tuple(t.to(self._device, non_blocking=True) for t in batch)
         self._record_batch_size(x)
         self.optimizer.zero_grad(set_to_none=True)
         y_pred = self(x)
@@ -925,7 +925,7 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
         Returns:
             ``(predictions, j)`` so the caller can restore the original order.
         """
-        x = tuple(t.to(self._device) for t in batch)
+        x = tuple(t.to(self._device, non_blocking=True) for t in batch)
         self._record_batch_size(x)
         *inputs, j = x
         inputs, n_padded = self._pad_batch(tuple(inputs))
@@ -1008,7 +1008,9 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
 
         with torch.no_grad():
             for batch in loader:
-                x = tuple(t.to(self._device) for t in batch)
+                x = tuple(
+                    t.to(self._device, non_blocking=True) for t in batch
+                )
                 self._record_batch_size(x)
                 *inputs, _j = x
                 y_pred = self(tuple(inputs))
@@ -1123,7 +1125,7 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
 
         with torch.no_grad():
             for batch in loader:
-                x = batch[0].to(self._device)
+                x = batch[0].to(self._device, non_blocking=True)
                 batch_idx = batch[-1].cpu().numpy()
                 # Emissions arrive as per-residue distributions; the null
                 # likelihood of a residue is the mixture P = sum_a v_a * bg_a.
