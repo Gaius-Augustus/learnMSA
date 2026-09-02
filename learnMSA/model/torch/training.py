@@ -1,21 +1,3 @@
-"""Batching for the PyTorch backend.
-
-The counterpart of :mod:`learnMSA.model.tf.training`. Both wrap the
-backend-neutral :class:`~learnMSA.model.batch_generator.BatchGenerator`, which
-turns a batch of sequence indices into numpy arrays; all that differs is the
-machinery around it -- ``tf.data`` there, a ``DataLoader`` here.
-
-The element contract is the same on both sides, so the model's prediction loop
-does not have to know which one produced a batch::
-
-    (*batches, indices)        without bucketing
-    (*batches, indices, j)     with bucketing, j being the position of each
-                               sequence within the requested index array
-
-Unlike ``tf.data`` there is no trailing dummy ``y``: the torch training loop is
-written out here rather than being driven by Keras, so nothing consumes it.
-"""
-
 import math
 from collections.abc import Iterator, Sequence
 
@@ -154,6 +136,13 @@ class _BucketBatchSampler(Sampler[list[int]]):
         return total
 
 
+def _seed_worker(worker_id: int) -> None:
+    """Without this all workers would share state any might produce
+    identical batches.
+    """
+    np.random.seed(torch.initial_seed() % 2**32)
+
+
 def _make_collate(
     indices: np.ndarray,
     batch_generator: BatchGenerator,
@@ -229,16 +218,21 @@ def make_dataset(
             sampler = _SequentialBatchSampler(indices.size, batch_size)
             total_steps = int(np.ceil(indices.size / batch_size))
 
+    # mutable state -- configure(), static_shape_mode, crop_long_seqs,
+    # bucket_boundaries, num_models -- must be set BEFORE creating the
+    # interator, otherwise forking across multiple workers is not safe
+    # normal pipeline works; indexed datasets do not work
+    num_workers = 0 if batch_generator.data[0].indexed else 2
+
     loader = DataLoader(
         _PositionDataset(indices.size),
         batch_sampler=sampler,
         collate_fn=_make_collate(
             indices, batch_generator, with_position=bucket_by_seq_length
         ),
-        # The batch generator holds dataset handles and mutable state (the
-        # per-model permutations, the crop bounds), so it is not safe to fork
-        # it across workers.
-        num_workers=0,
+        num_workers=num_workers,
+        worker_init_fn=_seed_worker if num_workers else None,
+        prefetch_factor=2 if num_workers else None,
         pin_memory=torch.cuda.is_available(),
     )
     return loader, total_steps

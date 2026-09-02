@@ -1270,7 +1270,7 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
 
         with torch.no_grad():
             for batch in loader:
-                x = batch[0].to(self._device)
+                x = batch[0].to(self._device, non_blocking=True)
                 batch_idx = batch[-1].cpu().numpy()
                 # Emissions arrive as per-residue distributions; the null
                 # likelihood of a residue is the mixture P = sum_a v_a * bg_a.
