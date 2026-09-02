@@ -502,6 +502,27 @@ def parse_args(
             "embeddings that guide the MSA step. (default: %(default)s)"
     )
     plm_group.add_argument(
+        "--reduce_online",
+        dest="reduce_online",
+        action="store_true",
+        help="Keep the language model's full-dimensional embeddings and "\
+            "reduce them with a bottleneck that is trained along with the "\
+            "alignment, instead of projecting them once through the frozen "\
+            "scoring model. The full-dimensional embeddings are cached in "\
+            "host memory, so make sure enough RAM is available: about "\
+            "sum(sequence lengths) x dim x 2 bytes. PyTorch backend only. "\
+            "(default: %(default)s)"
+    )
+    plm_group.add_argument(
+        "--reduction_loss_weight",
+        dest="reduction_loss_weight",
+        type=float,
+        default=lm.reduction_loss_weight,
+        help=argparse.SUPPRESS
+        # help="Weight of the reconstruction loss of the trainable embedding "\
+        #     "bottleneck. (default: %(default)s)"
+    )
+    plm_group.add_argument(
         "--plm_cache_dir",
         dest="plm_cache_dir",
         type=str,

@@ -18,6 +18,10 @@ from learnMSA.hmm.torch.util import (insertion_expansion_indices,
 from learnMSA.hmm.util.value_set_emb import PHMMEmbeddingValueSet
 
 
+# guard against too large input embeddings
+MAX_EMB_DIM = 128
+
+
 class TorchEmbeddingEmitter(TorchMVNormalEmitter):
     """An emitter for continuous embedding vectors using a multivariate normal
     distribution and a multivariate normal prior.
@@ -88,6 +92,7 @@ class TorchEmbeddingEmitter(TorchMVNormalEmitter):
         if input_shape is None:
             input_shape = (None, None, self._embedding_dim)
         self.input_dim = input_shape[-1]  # type: ignore
+        self._check_input_dim()
 
         # Share all insertion emissions across positions
         # We need to provide an array with indices into the emitter's kernel
@@ -109,6 +114,27 @@ class TorchEmbeddingEmitter(TorchMVNormalEmitter):
         self.share = np.concatenate(indices)
 
         super().build(input_shape)
+
+    def _check_input_dim(self) -> None:
+        """Check allowed embedding dimensions for the pHMM.
+        """
+        if self.input_dim > MAX_EMB_DIM:
+            raise ValueError(
+                f"The embeddings are {self.input_dim}-dimensional, which is "
+                f"too wide for the pHMM to emit directly. High-dimensional "
+                f"protein language model embeddings have to be reduced before "
+                f"they reach the pHMM: pass --reduce_online to learn the "
+                f"reduction jointly with the alignment, or supply embeddings "
+                f"that were already reduced to --scoring_model_dim "
+                f"({self._embedding_dim})."
+            )
+        if self.input_dim != self._embedding_dim:
+            raise ValueError(
+                f"The embeddings are {self.input_dim}-dimensional, but the "
+                f"pHMM's embedding emitter was built for "
+                f"{self._embedding_dim} dimensions. Set --scoring_model_dim "
+                f"to {self.input_dim} to match the embeddings."
+            )
 
     @override
     def matrix(self, sqrt_variance: bool = False) -> T_TorchTensor:

@@ -22,11 +22,15 @@ import torch
 
 import learnMSA.backend as backend
 from learnMSA.align.decode_util import DecodeArrays
+from learnMSA.config import LanguageModelConfig
 from learnMSA.hmm.torch.layer import TorchPHMMLayer as PHMMLayer
 from learnMSA.model.bucketing import make_default_bucket_scheme
 from learnMSA.model.context import LearnMSAContext
 from learnMSA.model.model import LearnMSAModel
 from learnMSA.model.torch.training import make_dataset
+from learnMSA.protein_language_models.common import ScoringModelConfig
+from learnMSA.protein_language_models.torch.embedding_encoder import (
+    TorchEmbeddingEncoder, make_embedding_encoder)
 from learnMSA.tree.torch.anc_probs_layer import TorchAncProbsLayer
 from learnMSA.util.sequence_dataset import Dataset, SequenceDataset
 
@@ -145,6 +149,12 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
                 low_rank=tree_cfg.low_rank,
             )
 
+        # trainable bottleneck to reduce pLM embeddings
+        self.embedding_encoder = None
+        plm_cfg = context.config.language_model
+        if plm_cfg.use_language_model and plm_cfg.reduce_online:
+            self.embedding_encoder = self._make_embedding_encoder(plm_cfg)
+
         self.phmm_layer = PHMMLayer(
             lengths=context.model_lengths,
             config=context.config.hmm,
@@ -165,6 +175,7 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
         self.loss_tracker = RunningMean(name="loss")
         self.loglik_tracker = RunningMean(name="loglik")
         self.prior_tracker = RunningMean(name="prior")
+        self.reconstruction_tracker = RunningMean(name="rec")
 
         # Per-model metrics for evaluation mode
         num_models = context.config.training.num_model
@@ -185,6 +196,37 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
         self._device = torch.device(
             "cuda" if backend.num_gpus() > 0 else "cpu"
         )
+
+    def _make_embedding_encoder(
+        self, plm_cfg: LanguageModelConfig
+    ) -> TorchEmbeddingEncoder:
+        """Build the embedding bottleneck, resuming a previous one after
+        model surgery.
+        """
+        if self.context.embedding_dim is None:
+            raise ValueError(
+                "reduce_online needs the width of the incoming "
+                "embeddings, but context.embedding_dim was never set. "
+                "align() reads it off the embedding dataset; set it "
+                "yourself when building the model directly."
+            )
+        encoder = make_embedding_encoder(
+            ScoringModelConfig(
+                lm_name=plm_cfg.language_model,
+                dim=plm_cfg.scoring_model_dim,
+                activation=plm_cfg.scoring_model_activation,
+                suffix=plm_cfg.scoring_model_suffix,
+                scaled=False,
+            ),
+            input_dim=self.context.embedding_dim,
+            loss_weight=plm_cfg.reduction_loss_weight,
+        )
+        state = self.context.emb_encoder_state
+        if state is not None:
+            encoder.load_state_dict({
+                k: torch.as_tensor(v) for k, v in state.items()
+            })
+        return encoder
 
     @property
     def device(self) -> torch.device:
@@ -307,6 +349,11 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
             # keep original adds; the structural track arrives one-hot encoded
             # from its SequenceDataset (remap=False)
 
+        if self.embedding_encoder is not None:
+            # The embedding track is the last add; the bottleneck maps it from
+            # the language model's full width to the one the pHMM expects.
+            adds = [*adds[:-1], self.embedding_encoder.reduce(adds[-1])]
+
         return encoded_seq, *adds
 
     def build(
@@ -333,7 +380,18 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
         if cfg.structure.use_structure:
             input_shape += ((B, None, n, cfg.structure.alphabet_size),)
         if cfg.language_model.use_language_model:
-            emb_dim = cfg.language_model.scoring_model_dim
+            if self.embedding_encoder is not None:
+                # The bottleneck has already reduced the track by the time the
+                # pHMM sees it.
+                emb_dim = cfg.language_model.scoring_model_dim
+            else:
+                # Whatever the embedding dataset holds reaches the pHMM
+                # unchanged. The emitter rejects a width it cannot emit.
+                emb_dim = (
+                    self.context.embedding_dim
+                    if self.context.embedding_dim is not None
+                    else cfg.language_model.scoring_model_dim
+                )
             input_shape += ((B, None, n, emb_dim),)
         input_shape += ((B, None, n, 1),)  # padding
         self.phmm_layer.build(input_shape=input_shape)
@@ -495,6 +553,8 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
                 "loglik": self.loglik_tracker.result(),
                 "prior": self.prior_tracker.result(),
             }
+            if self.embedding_encoder is not None:
+                logs["rec"] = self.reconstruction_tracker.result()
             history.append(logs)
             if verbose:
                 elapsed = time.perf_counter() - epoch_start
@@ -580,7 +640,30 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
         # Model.losses; torch has no such hook.
         loss = loss + self.regularization_loss()
 
+        if self.embedding_encoder is not None:
+            reconstruction = self.embedding_reconstruction_loss(x)
+            self.reconstruction_tracker.update_state(reconstruction)
+            loss = loss + reconstruction
+
         return loss
+
+    def embedding_reconstruction_loss(self, x: Any) -> torch.Tensor:
+        """The bottleneck's weighted reconstruction loss for this batch.
+
+        ``x`` still holds the unreduced embeddings, so this recomputes the
+        encoder and decoder rather than threading them out of ``forward``,
+        which has to keep returning a single tensor for ``predict`` and for
+        ``fullgraph=True`` compilation. Two linear layers are negligible next
+        to the HMM.
+        """
+        assert self.embedding_encoder is not None
+        embeddings = x[-2]  # (sequences, *adds, indices), embeddings last add
+        # Padding positions are all-zero embeddings and would otherwise pull
+        # the error towards zero for free.
+        mask = TorchEmbeddingEncoder.padding_mask(embeddings)
+        return self.embedding_encoder.reconstruction_loss(
+            embeddings, mask=mask
+        )
 
     def regularization_loss(self) -> torch.Tensor:
         """The sum of the sub-layers' L2 penalties."""
@@ -641,6 +724,7 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
         self.loss_tracker.reset_state()
         self.loglik_tracker.reset_state()
         self.prior_tracker.reset_state()
+        self.reconstruction_tracker.reset_state()
         for tracker in self.loglik_per_model_trackers:
             tracker.reset_state()
         for tracker in self.prior_per_model_trackers:
@@ -648,7 +732,12 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
 
     @property
     def metrics(self) -> list[RunningMean]:
-        return [self.loss_tracker, self.loglik_tracker, self.prior_tracker]
+        trackers = [
+            self.loss_tracker, self.loglik_tracker, self.prior_tracker
+        ]
+        if self.embedding_encoder is not None:
+            trackers.append(self.reconstruction_tracker)
+        return trackers
 
     @overload
     def predict(

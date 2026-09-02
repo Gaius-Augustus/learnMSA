@@ -84,9 +84,14 @@ Arguments
 
 ``--load_emb`` *EMB_FILE*
     Path to a file containing embeddings for each sequence. This file should be
-    a binary file in the format produced by the ``--save_emb`` option.
+    a binary file in the format produced by the ``--save_emb`` option or by the
+    ``learnMSA_embed`` script (see :doc:`language_model`).
     When this option is used, learnMSA will load the embeddings and use them to
     guide the alignment process.
+
+    All embeddings live in memory while learnMSA is running. Note that this can
+    blow up quickly when storing full-dimensional embeddings (e.g. 1024
+    dimensions for ProtT5).
 
 ``--save_emb`` *EMB_FILE*
     Path to save computed embeddings for each sequence. Per default, stores

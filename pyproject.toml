@@ -71,6 +71,7 @@ Homepage = "https://github.com/Gaius-Augustus/learnMSA"
 
 [project.scripts]
 learnMSA = "learnMSA.run:run_main"
+learnMSA_embed = "learnMSA.run.precompute_embeddings:main"
 
 [tool.setuptools.dynamic]
 version = { attr = "learnMSA._version.__version__" }

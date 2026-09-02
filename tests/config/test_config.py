@@ -392,6 +392,8 @@ class TestLanguageModelConfig:
         """Test LanguageModelConfig default values."""
         config = LanguageModelConfig()
         assert config.use_language_model is False
+        assert config.reduce_online is False
+        assert config.reduction_loss_weight == 1.0
         assert config.plm_cache_dir is None
         assert config.language_model == "protT5"
         assert config.scoring_model_dim == 16
@@ -410,6 +412,8 @@ class TestLanguageModelConfig:
         """Test LanguageModelConfig with custom values."""
         config = LanguageModelConfig(
             use_language_model=True,
+            reduce_online=True,
+            reduction_loss_weight=0.5,
             plm_cache_dir="/path/to/cache",
             language_model="esm2",
             scoring_model_dim=32,
@@ -425,6 +429,8 @@ class TestLanguageModelConfig:
             inverse_gamma_beta=1.0
         )
         assert config.use_language_model is True
+        assert config.reduce_online is True
+        assert config.reduction_loss_weight == 0.5
         assert config.plm_cache_dir == "/path/to/cache"
         assert config.language_model == "esm2"
         assert config.scoring_model_dim == 32
@@ -438,6 +444,11 @@ class TestLanguageModelConfig:
         assert config.embedding_prior_components == 64
         assert config.inverse_gamma_alpha == 2.0
         assert config.inverse_gamma_beta == 1.0
+
+    def test_reduction_loss_weight_must_be_non_negative(self):
+        LanguageModelConfig(reduction_loss_weight=0.0)
+        with pytest.raises(ValidationError, match="non-negative"):
+            LanguageModelConfig(reduction_loss_weight=-1.0)
 
     def test_language_model_validation(self):
         """Test that language_model must be one of the allowed values."""

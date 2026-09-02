@@ -19,6 +19,19 @@ class LanguageModelConfig(BaseModel):
     """Only compute and save the embeddings without running the full alignment.
     """
 
+    reduce_online: bool = False
+    """The embedding dataset holds the language model's full-dimensional
+    embeddings, which are projected onto scoring_model_dim by an autoencoder
+    that is learned jointly with the pHMM, instead of being reduced up front by
+    the frozen scoring model. The full-dimensional embeddings are cached in
+    host memory like any others, so make sure enough RAM is available: roughly
+    sum(sequence lengths) * dim * 2 bytes. Only supported under the Pytorch
+    backend."""
+
+    reduction_loss_weight: float = 1.0
+    """Weight of the autoencoder's reconstruction loss in the total loss.
+    Only has an effect when reduce_online is enabled."""
+
     plm_cache_dir: str | None = None
     """Directory where the protein language model is stored."""
 
@@ -148,7 +161,7 @@ class LanguageModelConfig(BaseModel):
             raise ValueError(f"{info.field_name} must be greater than 0.")
         return v
 
-    @field_validator("L2_insert", "L2_match")
+    @field_validator("L2_insert", "L2_match", "reduction_loss_weight")
     def validate_nonnegative_floats(cls, v: float, info) -> float:
         if v < 0:
             raise ValueError(f"{info.field_name} must be non-negative.")

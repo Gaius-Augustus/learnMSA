@@ -119,3 +119,30 @@ def test_compile_jit_rejected_under_torch() -> None:
     output = test.communicate()[1].strip().decode('ascii')
     assert test.returncode != 0
     assert expected_err in output
+
+
+def test_online_reduction_rejected_under_tensorflow() -> None:
+    """The bottleneck lives in the torch model and has no TensorFlow half.
+
+    Like --compile jit, this can only be checked once --backend auto has
+    resolved to a concrete framework, so argparse cannot catch it.
+    """
+    pytest.importorskip("tensorflow")
+
+    expected_err = (
+        "--reduce_online trains an embedding bottleneck inside the model "
+        "and is only implemented for the pytorch backend. "
+        "Use --backend pytorch."
+    )
+    test = subprocess.Popen(
+        [
+            "python", "learnMSA.py", "--silent",
+            "-i", "tests/data/egf.fasta", "-o", "test.out",
+            "--backend", "tensorflow", "--use_language_model",
+            "--reduce_online",
+        ],
+        stderr=subprocess.PIPE
+    )
+    output = test.communicate()[1].strip().decode('ascii')
+    assert test.returncode != 0
+    assert expected_err in output

@@ -53,6 +53,21 @@ def align(
     # Create a context that automatically sets up data-dependent parameters
     context = LearnMSAContext(config, data[0])
 
+    if config.language_model.use_language_model and len(data) > 1:
+        # infer the embedding dimension from the dataset
+        context.embedding_dim = int(data[-1].empty(()).shape[-1])
+        if config.language_model.reduce_online \
+                and context.embedding_dim \
+                <= config.language_model.scoring_model_dim:
+            # catch already reduced embeddings
+            raise ValueError(
+                f"reduce_online expects the language model's full embedding "
+                f"width, but the embeddings are only "
+                f"{context.embedding_dim}-dimensional, which is not wider "
+                f"than the bottleneck "
+                f"({config.language_model.scoring_model_dim})."
+            )
+
     # Write the config to file in the working directory
     config_path = work_dir / "config.json"
     with open(config_path, 'w') as f:
@@ -144,6 +159,11 @@ def _transfer_model_weights(
         # tau_kernel is per-sequence; only copy when shapes match (same dataset)
         if src_anc.tau_kernel.shape == dst_anc.tau_kernel.shape:
             assign(dst_anc.tau_kernel, src_anc.tau_kernel)
+
+    src_encoder = getattr(src, "embedding_encoder", None)
+    dst_encoder = getattr(dst, "embedding_encoder", None)
+    if src_encoder is not None and dst_encoder is not None:
+        dst_encoder.load_state_dict(src_encoder.state_dict())
 
 
 def _fit_and_align(
@@ -289,6 +309,13 @@ def _fit_and_align(
         context.emb_values = surgery_result.emb_values
         context.struct_values = surgery_result.struct_values
         context.joint_values = surgery_result.joint_aa_struct_values
+        if getattr(model, "embedding_encoder", None) is not None:
+            # Surgery discards the model, so the trained bottleneck has to
+            # ride to the next iteration in the context.
+            context.emb_encoder_state = {
+                k: to_numpy(v)
+                for k, v in model.embedding_encoder.state_dict().items()
+            }
         surgery_converged = surgery_result.surgery_converged
         if model.anc_probs_layer is not None:
             if not context.config.advanced.reset_evo_model:

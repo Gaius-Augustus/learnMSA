@@ -145,6 +145,8 @@ class TestArgsToConfig:
             "-i", "input.fasta",
             "-o", "output.a2m",
             "--use_language_model",
+            "--reduce_online",
+            "--reduction_loss_weight", "0.25",
             "--plm_cache_dir", "/models/cache",
             "--language_model", "esm2",
             "--scoring_model_dim", "32",
@@ -163,6 +165,8 @@ class TestArgsToConfig:
         config = args_to_config(args)
 
         assert config.language_model.use_language_model is True
+        assert config.language_model.reduce_online is True
+        assert config.language_model.reduction_loss_weight == 0.25
         assert config.language_model.plm_cache_dir == "/models/cache"
         assert config.language_model.language_model == "esm2"
         assert config.language_model.scoring_model_dim == 32

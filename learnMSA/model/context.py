@@ -60,6 +60,8 @@ class LearnMSAContext:
     p_init: initializers.InitSpec
     t_init: initializers.InitSpec
     mix_init: initializers.InitSpec
+    embedding_dim: int | None
+    emb_encoder_state: dict[str, Any] | None
 
     """
     Is created from a Configuration and a SequenceDataset to hold all relevant
@@ -90,6 +92,8 @@ class LearnMSAContext:
         self.aa_values = None
         self.struct_values = None
         self.emb_values = None
+        self.embedding_dim = None # filled in by align()
+        self.emb_encoder_state = None # filled in by align()
         self.joint_values = None
         if data is None:
             assert num_seq is not None, (

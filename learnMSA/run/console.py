@@ -70,6 +70,14 @@ def run_main() -> None:
             "under the pytorch backend. Use --compile on for torch.compile."
         )
 
+    if config.language_model.reduce_online \
+            and backend.get_backend() != "pytorch":
+        parser.error(
+            "--reduce_online trains an embedding bottleneck inside the model "
+            "and is only implemented for the pytorch backend. "
+            "Use --backend pytorch."
+        )
+
     from learnMSA.align.align import align
     from learnMSA.align.alignment_model import AlignmentModel
     from learnMSA.align.align_inserts import make_aligned_insertions

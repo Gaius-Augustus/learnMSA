@@ -27,13 +27,29 @@ def compute_embeddings(
     Args:
         data: The sequences to embed. Must have ``remove_gaps=True``.
         language_model_config: Selects the language model and the scoring model
-            that reduces its embedding dimension.
+            that reduces its embedding dimension. With ``reduce_online`` the
+            scoring model is skipped and the cache keeps the language model's
+            full embedding width, which is what the trainable bottleneck in the
+            model consumes.
         verbose: Print progress.
 
     Returns:
         An :class:`~learnMSA.util.embedding_cache.EmbeddingCache` that can be
         turned into an ``EmbeddingDataset`` or queried per sequence.
     """
+    # The console reports this as a usage error; this catches library callers
+    # who build a Configuration themselves.
+    if language_model_config.reduce_online \
+            and backend.get_backend() != "pytorch":
+        raise NotImplementedError(
+            "reduce_online is only implemented for the pytorch backend. "
+            "Select it with --backend pytorch."
+        )
+
+    # With reduce_online the frozen projection is replaced by a trainable
+    # bottleneck inside the model, so the cache has to keep the full width.
+    reduce = not language_model_config.reduce_online
+
     # TODO: remove the ScoringModelConfig entirely; it's only here for legacy
     # reasons
     scoring_model_config = _get_scoring_model_config(language_model_config)
@@ -52,7 +68,7 @@ def compute_embeddings(
     # "zeros" stand-in already emits the reduced width, so it needs none.
     # TODO: remove scoring model config and make the whole codebase use
     # the language model config instead
-    if language_model_config.language_model == "zeros":
+    if not reduce or language_model_config.language_model == "zeros":
         reduction_layer = None
     else:
         make_reduction_layer = backend.resolve(
@@ -66,9 +82,19 @@ def compute_embeddings(
     )
     embedding_fn = make_embedding_fn(language_model, reduction_layer)
 
-    cache = EmbeddingCache(
-        data.seq_lens, language_model_config.scoring_model_dim
-    )
+    if reduce:
+        cache_dim = language_model_config.scoring_model_dim
+    else:
+        cache_dim = language_model.dim
+        if verbose:
+            # half precision cache, see EmbeddingCache
+            gib = int(np.sum(data.seq_lens)) * cache_dim * 2 / 1024 ** 3
+            print(
+                f"Caching full-dimensional embeddings (dim {cache_dim}), "
+                f"about {gib:.1f} GiB of host memory."
+            )
+
+    cache = EmbeddingCache(data.seq_lens, cache_dim)
     compute_emb_func = partial(
         _compute_reduced_embeddings,
         data=data,

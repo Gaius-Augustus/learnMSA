@@ -115,6 +115,8 @@ def args_to_config(
     # --- Language model ---
     lm["use_language_model"] = load_emb or args.use_language_model
     lm["only_embeddings"] = save_emb and not args.use_language_model
+    lm["reduce_online"] = args.reduce_online
+    lm["reduction_loss_weight"] = args.reduction_loss_weight
     lm["plm_cache_dir"] = args.plm_cache_dir
     lm["language_model"] = args.language_model
     lm["scoring_model_dim"] = args.scoring_model_dim
