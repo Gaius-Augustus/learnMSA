@@ -241,7 +241,8 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
         self,
         inputs: tuple[torch.Tensor | np.ndarray, ...],
         training: bool | None = None,
-    ) -> torch.Tensor:
+        return_reconstruction_loss: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor | None]:
         """
         Forward pass of the model.
 
@@ -253,16 +254,28 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
                    - indices: shape (batch, num_models)
             training: Accepted for signature parity with the TensorFlow model;
                 torch tracks the mode on the module itself.
+            return_reconstruction_loss: Also return the embedding bottleneck's
+                reconstruction loss, computed from the same pass that reduces
+                the embeddings for the pHMM. ``None`` without a bottleneck.
 
         Returns:
-            The layer output, whose shape depends on the pHMM's call mode.
+            The layer output, whose shape depends on the pHMM's call mode,
+            paired with that loss when ``return_reconstruction_loss``.
         """
         if len(inputs) < 2:
             raise ValueError(
                 "inputs must contain at least sequences and indices"
             )
         # Pass through encoder layers
-        forward_seq, *adds = self.encode_batch(inputs, training=training)
+        if return_reconstruction_loss:
+            encoded, reconstruction_loss = self.encode_batch(
+                inputs, training=training, return_reconstruction_loss=True
+            )
+        else:
+            encoded, reconstruction_loss = (
+                self.encode_batch(inputs, training=training), None
+            )
+        forward_seq, *adds = encoded
 
         padding = 1 - forward_seq[:, :, :, -1:]
         forward_seq = forward_seq[:, :, :, :-1]
@@ -272,10 +285,19 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
         if self.phmm_layer.is_loglik_mode():
             output = output.squeeze(-1)
 
+        if return_reconstruction_loss:
+            return output, reconstruction_loss
         return output
 
     #: The neutral base calls this ``call``; torch modules use ``forward``.
     call = forward
+
+    def _forward_with_reconstruction(
+        self, x: tuple[torch.Tensor, ...]
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        if self.embedding_encoder is None:
+            return self(x), None
+        return self(x, return_reconstruction_loss=True)
 
     def _record_batch_size(self, batch: Sequence[torch.Tensor]) -> None:
         """Keep track of the runtime batch size for verbose OOM messages.
@@ -290,7 +312,11 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
         self,
         inputs: tuple[torch.Tensor | np.ndarray, ...],
         training: bool | None = None,
-    ) -> tuple[torch.Tensor, ...]:
+        return_reconstruction_loss: bool = False,
+    ) -> (
+        tuple[torch.Tensor, ...]
+        | tuple[tuple[torch.Tensor, ...], torch.Tensor | None]
+    ):
         """
         Encodes a batch of sequences with the ancestral probabilities layer.
 
@@ -300,10 +326,13 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
                    - ...: additional inputs depending on configuration
                    - indices: shape (batch, num_models)
             training: Unused; kept for signature parity.
+            return_reconstruction_loss: Additionally return the embedding
+                reconstruction loss.
 
         Returns:
             A tensor with the ancestral probabilities of the input sequences
-            as inputs to the pHMM layer.
+            as inputs to the pHMM layer and, if requested, the embedding
+            reconstruction loss.
         """
         if len(inputs) < 2:
             raise ValueError(
@@ -349,11 +378,24 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
             # keep original adds; the structural track arrives one-hot encoded
             # from its SequenceDataset (remap=False)
 
+        reconstruction_loss = None
         if self.embedding_encoder is not None:
             # The embedding track is the last add; the bottleneck maps it from
             # the language model's full width to the one the pHMM expects.
-            adds = [*adds[:-1], self.embedding_encoder.reduce(adds[-1])]
+            embeddings = adds[-1]
+            if return_reconstruction_loss:
+                # Padding positions are all-zero embeddings and would
+                # otherwise pull the error towards zero for free.
+                mask = TorchEmbeddingEncoder.padding_mask(embeddings)
+                reduced, reconstruction_loss = self.embedding_encoder(
+                    embeddings, return_loss=True, mask=mask
+                )
+            else:
+                reduced = self.embedding_encoder.reduce(embeddings)
+            adds = [*adds[:-1], reduced]
 
+        if return_reconstruction_loss:
+            return (encoded_seq, *adds), reconstruction_loss
         return encoded_seq, *adds
 
     def build(
@@ -587,8 +629,10 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
         x = tuple(t.to(self._device) for t in batch)
         self._record_batch_size(x)
         self.optimizer.zero_grad(set_to_none=True)
-        y_pred = self(x)
-        loss = self.compute_loss(x, None, y_pred)
+        y_pred, reconstruction_loss = self._forward_with_reconstruction(x)
+        loss = self.compute_loss(
+            x, None, y_pred, reconstruction_loss=reconstruction_loss
+        )
         loss.backward()
         grad_norm = torch.nn.utils.clip_grad_norm_(
             self.parameters(), clipnorm if clipnorm > 0 else math.inf
@@ -609,12 +653,19 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
         y: Any,
         y_pred: torch.Tensor,
         sample_weight: torch.Tensor | None = None,
+        reconstruction_loss: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
         Compute the total loss which combines likelihood and prior.
 
         In training mode, returns scalar loss with averaged metrics.
         In evaluation mode, returns scalar loss and per-model metrics.
+
+        Args:
+            reconstruction_loss: The embedding bottleneck's loss for this
+                batch, as returned by :meth:`_forward_with_reconstruction`.
+                Recomputed from ``x`` when omitted, which runs the encoder a
+                second time.
         """
         weighted_loglik = self.weighted_loglik(x, y_pred)  # (num_models,)
         log_prior = self.log_prior()  # (num_models,)
@@ -636,25 +687,25 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
                 )
                 self.prior_per_model_trackers[i].update_state(log_prior[i])
 
-        # Collect the regularization penalties that Keras would gather into
-        # Model.losses; torch has no such hook.
+        # Collect the regularization penalties
         loss = loss + self.regularization_loss()
 
         if self.embedding_encoder is not None:
-            reconstruction = self.embedding_reconstruction_loss(x)
-            self.reconstruction_tracker.update_state(reconstruction)
-            loss = loss + reconstruction
+            if reconstruction_loss is None:
+                reconstruction_loss = self.embedding_reconstruction_loss(x)
+            self.reconstruction_tracker.update_state(reconstruction_loss)
+            loss = loss + reconstruction_loss
 
         return loss
 
     def embedding_reconstruction_loss(self, x: Any) -> torch.Tensor:
         """The bottleneck's weighted reconstruction loss for this batch.
 
-        ``x`` still holds the unreduced embeddings, so this recomputes the
-        encoder and decoder rather than threading them out of ``forward``,
-        which has to keep returning a single tensor for ``predict`` and for
-        ``fullgraph=True`` compilation. Two linear layers are negligible next
-        to the HMM.
+        The fallback for callers that do not have the loss at hand: ``x`` still
+        holds the unreduced embeddings, so this runs the encoder a second time.
+        The training and evaluation loops instead take the loss along from the
+        pass that reduces the embeddings, see
+        :meth:`_forward_with_reconstruction`.
         """
         assert self.embedding_encoder is not None
         embeddings = x[-2]  # (sequences, *adds, indices), embeddings last add
@@ -1100,8 +1151,13 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
                 x = tuple(t.to(self._device) for t in batch)
                 self._record_batch_size(x)
                 *inputs, _j = x
-                y_pred = self(tuple(inputs))
-                self.compute_loss(tuple(inputs), None, y_pred)
+                y_pred, reconstruction_loss = (
+                    self._forward_with_reconstruction(tuple(inputs))
+                )
+                self.compute_loss(
+                    tuple(inputs), None, y_pred,
+                    reconstruction_loss=reconstruction_loss,
+                )
 
         self._eval_mode = False
 

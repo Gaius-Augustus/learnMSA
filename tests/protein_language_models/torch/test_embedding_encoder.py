@@ -115,6 +115,20 @@ def test_forward_can_return_the_loss_alongside_the_bottleneck() -> None:
     torch.testing.assert_close(loss, encoder.reconstruction_loss(embeddings))
 
 
+def test_forward_takes_a_mask_for_the_loss() -> None:
+    """The masked loss is what the model wants; forward must pass it through."""
+    encoder = TorchEmbeddingEncoder(8, 32)
+    embeddings = torch.randn(2, 5, 32)
+    embeddings[:, 3:] = 0.0
+    mask = TorchEmbeddingEncoder.padding_mask(embeddings)
+
+    _reduced, loss = encoder(embeddings, return_loss=True, mask=mask)
+    torch.testing.assert_close(
+        loss, encoder.reconstruction_loss(embeddings, mask=mask)
+    )
+    assert not torch.isclose(loss, encoder.reconstruction_loss(embeddings))
+
+
 def test_custom_encoder_and_decoder_are_used() -> None:
     encoder = TorchEmbeddingEncoder(
         4, 8,

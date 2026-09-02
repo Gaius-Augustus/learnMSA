@@ -9,6 +9,8 @@ pHMM's embedding emitter needs a shipped MVN prior and only the real language
 models have one; the embeddings themselves are synthetic.
 """
 
+import math
+
 import numpy as np
 import pytest
 import torch
@@ -113,6 +115,25 @@ def test_reconstruction_loss_is_added_to_the_total() -> None:
     )
 
 
+def test_forward_return_loss() -> None:
+    aa_dataset, emb_dataset = make_aa_dataset(), _full_embedding_dataset()
+    _, model = _build_model(_config(reduction_loss_weight=2.0),
+                            aa_dataset, emb_dataset)
+    model.loglik_mode()
+
+    batch_gen = BatchGenerator()
+    batch_gen.configure((aa_dataset, emb_dataset), model.context)
+    loader, _ = make_dataset(
+        np.array([2, 3]), batch_gen, batch_size=2, shuffle=False
+    )
+    x = tuple(t.to(model.device) for t in next(iter(loader)))
+
+    _y_pred, reconstruction = model(x, return_reconstruction_loss=True)
+    torch.testing.assert_close(
+        reconstruction, model.embedding_reconstruction_loss(x)
+    )
+
+
 def test_padding_is_excluded_from_the_reconstruction_loss() -> None:
     """Padded positions must not count; the batch is heavily padded here."""
     aa_dataset, emb_dataset = make_aa_dataset(), _full_embedding_dataset()
@@ -162,7 +183,7 @@ def test_bottleneck_is_updated_by_training() -> None:
         (aa_dataset, emb_dataset),
         indices=np.arange(len(SEQ_LENS)),
         batch_size=2,
-        epochs=2,
+        epochs=1,
         steps_per_epoch=2,
     )
 

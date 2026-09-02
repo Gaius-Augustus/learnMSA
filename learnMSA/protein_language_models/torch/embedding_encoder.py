@@ -146,7 +146,10 @@ class TorchEmbeddingEncoder(torch.nn.Module):
 
     @override
     def forward(
-        self, embeddings: torch.Tensor, return_loss: bool = False
+        self,
+        embeddings: torch.Tensor,
+        return_loss: bool = False,
+        mask: torch.Tensor | None = None,
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """Encode embeddings, and optionally score the reconstruction.
 
@@ -154,6 +157,8 @@ class TorchEmbeddingEncoder(torch.nn.Module):
             embeddings: Shape ``(..., input_dim)``.
             return_loss: Also run the decoder and return the weighted
                 reconstruction loss. Encoding happens once either way.
+            mask: Passed on to :meth:`reconstruction_loss`; only read when
+                ``return_loss``.
 
         Returns:
             The bottleneck of shape ``(..., reduced_dim)``, or that tensor
@@ -164,7 +169,7 @@ class TorchEmbeddingEncoder(torch.nn.Module):
         if not return_loss:
             return reduced_emb
         reconstructed = self.reconstruct(reduced_emb)
-        loss = self.reconstruction_loss(embeddings, reconstructed)
+        loss = self.reconstruction_loss(embeddings, reconstructed, mask=mask)
         return reduced_emb, loss
 
     @property
