@@ -91,7 +91,7 @@ def compute_embeddings(
             gib = int(np.sum(data.seq_lens)) * cache_dim * 2 / 1024 ** 3
             print(
                 f"Caching full-dimensional embeddings (dim {cache_dim}), "
-                f"about {gib:.1f} GiB of host memory."
+                f"about {gib:.1f} GiB of memory."
             )
 
     cache = EmbeddingCache(data.seq_lens, cache_dim)

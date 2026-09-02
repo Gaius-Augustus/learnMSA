@@ -20,7 +20,7 @@ same applies to the machine that later reads the file back.
 
 Example:
 
-  learnMSA_embed -i seqs.fasta -o seqs.emb --language_model protT5 --full_dim
+  learnMSA_embed -i seqs.fasta -o seqs.emb --language_model protT5 --full
   learnMSA -i seqs.fasta -o msa.fasta --use_language_model \\
       --reduce_online --load_emb seqs.emb
 """
@@ -63,10 +63,10 @@ def make_parser() -> argparse.ArgumentParser:
         "--scoring_model_dim", dest="scoring_model_dim", type=int,
         default=defaults.scoring_model_dim,
         help="Reduced embedding dimension of the scoring model. Ignored with "
-             "--full_dim. (default: %(default)s)"
+             "--full. (default: %(default)s)"
     )
     parser.add_argument(
-        "--full_dim", dest="full_dim", action="store_true",
+        "--full", dest="full", action="store_true",
         help="Keep the language model's native embedding width instead of "
              "reducing it with the frozen scoring model. Such embeddings can "
              "only be aligned with --reduce_online, which learns the "
@@ -75,7 +75,7 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--backend", dest="backend", type=str, default="auto",
         choices=["auto", "tensorflow", "pytorch"],
-        help="Compute backend. --full_dim requires pytorch. "
+        help="Compute backend. --full requires pytorch. "
              "(default: %(default)s)"
     )
     parser.add_argument(
@@ -107,7 +107,7 @@ def main(argv: list[str] | None = None) -> None:
 
     config = LanguageModelConfig(
         use_language_model=True,
-        reduce_online=args.full_dim,
+        reduce_online=args.full,
         language_model=args.language_model,
         plm_cache_dir=args.plm_cache_dir,
         scoring_model_dim=args.scoring_model_dim,
