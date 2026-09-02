@@ -47,10 +47,12 @@ def _config(**lm_kwargs) -> Configuration:
     )
 
 
-def _full_embedding_dataset(dim: int = FULL_DIM) -> EmbeddingDataset:
+def _full_embedding_dataset(
+    dim: int = FULL_DIM, dtype: type[np.floating] = np.float32
+) -> EmbeddingDataset:
     """A cache at the language model's full width, not the reduced one."""
     rows = [
-        (i + 1) * np.ones((length, dim), dtype=np.float32)
+        (i + 1) * np.ones((length, dim), dtype=dtype)
         for i, length in enumerate(SEQ_LENS)
     ]
     cache = EmbeddingCache(SEQ_LENS, dim, cache=np.concatenate(rows, axis=0))
@@ -102,9 +104,10 @@ def test_reconstruction_loss_is_added_to_the_total() -> None:
     )
     x = tuple(t.to(model.device) for t in next(iter(loader)))
 
-    y_pred = model(x)
-    loss = model.compute_loss(x, None, y_pred)
-    reconstruction = model.embedding_reconstruction_loss(x)
+    y_pred, reconstruction = model._forward_with_reconstruction(x)
+    loss = model.compute_loss(
+        x, None, y_pred, reconstruction_loss=reconstruction
+    )
 
     assert torch.isfinite(loss)
     assert reconstruction > 0
@@ -189,6 +192,40 @@ def test_bottleneck_is_updated_by_training() -> None:
 
     assert np.all(np.isfinite(history.history["loss"]))
     assert "rec" in history.history
+    assert not torch.allclose(
+        before, model.embedding_encoder.encoder.weight.detach()
+    )
+
+
+def test_half_precision_batches_train_the_bottleneck() -> None:
+    """The batch reaches the model in the cache's dtype and the model casts up.
+
+    Full-width embeddings dominate every batch, so they travel to the device in
+    the half precision the language model cached them in. Nothing between the
+    cache and ``TorchEmbeddingEncoder.reduce`` may assume float32.
+    """
+    aa_dataset = make_aa_dataset()
+    emb_dataset = _full_embedding_dataset(dtype=np.float16)
+    assert emb_dataset.get_dtype() == np.float16
+    _, model = _build_model(_config(), aa_dataset, emb_dataset)
+
+    batch_gen = BatchGenerator()
+    batch_gen.configure((aa_dataset, emb_dataset), model.context)
+    loader, _ = make_dataset(
+        np.arange(len(SEQ_LENS)), batch_gen, batch_size=2, shuffle=False
+    )
+    _sequences, embeddings, _indices = next(iter(loader))
+    assert embeddings.dtype == torch.float16
+
+    before = model.embedding_encoder.encoder.weight.detach().clone()
+    history = model.fit(
+        (aa_dataset, emb_dataset),
+        indices=np.arange(len(SEQ_LENS)),
+        batch_size=2, epochs=2, steps_per_epoch=2,
+    )
+
+    assert np.all(np.isfinite(history.history["loss"]))
+    assert np.all(np.isfinite(history.history["rec"]))
     assert not torch.allclose(
         before, model.embedding_encoder.encoder.weight.detach()
     )

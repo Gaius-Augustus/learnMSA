@@ -145,3 +145,28 @@ def test_adapt_order_embedding_dataset(embedding_dataset: EmbeddingDataset) -> N
         np.testing.assert_array_equal(
             embedding_dataset.get_encoded_seq(i), ref.get_encoded_seq(i)
         )
+
+
+def test_the_dtype_follows_the_cache() -> None:
+    """A batch is assembled in the precision the embeddings are cached in.
+
+    Converting in the dataset would cost a copy per sequence and per model,
+    which for full-width language model embeddings is the most expensive part
+    of a training step. The model widens the track instead.
+    """
+    lens = np.array([4, 6])
+    cache = EmbeddingCache(
+        lens, 8, cache=np.ones((int(lens.sum()), 8), dtype=np.float16)
+    )
+    data = EmbeddingDataset(embedding_cache=cache, seq_ids=["a", "b"])
+
+    assert data.get_dtype() == np.float16
+    assert data.empty((2, 3)).dtype == np.float16
+
+    seq = data.get_encoded_seq(0)
+    assert seq.dtype == np.float16
+    # A view of the cache, not a converted copy of it.
+    assert seq.base is cache.cache
+
+    # An explicit dtype still wins; the file roundtrip tests rely on it.
+    assert data.get_encoded_seq(0, dtype=np.float32).dtype == np.float32

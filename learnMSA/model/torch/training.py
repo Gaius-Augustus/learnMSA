@@ -239,5 +239,6 @@ def make_dataset(
         # per-model permutations, the crop bounds), so it is not safe to fork
         # it across workers.
         num_workers=0,
+        pin_memory=torch.cuda.is_available(),
     )
     return loader, total_steps

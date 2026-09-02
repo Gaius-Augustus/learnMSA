@@ -70,21 +70,24 @@ class EmbeddingDataset(Dataset):
         i: int,
         crop_start: int | None = None,
         crop_end: int | None = None,
-        dtype: type[np.integer | np.floating] = np.float32,
+        dtype: type[np.integer | np.floating] | None = None,
     ) -> np.ndarray:
         embedding = self._embedding_cache.get_embedding(self._permutation[i])
         if crop_end is not None:
             embedding = embedding[:crop_end]
         if crop_start is not None:
             embedding = embedding[crop_start:]
-        return embedding.astype(dtype)
+        return embedding if dtype is None else embedding.astype(dtype)
 
     def empty(
         self,
         shape: tuple[int, ...],
-        dtype: type[np.integer | np.floating] = np.float32,
+        dtype: type[np.integer | np.floating] | None = None,
     ) -> np.ndarray:
-        return np.zeros(shape + (self._embedding_cache.dim,), dtype=dtype)
+        return np.zeros(
+            shape + (self._embedding_cache.dim,),
+            dtype=self.get_dtype() if dtype is None else dtype,
+        )
 
     def write(
         self,
@@ -128,8 +131,8 @@ class EmbeddingDataset(Dataset):
         self._permutation = self._permutation[perm]
 
     def get_dtype(self) -> type[np.integer | np.floating]:
-        """Return the dtype of the encoded sequences."""
-        return np.float32
+        """Return the dtype of the encoded sequences, i.e. the cache's own."""
+        return self._embedding_cache.cache.dtype.type
 
     def sample_embedding_variance(self, n_samples: int = 10000) -> np.ndarray:
         """ Approximates the variance of embedding dimensions. """

@@ -201,6 +201,8 @@ class TorchEmbeddingEmitter(TorchMVNormalEmitter):
         emissions: T_TorchTensor,
         use_padding: bool = True,
     ) -> T_TorchTensor:
+        emissions = emissions.to(self.kernel.dtype)
+
         # Compute the emission scores for matches + single insertion
         emission_scores = super().forward(emissions, use_padding=False)
 

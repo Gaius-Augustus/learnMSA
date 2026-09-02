@@ -626,7 +626,7 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
         inf gradient makes that norm inf.
         """
         assert self.optimizer is not None, "compile() must run before fit()."
-        x = tuple(t.to(self._device) for t in batch)
+        x = tuple(t.to(self._device, non_blocking=True) for t in batch)
         self._record_batch_size(x)
         self.optimizer.zero_grad(set_to_none=True)
         y_pred, reconstruction_loss = self._forward_with_reconstruction(x)
@@ -664,7 +664,8 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
         Args:
             reconstruction_loss: The embedding bottleneck's loss for this
                 batch, as returned by :meth:`_forward_with_reconstruction`.
-                Recomputed from ``x`` when omitted, which runs the encoder a
+                Required whenever the model has a bottleneck: recomputing it
+                here would run the encoder over the full-width embeddings a
                 second time.
         """
         weighted_loglik = self.weighted_loglik(x, y_pred)  # (num_models,)
@@ -691,8 +692,7 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
         loss = loss + self.regularization_loss()
 
         if self.embedding_encoder is not None:
-            if reconstruction_loss is None:
-                reconstruction_loss = self.embedding_reconstruction_loss(x)
+            assert reconstruction_loss is not None
             self.reconstruction_tracker.update_state(reconstruction_loss)
             loss = loss + reconstruction_loss
 
@@ -1065,7 +1065,7 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
         Returns:
             ``(predictions, j)`` so the caller can restore the original order.
         """
-        x = tuple(t.to(self._device) for t in batch)
+        x = tuple(t.to(self._device, non_blocking=True) for t in batch)
         self._record_batch_size(x)
         *inputs, j = x
         inputs, n_padded = self._pad_batch(tuple(inputs))
@@ -1148,7 +1148,9 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
 
         with torch.no_grad():
             for batch in loader:
-                x = tuple(t.to(self._device) for t in batch)
+                x = tuple(
+                    t.to(self._device, non_blocking=True) for t in batch
+                )
                 self._record_batch_size(x)
                 *inputs, _j = x
                 y_pred, reconstruction_loss = (

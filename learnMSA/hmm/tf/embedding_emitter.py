@@ -166,6 +166,8 @@ class EmbeddingEmitter(TFMVNormalEmitter):
         emissions: T_TFTensor,
         use_padding: bool = True,
     ) -> T_TFTensor:
+        emissions = tf.cast(emissions, self.kernel.dtype)
+
         # Compute the emission scores for matches + single insertion
         emission_scores = super().call(emissions, use_padding=False)
 
