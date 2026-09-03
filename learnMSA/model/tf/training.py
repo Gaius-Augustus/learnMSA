@@ -119,12 +119,12 @@ def make_dataset(
 
             for batch, exp_shape in zip(batches, batch_generator.expected_shapes):
                 batch.set_shape(tf.TensorShape(
-                    [None, None, batch_generator.num_models] + list(exp_shape)
+                    [None, None, batch_generator.generated_num_models] + list(exp_shape)
                 ))
 
             if extras:
                 extras[0].set_shape(
-                    tf.TensorShape([None, batch_generator.num_models])
+                    tf.TensorShape([None, batch_generator.generated_num_models])
                 )
             scoring_model_config = getattr(
                 batch_generator, "scoring_model_config", None
@@ -133,7 +133,7 @@ def make_dataset(
                 extras[1].set_shape(tf.TensorShape([
                     None,
                     None,
-                    batch_generator.num_models,
+                    batch_generator.generated_num_models,
                     int(scoring_model_config.dim)+1
                 ]))
 
@@ -186,12 +186,12 @@ def make_dataset(
                 # explicitly set output shapes or tf 2.17 will complain about
                 # unknown shapes
                 batch.set_shape(tf.TensorShape(
-                    [batch_size, seq_dim, batch_generator.num_models] + list(exp_shape)
+                    [batch_size, seq_dim, batch_generator.generated_num_models] + list(exp_shape)
                 ))
 
             if extras:
                 extras[0].set_shape(
-                    tf.TensorShape([batch_size, batch_generator.num_models])
+                    tf.TensorShape([batch_size, batch_generator.generated_num_models])
                 )
             scoring_model_config = getattr(
                 batch_generator, "scoring_model_config", None
@@ -200,7 +200,7 @@ def make_dataset(
                 extras[1].set_shape(tf.TensorShape([
                     batch_size,
                     seq_dims[0],
-                    batch_generator.num_models,
+                    batch_generator.generated_num_models,
                     int(scoring_model_config.dim)+1
                 ]))
 

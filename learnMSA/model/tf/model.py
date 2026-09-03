@@ -26,6 +26,12 @@ from learnMSA.util.sequence_dataset import Dataset, SequenceDataset
 from learnMSA.util.clustering import write_sequence_weights
 
 
+def _broadcast_heads(x: tf.Tensor, n: int) -> tf.Tensor:
+    if x.shape[2] == n:
+        return x
+    return tf.tile(x, [1, 1, n, 1])
+
+
 class TFLearnMSAModel(tf.keras.Model, LearnMSAModel[tf.Tensor]):
     """evaluate
     The main model class for LearnMSA, combining a pHMM layer with
@@ -130,10 +136,12 @@ class TFLearnMSAModel(tf.keras.Model, LearnMSAModel[tf.Tensor]):
 
         Args:
             inputs: Tuple of (sequences, ..., indices) where:
-                   - sequences: shape (batch, seq_length, num_models)
+                   - sequences: shape (batch, seq_length, num_models), or
+                     (batch, seq_length, 1) when one sample is shared across
+                     all models and the model broadcasts over the model axis
                    - ...: additional inputs depending on configuration
                     (e.g., for language model)
-                   - indices: shape (batch, num_models)
+                   - indices: shape (batch, num_models) or (batch, 1)
             training: Boolean indicating training mode.
 
         Returns:
@@ -181,10 +189,12 @@ class TFLearnMSAModel(tf.keras.Model, LearnMSAModel[tf.Tensor]):
 
         Args:
             inputs: Tuple of (sequences, ..., indices) where:
-                   - sequences: shape (batch, seq_length, num_models)
+                   - sequences: shape (batch, seq_length, num_models), or
+                     (batch, seq_length, 1) when one sample is shared across
+                     all models and the model broadcasts over the model axis
                    - ...: additional inputs depending on configuration
                     (e.g., for language model) (not used here)
-                   - indices: shape (batch, num_models)
+                   - indices: shape (batch, num_models) or (batch, 1)
             training: Boolean indicating training mode.
 
         Returns:
@@ -197,13 +207,21 @@ class TFLearnMSAModel(tf.keras.Model, LearnMSAModel[tf.Tensor]):
             )
         sequences, *adds, indices = inputs
 
-        # Broadcast in the number of heads if necessary
+        # The batch generator emits a model axis of size 1 when a single
+        # sample is shared across all models. The indices must be materialized
+        # for all heads: TreeModel.make_tau reads B, H off subset.shape and
+        # gathers tau[subset, arange(H)], so a size-1 axis would put every
+        # head on head 0's evolutionary time. Tiling is correct -- the same
+        # sequence index still picks each head's own tau row.
+        #
+        # The sequence tracks are left single-head for now; the anc-probs
+        # layer broadcasts the ones it consumes, and whatever is still
+        # single-head on the way out is tiled below.
         if self.phmm_layer.head_subset is not None:
             n = len(self.phmm_layer.head_subset)
         else:
             n = self.phmm_layer.heads
-        if sequences.shape[2] == 1 and n > 1:
-            sequences = tf.tile(sequences, [1, 1, n, 1])
+        if indices.shape[1] == 1 and n > 1:
             indices = tf.tile(indices, [1, n])
 
         # The amino acid track already arrives as per-residue distributions over
@@ -235,6 +253,9 @@ class TFLearnMSAModel(tf.keras.Model, LearnMSAModel[tf.Tensor]):
             encoded_seq = sequences_onehot
             # keep original adds; the structural track arrives one-hot encoded
             # from its SequenceDataset (remap=False)
+
+        encoded_seq = _broadcast_heads(encoded_seq, n)
+        adds = tuple(_broadcast_heads(a, n) for a in adds)
 
         return encoded_seq, *adds
 

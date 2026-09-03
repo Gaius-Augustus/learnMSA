@@ -205,10 +205,12 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
 
         Args:
             inputs: Tuple of (sequences, ..., indices) where:
-                   - sequences: shape (batch, seq_length, num_models)
+                   - sequences: shape (batch, seq_length, num_models), or
+                     (batch, seq_length, 1) when one sample is shared across
+                     all models and the model broadcasts over the model axis
                    - ...: additional inputs depending on configuration
                     (e.g., for language model)
-                   - indices: shape (batch, num_models)
+                   - indices: shape (batch, num_models) or (batch, 1)
             training: Accepted for signature parity with the TensorFlow model;
                 torch tracks the mode on the module itself.
 
@@ -254,9 +256,11 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
 
         Args:
             inputs: Tuple of (sequences, ..., indices) where:
-                   - sequences: shape (batch, seq_length, num_models)
+                   - sequences: shape (batch, seq_length, num_models), or
+                     (batch, seq_length, 1) when one sample is shared across
+                     all models and the model broadcasts over the model axis
                    - ...: additional inputs depending on configuration
-                   - indices: shape (batch, num_models)
+                   - indices: shape (batch, num_models) or (batch, 1)
             training: Unused; kept for signature parity.
 
         Returns:
@@ -269,14 +273,12 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
             )
         sequences, *adds, indices = inputs
 
-        # Broadcast in the number of heads if necessary
         if self.phmm_layer.head_subset is not None:
             n = len(self.phmm_layer.head_subset)
         else:
             n = self.phmm_layer.heads
-        if sequences.shape[2] == 1 and n > 1:
-            sequences = sequences.repeat(1, 1, n, 1)
-            indices = indices.repeat(1, n)
+        if indices.shape[1] == 1 and n > 1:
+            indices = indices.expand(-1, n)
 
         # The amino acid track already arrives as per-residue distributions
         # over the emission alphabet (padding positions are all-zero vectors).

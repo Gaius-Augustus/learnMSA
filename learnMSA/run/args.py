@@ -223,6 +223,12 @@ def parse_args(
             "training. (default: %(default)s)")
     )
     train_group.add_argument(
+        "--share_batch",
+        dest="share_batch",
+        action="store_true",
+        help="Whether inputs during training are shared across models."
+    )
+    train_group.add_argument(
         "--no_aa",
         dest="no_aa",
         action="store_true",

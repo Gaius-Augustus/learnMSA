@@ -40,3 +40,27 @@ def test_make_dataset_aa_plus_embedding() -> None:
     # j + 1, and every model column holds the same sequence here.
     assert np.all(i.numpy() == np.array([[0], [2], [3]]))
     assert np.all(e[:, 0].numpy() == np.array([1.0, 3.0, 4.0])[:, None, None])
+
+
+def test_make_dataset_shared_batch() -> None:
+    aa_dataset = make_aa_dataset()
+    embedding_dataset = make_embedding_dataset()
+
+    config = Configuration()
+    config.training.share_batch = True
+    context = LearnMSAContext(config, aa_dataset)
+    batch_gen = BatchGenerator()
+    batch_gen.configure((aa_dataset, embedding_dataset), context)
+
+    dataset, _ = make_dataset(
+        np.array([0, 2, 3]), batch_gen, batch_size=3, shuffle=False
+    )
+    for (s, e, i), _ in dataset:
+        break
+
+    assert s.shape == (3, 18, 1, 20)
+    assert e.shape == (3, 18, 1, 8)
+    assert i.shape == (3, 1)
+    assert np.all(i.numpy() == np.array([[0], [2], [3]]))
+    # The tracks stay aligned: sequence j is filled with j + 1.
+    assert np.all(e[:, 0].numpy() == np.array([1.0, 3.0, 4.0])[:, None, None])

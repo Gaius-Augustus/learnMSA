@@ -1,7 +1,7 @@
 """Backend-neutral assembly of training batches from sequence indices.
 
 :class:`BatchGenerator` turns a batch of sequence indices into padded numpy
-arrays, applying the per-model index permutation and random cropping. It knows
+arrays, applying the index permutation and random cropping. It knows
 nothing about tensor frameworks -- the framework-specific input pipeline
 (``tf.data`` or a torch ``DataLoader``) wraps it and only has to adapt dtypes
 and shapes.
@@ -28,12 +28,11 @@ class BatchGenerator():
         shuffle=True,
         static_shape_mode=False,
     ) -> None:
-        # generate a unique permutation of the sequence indices
-        # for each model to train
         self.return_only_sequences = return_only_sequences
         self.shuffle = shuffle
         self.static_shape_mode = static_shape_mode
         self.bucket_boundaries = None
+        self.share_batch = False
         self.configured = False
 
     def configure(
@@ -48,6 +47,7 @@ class BatchGenerator():
         self.context = context
         self.config = context.config
         self.num_models = self.config.training.num_model
+        self.share_batch = self.config.training.share_batch
         self.crop_long_seqs = float(self.config.training.crop)
 
         # Validate crop_long_seqs in static shape mode
@@ -68,12 +68,21 @@ class BatchGenerator():
                     "static_shape_mode requires a finite crop_long_seqs value"
                 )
 
+        # One permutation per emitted model column: one per trained model
+        # normally, a single shared one when the batch is shared.
         self.permutations = [
-            np.arange(data[0].num_seq) for _ in range(self.num_models)
+            np.arange(data[0].num_seq)
+            for _ in range(self.generated_num_models)
         ]
         for p in self.permutations:
             np.random.shuffle(p)
         self.configured = True
+
+    @property
+    def generated_num_models(self) -> int:
+        """The size of the model axis of the arrays returned by ``__call__``.
+        """
+        return 1 if self.share_batch else self.num_models
 
     def __call__(
         self, indices: np.ndarray
@@ -83,13 +92,18 @@ class BatchGenerator():
                 "A batch generator must be configured with the "\
                 "configure(data, config) method."
             )
-        # Use a different permutation of the sequences per trained model
+        # Use a different permutation of the sequences per trained model,
+        # unless a single sample is shared across all of them.
+        num_gen = self.generated_num_models
         if self.shuffle:
             permutated_indices = np.stack(
-                [perm[indices] for perm in self.permutations], axis=1
+                [perm[indices] for perm in self.permutations[:num_gen]],
+                axis=1,
             )
         else:
-            permutated_indices = np.stack([indices]*self.num_models, axis=1)
+            permutated_indices = np.stack([indices]*num_gen, axis=1)
+
+        num_gen = permutated_indices.shape[1]
 
         # Assume sequence lengths are identical across datasets.
         if self.static_shape_mode:
@@ -115,20 +129,21 @@ class BatchGenerator():
         batch_dtypes = [dataset.get_dtype() for dataset in self.data]
         batches = [
             dataset.empty(
-                (indices.shape[0], max_len, self.num_models),
+                (indices.shape[0], max_len, num_gen),
                 dtype=cast(Any, dtype),
             )
             for dataset, dtype in zip(self.data, batch_dtypes)
         ]
 
-        # Compute random crop bounds once per (batch item, model) and reuse
-        # them for all datasets.
+        # Compute random crop bounds once per (batch item, model column) and
+        # reuse them for all datasets. A shared batch has a single column, so
+        # every model then sees the same crop window of a long sequence.
         crop_starts = np.zeros(
-            (indices.shape[0], self.num_models),
+            (indices.shape[0], num_gen),
             dtype=np.int32,
         )
         crop_ends = np.zeros(
-            (indices.shape[0], self.num_models),
+            (indices.shape[0], num_gen),
             dtype=np.int32,
         )
         for i, perm_ind in enumerate(permutated_indices):

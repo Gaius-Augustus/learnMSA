@@ -68,6 +68,7 @@ def args_to_config(
     tr["surgery_ins"] = args.surgery_ins
     tr["model_criterion"] = args.model_criterion
     tr["indexed_data"] = args.indexed_data
+    tr["share_batch"] = args.share_batch
     tr["unaligned_insertions"] = args.unaligned_insertions
     tr["auto_crop_scale"] = args.auto_crop_scale
     tr["trainable_insertions"] = args.trainable_insertions
