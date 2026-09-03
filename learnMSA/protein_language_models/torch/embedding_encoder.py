@@ -6,12 +6,7 @@ if sys.version_info >= (3, 12):
 else:
     from typing_extensions import override
 
-import numpy as np
 import torch
-
-from learnMSA.protein_language_models.common import ScoringModelConfig
-from learnMSA.protein_language_models.scoring_weights import \
-    load_scoring_weights
 
 
 class TorchEmbeddingEncoder(torch.nn.Module):
@@ -179,61 +174,39 @@ class TorchEmbeddingEncoder(torch.nn.Module):
 
 
 def make_embedding_encoder(
-    config: ScoringModelConfig,
+    reduced_dim: int,
     input_dim: int,
     loss_weight: float = 1.0,
 ) -> TorchEmbeddingEncoder:
-    """Build a trainable bottleneck seeded with the shipped bilinear matrix.
+    """Build a randomly initialized trainable bottleneck.
 
-    The pHMM's embedding emitter carries a multivariate normal prior that was
-    fitted in the space the frozen bilinear model projects to (see
-    ``_add_emb_emitter`` in :mod:`learnMSA.hmm.layer`). Seeding the encoder
-    with that same matrix makes :meth:`TorchEmbeddingEncoder.reduce` reproduce
-    the frozen projection exactly at step 0, so the prior is meaningful from
-    the start and training only fine-tunes away from it.
+    This is the ``reduce_online`` path, whose point is to start from scratch and
+    adapt to embeddings from any language model of any width. Nothing shipped on
+    disk is loaded here: the frozen bilinear matrix belongs to the offline path
+    (see :func:`~learnMSA.protein_language_models.torch.bilinear_symmetric.make_reduction_layer`),
+    and the embedding emitter correspondingly falls back to a generic standard
+    normal prior instead of the multivariate normal mixture that was fitted for
+    one specific projection (see ``_add_emb_emitter`` in
+    :mod:`learnMSA.hmm.layer`).
 
     Args:
-        config: Identifies the scoring model whose ``R`` seeds the encoder.
+        reduced_dim: Width of the bottleneck, i.e. the width the pHMM's
+            embedding emitter is built for.
         input_dim: Width of the language model's embeddings.
         loss_weight: Weight of the reconstruction loss.
 
     Returns:
-        A trainable :class:`TorchEmbeddingEncoder`.
+        A trainable :class:`TorchEmbeddingEncoder` with Glorot-uniform weights.
     """
     layer = TorchEmbeddingEncoder(
-        reduced_dim=config.dim,
+        reduced_dim=reduced_dim,
         input_dim=input_dim,
-        encoder=torch.nn.Linear(input_dim, config.dim, bias=False),
-        decoder=torch.nn.Linear(config.dim, input_dim, bias=False),
+        encoder=torch.nn.Linear(input_dim, reduced_dim, bias=False),
+        decoder=torch.nn.Linear(reduced_dim, input_dim, bias=False),
         loss_weight=loss_weight,
         trainable=True,
     )
-    R = _load_reduction_matrix(config, input_dim)
-    if R is not None:
-        with torch.no_grad():
-            # torch.nn.Linear computes x @ weight.T, so the weight is R
-            # transposed. The decoder starts at the projection's pseudo-inverse,
-            # which is the least-squares optimal reconstruction of that encoder.
-            layer.encoder.weight.copy_(torch.as_tensor(R.T))
-            layer.decoder.weight.copy_(torch.as_tensor(np.linalg.pinv(R).T))
+    with torch.no_grad():
+        torch.nn.init.xavier_uniform_(layer.encoder.weight)
+        torch.nn.init.xavier_uniform_(layer.decoder.weight)
     return layer
-
-
-def _load_reduction_matrix(
-    config: ScoringModelConfig, input_dim: int
-) -> np.ndarray | None:
-    """The shipped ``R`` of shape ``(input_dim, dim)``, or None if unusable.
-
-    Falls back to the default initialization rather than failing: the ``zeros``
-    stand-in ships no scoring model at all, and a mismatching width means the
-    weights belong to a different language model.
-    """
-    if config.lm_name == "zeros":
-        return None
-    try:
-        R = np.asarray(load_scoring_weights(config)["R"], dtype=np.float32)
-    except (FileNotFoundError, KeyError):
-        return None
-    if R.shape != (input_dim, config.dim):
-        return None
-    return R

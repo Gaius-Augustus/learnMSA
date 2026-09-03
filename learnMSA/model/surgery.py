@@ -390,7 +390,7 @@ def update_kernels(
             "plm_config must be provided to update_kernels if"\
             "the PHMMLayer uses a language model."
         embedding_dim = plm_config.scoring_model_dim
-        if hasattr(phmm_layer, "emb_mean"):
+        if getattr(phmm_layer, "emb_mean", None) is not None:
             emb_expectations = phmm_layer.emb_mean
         else:
             emb_expectations = np.zeros((embedding_dim,), dtype=np.float32)

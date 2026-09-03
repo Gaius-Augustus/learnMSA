@@ -28,7 +28,6 @@ from learnMSA.model.bucketing import make_default_bucket_scheme
 from learnMSA.model.context import LearnMSAContext
 from learnMSA.model.model import LearnMSAModel
 from learnMSA.model.torch.training import make_dataset
-from learnMSA.protein_language_models.common import ScoringModelConfig
 from learnMSA.protein_language_models.torch.embedding_encoder import (
     TorchEmbeddingEncoder, make_embedding_encoder)
 from learnMSA.tree.torch.anc_probs_layer import TorchAncProbsLayer
@@ -211,13 +210,7 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
                 "yourself when building the model directly."
             )
         encoder = make_embedding_encoder(
-            ScoringModelConfig(
-                lm_name=plm_cfg.language_model,
-                dim=plm_cfg.scoring_model_dim,
-                activation=plm_cfg.scoring_model_activation,
-                suffix=plm_cfg.scoring_model_suffix,
-                scaled=False,
-            ),
+            reduced_dim=plm_cfg.scoring_model_dim,
             input_dim=self.context.embedding_dim,
             loss_weight=plm_cfg.reduction_loss_weight,
         )

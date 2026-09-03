@@ -20,13 +20,8 @@ class LanguageModelConfig(BaseModel):
     """
 
     reduce_online: bool = False
-    """The embedding dataset holds the language model's full-dimensional
-    embeddings, which are projected onto scoring_model_dim by an autoencoder
-    that is learned jointly with the pHMM, instead of being reduced up front by
-    the frozen scoring model. The full-dimensional embeddings are cached in
-    host memory like any others, so make sure enough RAM is available: roughly
-    sum(sequence lengths) * dim * 2 bytes. Only supported under the Pytorch
-    backend."""
+    """Learn the reduction of any high-dimensional embedding space to a lower-
+    dimensional HMM observation space jointly with the full model."""
 
     reduction_loss_weight: float = 1.0
     """Weight of the autoencoder's reconstruction loss in the total loss.

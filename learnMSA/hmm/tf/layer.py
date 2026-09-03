@@ -23,7 +23,7 @@ from learnMSA.hmm.tf.padding_emitter import TFSubsetPaddingEmitter
 from learnMSA.hmm.tf.prior import TFPHMMStartPrior, TFPHMMTransitionPrior
 from learnMSA.hmm.tf.profile_emitter import ProfileEmitter
 from learnMSA.hmm.tf.transitioner import PHMMTransitioner
-from learnMSA.hmm.tf.util import load_dirichlet, load_mvn
+from learnMSA.hmm.tf.util import load_dirichlet, load_mvn, make_mvn_prior
 from learnMSA.hmm.util.value_set import PHMMValueSet
 from learnMSA.hmm.util.value_set_emb import PHMMEmbeddingValueSet
 
@@ -44,6 +44,7 @@ class TFPHMMLayer(tf.keras.Layer, PHMMLayer[T_TFTensor]):
         CombinedPrior=TFCombinedPrior,
         load_dirichlet=load_dirichlet,
         load_mvn=load_mvn,
+        make_mvn=make_mvn_prior,
     )
 
     def __init__(

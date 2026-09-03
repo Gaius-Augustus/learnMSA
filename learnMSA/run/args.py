@@ -511,13 +511,9 @@ def parse_args(
         "--reduce_online",
         dest="reduce_online",
         action="store_true",
-        help="Keep the language model's full-dimensional embeddings and "\
-            "reduce them with a bottleneck that is trained along with the "\
-            "alignment, instead of projecting them once through the frozen "\
-            "scoring model. The full-dimensional embeddings are cached in "\
-            "host memory, so make sure enough RAM is available: about "\
-            "sum(sequence lengths) x dim x 2 bytes. PyTorch backend only. "\
-            "(default: %(default)s)"
+        help="Learn the reduction of any high-dimensional embedding space to "\
+            "a lower-dimensional HMM observation space jointly with the full "\
+            "model. (default: %(default)s)"
     )
     plm_group.add_argument(
         "--reduction_loss_weight",

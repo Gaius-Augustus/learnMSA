@@ -25,7 +25,7 @@ from learnMSA.hmm.torch.prior import (TorchPHMMStartPrior,
                                       TorchPHMMTransitionPrior)
 from learnMSA.hmm.torch.profile_emitter import TorchProfileEmitter
 from learnMSA.hmm.torch.transitioner import TorchPHMMTransitioner
-from learnMSA.hmm.torch.util import load_dirichlet, load_mvn
+from learnMSA.hmm.torch.util import load_dirichlet, load_mvn, make_mvn_prior
 from learnMSA.hmm.util.value_set import PHMMValueSet
 from learnMSA.hmm.util.value_set_emb import PHMMEmbeddingValueSet
 from learnMSA.util.tensor import to_numpy
@@ -47,6 +47,7 @@ class TorchPHMMLayer(torch.nn.Module, PHMMLayer[T_TorchTensor]):
         CombinedPrior=TorchCombinedPrior,
         load_dirichlet=load_dirichlet,
         load_mvn=load_mvn,
+        make_mvn=make_mvn_prior,
     )
 
     def __init__(

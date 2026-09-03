@@ -51,6 +51,7 @@ class PHMMComponents:
     CombinedPrior: type
     load_dirichlet: Callable[..., Any]
     load_mvn: Callable[..., Any]
+    make_mvn: Callable[..., Any]
 
 
 class PHMMLayer(Generic[T_Tensor]):
@@ -618,12 +619,25 @@ class PHMMLayer(Generic[T_Tensor]):
                 _emb_values = list(emb_values)
 
             # Set up the MVN prior for mean embeddings
-            mvn_prior = self.components.load_mvn(
-                self.plm_config.id_string() + ".weights",
-                dim=self.plm_config.scoring_model_dim,
-                components=self.plm_config.embedding_prior_components,
-                states=self.states,
-            )
+            dim = self.plm_config.scoring_model_dim
+            if self.plm_config.reduce_online:
+                # Use a standard-normal prior when learning the embedding
+                # space reduction from scratch
+                mvn_prior = self.components.make_mvn(
+                    dim=dim,
+                    initializer=np.concatenate(
+                        [np.zeros(dim), np.ones(dim)]
+                    ),
+                    components=1,
+                    states=self.states,
+                )
+            else:
+                mvn_prior = self.components.load_mvn(
+                    self.plm_config.id_string() + ".weights",
+                    dim=dim,
+                    components=self.plm_config.embedding_prior_components,
+                    states=self.states,
+                )
 
             # Override embedding values with prior distribution if requested
             if self.config.use_prior_for_emission_init\

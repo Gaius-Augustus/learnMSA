@@ -4,11 +4,15 @@ The mode hands the model the language model's full-dimensional embeddings --
 cached like any others -- and lets a trainable bottleneck reduce them, instead
 of projecting them once through the frozen bilinear scoring model.
 
-No real language model is loaded here. The config names ``protT5`` because the
-pHMM's embedding emitter needs a shipped MVN prior and only the real language
-models have one; the embeddings themselves are synthetic.
+No real language model is loaded here, and none has to be: the mode reads
+nothing pretrained off disk. The bottleneck starts from Glorot-random weights
+and the embedding emitter falls back to a generic standard normal prior on its
+means, so any language model and any ``scoring_model_dim`` works, including
+combinations that ship no weights at all. The config still names ``protT5``
+because it is the default; the embeddings themselves are synthetic.
 """
 
+import dataclasses
 import math
 
 import numpy as np
@@ -18,6 +22,7 @@ import torch
 from learnMSA.align.align import align
 from learnMSA.config import (Configuration, LanguageModelConfig, TrainingConfig,
                              TreeConfig)
+from learnMSA.hmm.torch.layer import TorchPHMMLayer
 from learnMSA.model.batch_generator import BatchGenerator
 from learnMSA.model.context import LearnMSAContext
 from learnMSA.model.torch.model import TorchLearnMSAModel
@@ -283,3 +288,65 @@ def test_high_dimensional_embeddings_need_reduce_online() -> None:
 
     with pytest.raises(ValueError, match="reduced before"):
         align((aa_dataset, wide), config)
+
+
+def test_a_dimension_without_shipped_weights_still_works() -> None:
+    """The whole point of the mode: adapt to any pLM at any width.
+
+    No scoring model and no embedding prior ship for ``scoring_model_dim=17``,
+    so the model can only build if neither is being loaded.
+    """
+    aa_dataset = make_aa_dataset()
+    emb_dataset = _full_embedding_dataset()
+    config = _config()
+    config.language_model.scoring_model_dim = 17
+    _, model = _build_model(config, aa_dataset, emb_dataset)
+    model.loglik_mode()
+
+    batch_gen = BatchGenerator()
+    batch_gen.configure((aa_dataset, emb_dataset), model.context)
+    loader, _ = make_dataset(
+        np.arange(len(SEQ_LENS)), batch_gen, batch_size=2, shuffle=False
+    )
+    x = tuple(t.to(model.device) for t in next(iter(loader)))
+
+    _encoded, *adds = model.encode_batch(x)
+    assert adds[-1].shape[-1] == 17
+
+    y_pred, reconstruction = model._forward_with_reconstruction(x)
+    loss = model.compute_loss(
+        x, None, y_pred, reconstruction_loss=reconstruction
+    )
+    assert torch.isfinite(loss)
+
+
+def test_the_shipped_embedding_prior_is_not_loaded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The MVN mixture belongs to the frozen projection, which is gone here.
+
+    It was fitted in the space one specific scoring model maps to, so reaching
+    for it is a bug even when the file happens to be present. The amino acid
+    priors are untouched and still load normally.
+    """
+    def fail(*args, **kwargs):
+        raise AssertionError(
+            "reduce_online must not load the scoring-model-specific MVN prior"
+        )
+
+    monkeypatch.setattr(
+        TorchPHMMLayer,
+        "components",
+        dataclasses.replace(TorchPHMMLayer.components, load_mvn=fail),
+    )
+
+    aa_dataset, emb_dataset = make_aa_dataset(), _full_embedding_dataset()
+    _, model = _build_model(_config(), aa_dataset, emb_dataset)
+    assert model.embedding_encoder is not None
+
+    # ... while the offline path does load it.
+    offline_config = _config()
+    offline_config.language_model.reduce_online = False
+    reduced = _full_embedding_dataset(dim=REDUCED_DIM)
+    with pytest.raises(AssertionError, match="must not load"):
+        _build_model(offline_config, make_aa_dataset(), reduced)

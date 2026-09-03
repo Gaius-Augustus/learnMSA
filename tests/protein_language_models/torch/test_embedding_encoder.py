@@ -1,67 +1,68 @@
 """The trainable embedding bottleneck used by ``language_model.reduce_online``.
 
-The point of seeding the encoder with the shipped bilinear matrix is that the
-pHMM's embedding prior was fitted in exactly the space that matrix projects to.
-:func:`test_reduce_matches_the_frozen_projection` is what keeps that true; if it
-breaks, the prior silently stops describing the bottleneck's output.
+The point of that mode is to start from scratch and adapt to embeddings from any
+language model of any width, so the bottleneck must not depend on anything
+shipped on disk. :func:`test_initialization_is_random_not_a_shipped_matrix` and
+:func:`test_works_for_a_width_no_scoring_model_ships` are what keep that true;
+the matching half of the contract -- the pHMM falling back to a generic prior --
+lives in ``tests/hmm/torch/test_embedding_prior.py``.
 """
 
-import numpy as np
+import math
+
 import pytest
 import torch
 
-from learnMSA.protein_language_models.common import ScoringModelConfig
-from learnMSA.protein_language_models.torch.bilinear_symmetric import \
-    make_reduction_layer
 from learnMSA.protein_language_models.torch.embedding_encoder import (
     TorchEmbeddingEncoder, make_embedding_encoder)
 
-#: The shipped protT5 scoring model, the one production uses.
-SCORING_CONFIG = ScoringModelConfig(
-    lm_name="protT5", dim=16, activation="sigmoid", scaled=False
-)
-
-#: protT5's embedding width.
+#: protT5's embedding width, and the bottleneck production reduces it to.
 PROT_T5_DIM = 1024
+REDUCED_DIM = 16
 
 
-def test_reduce_matches_the_frozen_projection() -> None:
-    """At init the bottleneck reproduces the frozen bilinear reduction."""
-    encoder = make_embedding_encoder(SCORING_CONFIG, input_dim=PROT_T5_DIM)
-    frozen = make_reduction_layer(SCORING_CONFIG)
-    embeddings = torch.randn(2, 7, PROT_T5_DIM)
-    torch.testing.assert_close(
-        encoder.reduce(embeddings), frozen.reduce(embeddings)
-    )
+def test_initialization_is_random_not_a_shipped_matrix() -> None:
+    """Two encoders differ, so nothing fixed is being loaded and copied in."""
+    torch.manual_seed(0)
+    first = make_embedding_encoder(REDUCED_DIM, input_dim=PROT_T5_DIM)
+    torch.manual_seed(1)
+    second = make_embedding_encoder(REDUCED_DIM, input_dim=PROT_T5_DIM)
+    assert not torch.allclose(first.encoder.weight, second.encoder.weight)
+    assert not torch.allclose(first.decoder.weight, second.decoder.weight)
+
+
+def test_weights_follow_the_glorot_scale() -> None:
+    """Both weights are Glorot-uniform over their own fan in/out."""
+    torch.manual_seed(0)
+    encoder = make_embedding_encoder(REDUCED_DIM, input_dim=PROT_T5_DIM)
+    # xavier_uniform_ draws from U(-a, a) with a = sqrt(6/(fan_in+fan_out)),
+    # whose standard deviation is a/sqrt(3) = sqrt(2/(fan_in+fan_out)).
+    expected = math.sqrt(2.0 / (PROT_T5_DIM + REDUCED_DIM))
+    for weight in (encoder.encoder.weight, encoder.decoder.weight):
+        assert weight.std().item() == pytest.approx(expected, rel=0.05)
+        assert weight.mean().item() == pytest.approx(0.0, abs=0.1 * expected)
+
+
+def test_works_for_a_width_no_scoring_model_ships() -> None:
+    """No pretrained scoring model exists for these dimensions."""
+    encoder = make_embedding_encoder(7, input_dim=999)
+    assert encoder.reduce(torch.randn(2, 3, 999)).shape == (2, 3, 7)
+    assert encoder.reconstruct(torch.randn(2, 3, 7)).shape == (2, 3, 999)
+
+
+def test_the_bottleneck_has_no_bias() -> None:
+    """A bias-free linear map keeps ``reduce`` a pure projection."""
+    encoder = make_embedding_encoder(REDUCED_DIM, input_dim=PROT_T5_DIM)
+    assert encoder.encoder.bias is None
+    assert encoder.decoder.bias is None
 
 
 def test_encoder_and_decoder_are_trainable() -> None:
-    encoder = make_embedding_encoder(SCORING_CONFIG, input_dim=PROT_T5_DIM)
+    encoder = make_embedding_encoder(REDUCED_DIM, input_dim=PROT_T5_DIM)
     assert all(p.requires_grad for p in encoder.parameters())
     encoder.reconstruction_loss(torch.randn(2, 3, PROT_T5_DIM)).backward()
     assert encoder.encoder.weight.grad is not None
     assert encoder.decoder.weight.grad is not None
-
-
-def test_decoder_starts_at_the_pseudo_inverse() -> None:
-    """The seeded decoder is the least-squares inverse of the encoder.
-
-    Vectors that lie in the projection's row space come back unchanged, which
-    is the best any linear decoder can do at initialization.
-    """
-    encoder = make_embedding_encoder(SCORING_CONFIG, input_dim=PROT_T5_DIM)
-    R = encoder.encoder.weight.detach().T  # (D, R)
-    # Anything of the form R @ v is in the row space by construction.
-    in_row_space = (R @ torch.randn(SCORING_CONFIG.dim, 4)).T  # (4, D)
-    round_tripped = encoder.reconstruct(encoder.reduce(in_row_space))
-    torch.testing.assert_close(round_tripped, in_row_space, rtol=1e-3, atol=1e-3)
-
-
-def test_missing_scoring_weights_fall_back_to_default_init() -> None:
-    """``zeros`` ships no scoring model, so the seeding is simply skipped."""
-    config = ScoringModelConfig(lm_name="zeros", dim=4, activation="sigmoid")
-    encoder = make_embedding_encoder(config, input_dim=16)
-    assert encoder.reduce(torch.randn(2, 16)).shape == (2, 4)
 
 
 def test_bottleneck_must_be_narrower_than_the_input() -> None:
