@@ -29,18 +29,6 @@ class _PositionDataset(Dataset):
 
 class _RepeatingShuffleSampler(Sampler[list[int]]):
     """Endlessly reshuffles the positions and hands out fixed-size batches.
-
-    ``tf.data``'s ``shuffle(...).repeat()`` has no DataLoader equivalent: a
-    torch sampler is asked for its length up front. Training instead runs for a
-    fixed number of steps per epoch, so this sampler simply never stops, and
-    :func:`make_dataset` reports ``-1`` steps for it.
-
-    Every batch has exactly ``batch_size`` entries. TF gets that for free by
-    repeating *before* batching, which leaves no end for a short batch to form
-    at; here the leftover of each permutation opens the next one instead.
-    Batching each permutation on its own would emit a ``size % batch_size``
-    remainder every pass, and under ``torch.compile(dynamic=False)`` that odd
-    shape costs a full second compile of the training graph.
     """
 
     def __init__(self, size: int, batch_size: int) -> None:
@@ -79,18 +67,13 @@ class _SequentialBatchSampler(Sampler[list[int]]):
 class _BucketBatchSampler(Sampler[list[int]]):
     """Groups positions by sequence length before batching them.
 
-    The torch stand-in for ``tf.data.Dataset.bucket_by_sequence_length``. The
-    bucket a sequence falls into follows TensorFlow's convention exactly, since
-    :func:`~learnMSA.model.bucketing.compute_dataset_steps` counts steps under
-    the same rule:
+    Rules:
 
     - bucket 0: ``length < boundaries[0]``
     - bucket i: ``boundaries[i-1] <= length < boundaries[i]``
     - last bucket: ``length >= boundaries[-1]``
 
-    Each bucket is emitted in ``bucket_batch_sizes[i]``-sized batches, with a
-    short final batch per bucket, mirroring ``tf.data`` draining its buckets at
-    the end of an epoch.
+    Each bucket is emitted in ``bucket_batch_sizes[i]``-sized batches.
     """
 
     def __init__(

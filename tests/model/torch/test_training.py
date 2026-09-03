@@ -81,3 +81,28 @@ def test_repeating_sampler_visits_every_index_equally_often() -> None:
     counts = Counter(stream[:passes * size])
     assert len(counts) == size
     assert set(counts.values()) == {passes}
+
+
+def test_make_dataset_shared_batch() -> None:
+    """A shared batch collapses the model axis of every track at once."""
+    aa_dataset = make_aa_dataset()
+    embedding_dataset = make_embedding_dataset()
+
+    config = Configuration()
+    config.training.share_batch = True
+    context = LearnMSAContext(config, aa_dataset)
+    batch_gen = BatchGenerator()
+    batch_gen.configure((aa_dataset, embedding_dataset), context)
+
+    loader, _ = make_dataset(
+        np.array([0, 2, 3]), batch_gen, batch_size=3, shuffle=False
+    )
+    for s, e, i in loader:
+        break
+
+    assert tuple(s.shape) == (3, 18, 1, 20)
+    assert tuple(e.shape) == (3, 18, 1, 8)
+    assert tuple(i.shape) == (3, 1)
+    assert np.all(i.numpy() == np.array([[0], [2], [3]]))
+    # The tracks stay aligned: sequence j is filled with j + 1.
+    assert np.all(e[:, 0].numpy() == np.array([1.0, 3.0, 4.0])[:, None, None])
