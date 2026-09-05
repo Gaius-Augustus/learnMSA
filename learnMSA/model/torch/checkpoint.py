@@ -61,6 +61,10 @@ def load_model(
         )
 
     context = LearnMSAContext.from_config(checkpoint["context"])
+    if context.embedding_dim is None:
+        weight = checkpoint["state_dict"].get("embedding_encoder.encoder.weight")
+        if weight is not None:
+            context.embedding_dim = int(weight.shape[1])
     # Before the model is built: the pHMM layer reads ``advanced.use_triton``
     # when it is constructed, not when it is called.
     apply_runtime_config(context.config, config)

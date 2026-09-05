@@ -11,7 +11,8 @@ import pytest
 import torch
 
 import tests.hmm.ref as ref
-from learnMSA.config import Configuration, TrainingConfig, TreeConfig
+from learnMSA.config import (Configuration, LanguageModelConfig,
+                             TrainingConfig, TreeConfig)
 from learnMSA.config.hmm import PHMMPriorConfig
 from learnMSA.model.checkpoint import checkpoint_format
 from learnMSA.model.context import LearnMSAContext
@@ -130,6 +131,66 @@ def test_runtime_settings_come_from_the_current_run(
     assert list(loaded.context.model_lengths) == list(
         model.context.model_lengths
     )
+
+
+def _reduce_online_model(full_dim: int, reduced_dim: int) \
+        -> TorchLearnMSAModel:
+    """A model whose bottleneck reduces ``full_dim`` embeddings to
+    ``reduced_dim``. No language model is loaded; see
+    ``tests/model/torch/test_reduce_online.py``."""
+    config = Configuration(
+        training=TrainingConfig(length_init=[4]),
+        tree=TreeConfig(use_anc_probs=False),
+        language_model=LanguageModelConfig(
+            use_language_model=True,
+            scoring_model_dim=reduced_dim,
+            reduce_online=True,
+        ),
+    )
+    context = LearnMSAContext(config=config, num_seq=10)
+    context.embedding_dim = full_dim
+    model = TorchLearnMSAModel(context)
+    model.build()
+    return model
+
+
+def test_round_trip_preserves_the_embedding_bottleneck(tmp_path) -> None:
+    """The width of the embeddings only exists in the context, and the
+    bottleneck cannot be rebuilt without it."""
+    model = _reduce_online_model(full_dim=64, reduced_dim=16)
+    path = tmp_path / "model"
+    save_model(model, path)
+
+    loaded = load_model(path)
+
+    assert loaded.context.embedding_dim == 64
+    weight = loaded.embedding_encoder.encoder.weight
+    assert tuple(weight.shape) == (16, 64)
+    np.testing.assert_allclose(
+        weight.detach().cpu().numpy(),
+        model.embedding_encoder.encoder.weight.detach().cpu().numpy(),
+    )
+
+
+def test_embedding_width_is_recovered_from_an_older_checkpoint(
+    tmp_path
+) -> None:
+    """Checkpoints written before the width was serialized still load: the
+    bottleneck's own shape says how wide its input was."""
+    model = _reduce_online_model(full_dim=64, reduced_dim=16)
+    path = tmp_path / "model"
+    save_model(model, path)
+
+    checkpoint = torch.load(
+        str(path) + SUFFIX, map_location="cpu", weights_only=False
+    )
+    del checkpoint["context"]["embedding_dim"]
+    torch.save(checkpoint, str(path) + SUFFIX)
+
+    loaded = load_model(path)
+
+    assert loaded.context.embedding_dim == 64
+    assert tuple(loaded.embedding_encoder.encoder.weight.shape) == (16, 64)
 
 
 def test_refuses_a_foreign_checkpoint_format(

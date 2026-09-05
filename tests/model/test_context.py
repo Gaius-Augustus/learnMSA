@@ -358,6 +358,32 @@ def test_serialization_with_data(
     assert restored_context.effective_num_seq == context.effective_num_seq
 
 
+def test_serialization_preserves_embedding_dim(
+    simple_data: SequenceDataset, config: Configuration
+) -> None:
+    """The width of the incoming embeddings is read off the embedding dataset,
+    which a checkpoint does not carry, so it has to survive serialization."""
+    context = LearnMSAContext(config=config, data=simple_data)
+    context.embedding_dim = 1024
+
+    restored_context = LearnMSAContext.from_config(context.get_config())
+
+    assert restored_context.embedding_dim == 1024
+
+
+def test_serialization_without_embedding_dim(
+    simple_data: SequenceDataset, config: Configuration
+) -> None:
+    """Configurations written before the width was serialized still load."""
+    context = LearnMSAContext(config=config, data=simple_data)
+    config_dict = context.get_config()
+    del config_dict["embedding_dim"]
+
+    restored_context = LearnMSAContext.from_config(config_dict)
+
+    assert restored_context.embedding_dim is None
+
+
 def test_serialization_without_data(config: Configuration) -> None:
     """Test serialization when initialized without data."""
     config.training.length_init = [10, 15]

@@ -273,6 +273,9 @@ class LearnMSAContext:
             "clusters": self.clusters.tolist() if isinstance(self.clusters, np.ndarray) else self.clusters,
             "subset": self.subset.tolist(),
             "effective_num_seq": int(self.effective_num_seq),
+            "embedding_dim": (
+                None if self.embedding_dim is None else int(self.embedding_dim)
+            ),
             # Store whether batch_size is callable or int
             "batch_size_is_callable": callable(self.batch_size),
             "batch_size_value": None if callable(self.batch_size) else int(self.batch_size),
@@ -331,6 +334,8 @@ class LearnMSAContext:
         # Restore stored values that might differ from defaults
         context.subset = np.array(actual_config["subset"], dtype=np.int32)
         context.effective_num_seq = actual_config["effective_num_seq"]
+        # Repairs checkpoints missing embedding dim
+        context.embedding_dim = actual_config.get("embedding_dim")
 
         # Restore batch_size if it was a fixed integer
         if not actual_config["batch_size_is_callable"]:
