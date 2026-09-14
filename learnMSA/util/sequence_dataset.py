@@ -414,7 +414,7 @@ class SequenceDataset(Dataset):
         """
         perm = np.asarray(permutation)
         perm = perm.astype(np.int64, copy=False)
-        self.seq_ids = [self.seq_ids[i] for i in perm]
+        self.seq_ids = np.array(self.seq_ids, dtype=object)[perm].tolist()
         self.seq_lens = self.seq_lens[perm]
 
     def get_dtype(self) -> type[np.integer | np.floating]:

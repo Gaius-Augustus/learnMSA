@@ -100,7 +100,8 @@ class Dataset(ABC):
             raise ValueError(
                 "The sequence IDs in the two datasets do not match."
             )
-        perm = [self.seq_ids.index(seq_id) for seq_id in other_dataset.seq_ids]
+        index = {seq_id: i for i, seq_id in enumerate(self.seq_ids)}
+        perm = [index[seq_id] for seq_id in other_dataset.seq_ids]
         self.reorder(perm)
 
     @abstractmethod
