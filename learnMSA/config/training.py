@@ -68,7 +68,7 @@ class TrainingConfig(BaseModel):
     indexed_data: bool = False
     """Stream training data at the cost of training time."""
 
-    share_batch: bool = False
+    share_batch: bool = True
     """Whether model inputs during training are head-specific."""
 
     unaligned_insertions: bool = False

@@ -573,12 +573,9 @@ class PHMMLayer(Generic[T_Tensor]):
 
         if self.use_prior:
             if conditional:
-                # The emitter models P(struct | aa, state), so P(aa | state) is
-                # already covered by the amino acid profile emitter and its own
-                # prior; adding a marginal amino acid prior here would
-                # double-count it. The structural prior is added as a normal
-                # prior: the emitter applies it to every row of the conditional
-                # table.
+                # The emitter models P(struct | aa, state), so only the
+                # structural prior is added
+                # The amino acid emitter P(aa | state) adds the amino acid prior
                 if self.structural_config.prior_name:
                     joint_emitter.prior = struct_prior
             else:
