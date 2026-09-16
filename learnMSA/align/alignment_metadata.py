@@ -1,6 +1,10 @@
 from dataclasses import dataclass
 import numpy as np
 
+#: Rows of the flat metadata arrays reduced at a time. Bounds the temporaries
+#: of the whole-alignment reductions below.
+_REDUCE_CHUNK_BYTES = 32 * 1024 * 1024
+
 
 # utility class used in AlignmentModel storing data to construct a full MSA
 @dataclass
@@ -139,6 +143,64 @@ class AlignmentMetaData:
         virt_rep = (self._repeat_offset[flat_to_row] + flat_local).astype(np.int32)
         return virt_rep, flat_to_row
 
+    def _repeat_flat_index(
+        self, repeat_idx: int, row_indices: np.ndarray
+    ) -> tuple:
+        """Flat indices of virtual repeat *repeat_idx* for *row_indices*.
+
+        Returns:
+            flat_idx  : (B,) index into the flat per-repeat arrays. Meaningless
+                where ``has_repeat`` is False, but always in range.
+            has_repeat: (B,) bool, whether the row has this virtual repeat.
+        """
+        sr = row_indices
+        local_idx = repeat_idx - self._repeat_offset[sr]
+        has_repeat = (
+            (local_idx >= 0)
+            & (local_idx < self.num_repeats_per_row[sr])
+        )
+        safe_local = np.clip(
+            local_idx, 0,
+            np.maximum(self.num_repeats_per_row[sr] - 1, 0),
+        )
+        flat_idx = np.clip(
+            self._row_offsets[sr] + safe_local,
+            0, max(0, len(self.domain_hit) - 1),
+        )
+        return flat_idx, has_repeat
+
+    def get_repeat_insertions(
+        self, repeat_idx: int, row_indices: np.ndarray, column: int
+    ) -> tuple:
+        """Return (lens, starts) of a *single* insertion column.
+
+        Equivalent to slicing column *column* out of the second and third
+        return value of :meth:`get_repeat_data`, but without materializing the
+        full (B, num_match) arrays -- which at millions of rows costs gigabytes
+        per repeat.
+
+        Args:
+            repeat_idx: Virtual (logical) repeat column index.
+            row_indices: 1-D int array of row indices to query.
+            column: Insertion position in ``[0, num_match - 1)``.
+
+        Returns:
+            insertion_lens_col : (B,) int16, 0 where the row has no such repeat
+            insertion_start_col: (B,) int16, -1 where the row has no such repeat
+        """
+        n = np.asarray(row_indices).shape[0]
+        if len(self.insertion_lens) == 0:
+            return (
+                np.zeros(n, dtype=self.insertion_lens.dtype),
+                np.full(n, -1, dtype=self.insertion_start.dtype),
+            )
+        flat_idx, has_repeat = self._repeat_flat_index(repeat_idx, row_indices)
+        il = self.insertion_lens[flat_idx, column]
+        il[~has_repeat] = 0
+        is_ = self.insertion_start[flat_idx, column]
+        is_[~has_repeat] = -1
+        return il, is_
+
     def get_repeat_data(
         self, repeat_idx: int, row_indices: np.ndarray
     ) -> tuple:
@@ -159,20 +221,7 @@ class AlignmentMetaData:
             domain_loc_slice   : (B, 2)
             has_repeat         : (B,) bool
         """
-        sr = row_indices
-        local_idx = repeat_idx - self._repeat_offset[sr]
-        has_repeat = (
-            (local_idx >= 0)
-            & (local_idx < self.num_repeats_per_row[sr])
-        )
-        safe_local = np.clip(
-            local_idx, 0,
-            np.maximum(self.num_repeats_per_row[sr] - 1, 0),
-        )
-        flat_idx = np.clip(
-            self._row_offsets[sr] + safe_local,
-            0, max(0, len(self.domain_hit) - 1),
-        )
+        flat_idx, has_repeat = self._repeat_flat_index(repeat_idx, row_indices)
         dh = self.domain_hit[flat_idx].copy()
         dh[~has_repeat] = -1
         il = self.insertion_lens[flat_idx].copy()
@@ -250,31 +299,50 @@ class AlignmentMetaData:
         """Return (num_repeats, num_match) bool, True if any row has data."""
         R = self.num_repeats
         M = self.num_match
-        result = np.zeros((R, M), dtype=np.int8)
+        result = np.zeros((R, M), dtype=bool)
         total_R = len(self.domain_hit)
-        if total_R > 0:
-            virt_rep, _ = self._flat_virt_rep_and_row()
-            non_gap = (self.domain_hit != -1).astype(np.int8)
-            np.maximum.at(result, virt_rep, non_gap)
-        return result.astype(bool)
+        if total_R == 0:
+            return result
+        virt_rep, _ = self._flat_virt_rep_and_row()
+        # Chunked like insertion_lens_total, for the same reason.
+        step = max(1, _REDUCE_CHUNK_BYTES // max(1, M * 2))
+        for s in range(0, total_R, step):
+            e = min(s + step, total_R)
+            chunk = self.domain_hit[s:e] != -1
+            reps = virt_rep[s:e]
+            for r in np.unique(reps):
+                rows = chunk[reps == r]
+                if rows.size:
+                    result[r] |= rows.any(axis=0)
+        return result
 
     @property
     def insertion_lens_total(self) -> np.ndarray:
-        """(num_repeats, num_match-1) int32: max insertion length per slot."""
+        """(num_repeats, num_match-1) int32: max insertion length per slot.
+
+        Reduced in row chunks, one virtual repeat at a time. Widening the whole
+        (total_repeats, num_match-1) array to int32 and building a matching
+        flat index -- as a single ``np.maximum.at`` needs -- costs two arrays of
+        4 * total_repeats * (num_match-1) bytes, several GB at millions of
+        sequences.
+        """
         R = self.num_repeats
         M = self.num_match
-        result = np.zeros(R * max(0, M - 1), dtype=np.int32)
+        result = np.zeros((R, max(0, M - 1)), dtype=np.int32)
         total_R = len(self.insertion_lens)
         if total_R == 0 or M <= 1:
-            return result.reshape(R, max(0, M - 1))
+            return result
         virt_rep, _ = self._flat_virt_rep_and_row()
-        ins_flat = self.insertion_lens.astype(np.int32).ravel()
-        lin_idx = (
-            virt_rep[:, np.newaxis] * (M - 1)
-            + np.arange(M - 1, dtype=np.int32)[np.newaxis, :]
-        ).ravel()
-        np.maximum.at(result, lin_idx, ins_flat)
-        return result.reshape(R, M - 1)
+        step = max(1, _REDUCE_CHUNK_BYTES // max(1, (M - 1) * 2))
+        for s in range(0, total_R, step):
+            e = min(s + step, total_R)
+            chunk = self.insertion_lens[s:e]
+            reps = virt_rep[s:e]
+            for r in np.unique(reps):
+                rows = chunk[reps == r]
+                if rows.size:
+                    np.maximum(result[r], rows.max(axis=0), out=result[r])
+        return result
 
     @property
     def left_flank_len_total(self) -> np.int32:

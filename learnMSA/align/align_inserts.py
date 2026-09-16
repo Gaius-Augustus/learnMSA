@@ -1,11 +1,80 @@
-import numpy as np
-from learnMSA.util.sequence_dataset import SequenceDataset
-from learnMSA.util.aligned_dataset import AlignedDataset
-import subprocess
-from shutil import which
 import sys
-import Bio.SeqIO
 
+import numpy as np
+
+from learnMSA.util.sequence_dataset import SequenceDataset
+
+#: Characters famsa may emit for a gap. Everything else is a residue.
+_GAP_BYTES = (ord("-"), ord("."))
+
+
+class SliceColumns:
+    """Column mapping of one aligned insertion slice.
+
+    Memory note: this deliberately stores only the rows that actually have an
+    aligned insertion, not one entry per sequence in the dataset. At millions
+    of sequences and hundreds of slices a dense per-slice map costs gigabytes
+    (num_slices * num_seqs * 4 bytes), which is what used to kill large runs.
+
+    Attributes:
+        rows: (n_slice,) int32, ascending indices of the sequences that
+            contribute to this slice.
+        cols: (n_slice, max_fragment_len) int16/int32. ``cols[i, k]`` is the
+            column the k-th residue of ``rows[i]``'s fragment is aligned to.
+            Entries beyond a row's fragment length are never read.
+        width: Number of columns of the slice MSA, i.e. by how much this block
+            of the output alignment has to be widened.
+    """
+
+    __slots__ = ("rows", "cols", "width")
+
+    def __init__(self, rows: np.ndarray, cols: np.ndarray, width: int) -> None:
+        self.rows = rows
+        self.cols = cols
+        self.width = width
+
+
+#: Upper bound on the decoded bytes of a slice MSA held at once.
+_SLICE_CHUNK_BYTES = 8 * 1024 * 1024
+
+
+def _slice_columns(rows: np.ndarray, gapped: list[str]) -> SliceColumns:
+    """Build a :class:`SliceColumns` from the gapped strings of a slice MSA.
+
+    Reads the column map straight out of the aligner's output instead of
+    routing it through an :class:`~learnMSA.util.aligned_dataset.AlignedDataset`,
+    which would additionally allocate a SeqRecord per fragment, a dense
+    (n_slice, width) int16 MSA matrix and a Python list of n_slice arrays.
+    A slice can cover a large share of the dataset, so the decoded MSA is
+    walked in row chunks rather than materialized in one block.
+    """
+    n = len(gapped)
+    width = len(gapped[0]) if n > 0 else 0
+    gap0, gap1 = chr(_GAP_BYTES[0]), chr(_GAP_BYTES[1])
+    frag_lens = np.fromiter(
+        (width - g.count(gap0) - g.count(gap1) for g in gapped),
+        dtype=np.int64, count=n,
+    )
+    max_frag = int(frag_lens.max()) if n > 0 else 0
+    # Column indices fit in int16 unless the slice MSA is enormous.
+    dtype = np.int16 if width <= np.iinfo(np.int16).max else np.int32
+    cols = np.zeros((n, max_frag), dtype=dtype)
+    step = max(1, _SLICE_CHUNK_BYTES // max(1, width))
+    for start in range(0, n, step):
+        end = min(start + step, n)
+        arr = np.frombuffer(
+            "".join(gapped[start:end]).encode("ascii"), dtype=np.uint8
+        ).reshape(end - start, width)
+        non_gap = (arr != _GAP_BYTES[0]) & (arr != _GAP_BYTES[1])
+        del arr
+        row_idx, col_idx = np.nonzero(non_gap)
+        del non_gap
+        chunk_lens = frag_lens[start:end]
+        # Position of each residue within its own fragment.
+        offsets = np.concatenate([[0], np.cumsum(chunk_lens)[:-1]])
+        within = np.arange(row_idx.size) - np.repeat(offsets, chunk_lens)
+        cols[start + row_idx, within] = col_idx
+    return SliceColumns(np.asarray(rows, dtype=np.int32), cols, width)
 
 
 class AlignedInsertions():
@@ -17,156 +86,102 @@ class AlignedInsertions():
                  aligned_unannotated_segments = None):
         """
         Args:
-            n_total: Total number of sequences being aligned. Required to
-                build the index maps used for fast batch lookup.
-            aligned_insertions: List of lists of pairs
-                (indices, AlignedDataset with aligned slices) or None.
+            n_total: Total number of sequences being aligned. Kept for
+                backwards compatibility; no longer used for allocation.
+            aligned_insertions: List of lists of :class:`SliceColumns` or None.
                 Inner lists have length equal to length of model -1.
                 Outer list has length num_repeats.
-            aligned_left_flank: A pair (indices, AlignedDataset with aligned
-                slices) or None.
-            aligned_right_flank: A pair (indices, AlignedDataset with aligned
-                slices) or None.
-            unannotated_data: List of pairs (indices, AlignedDataset with
-                aligned slices) or None of length num_repeats-1.
+            aligned_left_flank: A :class:`SliceColumns` or None.
+            aligned_right_flank: A :class:`SliceColumns` or None.
+            aligned_unannotated_segments: List of :class:`SliceColumns` or None
+                of length num_repeats-1.
         """
+        self.n_total = n_total
         self.aligned_insertions = aligned_insertions
         self.aligned_left_flank = aligned_left_flank
         self.aligned_right_flank = aligned_right_flank
         self.aligned_unannotated_segments = aligned_unannotated_segments
 
-        def _process(msa_data: AlignedDataset, custom_indices: np.ndarray):
-            """Build (index_map, sparse_cols) for fast vectorized lookup.
-
-            index_map[i] = row in sparse_cols for sequence i, or -1 if
-            sequence i has no aligned insertion for this block.
-            sparse_cols[j] = column map for the j-th sequence in custom_indices.
-            """
-            max_len = msa_data.alignment_len
-            sparse_cols = np.zeros(
-                (msa_data.num_seq, max_len), dtype=np.int32
-            )
-            for i in range(msa_data.num_seq):
-                cols = msa_data.get_column_map(i)
-                sparse_cols[i, :cols.size] = cols
-            index_map = np.full(n_total, -1, dtype=np.int32)
-            index_map[custom_indices] = np.arange(
-                len(custom_indices), dtype=np.int32
-            )
-            return index_map, sparse_cols
-
-
         if aligned_insertions is None:
             self.ext_insertions = 0
         else:
-            self.custom_columns_insertions = []
-            for repeat in aligned_insertions:
-                self.custom_columns_insertions.append([])
-                for x in repeat:
-                    if x is None:
-                        self.custom_columns_insertions[-1].append(None)
-                    else:
-                        self.custom_columns_insertions[-1].append(
-                            _process(x[1], x[0])
-                        )
             self.ext_insertions = np.array([
-                [x[1].shape[1] if x is not None else 0 for x in repeats]
-                for repeats in self.custom_columns_insertions
+                [0 if x is None else x.width for x in repeat]
+                for repeat in aligned_insertions
             ])
 
-        if aligned_left_flank is None:
-            self.ext_left_flank = 0
-        else:
-            self.custom_columns_left_flank = _process(
-                aligned_left_flank[1], aligned_left_flank[0]
-            )
-            self.ext_left_flank = self.custom_columns_left_flank[1].shape[1]
-
-        if aligned_right_flank is None:
-            self.ext_right_flank = 0
-        else:
-            self.custom_columns_right_flank = _process(
-                aligned_right_flank[1], aligned_right_flank[0]
-            )
-            self.ext_right_flank = self.custom_columns_right_flank[1].shape[1]
+        self.ext_left_flank = (
+            0 if aligned_left_flank is None else aligned_left_flank.width
+        )
+        self.ext_right_flank = (
+            0 if aligned_right_flank is None else aligned_right_flank.width
+        )
 
         if aligned_unannotated_segments is None:
             self.ext_unannotated = 0
         else:
-            self.custom_columns_unannotated_segments = [
-                _process(x[1], x[0]) if x is not None else None
-                for x in aligned_unannotated_segments
-            ]
             self.ext_unannotated = np.array([
-                x[1].shape[1] if x is not None else 0
-                for x in self.custom_columns_unannotated_segments
+                0 if x is None else x.width
+                for x in aligned_unannotated_segments
             ])
 
-    def insertion(self, batch_indices, r):
+    def insertion(self, batch_indices, r, i=None):
+        """Custom columns of repeat *r*.
+
+        With *i* given, only the columns of insertion position *i* are
+        materialized. Callers should prefer that: materializing every position
+        of a repeat at once costs (batch_size, total insertion width) int32,
+        which is hundreds of MB for wide alignments.
+        """
         if self.aligned_insertions is None:
             return None
-        else:
-            return [
-                self._get_custom_columns(
-                    batch_indices,
-                    *self.custom_columns_insertions[r][i],
-                    self.ext_insertions[r,i]
-                )
-                if self.aligned_insertions[r][i] is not None else None
-                for i in range(len(self.aligned_insertions[r]))
-            ]
+        if i is not None:
+            return self._get_custom_columns(
+                batch_indices, self.aligned_insertions[r][i]
+            )
+        return [
+            self._get_custom_columns(batch_indices, x)
+            for x in self.aligned_insertions[r]
+        ]
 
     def left_flank(self, batch_indices):
-        if self.aligned_left_flank is None:
-            return None
-        else:
-            return self._get_custom_columns(
-                batch_indices,
-                *self.custom_columns_left_flank,
-                self.ext_left_flank
-            )
+        return self._get_custom_columns(batch_indices, self.aligned_left_flank)
 
     def right_flank(self, batch_indices):
-        if self.aligned_right_flank is None:
-            return None
-        else:
-            return self._get_custom_columns(
-                batch_indices,
-                *self.custom_columns_right_flank,
-                self.ext_right_flank
-            )
+        return self._get_custom_columns(batch_indices, self.aligned_right_flank)
 
     def unannotated_segment(self, batch_indices, r):
         if self.aligned_unannotated_segments is None:
             return None
-        else:
-            if self.aligned_unannotated_segments[r] is None:
-                return None
-            else:
-                return self._get_custom_columns(
-                    batch_indices,
-                    *self.custom_columns_unannotated_segments[r],
-                    self.ext_unannotated[r]
-                )
-
-    def _get_custom_columns(
-        self,
-        batch_indices,
-        index_map,
-        sparse_cols,
-        max_len
-    ):
-        result = np.tile(
-            np.arange(max_len, dtype=np.int32), (batch_indices.shape[0], 1)
+        return self._get_custom_columns(
+            batch_indices, self.aligned_unannotated_segments[r]
         )
-        local_rows = index_map[batch_indices]  # (batch_size,), -1 if no insertion
-        has_ins = local_rows >= 0
+
+    def _get_custom_columns(self, batch_indices, slice_columns):
+        """Per-row column map for *batch_indices*.
+
+        Rows without an aligned insertion in this slice keep the identity
+        mapping. ``slice_columns.rows`` is ascending, so membership is resolved
+        with a binary search instead of a dense lookup table.
+        """
+        if slice_columns is None:
+            return None
+        rows, cols = slice_columns.rows, slice_columns.cols
+        result = np.tile(
+            np.arange(cols.shape[1], dtype=np.int32),
+            (batch_indices.shape[0], 1),
+        )
+        if rows.size == 0:
+            return result
+        pos = np.searchsorted(rows, batch_indices)
+        np.minimum(pos, rows.size - 1, out=pos)
+        has_ins = rows[pos] == batch_indices
         if np.any(has_ins):
-            result[has_ins] = sparse_cols[local_rows[has_ins]]
+            result[has_ins] = cols[pos[has_ins]]
         return result
 
 
-def find_long_insertions_and_get_sequences(data : SequenceDataset, lens, starts, t = 20, k=2, max_insertions_len=500, max_insertions_len_below_seq_ok = 100):
+def find_long_insertions_and_get_sequences(data : SequenceDataset, lens, starts, t = 20, k=2, max_insertions_len=500, max_insertions_len_below_seq_ok = 100, row_to_seq=None):
     """
     Finds insertions that have at least length t. If there are at least k of these sequences, returns id + fragment pairs.
     Args: 
@@ -174,6 +189,9 @@ def find_long_insertions_and_get_sequences(data : SequenceDataset, lens, starts,
         slices: Distionary keeping track of the slices.
         lens, starts: Arrays of length n where n is the number of sequences in the dataset. Indicate how long insertions are and where they start respectively.
         name: Identifier for the location of the slice (e.g. left_flank or match_5).
+        row_to_seq: Maps an alignment row to its index in *data*. Required when
+            the alignment covers a subset of the dataset; the returned row
+            indices stay in alignment-row space either way.
     """
     at_least_t = lens >= t
     lengths = lens[at_least_t]
@@ -183,7 +201,9 @@ def find_long_insertions_and_get_sequences(data : SequenceDataset, lens, starts,
         id_fragment_pairs = []
         to_delete = [] #keeps track of fragments that are too long
         for j in range(lengths.size):
-            aa_seq = data.get_standardized_seq(which[j])
+            row = which[j]
+            seq_idx = int(row if row_to_seq is None else row_to_seq[row])
+            aa_seq = data.get_standardized_seq(seq_idx)
             segment = aa_seq[start[j] : start[j] + lengths[j]]
             #sometimes segments look strange (like ones consisting only of X)
             #this can cause problems in the downstream aligner, omit these segments
@@ -199,7 +219,7 @@ def find_long_insertions_and_get_sequences(data : SequenceDataset, lens, starts,
                     which.size > max_insertions_len_below_seq_ok)):
                 to_delete.append(j)
             else:
-                sid = data.seq_ids[which[j]]+"\n"
+                sid = data.seq_ids[seq_idx]+"\n"
                 id_fragment_pairs.append((sid, segment))
         which = np.delete(which, to_delete)
         if which.size > k:
@@ -227,71 +247,108 @@ def make_aligned_insertions(
     all_rows = np.arange(num_seq)
     num_ins_pos = meta_data.insertion_lens.shape[1]
 
-    insertions_long = []
+    # Collect the raw fragments of every slice. `rows` and `slices` are kept in
+    # lockstep and are consumed (and freed) one slice at a time below.
+    rows: dict[str, np.ndarray] = {}
+    slices: dict[str, list] = {}
+
+    def collect(key, found):
+        if found is not None:
+            rows[key], slices[key] = found
+
+    # Alignment rows and dataset indices differ when a subset is aligned.
+    row_to_seq = am.indices
+
+    collect("left_flank", find_long_insertions_and_get_sequences(
+        am.data[0],
+        meta_data.left_flank_len_for(all_rows),
+        meta_data.left_flank_start_for(all_rows),
+        row_to_seq=row_to_seq,
+    ))
+    collect("right_flank", find_long_insertions_and_get_sequences(
+        am.data[0],
+        meta_data.right_flank_len_for(all_rows),
+        meta_data.right_flank_start_for(all_rows),
+        row_to_seq=row_to_seq,
+    ))
     for r in range(meta_data.num_repeats):
-        _, il_r, is_r, _, _ = meta_data.get_repeat_data(r, all_rows)
-        insertions_long.append([])
         for i in range(num_ins_pos):
-            ins_long = find_long_insertions_and_get_sequences(
-                am.data[0], il_r[:, i], is_r[:, i]
-            )
-            insertions_long[-1].append(ins_long)
-    left_flank_long = find_long_insertions_and_get_sequences(
-        am.data[0], meta_data.left_flank_len_for(all_rows), meta_data.left_flank_start_for(all_rows)
-    )
-    right_flank_long = find_long_insertions_and_get_sequences(
-        am.data[0], meta_data.right_flank_len_for(all_rows), meta_data.right_flank_start_for(all_rows)
-    )
-    unannotated_long = []
+            # Only the single insertion column i is needed here; pulling the
+            # full per-repeat arrays would copy (num_seqs, num_match) int16
+            # several times over.
+            il_i, is_i = meta_data.get_repeat_insertions(r, all_rows, i)
+            collect(f"ins_{r}_{i}", find_long_insertions_and_get_sequences(
+                am.data[0], il_i, is_i, row_to_seq=row_to_seq
+            ))
     for r in range(meta_data.num_repeats-1):
         uns_l, uns_s = meta_data.get_unannotated_data(r, all_rows)
-        unannotated_long.append(find_long_insertions_and_get_sequences(
-            am.data[0], uns_l, uns_s
+        collect(f"unannotated_{r}", find_long_insertions_and_get_sequences(
+            am.data[0], uns_l, uns_s, row_to_seq=row_to_seq
         ))
-
-    slices = {}
-    if left_flank_long is not None:
-        slices["left_flank"] = left_flank_long[1]
-    if right_flank_long is not None:
-        slices["right_flank"] = right_flank_long[1]
-    for r in range(meta_data.num_repeats):
-        for i in range(num_ins_pos):
-            if insertions_long[r][i] is not None:
-                slices[f"ins_{r}_{i}"] = insertions_long[r][i][1]
-    for r in range(meta_data.num_repeats-1):
-        if unannotated_long[r] is not None:
-            slices[f"unannotated_{r}"] = unannotated_long[r][1]
 
     if verbose:
         print(f"Aligning {len(slices)} insertion slices with {method}.")
-    alignments = make_slice_msas(slices, method, threads)
 
-    #merge msa
-    insertions_long = [[(x[0], AlignedDataset(sequences = alignments[f"ins_{r}_{i}"] )) if x is not None else None for i,x in enumerate(repeats)] for r,repeats in enumerate(insertions_long)]
-    left_flank_long = (left_flank_long[0],  AlignedDataset(sequences = alignments["left_flank"])) if left_flank_long is not None else None
-    right_flank_long = (right_flank_long[0],  AlignedDataset(sequences = alignments["right_flank"])) if right_flank_long is not None else None
-    unannotated_long = [(x[0], AlignedDataset(sequences = alignments[f"unannotated_{r}"])) if x is not None else None for r,x in enumerate(unannotated_long)]
+    # Align and reduce one slice at a time so that the raw fragments, the
+    # gapped fragments and the column maps of all slices are never all alive
+    # at the same time.
+    columns = make_slice_msas(slices, rows, method, threads)
 
-    aligned_insertions = AlignedInsertions(num_seq, insertions_long, left_flank_long, right_flank_long, unannotated_long)
+    insertions_long = [
+        [columns.get(f"ins_{r}_{i}") for i in range(num_ins_pos)]
+        for r in range(meta_data.num_repeats)
+    ]
+    unannotated_long = [
+        columns.get(f"unannotated_{r}")
+        for r in range(meta_data.num_repeats-1)
+    ]
+
+    aligned_insertions = AlignedInsertions(
+        num_seq,
+        insertions_long,
+        columns.get("left_flank"),
+        columns.get("right_flank"),
+        unannotated_long,
+    )
     return aligned_insertions
 
 
-def make_slice_msas(slices, method="famsa", threads=0):
+def make_slice_msas(slices, rows, method="famsa", threads=0):
+    """Align every slice and reduce it to a :class:`SliceColumns`.
+
+    *slices* and *rows* are emptied as they are processed, so the raw fragments
+    of a slice are freed as soon as its column map exists.
+    """
     if method == "famsa":
-        alignments = align_with_famsa(slices, threads)
-    else:
-        print(f"Unknown aligner {method}")
-        sys.exit(1)
-    return alignments
+        return align_with_famsa(slices, rows, threads)
+    print(f"Unknown aligner {method}")
+    sys.exit(1)
 
 
-def align_with_famsa(slices, threads, max_ram_gb=None):
+def align_with_famsa(slices, rows, threads):
     #keep conditional import, famsa could be optional in the future
     from pyfamsa import Aligner as FamsaAligner, Sequence as FamsaSequence
     aligner = FamsaAligner(threads = threads)
-    alignments = {}
-    for key, seqs in slices.items():
-        enc_seqs =  [FamsaSequence(sid.encode(), seq.encode()) for sid,seq in seqs]
+    columns = {}
+    for key in list(slices):
+        seqs = slices.pop(key)
+        row_idx = rows.pop(key)
+        enc_seqs = [
+            FamsaSequence(sid.encode(), seq.encode()) for sid, seq in seqs
+        ]
         msa = aligner.align(enc_seqs)
-        alignments[key] = [(sequence.id.decode(), sequence.sequence.decode()) for sequence in msa]
-    return alignments
+        del enc_seqs
+        gapped = [sequence.sequence.decode() for sequence in msa]
+        # The reduction below assumes row i of the MSA is fragment i of the
+        # input. famsa preserves the input order, but verify rather than trust.
+        out_ids = [sequence.id.decode() for sequence in msa]
+        del msa
+        in_ids = [sid for sid, _ in seqs]
+        del seqs
+        if out_ids != in_ids:
+            order = {sid: j for j, sid in enumerate(out_ids)}
+            gapped = [gapped[order[sid]] for sid in in_ids]
+        del out_ids, in_ids
+        columns[key] = _slice_columns(row_idx, gapped)
+        del gapped
+    return columns

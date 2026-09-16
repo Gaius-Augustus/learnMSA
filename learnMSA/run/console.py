@@ -176,6 +176,16 @@ def run_main() -> None:
                 )
             )
 
+            # The output stage reads only the amino acid dataset. Auxiliary
+            # datasets (3Di structures) otherwise stay resident through it and
+            # cost several hundred bytes per sequence, which is gigabytes at
+            # millions of sequences. write_scores still needs them, so only
+            # release when no scores are requested.
+            if config.input_output.scores == Path():
+                for aux in am.data[1:]:
+                    if isinstance(aux, SequenceDataset):
+                        aux.release_records()
+
             # measure time of the file generation
             t = time.time()
             if config.input_output.verbose:

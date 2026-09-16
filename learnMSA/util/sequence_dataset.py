@@ -109,6 +109,7 @@ class SequenceDataset(Dataset):
         self.indexed = False
         self.parsing_ok = False
         self.record_dict: dict[str, SeqRecord.SeqRecord] | _IndexedSeqFileDict = {}
+        self._released = False
         self.seq_ids: list[str] = []
         self.num_seq = 0
         self.seq_lens = np.array([])
@@ -179,8 +180,29 @@ class SequenceDataset(Dataset):
         if self.indexed and isinstance(self.record_dict, _IndexedSeqFileDict):
             self.record_dict.close()
 
+    def release_records(self) -> None:
+        """Free the parsed sequence records, keeping only the metadata.
+
+        Biopython records dominate the resident size of a dataset (several
+        hundred bytes per sequence on top of the residues), so auxiliary
+        datasets that are not read any more should be released rather than
+        kept alive until the end of the run. ``seq_ids``, ``seq_lens``,
+        ``num_seq`` and ``max_len`` stay valid; anything that touches a record
+        (:meth:`get_record`, :meth:`get_standardized_seq`,
+        :meth:`get_encoded_seq`, :meth:`get_header`) raises afterwards.
+        """
+        self.close()
+        self.record_dict = {}
+        self.indexed = False
+        self._released = True
+
     def get_record(self, i: int) -> SeqRecord.SeqRecord:
         """ Get the SeqRecord object for sequence i. """
+        if getattr(self, "_released", False):
+            raise RuntimeError(
+                f"The records of {self.filepath} were released and cannot be "
+                "read again."
+            )
         return self.record_dict[self.seq_ids[i]]  # type: ignore
 
     def get_header(self, i: int) -> str:
@@ -228,7 +250,7 @@ class SequenceDataset(Dataset):
         characters at all. Ambiguity codes are preserved (resolved later during
         encoding).
         """
-        seq_str = str(self.get_record(i).upper().seq)
+        seq_str = str(self.get_record(i).seq).upper()
         if self.remove_gaps:
             for s in self.gap_symbols:
                 seq_str = seq_str.replace(s, '')
@@ -240,6 +262,39 @@ class SequenceDataset(Dataset):
         for s in self.ignore_symbols:
             seq_str = seq_str.replace(s, '')
         return seq_str
+
+    def _render_token_lut(self) -> np.ndarray:
+        """256-entry byte -> output-alphabet-token lookup table."""
+        lut = getattr(self, "_token_lut", None)
+        if lut is None:
+            assert len(self.output_alphabet) < 255, \
+                "Output alphabet too large for a byte lookup table."
+            lut = np.full(256, 255, dtype=np.uint8)
+            for t, ch in enumerate(self.output_alphabet):
+                lut[ord(ch)] = t
+            self._token_lut = lut
+        return lut
+
+    def get_render_tokens(self, i: int) -> np.ndarray:
+        """Sequence i as integer tokens over ``output_alphabet``.
+
+        Equivalent to ``get_encoded_seq(i, remap=False).argmax(-1)`` but
+        without the one-hot detour, which allocates an
+        (L, len(output_alphabet)) float32 array and runs a Python loop over
+        every residue. Used when rendering alignments, where only the original
+        residue matters.
+        """
+        seq_str = self.get_standardized_seq(i)
+        if self.validate_alphabet:
+            if bool(self._invalid_char_pattern.search(seq_str)):
+                raise ValueError(
+                    "Found unknown character(s) in sequence "\
+                    f"{self.seq_ids[i]}. Allowed alphabet: "\
+                    f"{self.output_alphabet}."
+                )
+        return self._render_token_lut()[
+            np.frombuffer(seq_str.encode("ascii", "replace"), dtype=np.uint8)
+        ]
 
     def get_encoded_seq(
         self,
