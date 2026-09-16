@@ -19,10 +19,6 @@ from learnMSA.model.checkpoint import (checkpoint_format, load_model,
 from learnMSA.util.aligned_dataset import AlignedDataset, SequenceDataset
 from learnMSA.util.dataset import Dataset
 
-#: Target size of the per-batch render buffers in ``to_file``. The batch size
-#: is derived from it so that wide alignments do not blow up host memory.
-_OUTPUT_BATCH_BYTES = 256 * 1024 * 1024
-_MIN_OUTPUT_BATCH = 256
 _NEWLINE_BYTE = ord("\n")
 
 
@@ -232,28 +228,9 @@ class AlignmentModel():
         if format == "fasta" or format == "a2m":
             # Stream batches to file
             output_alphabet = self.get_output_alphabet(format == "a2m")
-            # Render tokens are looked up as raw bytes. Going through numpy's
-            # '<U1' dtype instead would cost 4 bytes per character and several
-            # copies of a (batch_size, alignment_width) buffer.
             lut = np.array(
                 [ord(c) for c in output_alphabet.tolist()], dtype=np.uint8
             )
-            if not model_index in self.metadata:
-                self.build_alignment([model_index], decoding_mode)
-            # The column layout is a property of the whole alignment, so it is
-            # computed once instead of once per batch.
-            layout = self.batch_layout(
-                model_index, aligned_insertions, add_block_sep, only_matches
-            )
-            W = layout.total_width
-            # Keep the per-batch buffers bounded no matter how wide the
-            # alignment is.
-            if W > 0:
-                batch_size = int(min(
-                    batch_size, max(_MIN_OUTPUT_BATCH, _OUTPUT_BATCH_BYTES // W)
-                ))
-            num_lines = max(1, (W + fasta_line_limit - 1) // fasta_line_limit)
-            total_len = W + num_lines
             # Use a large write buffer only when the output is large enough to
             # benefit from it. Total residues is a lower bound on output size.
             total_residues = int(np.sum(self.data[0].seq_lens[self.indices]))
@@ -270,11 +247,15 @@ class AlignmentModel():
                         aligned_insertions=aligned_insertions,
                         only_matches=only_matches,
                         decoding_mode=decoding_mode,
-                        layout=layout,
                     )
-                    b = batch_indices.size
-                    # Translate to output bytes and insert the line breaks in
-                    # one uint8 buffer.
+                    # Render straight to output bytes. Going through numpy's
+                    # '<U1' dtype costs 4 bytes per character and two to three
+                    # full copies of a (batch_size, alignment_width) buffer.
+                    b, W = batch_alignment.shape
+                    num_lines = max(
+                        1, (W + fasta_line_limit - 1) // fasta_line_limit
+                    )
+                    total_len = W + num_lines
                     wrapped = np.empty((b, total_len), dtype=np.uint8)
                     if W > 0:
                         chars = lut[batch_alignment]
@@ -315,39 +296,49 @@ class AlignmentModel():
             data = AlignedDataset(sequences=msa)
             data.write(filepath, format)
 
-    class BatchLayout:
-        """Column layout of an output alignment.
-
-        Everything here is a property of the alignment as a whole, not of a
-        batch, so it is computed once and reused for every batch. Each of the
-        metadata properties behind it is an O(total_repeats * num_match) pass,
-        which used to be repeated for every one of the (num_seqs / batch_size)
-        batches.
-        """
-
-        __slots__ = ("ins_lens_total", "uns_lens_total", "is_non_empty",
-                     "total_width", "left_flank_len", "right_flank_len")
-
-        def __init__(self, ins_lens_total, uns_lens_total, is_non_empty,
-                     total_width, left_flank_len, right_flank_len):
-            self.ins_lens_total = ins_lens_total
-            self.uns_lens_total = uns_lens_total
-            self.is_non_empty = is_non_empty
-            self.total_width = total_width
-            self.left_flank_len = left_flank_len
-            self.right_flank_len = right_flank_len
-
-    def batch_layout(
+    def get_batch_alignment(
         self,
         model_index: int,
-        aligned_insertions: AlignedInsertions = AlignedInsertions(),
+        batch_indices: np.ndarray,
         add_block_sep: bool = True,
+        aligned_insertions: AlignedInsertions = AlignedInsertions(),
         only_matches: bool = False,
-    ) -> "AlignmentModel.BatchLayout":
-        """Compute the batch-independent column layout of the alignment."""
+        decoding_mode: DecodingMode = DecodingMode.VITERBI,
+    ) -> np.ndarray:
+        """ Returns a dense matrix representing a subset of sequences
+            as specified by batch_indices with respect to the alignment of all
+            sequences (i.e. the sub alignment can contain gap-only columns and
+            stacking all batches yields a complete alignment).
+        Args:
+            model_index: Specifies the model for decoding. Use a suitable
+                criterion like loglik to decide for a model.
+            batch_indices: Sequence indices / indices of alignment rows.
+            add_block_sep: If true, columns containing a special character are
+                added to the alignment indicating domain boundaries.
+            aligned_insertions: Can be used to override insertion metadata if
+                insertions are aligned after the main procedure.
+            only_matches: If true, omit all insertions and write only those
+                amino acids that are assigned to match states.
+            decoding_mode: The mode used for decoding the alignment.
+        """
+        if not model_index in self.metadata:
+            self.build_alignment([model_index], decoding_mode)
         meta_data = self.metadata[model_index]
 
-        # Each of these triggers a full pass over the flat metadata arrays.
+        # Gather the sequences for the batch as integer render tokens (original
+        # residues preserved). uint8 suffices: render tokens are < 32.
+        b = batch_indices.size
+        output_len= len(self.data[0].output_alphabet)
+        term_val = output_len- 1  # gap token (last of the render alphabet)
+        sequences = np.full((b, self.data[0].max_len), term_val, dtype=np.uint8)
+        for i, j in enumerate(batch_indices):
+            idx = int(self.indices[j])
+            l = self.data[0].seq_lens[idx]
+            sequences[i, :l] = self.data[0].get_encoded_seq(
+                idx, remap=False
+            ).argmax(axis=-1)
+
+        # Cache expensive metadata properties (each triggers _flat_virt_rep_and_row).
         _ins_lens_total = meta_data.insertion_lens_total          # (num_repeats, M-1)
         _uns_lens_total = meta_data.unannotated_segment_lens_total  # (num_repeats-1,)
 
@@ -365,20 +356,23 @@ class AlignmentModel():
         # Pre-compute which match-state columns are non-empty across all rows.
         is_non_empty_all = meta_data.repeat_occupancy_mask()  # (num_repeats, num_match)
 
+        # compute total alignment width so we can pre-allocate the   #
+        # output array and write each block directly into it
+        sep_val = 2 * output_len # separator token value
         num_repeats = meta_data.num_repeats
-        left_flank_len = int(max(
-            meta_data.left_flank_len_total,
-            aligned_insertions.ext_left_flank
-        ))
-        right_flank_len = int(max(
-            meta_data.right_flank_len_total,
-            aligned_insertions.ext_right_flank
-        ))
 
         if only_matches:
             # Only match columns remain; count non-empty per repeat.
             total_width = int(np.sum(is_non_empty_all))
         else:
+            left_flank_len = int(max(
+                meta_data.left_flank_len_total,
+                aligned_insertions.ext_left_flank
+            ))
+            right_flank_len = int(max(
+                meta_data.right_flank_len_total,
+                aligned_insertions.ext_right_flank
+            ))
             # For each repeat: match cols + insertion cols (after removing
             # empty match cols).  Separators add one column per block.
             total_width = left_flank_len + right_flank_len
@@ -395,67 +389,6 @@ class AlignmentModel():
                 if rep_i < num_repeats - 1:
                     total_width += int(_uns_lens_total_ext[rep_i])
 
-        return AlignmentModel.BatchLayout(
-            _ins_lens_total_ext, _uns_lens_total_ext, is_non_empty_all,
-            total_width, left_flank_len, right_flank_len,
-        )
-
-    def get_batch_alignment(
-        self,
-        model_index: int,
-        batch_indices: np.ndarray,
-        add_block_sep: bool = True,
-        aligned_insertions: AlignedInsertions = AlignedInsertions(),
-        only_matches: bool = False,
-        decoding_mode: DecodingMode = DecodingMode.VITERBI,
-        layout: "AlignmentModel.BatchLayout | None" = None,
-    ) -> np.ndarray:
-        """ Returns a dense matrix representing a subset of sequences
-            as specified by batch_indices with respect to the alignment of all
-            sequences (i.e. the sub alignment can contain gap-only columns and
-            stacking all batches yields a complete alignment).
-        Args:
-            model_index: Specifies the model for decoding. Use a suitable
-                criterion like loglik to decide for a model.
-            batch_indices: Sequence indices / indices of alignment rows.
-            add_block_sep: If true, columns containing a special character are
-                added to the alignment indicating domain boundaries.
-            aligned_insertions: Can be used to override insertion metadata if
-                insertions are aligned after the main procedure.
-            only_matches: If true, omit all insertions and write only those
-                amino acids that are assigned to match states.
-            decoding_mode: The mode used for decoding the alignment.
-            layout: Precomputed column layout from :meth:`batch_layout`. It
-                does not depend on the batch, so callers that stream many
-                batches should compute it once -- otherwise every batch
-                redoes an O(total_repeats * num_match) pass over the metadata.
-        """
-        if not model_index in self.metadata:
-            self.build_alignment([model_index], decoding_mode)
-        meta_data = self.metadata[model_index]
-
-        # Gather the sequences for the batch as integer render tokens (original
-        # residues preserved). uint8 suffices: render tokens are < 32.
-        b = batch_indices.size
-        output_len= len(self.data[0].output_alphabet)
-        term_val = output_len- 1  # gap token (last of the render alphabet)
-        sequences = np.full((b, self.data[0].max_len), term_val, dtype=np.uint8)
-        for i, j in enumerate(batch_indices):
-            idx = int(self.indices[j])
-            l = self.data[0].seq_lens[idx]
-            sequences[i, :l] = self.data[0].get_render_tokens(idx)
-
-        if layout is None:
-            layout = self.batch_layout(
-                model_index, aligned_insertions, add_block_sep, only_matches
-            )
-        _ins_lens_total_ext = layout.ins_lens_total
-        _uns_lens_total_ext = layout.uns_lens_total
-        is_non_empty_all = layout.is_non_empty
-        total_width = layout.total_width
-        sep_val = 2 * output_len # separator token value
-        num_repeats = meta_data.num_repeats
-
         out = np.full((b, total_width), term_val, dtype=np.uint8)
         # Mark separator columns immediately so we don't have to scatter them later.
         if add_block_sep and not only_matches:
@@ -464,7 +397,10 @@ class AlignmentModel():
 
         # ------ Left flank ------ #
         if not only_matches:
-            lf_maxlen = layout.left_flank_len
+            lf_maxlen = int(max(
+                meta_data.left_flank_len_total,
+                aligned_insertions.ext_left_flank
+            ))
             if lf_maxlen > 0:
                 out[:, col:col + lf_maxlen] = self.get_insertion_block(
                     sequences,
@@ -529,7 +465,10 @@ class AlignmentModel():
 
         # ------ Right flank ------ #
         if not only_matches:
-            rf_maxlen = layout.right_flank_len
+            rf_maxlen = int(max(
+                meta_data.right_flank_len_total,
+                aligned_insertions.ext_right_flank
+            ))
             if rf_maxlen > 0:
                 out[:, col:col + rf_maxlen] = self.get_insertion_block(
                     sequences,
@@ -958,7 +897,7 @@ class AlignmentModel():
         # Slow path: custom column mapping (arbitrary scatter targets).
         A = np.arange(n)
         block = np.full((n, maxlen), gap_val, dtype=np.uint8)
-        columns = np.tile(np.arange(maxlen, dtype=np.int32), (n, 1))
+        columns = np.stack([np.arange(maxlen)] * n)
         columns[:, :custom_columns.shape[1]] = custom_columns
         count_down_lens = np.copy(lens)
         active = count_down_lens > 0
@@ -1048,9 +987,9 @@ class AlignmentModel():
                 continue
             ins_col_start = int(match_col_offsets[c]) + 1
             if custom_columns_fn is not None:
-                # Materialize one insertion position at a time: holding the
-                # columns of every position of a repeat at once costs
-                # (n, total insertion width) int32.
+                # One insertion position at a time: holding the columns of
+                # every position of a repeat costs (n, total insertion width)
+                # int32, hundreds of MB for wide alignments.
                 custom_column = custom_columns_fn(c)
             elif custom_columns is None:
                 custom_column = None

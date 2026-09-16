@@ -42,7 +42,12 @@ class AlignedDataset(SequenceDataset):
             (self.num_seq, len(self.get_record(0))), dtype=np.int16
         )
         for i in range(self.num_seq):
-            self._msa_matrix[i,:] = self.get_render_tokens(i)
+            # get_encoded_seq returns a one-hot over the output alphabet;
+            # argmax recovers the integer token per column.
+            self._msa_matrix[i,:] = self.get_encoded_seq(
+                i,
+                remap=False,
+            ).argmax(axis=-1) # TODO: optimize one-hot detour
         # Compute a mapping from sequence positions to MSA-column index
         # A-B--C -> 112223
         cumsum = np.cumsum(self._msa_matrix != gap_idx, axis=1)

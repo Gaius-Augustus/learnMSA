@@ -37,9 +37,9 @@ def test_make_dataset_aa_plus_embedding() -> None:
     for s, e, i in loader:
         break
 
-    assert tuple(s.shape) == (3, 18, 4, 20)  # aa track: distributions
-    assert tuple(e.shape) == (3, 18, 4, 8)
-    assert tuple(i.shape) == (3, 4)
+    assert tuple(s.shape) == (3, 18, 1, 20)  # aa track: distributions
+    assert tuple(e.shape) == (3, 18, 1, 8)
+    assert tuple(i.shape) == (3, 1)
     # The tracks are aligned: make_embedding_dataset fills sequence j with
     # j + 1, and every model column holds the same sequence here.
     assert np.all(i.numpy() == np.array([[0], [2], [3]]))

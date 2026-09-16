@@ -125,22 +125,6 @@ def test_batch_size_does_not_change_the_output(tmp_path) -> None:
     assert a.read_bytes() == b.read_bytes()
 
 
-def test_batch_layout_is_batch_independent(tmp_path) -> None:
-    """A precomputed layout must match what a single batch would compute."""
-    data, meta, _ = _synthetic()
-    am = _model_with_metadata(data, meta)
-    mode = AlignmentModel.DecodingMode.VITERBI
-    ai = make_aligned_insertions(am, 0, decoding_mode=mode, verbose=False,
-                                 threads=1)
-    layout = am.batch_layout(0, ai, add_block_sep=False, only_matches=False)
-    for batch in (np.arange(5), np.arange(40, 60), np.arange(data.num_seq)):
-        block = am.get_batch_alignment(
-            0, batch, add_block_sep=False, aligned_insertions=ai,
-            decoding_mode=mode,
-        )
-        assert block.shape == (batch.size, layout.total_width)
-
-
 def _read(path):
     rows, header, parts = [], None, []
     for line in open(path):

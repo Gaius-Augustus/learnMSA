@@ -113,32 +113,35 @@ def test_multi_model_default() -> None:
         batch_gen = batch_generator.BatchGenerator(shuffle=True)
         batch_gen.configure(data, LearnMSAContext(config, data))
 
-        assert batch_gen.generated_num_models == 4
+        assert batch_gen.generated_num_models == 1
         s, i = batch_gen(np.array([0, 1, 2, 3, 4]))
-        assert s.shape[2] == 4
-        assert i.shape == (5, 4)
+        assert s.shape[2] == 1
+        assert i.shape == (5, 1)
 
 
 @pytest.mark.parametrize("shuffle", [False, True])
-def test_shared_batch(shuffle: bool) -> None:
+@pytest.mark.parametrize("share_batch", [False, True])
+def test_shared_batch(shuffle: bool, share_batch: bool) -> None:
     filename = os.path.dirname(__file__) + "/../data/felix_insert_delete.fa"
     with SequenceDataset(filename) as data:
         config = Configuration()
         config.training.num_model = 4
         config.training.no_sequence_weights = True
-        config.training.share_batch = True
+        config.training.share_batch = share_batch
         batch_gen = batch_generator.BatchGenerator(shuffle=shuffle)
         batch_gen.configure(data, LearnMSAContext(config, data))
 
+        shared_dim = 1 if share_batch else 4
+
         assert batch_gen.num_models == 4
-        assert batch_gen.generated_num_models == 1
-        assert len(batch_gen.permutations) == 1
+        assert batch_gen.generated_num_models == shared_dim
+        assert len(batch_gen.permutations) == shared_dim
 
         ind = np.array([0, 1, 2, 3, 4])
         s, i = batch_gen(ind)
         assert s.shape[0] == ind.size
-        assert s.shape[2] == 1
-        assert i.shape == (ind.size, 1)
+        assert s.shape[2] == shared_dim
+        assert i.shape == (ind.size, shared_dim)
         if not shuffle:
             np.testing.assert_equal(i[:, 0], ind)
 

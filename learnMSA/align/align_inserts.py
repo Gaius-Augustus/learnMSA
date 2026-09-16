@@ -4,26 +4,17 @@ import numpy as np
 
 from learnMSA.util.sequence_dataset import SequenceDataset
 
-#: Characters famsa may emit for a gap. Everything else is a residue.
-_GAP_BYTES = (ord("-"), ord("."))
+
 
 
 class SliceColumns:
     """Column mapping of one aligned insertion slice.
 
-    Memory note: this deliberately stores only the rows that actually have an
-    aligned insertion, not one entry per sequence in the dataset. At millions
-    of sequences and hundreds of slices a dense per-slice map costs gigabytes
-    (num_slices * num_seqs * 4 bytes), which is what used to kill large runs.
-
     Attributes:
-        rows: (n_slice,) int32, ascending indices of the sequences that
-            contribute to this slice.
+        rows: (n_slice,) int32, indices of the sequences in this slice.
         cols: (n_slice, max_fragment_len) int16/int32. ``cols[i, k]`` is the
             column the k-th residue of ``rows[i]``'s fragment is aligned to.
-            Entries beyond a row's fragment length are never read.
-        width: Number of columns of the slice MSA, i.e. by how much this block
-            of the output alignment has to be widened.
+        width: Number of columns of the slice MSA.
     """
 
     __slots__ = ("rows", "cols", "width")
@@ -34,23 +25,19 @@ class SliceColumns:
         self.width = width
 
 
-#: Upper bound on the decoded bytes of a slice MSA held at once.
-_SLICE_CHUNK_BYTES = 8 * 1024 * 1024
 
 
 def _slice_columns(rows: np.ndarray, gapped: list[str]) -> SliceColumns:
     """Build a :class:`SliceColumns` from the gapped strings of a slice MSA.
-
-    Reads the column map straight out of the aligner's output instead of
-    routing it through an :class:`~learnMSA.util.aligned_dataset.AlignedDataset`,
-    which would additionally allocate a SeqRecord per fragment, a dense
-    (n_slice, width) int16 MSA matrix and a Python list of n_slice arrays.
-    A slice can cover a large share of the dataset, so the decoded MSA is
-    walked in row chunks rather than materialized in one block.
     """
+
+    _FAMSA_GAP_BYTES = (ord("-"), ord("."))
+    # Upper bound on the decoded bytes of a slice MSA held at once.
+    _SLICE_CHUNK_BYTES = 8 * 1024 * 1024
+
     n = len(gapped)
     width = len(gapped[0]) if n > 0 else 0
-    gap0, gap1 = chr(_GAP_BYTES[0]), chr(_GAP_BYTES[1])
+    gap0, gap1 = chr(_FAMSA_GAP_BYTES[0]), chr(_FAMSA_GAP_BYTES[1])
     frag_lens = np.fromiter(
         (width - g.count(gap0) - g.count(gap1) for g in gapped),
         dtype=np.int64, count=n,
@@ -65,7 +52,7 @@ def _slice_columns(rows: np.ndarray, gapped: list[str]) -> SliceColumns:
         arr = np.frombuffer(
             "".join(gapped[start:end]).encode("ascii"), dtype=np.uint8
         ).reshape(end - start, width)
-        non_gap = (arr != _GAP_BYTES[0]) & (arr != _GAP_BYTES[1])
+        non_gap = (arr != _FAMSA_GAP_BYTES[0]) & (arr != _FAMSA_GAP_BYTES[1])
         del arr
         row_idx, col_idx = np.nonzero(non_gap)
         del non_gap
