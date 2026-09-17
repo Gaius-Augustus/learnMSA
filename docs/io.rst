@@ -41,6 +41,18 @@ Arguments
     For example, to convert an a2m file to fasta format, use:
     ``learnMSA -i proteins.a2m --convert -f fasta -o protein.fasta``.
 
+``--runtime`` *[SCALE]*
+    With this option, learnMSA does not perform any alignment, but only prints
+    a conservative estimate of the wall time needed to align the input file in
+    the format HH:MM:SS and exits. The estimate is rounded up to 15 minute
+    steps below one hour and to full hours above. It is based on the number of
+    sequences and their mean and median lengths and is calibrated on runs with
+    default settings on a GPU workstation. Slower machines (e.g. with few CPU
+    cores or a slow shared filesystem) may need a larger *SCALE*. The optional *SCALE* (default: 1)
+    multiplies the estimate to account for different hardware.
+    This is intended for configuring cluster jobs, for example:
+    ``sbatch --time=$(learnMSA -i proteins.fasta --runtime) job.sh``.
+
 ``-s / --silent``
     Suppresses all standard output messages.
 

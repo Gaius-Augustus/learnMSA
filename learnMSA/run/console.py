@@ -34,6 +34,11 @@ def run_main() -> None:
     # Resolve input file (may use --from_msa when -i is omitted)
     util.resolve_input_file(config, parser)
 
+    # Only estimate the runtime, without loading the data or a framework
+    if args.runtime is not None:
+        print_runtime_estimate(config, parser, args.runtime)
+        return
+
     # Validate that output_file is provided when required
     util.validate_output_file_requirements(config, parser)
 
@@ -250,6 +255,20 @@ def run_main() -> None:
             raise NotImplementedError(
                 "Distribution output is not implemented in this version."
             )
+
+
+def print_runtime_estimate(
+    config : Configuration, parser, scale : float
+) -> None:
+    from learnMSA.run.runtime import estimate_runtime, format_runtime
+
+    if config.input_output.input_format != "fasta":
+        parser.error("--runtime requires input in fasta format")
+    try:
+        minutes = estimate_runtime(config.input_output.input_file, scale)
+    except (ValueError, OSError) as e:
+        parser.error(str(e))
+    print(format_runtime(minutes))
 
 
 def convert_file(config : Configuration) -> None:
