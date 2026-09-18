@@ -266,6 +266,22 @@ def _auto_sizes(unit_in: float) -> tuple[float, float, float]:
     return node_size, font_size, edge_font_size
 
 
+# Node colors
+_MATCH_COLOR = "#3B6FB6"
+_INSERT_COLOR = "#E8B730"
+_DELETE_COLOR = "#C8453C"
+_OTHER_COLOR = "#696969"
+
+
+def _state_colors(L: int, Q: int) -> tuple[list[str], list[str]]:
+    face = (
+        [_MATCH_COLOR] * L + [_INSERT_COLOR] * (L - 1)
+        + [_DELETE_COLOR] * L + [_OTHER_COLOR] * (Q - 3 * L + 1)
+    )
+    label = ["black" if c == _INSERT_COLOR else "white" for c in face]
+    return face, label
+
+
 def _edge_color_width(p: float) -> tuple:
     return plt.get_cmap("winter")(p), 1.0 + 5.0 * p
 
@@ -338,6 +354,7 @@ def _draw_phmm_graph(
         labels_full.append(f"D{first + 1}")
 
     n_texts = len(ax.texts)
+    n_collections = len(ax.collections)
     plot_transition_graph(
         _DisplayTransitioner(A_full, P_full),
         head=0,
@@ -359,25 +376,40 @@ def _draw_phmm_graph(
     for text in ax.texts[n_texts:]:
         text.set_zorder(max(text.get_zorder(), 1.5))
 
-    # Ghost nodes: hollow, dashed and labelled in the node color.
+    # Color the states by group. hidten draws all nodes in one collection
+    # (in node order) and their labels as the first texts, before the edge
+    # labels.
+    face, label_color = _state_colors(L, Q)
+    face += [_OTHER_COLOR] * n_ghosts  # ghosts are hollow and hidden below
+    for coll in ax.collections[n_collections:]:
+        if len(coll.get_offsets()) == Q + n_ghosts:
+            coll.set_facecolor(face)
+            break
+    for text, color in zip(ax.texts[n_texts:n_texts + Q], label_color):
+        text.set_color(color)
+
+    # Ghost nodes: hollow, dashed and labelled in the color of their group.
     for g in range(Q, Q + n_ghosts):
         x, y = pos_full[g]
+        color = _MATCH_COLOR if (g - Q) % 2 == 0 else _DELETE_COLOR
         ax.scatter(
             [x], [y], s=style.node_size, facecolors="white",
-            edgecolors="steelblue", linestyles="--", linewidths=1.0, zorder=3,
+            edgecolors=color, linestyles="--", linewidths=1.0, zorder=3,
         )
         ax.text(
             x, y, labels_full[g], ha="center", va="center", zorder=4,
-            fontsize=style.font_size, color="steelblue",
+            fontsize=style.font_size, color=color,
         )
     # Continuation arrows at the start of the following row.
     for k in geo.boundaries:
         r = geo.row_of(k) + 1
-        for y in (geo.y_match(r), geo.y_delete(r)):
+        for y, color in (
+            (geo.y_match(r), _MATCH_COLOR), (geo.y_delete(r), _DELETE_COLOR),
+        ):
             ax.annotate(
                 "", xy=(0.72, y), xytext=(0.2, y),
                 arrowprops=dict(
-                    arrowstyle=style.arrows_style, color="steelblue",
+                    arrowstyle=style.arrows_style, color=color,
                     linestyle=":", shrinkA=0, shrinkB=0,
                 ),
             )
