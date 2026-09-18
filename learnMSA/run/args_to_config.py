@@ -43,6 +43,7 @@ def args_to_config(
     io["save_model"] = _get_save_model(args)
     io["load_model"] = args.load_model
     io["scores"] = args.scores
+    io["decode_file"] = args.decode_file
     io["verbose"] = not args.silent
     io["cuda_visible_devices"] = args.cuda_visible_devices
     io["work_dir"] = args.work_dir

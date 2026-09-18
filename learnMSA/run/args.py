@@ -142,6 +142,14 @@ def parse_args(
         help="Additional table file containing per-sequence likelihoods.",
     )
     io_group.add_argument(
+        "--decode_file",
+        dest="decode_file",
+        type=str,
+        default="" if io.decode_file == Path() else str(io.decode_file),
+        help="Additional fasta file with the decoded HMM state sequences. "
+            "Uses the decoding mode set by --decode.",
+    )
+    io_group.add_argument(
         "--struct",
         dest="struct_file",
         type=str,
