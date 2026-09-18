@@ -624,7 +624,8 @@ def parse_args(
         dest="plot",
         type=str,
         default=vis.plot,
-        help="Produces a pdf of the learned HMM."
+        help="Plots the learned HMM. The format follows the file extension "\
+            "(pdf, svg, png)."
     )
     vis_group.add_argument(
         "--plot_head",
