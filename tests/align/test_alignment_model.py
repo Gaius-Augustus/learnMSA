@@ -9,12 +9,15 @@ decoder live in ``tf/test_decode.py`` instead.
 import os
 
 import numpy as np
+import pytest
 
 from learnMSA import Configuration
 from learnMSA.align.align import align
 from learnMSA.align.align_hits import HitAlignmentMode
 from learnMSA.align.alignment_metadata import AlignmentMetaData
-from learnMSA.align.alignment_model import AlignmentModel
+from learnMSA.align.alignment_model import (AlignmentModel,
+                                            parse_state_string,
+                                            read_state_file)
 from learnMSA.model.model import LearnMSAModel
 from learnMSA.util.aligned_dataset import AlignedDataset, SequenceDataset
 
@@ -66,6 +69,86 @@ def test_mea(
     ref_subalignment = ["FE...LIK...", "FE...LIKhac", "FEahcLIK..."]
     for s, r in zip(subalignment_strings, ref_subalignment):
         assert s == r
+
+def test_states_match_viterbi(
+    simple_data : SequenceDataset,
+    simple_model : LearnMSAModel,
+    viterbi_seqs : np.ndarray,
+) -> None:
+    """States reconstructed from the alignment metadata equal the Viterbi
+    paths of both heads, including multi-hit paths."""
+    am = AlignmentModel(simple_data, simple_model)
+    n = simple_data.num_seq
+    for head in range(2):
+        states = am.get_batch_states(head, np.arange(n))
+        for i in range(n):
+            l = simple_data.seq_lens[i]
+            np.testing.assert_equal(states[i, :l], viterbi_seqs[head, i, :l])
+            assert np.all(states[i, l:] == -1)
+
+
+def test_states_to_string(
+    simple_data : SequenceDataset,
+    simple_model : LearnMSAModel,
+) -> None:
+    """One token per residue, deletions implicit, consistent with the MSA."""
+    subset = np.array([0, 2, 5])
+    am = AlignmentModel(simple_data, simple_model, subset)
+    ref = [
+        "M1 M2 M3 M4 M5",
+        "M1 M2 M3 M4 M5 R R R",
+        "M1 M2 I2 I2 I2 M3 M4 M5",
+    ]
+    assert am.states_to_string(0) == ref
+
+
+def test_states_multi_hit(
+    multi_hit_data : SequenceDataset,
+    simple_model : LearnMSAModel,
+) -> None:
+    """Hits are separated by U and do not depend on the hit alignment."""
+    ref = [
+        "M1 M2 M3 M5",
+        "L L L M1 M3 M4",
+        "M1 M3 M5 U U U M1 M2 M3 M4 M5 U U U M2 M3 M4 R R R",
+        "M1 M2 M3 M4 M5 U U U M2 M3 M4",
+        "M1 M3 M5 U M1 M2 M3 M4 M5",
+    ]
+    for mode in HitAlignmentMode:
+        am = AlignmentModel(
+            multi_hit_data, simple_model, hit_alignment_mode=mode
+        )
+        assert am.states_to_string(0) == ref
+
+
+def test_state_file_roundtrip(
+    multi_hit_data : SequenceDataset,
+    simple_model : LearnMSAModel,
+    tmp_path,
+) -> None:
+    am = AlignmentModel(multi_hit_data, simple_model)
+    path = tmp_path / "states.fasta"
+    am.states_to_file(path, 0, batch_size=2)
+    n = multi_hit_data.num_seq
+    states = am.get_batch_states(0, np.arange(n))
+    for model_length in (5, None):
+        headers, parsed = read_state_file(path, model_length)
+        assert headers == [multi_hit_data.get_header(i) for i in range(n)]
+        for i in range(n):
+            l = multi_hit_data.seq_lens[i]
+            np.testing.assert_equal(parsed[i], states[i, :l])
+
+
+def test_parse_state_string() -> None:
+    np.testing.assert_equal(
+        parse_state_string("L M1 I1 I1 M3 U M2 R", 3),
+        [5, 0, 3, 3, 2, 6, 1, 7],
+    )
+    assert parse_state_string("", 3).size == 0
+    for bad in ("M4", "I3", "M0", "X", "LL", "Mx"):
+        with pytest.raises(ValueError):
+            parse_state_string(bad, 3)
+
 
 def test_alignment_egf(tmp_path) -> None:
     """Test the high-level alignment function with real world data.

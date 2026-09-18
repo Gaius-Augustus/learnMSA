@@ -224,15 +224,18 @@ def validate_output_file_requirements(config, parser) -> None:
 
         # If not using any output options, output_file is required for alignment
         using_scores = config.input_output.scores != Path()
+        using_decode = config.input_output.decode_file != Path()
         using_save_model = config.input_output.save_model != ""
         using_logo = config.visualization.plot != ""
 
         # If none of these alternative outputs are being used,
         # we need an output file
-        if not (using_scores or using_save_model or using_logo):
+        if not (using_scores or using_decode or using_save_model
+                or using_logo):
             parser.error(
                 "argument -o/--out_file is required (or use --scores, "
-                "--save_model, or --logo to save alternative outputs)"
+                "--decode_file, --save_model, or --logo to save alternative "
+                "outputs)"
             )
 
 

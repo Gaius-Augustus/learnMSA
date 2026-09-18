@@ -167,18 +167,19 @@ def run_main() -> None:
         if config.input_output.save_model:
             am.save(config.input_output.save_model)
 
+        decoding_mode = AlignmentModel.DecodingMode.from_str(
+            config.training.decoding_mode
+        )
+
+        if config.input_output.output_file != Path() \
+                or config.input_output.decode_file != Path():
+            # build the alignment (predict state sequences, create metadata)
+            am.build_alignment([am.best_head], decoding_mode=decoding_mode)
+
         if config.input_output.output_file != Path():
 
             Path(config.input_output.output_file).parent.mkdir(
                 parents=True, exist_ok=True
-            )
-
-            # build the alignment (= predict state sequences and create metadata)
-            am.build_alignment(
-                [am.best_head],
-                decoding_mode=AlignmentModel.DecodingMode.from_str(
-                    config.training.decoding_mode
-                )
             )
 
             # Free datasets that are not the amino acid dataset to save memory.
@@ -195,9 +196,6 @@ def run_main() -> None:
             assert am.best_head != -1,\
                 "Best head was not selected. This should not happen."
 
-            decoding_mode=AlignmentModel.DecodingMode.from_str(
-                config.training.decoding_mode
-            )
             if config.training.unaligned_insertions\
                     or config.training.only_matches:
                 # Don't align insertions when requested or when only matches need to
@@ -231,6 +229,21 @@ def run_main() -> None:
             if config.input_output.verbose:
                 print(f"Generating output took {time.time()-t:.4f} seconds.")
                 print("Wrote file", config.input_output.output_file)
+
+        if config.input_output.decode_file != Path():
+            Path(config.input_output.decode_file).parent.mkdir(
+                parents=True, exist_ok=True
+            )
+            am.states_to_file(
+                config.input_output.decode_file,
+                am.best_head,
+                decoding_mode=decoding_mode,
+            )
+            if config.input_output.verbose:
+                print(
+                    "Wrote decoded states to",
+                    config.input_output.decode_file,
+                )
 
         if config.input_output.scores != Path():
             am.write_scores(

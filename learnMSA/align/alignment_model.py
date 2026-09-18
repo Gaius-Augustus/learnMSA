@@ -492,6 +492,144 @@ class AlignmentModel():
         n, L = chars.shape
         return np.ascontiguousarray(chars).view(f'U{L}').reshape(n).tolist()
 
+    def get_batch_states(
+        self,
+        model_index: int,
+        batch_indices: np.ndarray,
+        decoding_mode: DecodingMode = DecodingMode.VITERBI,
+    ) -> np.ndarray:
+        """ Returns the decoded state sequences of a subset of sequences as
+            specified by batch_indices.
+
+        Args:
+            model_index: Specifies the model for decoding.
+            batch_indices: Sequence indices / indices of alignment rows.
+            decoding_mode: The mode used for decoding the alignment.
+
+        Returns:
+            A matrix of shape (len(batch_indices), max_len) with model state
+            ids (see :func:`get_state_tokens`). Positions beyond the end of
+            a sequence are -1.
+        """
+        if not model_index in self.metadata:
+            self.build_alignment([model_index], decoding_mode)
+        meta_data = self.metadata[model_index]
+        L = meta_data.num_match
+
+        b = batch_indices.size
+        seq_lens = self.data[0].seq_lens[self.indices[batch_indices]]
+        states = np.full((b, self.data[0].max_len), -1, dtype=np.int32)
+        rows = np.arange(b)
+
+        _scatter_segments(
+            states, rows,
+            meta_data.left_flank_start_for(batch_indices),
+            meta_data.left_flank_len_for(batch_indices),
+            np.full(b, 2*L-1),
+        )
+        for rep_i in range(meta_data.num_repeats):
+            dh, il, is_, _, _ = meta_data.get_repeat_data(
+                rep_i, batch_indices
+            )
+            r, k = np.nonzero(dh != -1)
+            states[r, dh[r, k]] = k
+            r, c = np.nonzero(il > 0)
+            _scatter_segments(states, r, is_[r, c], il[r, c], L + c)
+            if rep_i < meta_data.num_repeats - 1:
+                uns_l, uns_s = meta_data.get_unannotated_data(
+                    rep_i, batch_indices
+                )
+                _scatter_segments(
+                    states, rows, uns_s, uns_l, np.full(b, 2*L)
+                )
+        _scatter_segments(
+            states, rows,
+            meta_data.right_flank_start_for(batch_indices),
+            meta_data.right_flank_len_for(batch_indices),
+            np.full(b, 2*L+1),
+        )
+
+        in_seq = np.arange(states.shape[1])[None, :] < seq_lens[:, None]
+        assert np.all(states[in_seq] != -1), \
+            "Some residues were not assigned a decoded state."
+        return states
+
+    def get_state_tokens(self, model_index: int) -> np.ndarray:
+        """ Returns the string representation of all emitting states indexed
+            by state id. For a model of length L, the tokens are
+            ``M1..ML`` (match states, ids 0..L-1), ``I1..I{L-1}`` (insertion
+            between Mk and Mk+1, ids L..2L-2), ``L`` (left flank, 2L-1),
+            ``U`` (unannotated segment between hits, 2L) and ``R`` (right
+            flank, 2L+1).
+        """
+        L = self.model.context.model_lengths[model_index]
+        return _state_tokens(L)
+
+    def states_to_string(
+        self,
+        model_index: int,
+        decoding_mode: DecodingMode = DecodingMode.VITERBI,
+    ) -> list[str]:
+        """ Decodes the state sequences of all sequences and returns them as
+            a list of strings with one space-separated token per residue.
+            See :func:`get_state_tokens` for the token format.
+        """
+        return self._states_to_strings(
+            model_index, np.arange(self.indices.size), decoding_mode
+        )
+
+    def states_to_file(
+        self,
+        filepath: str | Path,
+        model_index: int,
+        batch_size: int = 10000,
+        decoding_mode: DecodingMode = DecodingMode.VITERBI,
+    ) -> None:
+        """ Writes the decoded state sequences in fasta format. Each record
+            holds one space-separated state token per residue on a single
+            line (no gaps). See :func:`get_state_tokens` for the token
+            format and :func:`read_state_file` for a parser.
+
+        Args:
+            filepath: Path of the output file.
+            model_index: Specifies the model for decoding.
+            batch_size: Defines how many sequences are decoded and written to
+                file at a time.
+            decoding_mode: The mode used for decoding the alignment.
+        """
+        with open(filepath, "wb") as output_file:
+            n = self.indices.size
+            for i in range(0, n, batch_size):
+                batch_indices = np.arange(i, min(n, i+batch_size))
+                strings = self._states_to_strings(
+                    model_index, batch_indices, decoding_mode
+                )
+                buf = bytearray()
+                for j, s in zip(batch_indices, strings):
+                    buf += b">"
+                    buf += self.data[0].get_header(
+                        self.indices[int(j)]
+                    ).encode("utf-8")
+                    buf += b"\n"
+                    buf += s.encode("ascii")
+                    buf += b"\n"
+                output_file.write(buf)
+
+    def _states_to_strings(
+        self,
+        model_index: int,
+        batch_indices: np.ndarray,
+        decoding_mode: DecodingMode,
+    ) -> list[str]:
+        states = self.get_batch_states(
+            model_index, batch_indices, decoding_mode
+        )
+        tokens = self.get_state_tokens(model_index)
+        seq_lens = self.data[0].seq_lens[self.indices[batch_indices]]
+        return [
+            " ".join(tokens[row[:l]]) for row, l in zip(states, seq_lens)
+        ]
+
     def write_scores(self, filepath: Path, model: int) -> None:
         """ Writes per-sequence scores (loglik, bitscore) to a
             tsv file sorted by the bitscore ``loglik(S) - log P(S; nullmodel)``.
@@ -1163,3 +1301,124 @@ def _interval_jaccard(i1: np.ndarray, i2: np.ndarray) -> np.ndarray:
     intersection = np.maximum(0, overlap_end - overlap_start)
     union = (i1[:, 1] - i1[:, 0]) + (i2[:, 1] - i2[:, 0]) - intersection
     return np.where(union > 0, intersection / union, 0.0)
+
+
+def _scatter_segments(
+    states: np.ndarray,
+    rows: np.ndarray,
+    starts: np.ndarray,
+    lens: np.ndarray,
+    values: np.ndarray,
+) -> None:
+    """ Writes values[i] to states[rows[i], starts[i]:starts[i]+lens[i]] for
+    all i in one vectorized scatter.
+    """
+    lens = np.asarray(lens, dtype=np.int64)
+    mask = lens > 0
+    if not np.any(mask):
+        return
+    lens = lens[mask]
+    offsets = np.arange(np.sum(lens)) - np.repeat(np.cumsum(lens) - lens, lens)
+    positions = np.repeat(np.asarray(starts, dtype=np.int64)[mask], lens)
+    states[
+        np.repeat(np.asarray(rows)[mask], lens), positions + offsets
+    ] = np.repeat(np.asarray(values)[mask], lens)
+
+
+def _state_tokens(model_length: int) -> np.ndarray:
+    """ Token of each emitting state indexed by state id. """
+    L = model_length
+    return np.array(
+        [f"M{k}" for k in range(1, L+1)]
+        + [f"I{k}" for k in range(1, L)]
+        + ["L", "U", "R"],
+        dtype=object,
+    )
+
+
+def parse_state_string(s: str, model_length: int) -> np.ndarray:
+    """ Parses a string of space-separated state tokens as written by
+    :meth:`AlignmentModel.states_to_file` back to model state ids.
+
+    Args:
+        s: The state string, e.g. ``"L M1 M2 I2 I2 M3 R"``.
+        model_length: Number of match states L of the model.
+
+    Returns:
+        An int32 array with one state id per token (``Mk`` -> k-1,
+        ``Ik`` -> L+k-1, ``L`` -> 2L-1, ``U`` -> 2L, ``R`` -> 2L+1).
+    """
+    L = model_length
+    tokens = np.array(s.split(), dtype=str)
+    ids = np.full(tokens.size, -1, dtype=np.int32)
+    if tokens.size == 0:
+        return ids
+    kind = tokens.astype("U1")
+    is_flank = np.char.str_len(tokens) == 1
+    ids[is_flank & (kind == "L")] = 2*L-1
+    ids[is_flank & (kind == "U")] = 2*L
+    ids[is_flank & (kind == "R")] = 2*L+1
+    for letter, offset, max_k in (("M", -1, L), ("I", L-1, L-1)):
+        mask = (kind == letter) & ~is_flank
+        if not np.any(mask):
+            continue
+        digits = np.char.lstrip(tokens[mask], letter)
+        if not np.all(np.char.isdigit(digits)):
+            raise ValueError(f"Invalid state token in: {s}")
+        k = digits.astype(np.int64)
+        if np.any((k < 1) | (k > max_k)):
+            raise ValueError(
+                f"State index out of range for a model of length {L}: {s}"
+            )
+        ids[mask] = k + offset
+    if np.any(ids == -1):
+        bad = tokens[ids == -1][0]
+        raise ValueError(f"Invalid state token: {bad}")
+    return ids
+
+
+def read_state_file(
+    filepath: str | Path,
+    model_length: int | None = None,
+) -> tuple[list[str], list[np.ndarray]]:
+    """ Reads a file written by :meth:`AlignmentModel.states_to_file`.
+
+    Args:
+        filepath: Path of the state file.
+        model_length: Number of match states L of the model that decoded the
+            states. If None, L is inferred as the largest match index (or
+            insertion index + 1) in the file. This underestimates L when the
+            last match states are used by no sequence, which shifts the ids
+            of all non-match states. Pass the true length when it is known,
+            e.g. ``am.model.context.model_lengths[am.best_head]``.
+
+    Returns:
+        The fasta headers and, per record, an int32 array of state ids (see
+        :func:`parse_state_string`).
+    """
+    headers: list[str] = []
+    records: list[list[str]] = []
+    with open(filepath) as f:
+        for line in f:
+            line = line.strip()
+            if line.startswith(">"):
+                headers.append(line[1:])
+                records.append([])
+            elif line:
+                if not records:
+                    raise ValueError(
+                        f"{filepath} does not start with a fasta header."
+                    )
+                records[-1].append(line)
+    strings = [" ".join(r) for r in records]
+
+    if model_length is None:
+        model_length = 1
+        for s in strings:
+            for t in s.split():
+                if t[0] == "M" and len(t) > 1:
+                    model_length = max(model_length, int(t[1:]))
+                elif t[0] == "I" and len(t) > 1:
+                    model_length = max(model_length, int(t[1:]) + 1)
+
+    return headers, [parse_state_string(s, model_length) for s in strings]

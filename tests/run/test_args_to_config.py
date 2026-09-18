@@ -76,6 +76,7 @@ class TestArgsToConfig:
             "--silent",
             "--only_matches",
             "--scores", "scores.tsv",
+            "--decode_file", "states.fasta",
             "--no_noise",
         ])
 
@@ -106,6 +107,7 @@ class TestArgsToConfig:
         assert config.training.use_noise is False
         assert config.input_output.verbose is False
         assert config.input_output.scores == Path("scores.tsv")
+        assert config.input_output.decode_file == Path("states.fasta")
 
     def test_args_to_config_with_epochs_single_value(self):
         """Test that single epoch value is expanded to 3."""

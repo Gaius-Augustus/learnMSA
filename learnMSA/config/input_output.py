@@ -43,6 +43,10 @@ class InputOutputConfig(BaseModel):
     """If set, the per-sequence likelihoods and bit scores will be saved to the
     specified file."""
 
+    decode_file: PathField = Path()
+    """If set, the decoded state sequences will be saved to the specified file
+    in fasta-like format."""
+
     verbose: bool = False
     """If False, all output messages will be disabled."""
 

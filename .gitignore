@@ -32,3 +32,6 @@ util/prepare_build.py
 docs/_build/
 # calibration sweep logs (the JSON reports are committed, these are not)
 util/calib_logs/
+
+# Claude Code
+CLAUDE.md
