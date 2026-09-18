@@ -135,17 +135,6 @@ def parse_args(
         help="Convert input files to format specific by --format."
     )
     io_group.add_argument(
-        "--runtime",
-        dest="runtime",
-        metavar="SCALE",
-        type=float,
-        nargs="?",
-        const=1.0,
-        default=None,
-        help="Print a conservative wall time estimate (HH:MM:SS) for aligning "
-            "the input file and exit."
-    )
-    io_group.add_argument(
         "--scores",
         dest="scores",
         type=str,

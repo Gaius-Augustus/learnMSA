@@ -1,3 +1,13 @@
+"""Conservative wall time estimate for aligning a FASTA file with learnMSA,
+e.g. to configure a cluster job. Run standalone with
+
+    python -m learnMSA.run.runtime proteins.fasta [--scale SCALE]
+
+which prints the estimate as HH:MM:SS, for example:
+
+    sbatch --time=$(python -m learnMSA.run.runtime proteins.fasta) job.sh
+"""
+import argparse
 import math
 from pathlib import Path
 
@@ -90,3 +100,31 @@ def estimate_runtime(input_file: str | Path, scale: float = 1.0) -> int:
         raise ValueError(f"scale must be positive, got {scale}.")
     stats = read_fasta_stats(input_file)
     return round_runtime(scale * estimate_runtime_seconds(stats))
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(
+        prog="python -m learnMSA.run.runtime",
+        description="Print a conservative wall time estimate (HH:MM:SS) for "
+            "aligning a FASTA file with learnMSA using default settings. The "
+            "estimate is rounded up to 15 minute steps below one hour and to "
+            "full hours above.",
+    )
+    parser.add_argument("input_file", help="FASTA file to align.")
+    parser.add_argument(
+        "--scale",
+        type=float,
+        default=1.0,
+        help="Factor applied to the estimate to account for different "
+            "hardware, e.g. > 1 for slower machines (default: 1).",
+    )
+    args = parser.parse_args(argv)
+    try:
+        minutes = estimate_runtime(args.input_file, args.scale)
+    except (ValueError, OSError) as e:
+        parser.error(str(e))
+    print(format_runtime(minutes))
+
+
+if __name__ == "__main__":
+    main()

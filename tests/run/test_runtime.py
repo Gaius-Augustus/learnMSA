@@ -4,10 +4,8 @@ import sys
 
 import pytest
 
-from learnMSA.run import estimate_runtime
-from learnMSA.run.args import parse_args
 from learnMSA.run.runtime import (
-    estimate_runtime_seconds, format_runtime, round_runtime
+    estimate_runtime, estimate_runtime_seconds, format_runtime, round_runtime
 )
 from learnMSA.util.fasta_stats import FastaStats
 
@@ -59,21 +57,11 @@ def test_scale() -> None:
             estimate_runtime(f"{DIR}/egf.fasta", scale=scale)
 
 
-@pytest.mark.parametrize(
-    "runtime_args, expected",
-    [([], None), (["--runtime"], 1.0), (["--runtime", "2.5"], 2.5)],
-)
-def test_runtime_arg(runtime_args: list[str], expected: float | None) -> None:
-    parser = parse_args("test_version")
-    args = parser.parse_args(["-i", "input.fasta", *runtime_args])
-    assert args.runtime == expected
-
-
 def test_runtime_cli_rejects_non_positive_scale() -> None:
     result = subprocess.run(
         [
-            sys.executable, "learnMSA.py", "-i", f"{DIR}/egf.fasta",
-            "--runtime", "0",
+            sys.executable, "-m", "learnMSA.run.runtime", f"{DIR}/egf.fasta",
+            "--scale", "0",
         ],
         capture_output=True,
         text=True,
@@ -82,12 +70,12 @@ def test_runtime_cli_rejects_non_positive_scale() -> None:
     assert "scale must be positive" in result.stderr
 
 
-@pytest.mark.parametrize("extra_args", [[], ["2.5"]])
+@pytest.mark.parametrize("extra_args", [[], ["--scale", "2.5"]])
 def test_runtime_cli(extra_args: list[str]) -> None:
     result = subprocess.run(
         [
-            sys.executable, "learnMSA.py", "-i", f"{DIR}/egf.fasta",
-            "--runtime", *extra_args,
+            sys.executable, "-m", "learnMSA.run.runtime", f"{DIR}/egf.fasta",
+            *extra_args,
         ],
         capture_output=True,
         text=True,
