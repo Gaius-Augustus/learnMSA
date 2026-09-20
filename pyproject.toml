@@ -41,24 +41,27 @@ docs = [
     "myst-parser>=2.0",
 ]
 plots = [
-    "evoten[plots]",
+    "hidten[plots]",
     "imageio",
+    "matplotlib",
     "logomaker",
     "networkx",
     "scipy"
 ]
-plm = [
-    # NOTE: on systems with custom CUDA/NCCL installs (e.g. Blackwell),
-    # install torch manually first:
-    # pip install torch --index-url https://download.pytorch.org/whl/cpu
-    # torch is listed only because HuggingFace transformers wants it importable;
-    # the language model code itself uses the TensorFlow API (TFEsmModel,
-    # TFT5EncoderModel) and never calls torch. It is therefore left unpinned, so
-    # that `pip install learnMSA[pytorch,plm]` stays satisfiable alongside the
-    # `pytorch` extra's torch>=2.13.
+# NOTE: on systems with custom CUDA/NCCL installs (e.g. Blackwell),
+# install torch manually first:
+# pip install torch --index-url https://download.pytorch.org/whl/cpu
+# torch is listed only because HuggingFace transformers wants it importable;
+# the language model code itself uses the TensorFlow API (TFEsmModel,
+# TFT5EncoderModel) and never calls torch.
+plm-tf = [
     "torch",
     "transformers<5.0",
-    "tf-keras",
+    "tf-keras>=2.17,<2.21",
+    "SentencePiece"
+]
+plm-torch = [
+    "transformers<5.0",
     "SentencePiece"
 ]
 
