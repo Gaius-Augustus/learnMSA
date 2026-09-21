@@ -5,6 +5,32 @@ from learnMSA.run import util
 from learnMSA import Configuration
 
 
+_SIZE_UNITS_MB = {"K": 1 / 1024, "M": 1.0, "G": 1024.0, "T": 1024.0 ** 2}
+
+
+def _parse_megabytes(value: str) -> float:
+    """Parse a size in megabytes. Accepts a plain number (MB) or a number
+    with a unit suffix like 500M, 800MB or 1.5G."""
+    s = value.strip().upper()
+    if s.endswith("B"):
+        s = s[:-1]
+    factor = 1.0
+    if s and s[-1] in _SIZE_UNITS_MB:
+        factor = _SIZE_UNITS_MB[s[-1]]
+        s = s[:-1]
+    try:
+        mb = float(s) * factor
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"invalid size '{value}', expected e.g. 200, 500M or 1.5G"
+        )
+    if mb < 0:
+        raise argparse.ArgumentTypeError(
+            f"size must be non-negative, got '{value}'"
+        )
+    return mb
+
+
 class LearnMSAArgumentParser(argparse.ArgumentParser):
     def error(self, message : str):
         sys.stderr.write('error: %s\n' % message)
@@ -148,6 +174,18 @@ def parse_args(
         default="" if io.decode_file == Path() else str(io.decode_file),
         help="Additional fasta file with the decoded HMM state sequences. "
             "Uses the decoding mode set by --decode.",
+    )
+    io_group.add_argument(
+        "--compress",
+        dest="compress",
+        nargs="?",
+        type=_parse_megabytes,
+        const=io.compress_threshold_mb,
+        default=io.compress_threshold_mb if io.compress else None,
+        metavar="THRESHOLD",
+        help="Stream the fasta/a2m alignment into a gzip file (.gz). "
+            "Optionally, only compress if the estimated size exceeds "
+            "THRESHOLD megabytes. (default threshold: 0, always compress)",
     )
     io_group.add_argument(
         "--struct",

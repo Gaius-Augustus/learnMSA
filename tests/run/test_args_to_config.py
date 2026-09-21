@@ -286,6 +286,45 @@ class TestArgsToConfig:
                 "--compile", "yes",
             ])
 
+    def test_compress_off_by_default(self):
+        parser = parse_args("test_version")
+        args = parser.parse_args(["-i", "input.fasta", "-o", "output.a2m"])
+        config = args_to_config(args)
+        assert config.input_output.compress is False
+        assert config.input_output.compress_threshold_mb == 0.0
+
+    @pytest.mark.parametrize("extra, threshold", [
+        ([], 0.0),
+        (["200"], 200.0),
+        (["0.5"], 0.5),
+        (["500M"], 500.0),
+        (["800MB"], 800.0),
+        (["1G"], 1024.0),
+        (["512k"], 0.5),
+    ])
+    def test_args_to_config_compress(self, extra, threshold):
+        """--compress with an optional threshold in megabytes."""
+        parser = parse_args("test_version")
+        args = parser.parse_args([
+            "-i", "input.fasta",
+            "-o", "output.a2m",
+            "--compress", *extra,
+        ])
+        config = args_to_config(args)
+        assert config.input_output.compress is True
+        assert config.input_output.compress_threshold_mb == \
+            pytest.approx(threshold)
+
+    @pytest.mark.parametrize("value", ["-5", "abc", "on", "1X"])
+    def test_compress_rejects_invalid_threshold(self, value):
+        parser = parse_args("test_version")
+        with pytest.raises(SystemExit):
+            parser.parse_args([
+                "-i", "input.fasta",
+                "-o", "output.a2m",
+                "--compress", value,
+            ])
+
     def test_args_to_config_triton(self):
         """--triton switches the torch HMM over to the Triton kernels."""
         parser = parse_args("test_version")

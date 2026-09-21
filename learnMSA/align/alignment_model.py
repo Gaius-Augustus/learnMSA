@@ -1,3 +1,4 @@
+import gzip
 import json
 import shutil
 import time
@@ -200,7 +201,9 @@ class AlignmentModel():
         fasta_line_limit: int = 80,
         only_matches: bool = False,
         decoding_mode: DecodingMode = DecodingMode.VITERBI,
-    ) -> None:
+        compress: bool = False,
+        compress_threshold_mb: float = 0.0,
+    ) -> Path:
         """ Select one model and decode an alignment that is written in fasta
             or a2m file format.
             The file is written batch wise. The memory required for this
@@ -224,8 +227,32 @@ class AlignmentModel():
             only_matches: If true, omit all insertions and write only those
                 amino acids that are assigned to match states.
             decoding_mode: The mode used for decoding the alignment.
+            compress: If true, fasta and a2m output is streamed batch-wise
+                into a gzip file and ".gz" is appended to filepath unless
+                already present. The uncompressed text never touches the
+                disk. Ignored for other formats.
+            compress_threshold_mb: Only compress if the estimated size of the
+                uncompressed output exceeds this many megabytes. 0 always
+                compresses.
+
+        Returns:
+            The path of the written file.
         """
+        filepath = Path(filepath)
         if format == "fasta" or format == "a2m":
+            use_gzip = compress and (
+                compress_threshold_mb <= 0
+                or self.estimate_fasta_size(
+                    model_index,
+                    add_block_sep=add_block_sep,
+                    aligned_insertions=aligned_insertions,
+                    fasta_line_limit=fasta_line_limit,
+                    only_matches=only_matches,
+                    decoding_mode=decoding_mode,
+                ) > compress_threshold_mb * 1024 * 1024
+            )
+            if use_gzip and filepath.suffix != ".gz":
+                filepath = filepath.with_name(filepath.name + ".gz")
             # Stream batches to file
             output_alphabet = self.get_output_alphabet(format == "a2m")
             lut = np.array(
@@ -235,7 +262,15 @@ class AlignmentModel():
             # benefit from it. Total residues is a lower bound on output size.
             total_residues = int(np.sum(self.data[0].seq_lens[self.indices]))
             write_buffer = 8 * 1024 * 1024 if total_residues > 1_000_000 else -1
-            with open(filepath, "wb", buffering=write_buffer) as output_file:
+            _GZIP_LEVEL = 6
+            if use_gzip:
+                # Each batch is compressed as it is written.
+                output_file = gzip.open(
+                    filepath, "wb", compresslevel=_GZIP_LEVEL
+                )
+            else:
+                output_file = open(filepath, "wb", buffering=write_buffer)
+            with output_file:
                 n = self.indices.size
                 i = 0
                 while i < n:
@@ -295,6 +330,58 @@ class AlignmentModel():
             ]
             data = AlignedDataset(sequences=msa)
             data.write(filepath, format)
+        return filepath
+
+    def estimate_fasta_size(
+        self,
+        model_index: int,
+        add_block_sep: bool = False,
+        aligned_insertions: AlignedInsertions = AlignedInsertions(),
+        fasta_line_limit: int = 80,
+        only_matches: bool = False,
+        decoding_mode: DecodingMode = DecodingMode.VITERBI,
+    ) -> int:
+        """ Estimates the size in bytes of the uncompressed fasta/a2m file
+            written by to_file with the same arguments, without rendering the
+            alignment. The sequence part is exact; header bytes are
+            extrapolated from a sample of records for large inputs.
+        """
+        # Number of records whose headers are measured by estimate_fasta_size.
+        _HEADER_SAMPLE_SIZE = 10000
+        if not model_index in self.metadata:
+            self.build_alignment([model_index], decoding_mode)
+        meta_data = self.metadata[model_index]
+        width = _alignment_width(
+            meta_data,
+            aligned_insertions,
+            add_block_sep,
+            only_matches,
+            meta_data.repeat_occupancy_mask(),
+            np.maximum(
+                meta_data.insertion_lens_total,
+                aligned_insertions.ext_insertions,
+            ),
+            np.maximum(
+                meta_data.unannotated_segment_lens_total,
+                aligned_insertions.ext_unannotated,
+            ),
+        )
+        n = int(self.indices.size)
+        if n == 0:
+            return 0
+        num_lines = max(1, (width + fasta_line_limit - 1) // fasta_line_limit)
+        # Headers: ">" + header + "\n" per record.
+        if n <= _HEADER_SAMPLE_SIZE:
+            sample = np.arange(n)
+        else:
+            sample = np.linspace(0, n - 1, _HEADER_SAMPLE_SIZE).astype(int)
+        sample_bytes = sum(
+            len(self.data[0].get_header(int(self.indices[j])).encode("utf-8"))
+            + 2
+            for j in sample
+        )
+        header_bytes = round(sample_bytes * n / sample.size)
+        return n * (width + num_lines) + header_bytes
 
     def get_batch_alignment(
         self,
@@ -360,34 +447,15 @@ class AlignmentModel():
         # output array and write each block directly into it
         sep_val = 2 * output_len # separator token value
         num_repeats = meta_data.num_repeats
-
-        if only_matches:
-            # Only match columns remain; count non-empty per repeat.
-            total_width = int(np.sum(is_non_empty_all))
-        else:
-            left_flank_len = int(max(
-                meta_data.left_flank_len_total,
-                aligned_insertions.ext_left_flank
-            ))
-            right_flank_len = int(max(
-                meta_data.right_flank_len_total,
-                aligned_insertions.ext_right_flank
-            ))
-            # For each repeat: match cols + insertion cols (after removing
-            # empty match cols).  Separators add one column per block.
-            total_width = left_flank_len + right_flank_len
-            if add_block_sep:
-                # left flank sep + num_repeats seps + unannotated seps
-                n_seps = 1 + num_repeats
-                if num_repeats > 1:
-                    n_seps += num_repeats - 1  # unannotated segments
-                total_width += n_seps
-            for rep_i in range(num_repeats):
-                n_match = int(np.sum(is_non_empty_all[rep_i]))
-                n_ins = int(np.sum(_ins_lens_total_ext[rep_i]))
-                total_width += n_match + n_ins
-                if rep_i < num_repeats - 1:
-                    total_width += int(_uns_lens_total_ext[rep_i])
+        total_width = _alignment_width(
+            meta_data,
+            aligned_insertions,
+            add_block_sep,
+            only_matches,
+            is_non_empty_all,
+            _ins_lens_total_ext,
+            _uns_lens_total_ext,
+        )
 
         out = np.full((b, total_width), term_val, dtype=np.uint8)
         # Mark separator columns immediately so we don't have to scatter them later.
@@ -1284,6 +1352,46 @@ class AlignmentModel():
         all_idx = np.concatenate(all_idx)
         meta_data.reorder(all_idx)
         return meta_data
+
+def _alignment_width(
+    meta_data: AlignmentMetaData,
+    aligned_insertions: AlignedInsertions,
+    add_block_sep: bool,
+    only_matches: bool,
+    is_non_empty_all: np.ndarray,
+    ins_lens_total_ext: np.ndarray,
+    uns_lens_total_ext: np.ndarray,
+) -> int:
+    """Number of columns of the alignment rendered by get_batch_alignment."""
+    if only_matches:
+        # Only match columns remain; count non-empty per repeat.
+        return int(np.sum(is_non_empty_all))
+    num_repeats = meta_data.num_repeats
+    left_flank_len = int(max(
+        meta_data.left_flank_len_total,
+        aligned_insertions.ext_left_flank
+    ))
+    right_flank_len = int(max(
+        meta_data.right_flank_len_total,
+        aligned_insertions.ext_right_flank
+    ))
+    # For each repeat: match cols + insertion cols (after removing
+    # empty match cols).  Separators add one column per block.
+    total_width = left_flank_len + right_flank_len
+    if add_block_sep:
+        # left flank sep + num_repeats seps + unannotated seps
+        n_seps = 1 + num_repeats
+        if num_repeats > 1:
+            n_seps += num_repeats - 1  # unannotated segments
+        total_width += n_seps
+    for rep_i in range(num_repeats):
+        n_match = int(np.sum(is_non_empty_all[rep_i]))
+        n_ins = int(np.sum(ins_lens_total_ext[rep_i]))
+        total_width += n_match + n_ins
+        if rep_i < num_repeats - 1:
+            total_width += int(uns_lens_total_ext[rep_i])
+    return total_width
+
 
 def _interval_jaccard(i1: np.ndarray, i2: np.ndarray) -> np.ndarray:
     """ Computes the Jaccard index of two arrays of half-open intervals

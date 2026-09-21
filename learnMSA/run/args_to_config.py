@@ -52,6 +52,9 @@ def args_to_config(
     io["emb_file"] = args.emb_file
     io["save_emb"] = _get_save_emb(args)
     io["add_block_separator_to_msa"] = args.block_sep
+    io["compress"] = args.compress is not None
+    if args.compress is not None:
+        io["compress_threshold_mb"] = args.compress
 
     # --- Training ---
     tr["num_model"] = args.num_model

@@ -7,6 +7,8 @@ the MSA. Ungapping every row must give back the input sequence, which is the
 property the memory rewrite of the output stage has to preserve.
 """
 
+import gzip
+
 import numpy as np
 import pytest
 
@@ -123,6 +125,66 @@ def test_batch_size_does_not_change_the_output(tmp_path) -> None:
     am.to_file(b, 0, aligned_insertions=ai, format="a2m", decoding_mode=mode,
                batch_size=7)
     assert a.read_bytes() == b.read_bytes()
+
+
+@pytest.mark.parametrize("fmt", ["fasta", "a2m"])
+@pytest.mark.parametrize("add_block_sep, only_matches", [
+    (False, False), (True, False), (False, True),
+])
+def test_estimate_fasta_size_is_exact(
+    tmp_path, fmt, add_block_sep, only_matches
+) -> None:
+    """The estimate from the metadata matches the written file size."""
+    data, meta, _ = _synthetic()
+    am = _model_with_metadata(data, meta)
+    mode = AlignmentModel.DecodingMode.VITERBI
+    ai = make_aligned_insertions(am, 0, decoding_mode=mode, verbose=False,
+                                 threads=1)
+    kwargs = dict(aligned_insertions=ai, add_block_sep=add_block_sep,
+                  only_matches=only_matches, decoding_mode=mode)
+    out = am.to_file(tmp_path / f"msa.{fmt}", 0, format=fmt, **kwargs)
+    assert am.estimate_fasta_size(0, **kwargs) == out.stat().st_size
+
+
+@pytest.mark.parametrize("fmt", ["fasta", "a2m"])
+def test_compressed_output_matches_plain(tmp_path, fmt) -> None:
+    """--compress writes a .gz file with exactly the plain text inside."""
+    data, meta, _ = _synthetic()
+    am = _model_with_metadata(data, meta)
+    mode = AlignmentModel.DecodingMode.VITERBI
+    ai = make_aligned_insertions(am, 0, decoding_mode=mode, verbose=False,
+                                 threads=1)
+    plain = am.to_file(tmp_path / f"plain.{fmt}", 0, aligned_insertions=ai,
+                       format=fmt, decoding_mode=mode)
+    packed = am.to_file(tmp_path / f"packed.{fmt}", 0, aligned_insertions=ai,
+                        format=fmt, decoding_mode=mode, batch_size=7,
+                        compress=True)
+    assert packed == tmp_path / f"packed.{fmt}.gz"
+    assert not (tmp_path / f"packed.{fmt}").exists()
+    with gzip.open(packed, "rb") as f:
+        assert f.read() == plain.read_bytes()
+    # An existing .gz suffix is not doubled.
+    again = am.to_file(tmp_path / "x.gz", 0, aligned_insertions=ai,
+                       format=fmt, decoding_mode=mode, compress=True)
+    assert again == tmp_path / "x.gz"
+
+
+def test_compress_threshold(tmp_path) -> None:
+    """Only outputs estimated above the threshold are compressed."""
+    data, meta, _ = _synthetic()
+    am = _model_with_metadata(data, meta)
+    mode = AlignmentModel.DecodingMode.VITERBI
+    size_mb = am.estimate_fasta_size(0, decoding_mode=mode) / 1024**2
+    small = am.to_file(tmp_path / "small.a2m", 0, format="a2m",
+                       decoding_mode=mode, compress=True,
+                       compress_threshold_mb=size_mb * 2)
+    assert small == tmp_path / "small.a2m"
+    assert small.read_bytes().startswith(b">")
+    large = am.to_file(tmp_path / "large.a2m", 0, format="a2m",
+                       decoding_mode=mode, compress=True,
+                       compress_threshold_mb=size_mb / 2)
+    assert large == tmp_path / "large.a2m.gz"
+    assert not (tmp_path / "large.a2m").exists()
 
 
 def _read(path):

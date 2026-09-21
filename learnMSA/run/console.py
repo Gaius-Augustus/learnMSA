@@ -191,16 +191,27 @@ def run_main() -> None:
             assert am.best_head != -1,\
                 "Best head was not selected. This should not happen."
 
+            if config.input_output.compress and config.input_output.verbose \
+                    and config.input_output.format not in ("fasta", "a2m"):
+                print(
+                    "Warning: --compress only applies to fasta and a2m "
+                    f"output. Writing an uncompressed "
+                    f"{config.input_output.format} file."
+                )
+
             if config.training.unaligned_insertions\
                     or config.training.only_matches:
                 # Don't align insertions when requested or when only matches need to
                 # be written to the output file
-                am.to_file(
+                written_file = am.to_file(
                     config.input_output.output_file,
                     am.best_head,
                     format=config.input_output.format,
                     only_matches=config.training.only_matches,
                     decoding_mode=decoding_mode,
+                    compress=config.input_output.compress,
+                    compress_threshold_mb=\
+                        config.input_output.compress_threshold_mb,
                     add_block_sep=config.input_output.add_block_separator_to_msa,
                 )
             else:
@@ -212,18 +223,21 @@ def run_main() -> None:
                     threads=config.advanced.aligner_threads,
                     verbose=config.input_output.verbose,
                 )
-                am.to_file(
+                written_file = am.to_file(
                     config.input_output.output_file,
                     am.best_head,
                     aligned_insertions=aligned_insertions,
                     format=config.input_output.format,
                     decoding_mode=decoding_mode,
+                    compress=config.input_output.compress,
+                    compress_threshold_mb=\
+                        config.input_output.compress_threshold_mb,
                     add_block_sep=config.input_output.add_block_separator_to_msa,
                 )
 
             if config.input_output.verbose:
                 print(f"Generating output took {time.time()-t:.4f} seconds.")
-                print("Wrote file", config.input_output.output_file)
+                print("Wrote file", written_file)
 
         if config.input_output.decode_file != Path():
             Path(config.input_output.decode_file).parent.mkdir(

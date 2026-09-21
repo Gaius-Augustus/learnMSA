@@ -77,6 +77,22 @@ class InputOutputConfig(BaseModel):
     sequences hit the profile. This can be seen as an extended A2M format that
     shows multi-hits."""
 
+    compress: bool = False
+    """If True, fasta and a2m alignments are streamed batch-wise into a gzip
+    file."""
+
+    compress_threshold_mb: float = 0.0
+    """Only compress if the estimated size of the uncompressed alignment
+    exceeds this many megabytes. See `--compress`."""
+
+    @field_validator("compress_threshold_mb")
+    @classmethod
+    def validate_compress_threshold(cls, v: float) -> float:
+        """Validate the compression threshold."""
+        if v < 0:
+            raise ValueError("compress_threshold_mb must be non-negative")
+        return v
+
     @field_validator("format")
     @classmethod
     def validate_format(cls, v: str) -> str:

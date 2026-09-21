@@ -762,6 +762,16 @@ class TestInputOutputConfig:
         with pytest.raises(ValidationError, match="cuda_visible_devices must be"):
             InputOutputConfig(cuda_visible_devices="abc")
 
+    def test_input_output_config_compress(self):
+        """Compression is off by default; the threshold must be >= 0."""
+        config = InputOutputConfig()
+        assert config.compress is False
+        assert config.compress_threshold_mb == 0.0
+        config = InputOutputConfig(compress=True, compress_threshold_mb=200)
+        assert config.compress_threshold_mb == 200.0
+        with pytest.raises(ValidationError):
+            InputOutputConfig(compress=True, compress_threshold_mb=-1)
+
     def test_input_output_config_comprehensive(self):
         """Test InputOutputConfig with all parameters set."""
         config = InputOutputConfig(
