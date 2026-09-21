@@ -5,8 +5,9 @@ from dataclasses import dataclass
 from typing import List
 
 
-# Documentation directory (inside the learnMSA package)
-HELP_DIR = Path(__file__).parent.parent / "docs"
+_REPO_DOCS = Path(__file__).parents[2] / "docs"
+HELP_DIR = (_REPO_DOCS if _REPO_DOCS.is_dir()
+            else Path(__file__).parent.parent / "docs")
 
 
 def format_description(description: str) -> str:
@@ -33,7 +34,6 @@ def is_perfect_match(search_term: str, arg_name: str) -> bool:
 
     # Split by common delimiters and check each token
     # Common delimiters in argument names: space, /, comma
-    import re
     tokens = re.split(r'[\s/,]+', name_lower)
 
     return search_lower in tokens

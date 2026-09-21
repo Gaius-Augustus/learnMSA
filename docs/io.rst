@@ -74,6 +74,21 @@ Arguments
     correlated with sequence length. When this option is used, the ``-o / --out_file``
     parameter becomes optional.
 
+``--compress`` *[THRESHOLD]*
+    Writes the output alignment gzip-compressed and appends ``.gz`` to the
+    output file name (e.g., ``-o msa.a2m --compress`` writes ``msa.a2m.gz``).
+    The alignment is compressed batch by batch while it is written, so the
+    uncompressed text never touches the disk. Useful when disk space is
+    limited, since gap-heavy alignments of many sequences compress very well.
+    If *THRESHOLD* is given, the output is only compressed if the estimated
+    size of the uncompressed file exceeds *THRESHOLD* megabytes; smaller
+    alignments are written as plain text. A unit suffix is accepted
+    (e.g., ``--compress 500M`` or ``--compress 2G``). Only applies to the
+    ``fasta`` and ``a2m`` formats; all other formats and output files are
+    written uncompressed.
+
+    Default: off. Without *THRESHOLD*, the output is always compressed.
+
 ``--struct`` *STRUCT_FILE*
     Path to a fasta file containing discrete letters from a structural alphabet
     for each sequence. Currently, only the 3Di alphabet from Foldseek is
