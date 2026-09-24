@@ -11,9 +11,13 @@ from learnMSA.align.align_hits import HitAlignmentMode
 import learnMSA.model.training_util as training_util
 from learnMSA import Configuration
 from learnMSA.align.alignment_model import AlignmentModel
-from learnMSA.model.surgery import model_surgery
+from learnMSA.align.multi_alignment_model import MultiAlignmentModel
+from learnMSA.model.batch_generator import (get_index_table,
+                                            sort_index_table)
+from learnMSA.model.surgery import ModelSurgeryResult, model_surgery
 from learnMSA.model.model import LearnMSAModel, make_learnmsa_model
 from learnMSA.model.context import LearnMSAContext
+from learnMSA.util.multi_dataset import MultiDataset, MultiSequenceDataset
 from learnMSA.util.sequence_dataset import Dataset, SequenceDataset
 from learnMSA.util.tensor import assign, to_numpy
 
@@ -263,17 +267,7 @@ def _fit_and_align(
         if last_iteration:
             break
 
-        if config.training.surgery_checkpoints:
-            # Save model checkpoint after surgery
-            surgery_checkpoint_path = (
-                Path(config.input_output.work_dir) /
-                f"surgery_checkpoint_iter_{i+1}.model"
-            )
-            am.save(surgery_checkpoint_path)
-            if config.input_output.verbose:
-                print(
-                    f"Saved surgery checkpoint to {surgery_checkpoint_path}."
-                )
+        _save_surgery_checkpoint(config, am, i)
 
         surgery_result = model_surgery(
             am.model,
@@ -283,35 +277,8 @@ def _fit_and_align(
             surgery_ins = config.training.surgery_ins,
             verbose = config.input_output.verbose,
         )
-
-        context.model_lengths = surgery_result.model_lengths
-        context.aa_values = surgery_result.aa_values
-        context.emb_values = surgery_result.emb_values
-        context.struct_values = surgery_result.struct_values
-        context.joint_values = surgery_result.joint_aa_struct_values
+        _update_context_after_surgery(context, model, surgery_result)
         surgery_converged = surgery_result.surgery_converged
-        if model.anc_probs_layer is not None:
-            if not context.config.advanced.reset_evo_model:
-                context.R_init = initializers.Constant(
-                    to_numpy(model.anc_probs_layer.exchangeability_const)
-                )
-                context.R_delta_init = initializers.Constant(
-                    to_numpy(model.anc_probs_layer.exchangeability_delta_kernel)
-                )
-                context.p_init = initializers.Constant(
-                    to_numpy(model.anc_probs_layer.equilibrium_kernel)
-                )
-                if model.anc_probs_layer.num_components > 1:
-                    context.mix_init = initializers.Constant(
-                        to_numpy(model.anc_probs_layer.mixture_kernel)
-                    )
-                    context.scale_init = initializers.Constant(
-                        to_numpy(model.anc_probs_layer.scale_kernel)
-                    )
-            if not context.config.advanced.reset_branch_lengths:
-                context.t_init = initializers.Constant(
-                    to_numpy(model.anc_probs_layer.tau_kernel)
-                )
 
         if config.input_output.verbose and surgery_converged:
             print("Surgery converged.")
@@ -327,6 +294,263 @@ def _fit_and_align(
     return am
 
 
+def _save_surgery_checkpoint(
+    config: Configuration, am: AlignmentModel, iteration: int
+) -> None:
+    """Saves the model before surgery, if enabled in the config."""
+    if not config.training.surgery_checkpoints:
+        return
+    surgery_checkpoint_path = (
+        Path(config.input_output.work_dir) /
+        f"surgery_checkpoint_iter_{iteration+1}.model"
+    )
+    am.save(surgery_checkpoint_path)
+    if config.input_output.verbose:
+        print(
+            f"Saved surgery checkpoint to {surgery_checkpoint_path}."
+        )
+
+
+def _update_context_after_surgery(
+    context: LearnMSAContext,
+    model: LearnMSAModel,
+    surgery_result: ModelSurgeryResult,
+) -> None:
+    """Initializes the next model from the surgery result and the trained
+    evolutionary model."""
+    context.model_lengths = surgery_result.model_lengths
+    context.aa_values = surgery_result.aa_values
+    context.emb_values = surgery_result.emb_values
+    context.struct_values = surgery_result.struct_values
+    context.joint_values = surgery_result.joint_aa_struct_values
+    if model.anc_probs_layer is not None:
+        if not context.config.advanced.reset_evo_model:
+            context.R_init = initializers.Constant(
+                to_numpy(model.anc_probs_layer.exchangeability_const)
+            )
+            context.R_delta_init = initializers.Constant(
+                to_numpy(model.anc_probs_layer.exchangeability_delta_kernel)
+            )
+            context.p_init = initializers.Constant(
+                to_numpy(model.anc_probs_layer.equilibrium_kernel)
+            )
+            if model.anc_probs_layer.num_components > 1:
+                context.mix_init = initializers.Constant(
+                    to_numpy(model.anc_probs_layer.mixture_kernel)
+                )
+                context.scale_init = initializers.Constant(
+                    to_numpy(model.anc_probs_layer.scale_kernel)
+                )
+        if not context.config.advanced.reset_branch_lengths:
+            context.t_init = initializers.Constant(
+                to_numpy(model.anc_probs_layer.tau_kernel)
+            )
+
+
+def align_batch(
+    data : MultiSequenceDataset
+        | tuple[MultiSequenceDataset, *tuple[MultiDataset, ...]],
+    config : Configuration,
+) -> MultiAlignmentModel:
+    """ Aligns several datasets at once. Each dataset gets one pHMM head and
+    all heads are trained and decoded in parallel in a single multi-head
+    model. Datasets of similar sequence length make better use of the GPU.
+    In the configuration, ``training.num_model`` is ignored.
+
+    Args:
+        data: MultiSequenceDataset(s) to align.
+        config: Configuration that controls training and decoding.
+
+    Returns:
+        A MultiAlignmentModel. Head k aligns dataset k; write it with
+        ``to_file(path, k)``.
+    """
+    if backend.get_backend() != "pytorch":
+        raise NotImplementedError(
+            "align_batch requires the pytorch backend, but "
+            f"'{backend.get_backend()}' is selected."
+        )
+    if isinstance(data, Dataset):
+        data = (data,)
+    if not isinstance(data[0], MultiSequenceDataset):
+        raise ValueError(
+            "align_batch requires a MultiSequenceDataset as first dataset."
+        )
+    if config.input_output.load_model or config.training.skip_training:
+        raise NotImplementedError(
+            "align_batch does not support loading a model or skipping "
+            "training."
+        )
+    if config.visualization.logo_gif:
+        raise NotImplementedError(
+            "--logo_gif is not currently supported."
+        )
+
+    # Create working directory if it does not exist
+    work_dir = Path(config.input_output.work_dir)
+    work_dir.mkdir(parents=True, exist_ok=True)
+
+    # One model per dataset; the context sets up per-dataset parameters
+    context = LearnMSAContext(config, data[0])
+
+    # Write the config to file in the working directory
+    config_path = work_dir / "config.json"
+    with open(config_path, 'w') as f:
+        json.dump(config.model_dump(mode='json'), f, indent=2)
+    if config.input_output.verbose:
+        print(f"Configuration saved to {config_path}")
+        print(
+            f"Created {config.training.num_model} models, one for each "
+            "dataset."
+        )
+
+    config.hmm.use_noise = config.training.use_noise
+    try:
+        t_a = time.time()
+        am = _fit_and_align_batch(data, context)
+        if config.input_output.verbose:
+            print("Time for alignment:", "%.4f" % (time.time()-t_a))
+    except backend.oom_errors() as e:
+        print("Out of memory. A resource was exhausted.")
+        runtime_batch_size = context.last_runtime_batch_size
+        if runtime_batch_size is None:
+            runtime_batch_size = config.training.batch_size
+        print(
+            "Try reducing the batch size (-b). The current batch size "\
+            "was: "+str(runtime_batch_size)+"."
+        )
+        sys.exit(getattr(e, "error_code", 1))
+
+    backend.clear_session()
+
+    return am
+
+
+def _fit_and_align_batch(
+    data : tuple[MultiSequenceDataset, *tuple[Dataset, ...]],
+    context : LearnMSAContext,
+) -> MultiAlignmentModel:
+    """ Trains a LearnMSAModel with one head per dataset and creates a
+    MultiAlignmentModel from it (see :func:`align_batch`).
+    """
+    config = context.config
+    multi = data[0]
+    num_datasets = multi.num_datasets
+    if config.input_output.verbose:
+        for part in multi.datasets:
+            _dataset_messages(part)
+
+    # Roughly estimate the full length sequences of each dataset
+    backbones = []
+    for k, part in enumerate(multi.datasets):
+        rep = None
+        if context.rep is not None:
+            rep = context.rep[multi.global_indices(k)] - multi.offsets[k]
+        backbone = training_util.get_backbone(
+            part.seq_lens,
+            config.training.surgery_quantile,
+            config.training.min_surgery_seqs,
+            rep,
+        )
+        backbones.append(multi.to_global(k, backbone))
+
+    # The sequences each head aligns in the end
+    subset_owner = multi.dataset_of(context.subset)
+    decode_indices = [
+        context.subset[subset_owner == k] for k in range(num_datasets)
+    ]
+    if any(idx.size == 0 for idx in decode_indices):
+        raise ValueError(
+            "Every dataset needs at least one sequence in subset_ids."
+        )
+
+    # Batches are sized for the largest dataset
+    max_num_seq = max(part.num_seq for part in multi.datasets)
+
+    model = None
+    last_iteration = config.training.max_iterations == 1
+    for i in range(config.training.max_iterations):
+        if callable(context.batch_size):
+            batch_size = context.batch_size(multi)
+        else:
+            batch_size = context.batch_size
+        batch_size = min(
+            batch_size,
+            training_util.get_low_seq_num_batch_size(max_num_seq),
+            training_util.MAX_TRAIN_BATCH_SIZE,
+        )
+        if last_iteration:
+            head_indices = [
+                multi.global_indices(k) for k in range(num_datasets)
+            ]
+        else:
+            head_indices = backbones
+        # Sorted, hence grouped by dataset
+        train_indices = np.concatenate(head_indices)
+
+        model = make_learnmsa_model(context)
+        model.build(((batch_size,),))
+
+        _pre_training_checkpoint(config, model, data, train_indices, i)
+
+        # Every head runs the steps needed for the largest dataset; smaller
+        # datasets are cycled through more often
+        steps = model.get_num_steps(
+            max(idx.size for idx in head_indices), batch_size
+        )
+        model.fit(
+            data,
+            indices=train_indices,
+            iteration=i,
+            batch_size=batch_size,
+            steps_per_epoch=steps,
+        )
+
+        if last_iteration:
+            break
+
+        _save_surgery_checkpoint(
+            config, AlignmentModel(data, model, train_indices), i
+        )
+
+        # Surgery statistics of all heads in one pass, each on its own data
+        table, _ = sort_index_table(
+            get_index_table(head_indices), multi.seq_lens
+        )
+        surgery_result = model_surgery(
+            model,
+            data,
+            indices=table,
+            surgery_del = config.training.surgery_del,
+            surgery_ins = config.training.surgery_ins,
+            verbose = config.input_output.verbose,
+        )
+        _update_context_after_surgery(context, model, surgery_result)
+        surgery_converged = surgery_result.surgery_converged
+
+        if config.input_output.verbose and surgery_converged:
+            print("Surgery converged.")
+
+        last_iteration = surgery_converged\
+            or (i == config.training.max_iterations-2)
+
+        # Free compiled graphs and cached memory
+        del model
+        model = None
+        backend.clear_session()
+
+    assert model is not None
+    am = MultiAlignmentModel(
+        data,
+        model,
+        decode_indices,
+        hit_alignment_mode = HitAlignmentMode.from_str(
+            config.training.hit_alignment_mode
+        ),
+    )
+    if config.input_output.verbose:
+        print("Created alignment model successfully.")
+    return am
 
 
 def _dataset_messages(

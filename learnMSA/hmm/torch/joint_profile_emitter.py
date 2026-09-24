@@ -20,7 +20,7 @@ from hidten.torch.util import (T_Initializer, safe_log, setup_initializer,
 from learnMSA.hmm.joint_util import (AB_init, assert_value_sets, flatten_AB,
                                      outer_product_flat_np, tile_conditional)
 from learnMSA.hmm.torch.profile_emitter import TorchProfileEmitter
-from learnMSA.hmm.torch.util import sequence_mask
+from learnMSA.hmm.torch.util import select_heads, sequence_mask
 from learnMSA.hmm.util.value_set import PHMMValueSet
 
 
@@ -365,8 +365,19 @@ class TorchJointProfileEmitter(TorchProfileEmitter):
 
         Returns:
             The prior scores of shape ``(H)``, where ``H`` is the number of
-            heads.
+            heads, or ``len(head_subset)`` if a head subset is set.
         """
+        # The priors cover all heads: score the full matrix, then select
+        head_subset, self.head_subset = self.head_subset, None
+        try:
+            log_prior_scores = self._prior_scores_all_heads()
+        finally:
+            self.head_subset = head_subset
+        return select_heads(  # type: ignore[return-value]
+            log_prior_scores, head_subset
+        )
+
+    def _prior_scores_all_heads(self) -> T_TorchTensor:
         log_prior_scores = torch.zeros(
             self.heads, dtype=self.kernel.dtype, device=self.kernel.device
         )

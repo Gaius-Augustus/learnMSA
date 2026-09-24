@@ -6,8 +6,11 @@ import pytest
 
 from learnMSA import Configuration
 from learnMSA.config import InputOutputConfig, TrainingConfig
+from learnMSA.model.batch_generator import MultiBatchGenerator
 from learnMSA.model.context import LearnMSAContext
-from learnMSA.model.training_util import get_adaptive_batch_size
+from learnMSA.model.training_util import (get_adaptive_batch_size,
+                                          get_initial_model_lengths)
+from learnMSA.util.multi_dataset import MultiSequenceDataset
 from learnMSA.util.sequence_dataset import SequenceDataset
 
 DIR = "tests/data/"
@@ -447,3 +450,118 @@ def test_serialization_preserves_config(config : Configuration) -> None:
     assert restored_context.config.hmm_prior.alpha_single == 3.5
     assert restored_context.config.training.learning_rate == 0.05
     assert restored_context.config.training.length_init == [12, 18]
+
+
+# Contexts of a MultiSequenceDataset (one model per dataset)
+
+MULTI_FILES = [f"{DIR}/felix.fa", f"{DIR}/felix_insert_delete.fa"]
+
+
+@pytest.fixture
+def multi_data() -> Generator[MultiSequenceDataset, None, None]:
+    with MultiSequenceDataset(filepaths=MULTI_FILES) as data:
+        yield data
+
+
+def test_multi_dataset_context(
+    multi_data: MultiSequenceDataset, config: Configuration
+) -> None:
+    np.random.seed(3)
+    context = LearnMSAContext(config, multi_data)
+    np.random.seed(3)
+    expected_lengths = np.concatenate([
+        get_initial_model_lengths(
+            part.seq_lens,
+            config.training.length_init_quantile,
+            config.training.len_mul,
+            1,
+        )
+        for part in multi_data.datasets
+    ])
+
+    assert config.training.num_model == 2
+    assert context.num_seq == 14
+    np.testing.assert_equal(context.model_lengths, expected_lengths)
+    expected_crops = [
+        int(np.ceil(config.training.auto_crop_scale * np.mean(p.seq_lens)))
+        for p in multi_data.datasets
+    ]
+    np.testing.assert_equal(context.head_crops, expected_crops)
+    assert config.training.crop == max(expected_crops)
+    assert isinstance(context.batch_gen, MultiBatchGenerator)
+    # Without weights, every model is normalized by its dataset size.
+    np.testing.assert_equal(context.prior_scale, [8, 6])
+
+
+def test_single_dataset_prior_scale(
+    simple_data: SequenceDataset, config: Configuration
+) -> None:
+    config.training.num_model = 3
+    context = LearnMSAContext(config, simple_data)
+    np.testing.assert_equal(context.prior_scale, [8, 8, 8])
+    assert context.head_crops is None
+
+
+def test_multi_dataset_context_errors(
+    multi_data: MultiSequenceDataset, config: Configuration
+) -> None:
+    config.training.length_init = [5, 5, 5]
+    with pytest.raises(ValueError):
+        LearnMSAContext(config, multi_data)
+    config.training.length_init = None
+    config.init_msa.seeded = True
+    with pytest.raises(ValueError):
+        LearnMSAContext(config, multi_data)
+
+
+def test_multi_dataset_clustering(tmp_path: Path) -> None:
+    # Ids that mmseqs2 and the clustering keep as strings
+    multi_data = MultiSequenceDataset(
+        filepaths=[f"{DIR}/failing_ids.fasta", f"{DIR}/headers.fasta"]
+    )
+    n0 = multi_data.datasets[0].num_seq
+    n1 = multi_data.datasets[1].num_seq
+    config = Configuration(
+        input_output=InputOutputConfig(verbose=False, work_dir=str(tmp_path)),
+    )
+    context = LearnMSAContext(config, multi_data)
+    single = []
+    for part in multi_data.datasets:
+        part_config = config.model_copy(deep=True)
+        part_config.input_output.input_file = part.filepath
+        single.append(LearnMSAContext(part_config, part))
+
+    assert context.sequence_weights is not None
+    np.testing.assert_allclose(
+        context.sequence_weights,
+        np.concatenate([c.sequence_weights for c in single]),
+    )
+    # Datasets never share a cluster, representatives are global indices.
+    num_clusters = int(single[0].clusters.max()) + 1
+    np.testing.assert_equal(
+        context.clusters,
+        np.concatenate([single[0].clusters,
+                        single[1].clusters + num_clusters]),
+    )
+    np.testing.assert_equal(
+        context.rep, np.concatenate([single[0].rep, single[1].rep + n0])
+    )
+    w = context.sequence_weights
+    np.testing.assert_allclose(
+        context.prior_scale,
+        [np.sqrt(w[:n0].sum() * n0), np.sqrt(w[n0:].sum() * n1)],
+    )
+
+
+def test_serialization_keeps_the_prior_scale(
+    multi_data: MultiSequenceDataset, config: Configuration
+) -> None:
+    context = LearnMSAContext(config, multi_data)
+    config_dict = context.get_config()
+    restored = LearnMSAContext.from_config(config_dict)
+    np.testing.assert_equal(restored.prior_scale, context.prior_scale)
+
+    # Configs written before the prior scale existed still load.
+    del config_dict["prior_scale"]
+    restored = LearnMSAContext.from_config(config_dict)
+    np.testing.assert_equal(restored.prior_scale, [14, 14])

@@ -79,19 +79,24 @@ def parse_args(
         "--in_file",
         dest="input_file",
         type=str,
+        nargs="+",
         required=False,
         default=None,
         help="Input fasta file. Optional when --from_msa and --save_model "
-            "are both provided."
+            "are both provided. Several files can be provided and are aligned "
+            "in parallel."
     )
     io_group.add_argument(
         "-o",
         "--out_file",
         dest="output_file",
         type=str,
+        nargs="+",
         required=False,
         default=None,
-        help="Output file. Use -f to change format. Optional when --scores is used."
+        help="Output file. Use -f to change format. Optional when --scores is "
+            "used. For several input files, one output file per input file "
+            "or a single output directory."
     )
     io_group.add_argument(
         "-f",

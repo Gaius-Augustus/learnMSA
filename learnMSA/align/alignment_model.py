@@ -1231,12 +1231,7 @@ class AlignmentModel():
                 f"with decoding mode {decoding_mode}..."
             )
 
-        if decoding_mode == AlignmentModel.DecodingMode.VITERBI:
-            self.model.viterbi_mode()
-        elif decoding_mode == AlignmentModel.DecodingMode.MEA:
-            self.model.mea_mode()
-        else:
-            raise ValueError(f"Unsupported decoding mode: {decoding_mode}")
+        self._set_decoding_mode(decoding_mode)
 
         outputs = self.model.predict(
             self.data, indices=self.indices, models=models,
@@ -1247,92 +1242,124 @@ class AlignmentModel():
 
         meta_data = self._stack_ragged_outputs(outputs, models)
 
-        if self.hit_alignment_mode == HitAlignmentMode.GREEDY_SCORES:
-            # Use occupancy (number of used match states) as hit score.
-            occupancy = meta_data.occupancy_matrix()  # (R, N), -1 for empty
-            meta_data = hit_alignment(
-                meta_data, self.hit_alignment_mode, occupancy
+        multi_hit_rows = self._multi_hit_rows(meta_data)
+        meta_data_single = None
+        if multi_hit_rows is not None:
+            # Re-run Viterbi for all sequences with more than one hit
+            # and a model where multi-hits are forbidden
+            self.model.phmm_layer.enable_multi_hits(False)
+            outputs_single = self.model.predict(
+                self.data, indices=self.indices[multi_hit_rows],
+                models=models, ragged_output=True
+            ) # (B, T, H)
+            meta_data_single = self._stack_ragged_outputs(
+                outputs_single, models
             )
-        elif self.hit_alignment_mode == HitAlignmentMode.GREEDY_SINGLE:
-            # Find sequences with multiple hits
-            n = meta_data.num_rows
-            # Indices of rows with multiple hits
-            multi_hit_rows = np.arange(n)[meta_data.num_repeats_per_row > 1]
-            n_multi = len(multi_hit_rows)
+            # Restore original behavior
+            self.model.phmm_layer.enable_multi_hits(True)
 
-            if n_multi == 0:
-                # When no multi-hits were predicted, hit alignment is trivial
-                meta_data = hit_alignment(meta_data, HitAlignmentMode.LEFT_ALIGN)
-            else:
-                if self.model.context.config.input_output.verbose:
-                    print(f"Predicted {n_multi} sequences with multi-hits.")
-
-                # Re-run Viterbi for all sequences with more than one hit
-                # and a model where multi-hits are forbidden
-                self.model.phmm_layer.enable_multi_hits(False)
-    
-                outputs_single = self.model.predict(
-                    self.data, indices=multi_hit_rows, models=models,
-                    ragged_output=True
-                ) # (B, T, H)
-                meta_data_single = self._stack_ragged_outputs(
-                    outputs_single, models
-                )
-                
-                # Restore original behavior
-                self.model.phmm_layer.enable_multi_hits(True)
-
-                assert all(meta_data_single.num_repeats_per_row == 1)
-
-                repeated_single_hit_loc = np.repeat(
-                    meta_data_single.domain_loc,
-                    meta_data.num_repeats_per_row[multi_hit_rows],
-                    axis=0
-                )
-
-                # (R, N), -1 for empty
-                occupancy = meta_data.occupancy_matrix() > 0
-                multi_hit_occupancy = occupancy[:, multi_hit_rows]
-                idx = np.arange(meta_data.total_repeats, dtype=np.int32)
-                idx_helper = np.full(
-                    (meta_data.num_rows, meta_data.num_repeats),
-                    -1,
-                    dtype=np.int32,
-                )
-                idx_helper[occupancy.T] = idx
-                multi_hit_repeats = idx_helper[multi_hit_rows][multi_hit_occupancy.T]
-
-                multi_hit_loc = meta_data.domain_loc[multi_hit_repeats]
-
-                # Score single-hits implicitly with 1 (their score does not matter)
-                interval_similarity = occupancy.astype(np.float32)
-
-                multi_hit_interval_similarity = _interval_jaccard(
-                    multi_hit_loc, repeated_single_hit_loc
-                )
-
-                mh_rows, mh_virt = np.nonzero(multi_hit_occupancy.T)
-                interval_similarity[
-                    mh_virt,
-                    multi_hit_rows[mh_rows],
-                ] = multi_hit_interval_similarity
-                interval_similarity[~occupancy] = -1
-    
-                meta_data = hit_alignment(
-                    meta_data,
-                    HitAlignmentMode.GREEDY_SCORES,
-                    interval_similarity,
-                )
-        else:
-            meta_data = hit_alignment(meta_data, self.hit_alignment_mode)
-
-        self.metadata[models[0]] = meta_data
+        self.metadata[models[0]] = self._align_hits(
+            meta_data, multi_hit_rows, meta_data_single
+        )
 
         if self.model.context.config.input_output.verbose:
             print(
                 f"Building alignment took {time.time() - t:.2f} "+
                 "seconds."
             )
+
+    def _set_decoding_mode(self, decoding_mode: DecodingMode) -> None:
+        if decoding_mode == AlignmentModel.DecodingMode.VITERBI:
+            self.model.viterbi_mode()
+        elif decoding_mode == AlignmentModel.DecodingMode.MEA:
+            self.model.mea_mode()
+        else:
+            raise ValueError(f"Unsupported decoding mode: {decoding_mode}")
+
+    def _multi_hit_rows(
+        self, meta_data: AlignmentMetaData
+    ) -> np.ndarray | None:
+        """The rows that need a single-hit re-run in GREEDY_SINGLE mode, or
+        None if there is nothing to re-run."""
+        if self.hit_alignment_mode != HitAlignmentMode.GREEDY_SINGLE:
+            return None
+        # Indices of rows with multiple hits
+        n = meta_data.num_rows
+        multi_hit_rows = np.arange(n)[meta_data.num_repeats_per_row > 1]
+        if len(multi_hit_rows) == 0:
+            return None
+        if self.model.context.config.input_output.verbose:
+            print(f"Predicted {len(multi_hit_rows)} sequences with multi-hits.")
+        return multi_hit_rows
+
+    def _align_hits(
+        self,
+        meta_data: AlignmentMetaData,
+        multi_hit_rows: np.ndarray | None,
+        meta_data_single: AlignmentMetaData | None,
+    ) -> AlignmentMetaData:
+        """Aligns the domain hits according to hit_alignment_mode.
+
+        Args:
+            meta_data: The decoded alignment.
+            multi_hit_rows: See :meth:`_multi_hit_rows`.
+            meta_data_single: The decoded alignment of the multi_hit_rows
+                under a model without multi-hits (GREEDY_SINGLE only).
+        """
+        if self.hit_alignment_mode == HitAlignmentMode.GREEDY_SCORES:
+            # Use occupancy (number of used match states) as hit score.
+            occupancy = meta_data.occupancy_matrix()  # (R, N), -1 for empty
+            return hit_alignment(
+                meta_data, self.hit_alignment_mode, occupancy
+            )
+        if self.hit_alignment_mode != HitAlignmentMode.GREEDY_SINGLE:
+            return hit_alignment(meta_data, self.hit_alignment_mode)
+        if multi_hit_rows is None:
+            # When no multi-hits were predicted, hit alignment is trivial
+            return hit_alignment(meta_data, HitAlignmentMode.LEFT_ALIGN)
+
+        assert meta_data_single is not None
+        assert all(meta_data_single.num_repeats_per_row == 1)
+
+        repeated_single_hit_loc = np.repeat(
+            meta_data_single.domain_loc,
+            meta_data.num_repeats_per_row[multi_hit_rows],
+            axis=0
+        )
+
+        # (R, N), -1 for empty
+        occupancy = meta_data.occupancy_matrix() > 0
+        multi_hit_occupancy = occupancy[:, multi_hit_rows]
+        idx = np.arange(meta_data.total_repeats, dtype=np.int32)
+        idx_helper = np.full(
+            (meta_data.num_rows, meta_data.num_repeats),
+            -1,
+            dtype=np.int32,
+        )
+        idx_helper[occupancy.T] = idx
+        multi_hit_repeats = idx_helper[multi_hit_rows][multi_hit_occupancy.T]
+
+        multi_hit_loc = meta_data.domain_loc[multi_hit_repeats]
+
+        # Score single-hits implicitly with 1 (their score does not matter)
+        interval_similarity = occupancy.astype(np.float32)
+
+        multi_hit_interval_similarity = _interval_jaccard(
+            multi_hit_loc, repeated_single_hit_loc
+        )
+
+        mh_rows, mh_virt = np.nonzero(multi_hit_occupancy.T)
+        interval_similarity[
+            mh_virt,
+            multi_hit_rows[mh_rows],
+        ] = multi_hit_interval_similarity
+        interval_similarity[~occupancy] = -1
+
+        return hit_alignment(
+            meta_data,
+            HitAlignmentMode.GREEDY_SCORES,
+            interval_similarity,
+        )
 
     def _stack_ragged_outputs(
         self,

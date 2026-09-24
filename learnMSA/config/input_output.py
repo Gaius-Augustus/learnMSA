@@ -21,11 +21,13 @@ PathField = Annotated[Union[str, Path], BeforeValidator(_validate_path)]
 class InputOutputConfig(BaseModel):
     """Input/output and general control parameters."""
 
-    input_file: PathField = Path()
-    """Input fasta file containing the protein sequences to align."""
+    input_file: PathField | list[PathField] = Path()
+    """Input fasta file containing the protein sequences to align or a list of
+    several files."""
 
-    output_file: PathField = Path()
-    """Output file path for the resulting multiple sequence alignment."""
+    output_file: PathField | list[PathField] = Path()
+    """Output file path for the resulting multiple sequence alignment or a list
+    of output files matching the order of input files."""
 
     format: str = "a2m"
     """Format of the output alignment file."""

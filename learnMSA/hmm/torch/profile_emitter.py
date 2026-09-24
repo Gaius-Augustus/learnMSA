@@ -12,7 +12,7 @@ from hidten.torch.emitter.categorical import (T_shapelike, T_TorchTensor,
                                               TorchCategoricalEmitter)
 
 from learnMSA.hmm.torch.util import (insertion_expansion_indices,
-                                     sequence_mask)
+                                     select_heads, sequence_mask)
 from learnMSA.hmm.util.value_set import PHMMValueSet
 
 
@@ -166,12 +166,19 @@ class TorchProfileEmitter(TorchCategoricalEmitter):
         """
         if not hasattr(self, "_prior"):
             return 0.0  # type: ignore[return-value]
-        matrix = self.matrix()
+        # The prior covers all heads: score the full matrix, then select
+        head_subset, self.head_subset = self.head_subset, None
+        try:
+            matrix = self.matrix()
+        finally:
+            self.head_subset = head_subset
         if self.extra_dims > 0:
             d = self.matrix_dim - self.extra_dims
             fold = matrix[..., d:].sum(dim=-1, keepdim=True) / d
             matrix = matrix[..., :d] + fold
-        return self._prior(matrix)
+        return select_heads(  # type: ignore[return-value]
+            self._prior(matrix), head_subset
+        )
 
     def _build_share(self) -> np.ndarray:
         # Share all insertion emissions across positions

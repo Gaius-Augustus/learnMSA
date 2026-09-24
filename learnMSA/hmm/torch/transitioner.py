@@ -16,6 +16,7 @@ from hidten.torch.transitioner import (T_shapelike, T_TorchTensor,
 from hidten.torch.util import (log_zero, safe_log, tiny, to_tensor,
                                zero_row_softmax)
 
+from learnMSA.hmm.torch.util import select_heads
 from learnMSA.hmm.util.transition_index_set import PHMMTransitionIndexSet
 from learnMSA.hmm.util.value_set import PHMMValueSet
 
@@ -458,7 +459,7 @@ class TorchPHMMTransitioner(TorchTransitioner):
                     torch.tensor([[max_states_subset]], device=device),
                     num_classes=max_states_subset + 1,
                 ).to(log_matrix.dtype)
-            )
+            ).expand(log_matrix.shape[0], -1, -1)
             log_matrix = log_matrix[:, :max_states_subset, :max_states_subset]
             log_matrix = torch.cat([log_matrix, terminal_log_in], dim=2)
             log_matrix = torch.cat([log_matrix, terminal_log_out], dim=1)
@@ -483,7 +484,7 @@ class TorchPHMMTransitioner(TorchTransitioner):
             terminal_state_out = torch.nn.functional.one_hot(
                 torch.tensor([[max_states_subset]], device=device),
                 num_classes=max_states_subset + 1,
-            ).to(matrix.dtype)
+            ).to(matrix.dtype).expand(matrix.shape[0], -1, -1)
             matrix = matrix[:, :max_states_subset, :max_states_subset]
             matrix = torch.cat([matrix, terminal_state_in], dim=2)
             matrix = torch.cat([matrix, terminal_state_out], dim=1)
@@ -535,7 +536,10 @@ class TorchPHMMTransitioner(TorchTransitioner):
 
     @override
     def prior_scores(self) -> T_TorchTensor:
-        return self.explicit_transitioner.prior_scores()
+        # The explicit transitioner and its priors always cover all heads
+        return select_heads(  # type: ignore[return-value]
+            self.explicit_transitioner.prior_scores(), self.head_subset
+        )
 
     def _head_subset_tensor(self, device: torch.device) -> T_TorchTensor:
         return to_tensor(

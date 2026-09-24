@@ -7,6 +7,7 @@ from learnMSA import Configuration
 from learnMSA.model import batch_generator
 from learnMSA.model.bucketing import make_default_bucket_scheme
 from learnMSA.model.context import LearnMSAContext
+from learnMSA.util.multi_dataset import MultiSequenceDataset
 from learnMSA.util.sequence_dataset import SequenceDataset
 
 
@@ -207,3 +208,95 @@ def test_full_training_set_keeps_the_permutations() -> None:
             batch_gen.configure(data, context, indices)
             for p, q in zip(batch_gen.permutations, expected):
                 np.testing.assert_equal(p, q)
+
+
+def test_index_tables() -> None:
+    seq_lens = np.array([3, 7, 5, 2, 9])
+    np.testing.assert_equal(
+        batch_generator.get_lengths(seq_lens, np.array([4, 0])), [9, 3]
+    )
+    # Every model gets its own column, padded with -1.
+    table = batch_generator.get_index_table(
+        [np.array([0, 1, 2]), np.array([3, 4])]
+    )
+    np.testing.assert_equal(table, [[0, 3], [1, 4], [2, -1]])
+    np.testing.assert_equal(
+        batch_generator.get_lengths(seq_lens, table), [3, 9, 5]
+    )
+    # Every column is sorted by decreasing length, empty cells stay last.
+    sorted_table, positions = batch_generator.sort_index_table(
+        table, seq_lens
+    )
+    np.testing.assert_equal(sorted_table, [[1, 4], [2, 3], [0, -1]])
+    np.testing.assert_equal(positions, [[1, 1], [2, 0], [0, -1]])
+    np.testing.assert_equal(
+        batch_generator.get_lengths(seq_lens, sorted_table), [9, 5, 3]
+    )
+
+
+def _multi_context(auto_crop: bool = True):
+    """Two datasets over disjoint residues, so every cell shows its origin."""
+    multi = MultiSequenceDataset(sequences=[
+        [("a1", "A" * 4), ("a2", "A" * 4), ("a3", "A" * 40)],
+        [("w1", "W" * 10), ("w2", "W" * 10)],
+    ])
+    config = Configuration()
+    config.training.no_sequence_weights = True
+    config.training.auto_crop = auto_crop
+    return multi, LearnMSAContext(config, multi)
+
+
+def test_multi_batch_gen_fills_each_column_from_its_dataset() -> None:
+    multi, context = _multi_context(auto_crop=False)
+    batch_gen = context.batch_gen
+    assert isinstance(batch_gen, batch_generator.MultiBatchGenerator)
+    batch_gen.configure(multi, context, np.arange(multi.num_seq))
+    assert batch_gen.groups == [(0, 3), (3, 5)]
+
+    seqs, ind = batch_gen(np.array([[0, 3], [1, 4], [2, -1]]))
+    assert seqs.shape == (3, 41, 2, 20)
+    alphabet = SequenceDataset._default_alphabet
+    a, w = alphabet.index("A"), alphabet.index("W")
+    assert seqs[:, :, 0, a].sum() == 48 and seqs[:, :, 0].sum() == 48
+    assert seqs[:, :, 1, w].sum() == 20 and seqs[:, :, 1].sum() == 20
+    # The empty cell holds no residues and reports index 0.
+    assert seqs[2, :, 1].sum() == 0
+    np.testing.assert_equal(ind, [[0, 3], [1, 4], [2, 0]])
+
+    # 1-D indices give every column the same sequences.
+    _, ind = batch_gen(np.array([0, 3]))
+    np.testing.assert_equal(ind, [[0, 0], [3, 3]])
+
+
+def test_multi_batch_gen_crops_per_dataset() -> None:
+    multi, context = _multi_context()
+    # ceil(2 * mean length) of each dataset
+    np.testing.assert_equal(context.head_crops, [32, 20])
+    assert context.config.training.crop == 32
+    batch_gen = context.batch_gen
+    batch_gen.configure(multi, context, np.arange(multi.num_seq))
+
+    seqs, _ = batch_gen(np.array([[2, 3]]))
+    assert seqs.shape[1] == 33
+    assert seqs[0, :, 0].sum() == 32
+
+    # Prediction disables cropping.
+    batch_gen.crop_long_seqs = np.inf
+    seqs, _ = batch_gen(np.array([[2, 3]]))
+    assert seqs[0, :, 0].sum() == 40
+
+    batch_gen.crop_long_seqs = 32
+    batch_gen.static_shape_mode = True
+    seqs, _ = batch_gen(np.array([[0, 3]]))
+    assert seqs.shape[1] == 33
+
+
+def test_multi_batch_gen_validates_its_inputs() -> None:
+    multi, context = _multi_context()
+    batch_gen = context.batch_gen
+    with pytest.raises(ValueError):
+        batch_gen.configure(multi, context, np.array([3, 0, 1]))
+    with pytest.raises(ValueError):
+        batch_gen.configure(multi, context, np.array([0, 1]))
+    with pytest.raises(ValueError):
+        batch_gen.configure(multi.datasets[0], context)

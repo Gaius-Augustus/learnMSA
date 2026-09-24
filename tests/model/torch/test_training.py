@@ -14,8 +14,10 @@ import numpy as np
 from learnMSA.config.config import Configuration
 from learnMSA.model.batch_generator import BatchGenerator
 from learnMSA.model.context import LearnMSAContext
-from learnMSA.model.torch.training import (_RepeatingShuffleSampler,
+from learnMSA.model.torch.training import (_GroupedShuffleSampler,
+                                           _RepeatingShuffleSampler,
                                            make_dataset)
+from learnMSA.util.multi_dataset import MultiSequenceDataset
 from tests.embedding_data import make_aa_dataset, make_embedding_dataset
 
 
@@ -106,3 +108,39 @@ def test_make_dataset_shared_batch() -> None:
     assert np.all(i.numpy() == np.array([[0], [2], [3]]))
     # The tracks stay aligned: sequence j is filled with j + 1.
     assert np.all(e[:, 0].numpy() == np.array([1.0, 3.0, 4.0])[:, None, None])
+
+
+def test_grouped_sampler_reshuffles_every_group_on_its_own() -> None:
+    """Each column stays in its group and visits each of its positions
+    equally often, however much smaller it is than the largest group."""
+    groups, batch_size, passes = [(0, 100), (100, 116)], 8, 4
+    sampler = _GroupedShuffleSampler(groups, batch_size)
+
+    batches = list(islice(iter(sampler), passes * 100 // batch_size))
+    assert all(len(b) == batch_size for b in batches)
+    columns = np.array([row for b in batches for row in b])
+    for k, (start, stop) in enumerate(groups):
+        counts = Counter(columns[:, k].tolist())
+        assert set(counts) == set(range(start, stop))
+    assert set(Counter(columns[:, 0].tolist()).values()) == {passes}
+    assert set(Counter(columns[:16 * 25, 1].tolist()).values()) == {25}
+
+
+def test_make_dataset_per_dataset_columns() -> None:
+    """A shuffled loader on a MultiBatchGenerator gives every model column
+    sequences of its own dataset only."""
+    multi = MultiSequenceDataset(sequences=[
+        [(f"a{i}", "A" * (i + 1)) for i in range(7)],
+        [(f"w{i}", "W" * (i + 1)) for i in range(3)],
+    ])
+    config = Configuration()
+    config.training.no_sequence_weights = True
+    context = LearnMSAContext(config, multi)
+    indices = np.arange(multi.num_seq)
+    context.batch_gen.configure(multi, context, indices)
+
+    loader, _ = make_dataset(indices, context.batch_gen, batch_size=4)
+    for (s, i), _ in zip(loader, range(5)):
+        assert tuple(s.shape[::2]) == (4, 2)
+        assert tuple(i.shape) == (4, 2)
+        assert np.all(i[:, 0].numpy() < 7) and np.all(i[:, 1].numpy() >= 7)

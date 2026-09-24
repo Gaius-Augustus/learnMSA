@@ -14,7 +14,7 @@ from hidten.torch.emitter.multivariate_normal import (T_shapelike,
                                                       mvn_log_prob)
 
 from learnMSA.hmm.torch.util import (insertion_expansion_indices,
-                                     sequence_mask)
+                                     select_heads, sequence_mask)
 from learnMSA.hmm.util.value_set_emb import PHMMEmbeddingValueSet
 
 
@@ -137,6 +137,20 @@ class TorchEmbeddingEmitter(TorchMVNormalEmitter):
             matrix = mask * matrix + (1 - mask) * matrix.detach()
 
         return matrix
+
+    @override
+    def prior_scores(self) -> T_TorchTensor:
+        if not hasattr(self, "_prior"):
+            return 0.0  # type: ignore[return-value]
+        # The prior covers all heads: score the full matrix, then select
+        head_subset, self.head_subset = self.head_subset, None
+        try:
+            matrix = self.matrix()
+        finally:
+            self.head_subset = head_subset
+        return select_heads(  # type: ignore[return-value]
+            self._prior(matrix), head_subset
+        )
 
     def emission_scores(self, observations: T_TorchTensor) -> T_TorchTensor:
         if self.use_full_matmul:

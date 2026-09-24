@@ -36,8 +36,9 @@ def args_to_config(
     adv = data["advanced"]
 
     # --- Input/output ---
-    io["input_file"] = args.input_file if args.input_file is not None else ""
-    io["output_file"] = args.output_file if args.output_file is not None else ""
+    # Several files become lists; see util.resolve_multiple_inputs
+    io["input_file"] = _file_or_files(args.input_file)
+    io["output_file"] = _file_or_files(args.output_file)
     io["format"] = args.format
     io["input_format"] = args.input_format
     io["save_model"] = _get_save_model(args)
@@ -178,14 +179,21 @@ def args_to_config(
     return Configuration.model_validate(data)
 
 
+def _file_or_files(files: list[str] | None) -> str | list[str]:
+    """A single file as a string, several files as a list."""
+    if not files:
+        return ""
+    return files[0] if len(files) == 1 else files
+
+
 def _get_save_emb(args: Namespace) -> str:
     """Determine the save_emb path based on command-line arguments."""
     if args.save_emb == "<workdir>":
         if args.input_file is None:
             return ""
         else:
-            p = Path(args.work_dir) / (Path(args.input_file).stem + ".emb")
-            return str(p)
+            stem = Path(args.input_file[0]).stem
+            return str(Path(args.work_dir) / (stem + ".emb"))
     else:
         return args.save_emb
 
@@ -194,7 +202,7 @@ def _get_save_model(args: Namespace) -> str:
     """Determine the save_model path based on command-line arguments."""
     if args.save_model == "<workdir>":
         stem = (
-            Path(args.input_file).stem
+            Path(args.input_file[0]).stem
             if args.input_file is not None
             else Path(args.from_msa).stem
         )

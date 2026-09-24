@@ -32,6 +32,33 @@ def sequence_mask(
     return (positions[None, :] < lengths_t[:, None]).to(dtype)
 
 
+def select_heads(
+    scores: torch.Tensor | float,
+    head_subset: Sequence[int] | None,
+) -> torch.Tensor | float:
+    """Selects the ``head_subset`` entries of per-head scores.
+
+    Modules with a head subset compute their prior scores on the full,
+    unrestricted parameter matrix and select the subset afterwards, because
+    the priors hold parameters for all heads.
+
+    Args:
+        scores: Per-head scores of shape ``(H, ...)``, or a scalar when a
+            module has no prior.
+        head_subset: The heads to select, in this order, or ``None``.
+
+    Returns:
+        The scores of shape ``(len(head_subset), ...)``, or ``scores``
+        unchanged if ``head_subset`` is ``None`` or ``scores`` is a scalar.
+    """
+    if head_subset is None or not isinstance(scores, torch.Tensor):
+        return scores
+    index = torch.as_tensor(
+        np.asarray(head_subset), dtype=torch.int64, device=scores.device
+    )
+    return scores.index_select(0, index)
+
+
 def insertion_expansion_indices(lengths: np.ndarray) -> np.ndarray:
     """Indices that expand one insertion score per head into one per state.
 

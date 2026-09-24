@@ -4,6 +4,7 @@ import sys
 import time
 from contextlib import ExitStack
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import learnMSA.backend as backend
 import learnMSA.run.util as util
@@ -12,6 +13,9 @@ from learnMSA.backend import set_backend
 from learnMSA.run.args_to_config import args_to_config
 from learnMSA.run.help import handle_help_command
 from learnMSA.run.args import parse_args
+
+if TYPE_CHECKING:
+    from learnMSA.align.alignment_model import AlignmentModel
 
 # Framework-specific environment (log levels, allocator, the triton guard)
 # is set in learnMSA.run.util.setup_devices, once the backend is known.
@@ -36,6 +40,9 @@ def run_main() -> None:
 
     # Validate that output_file is provided when required
     util.validate_output_file_requirements(config, parser)
+
+    # Check the options for several input files and name their outputs
+    util.resolve_multiple_inputs(config, parser)
 
     # Print brief description of the tool
     if config.input_output.verbose and parser.description:
@@ -70,9 +77,18 @@ def run_main() -> None:
             "under the pytorch backend. Use --compile on for torch.compile."
         )
 
+    if isinstance(config.input_output.input_file, list):
+        if backend.get_backend() != "pytorch":
+            parser.error(
+                "Aligning several input files at once requires the pytorch "
+                f"backend, but '{backend.get_backend()}' is selected. Use "
+                "--backend pytorch."
+            )
+        align_multiple_files(config)
+        return
+
     from learnMSA.align.align import align
     from learnMSA.align.alignment_model import AlignmentModel
-    from learnMSA.align.align_inserts import make_aligned_insertions
     from learnMSA.util import SequenceDataset, EmbeddingDataset
 
     with ExitStack() as stack:
@@ -173,71 +189,17 @@ def run_main() -> None:
 
         if config.input_output.output_file != Path():
 
-            Path(config.input_output.output_file).parent.mkdir(
-                parents=True, exist_ok=True
-            )
-
             # Free datasets that are not the amino acid dataset to save memory.
             if config.input_output.scores == Path():
                 for aux in am.data[1:]:
                     if isinstance(aux, SequenceDataset):
                         aux.release_records()
 
-            # measure time of the file generation
-            t = time.time()
-            if config.input_output.verbose:
-                print("Generating output file...")
-
-            assert am.best_head != -1,\
-                "Best head was not selected. This should not happen."
-
-            if config.input_output.compress and config.input_output.verbose \
-                    and config.input_output.format not in ("fasta", "a2m"):
-                print(
-                    "Warning: --compress only applies to fasta and a2m "
-                    f"output. Writing an uncompressed "
-                    f"{config.input_output.format} file."
-                )
-
-            if config.training.unaligned_insertions\
-                    or config.training.only_matches:
-                # Don't align insertions when requested or when only matches need to
-                # be written to the output file
-                written_file = am.to_file(
-                    config.input_output.output_file,
-                    am.best_head,
-                    format=config.input_output.format,
-                    only_matches=config.training.only_matches,
-                    decoding_mode=decoding_mode,
-                    compress=config.input_output.compress,
-                    compress_threshold_mb=\
-                        config.input_output.compress_threshold_mb,
-                    add_block_sep=config.input_output.add_block_separator_to_msa,
-                )
-            else:
-                aligned_insertions = make_aligned_insertions(
-                    am,
-                    am.best_head,
-                    decoding_mode=decoding_mode,
-                    method=config.advanced.insertion_aligner,
-                    threads=config.advanced.aligner_threads,
-                    verbose=config.input_output.verbose,
-                )
-                written_file = am.to_file(
-                    config.input_output.output_file,
-                    am.best_head,
-                    aligned_insertions=aligned_insertions,
-                    format=config.input_output.format,
-                    decoding_mode=decoding_mode,
-                    compress=config.input_output.compress,
-                    compress_threshold_mb=\
-                        config.input_output.compress_threshold_mb,
-                    add_block_sep=config.input_output.add_block_separator_to_msa,
-                )
-
-            if config.input_output.verbose:
-                print(f"Generating output took {time.time()-t:.4f} seconds.")
-                print("Wrote file", written_file)
+            _warn_compress(config)
+            write_alignment(
+                am, am.best_head, config.input_output.output_file, config,
+                decoding_mode,
+            )
 
         if config.input_output.decode_file != Path():
             Path(config.input_output.decode_file).parent.mkdir(
@@ -277,6 +239,116 @@ def run_main() -> None:
             raise NotImplementedError(
                 "Distribution output is not implemented in this version."
             )
+
+
+def align_multiple_files(config : Configuration) -> None:
+    """Aligns every file in the list config.input_output.input_file with its
+    own pHMM, training and decoding all of them jointly. The alignments are
+    written to the files in the list config.input_output.output_file."""
+    from learnMSA.align.align import align_batch
+    from learnMSA.align.alignment_model import AlignmentModel
+    from learnMSA.util import MultiSequenceDataset
+
+    io = config.input_output
+    with MultiSequenceDataset(
+        filepaths=io.input_file,
+        fmt=io.input_format,
+        indexed=config.training.indexed_data,
+        model_uo=config.hmm.model_uo,
+    ) as data:
+        # rule out issues with the seq files early on
+        data.validate_dataset()
+
+        am = align_batch(data, config)
+
+        decoding_mode = AlignmentModel.DecodingMode.from_str(
+            config.training.decoding_mode
+        )
+        # Decode all alignments in one pass
+        am.build_alignment(decoding_mode=decoding_mode)
+
+        _warn_compress(config)
+        for k, output_file in enumerate(io.output_file):
+            write_alignment(
+                am.head(k), k, output_file, config, decoding_mode
+            )
+
+
+def write_alignment(
+    am: "AlignmentModel",
+    model_index: int,
+    output_file: str | Path,
+    config: Configuration,
+    decoding_mode: "AlignmentModel.DecodingMode",
+) -> Path:
+    """Writes the alignment of one model to output_file, aligning the
+    insertions unless disabled in the config.
+
+    Returns:
+        The path of the written file.
+    """
+    from learnMSA.align.align_inserts import make_aligned_insertions
+
+    Path(output_file).parent.mkdir(parents=True, exist_ok=True)
+
+    # measure time of the file generation
+    t = time.time()
+    if config.input_output.verbose:
+        print("Generating output file...")
+
+    assert model_index != -1,\
+        "Best head was not selected. This should not happen."
+
+    if config.training.unaligned_insertions\
+            or config.training.only_matches:
+        # Don't align insertions when requested or when only matches need to
+        # be written to the output file
+        written_file = am.to_file(
+            output_file,
+            model_index,
+            format=config.input_output.format,
+            only_matches=config.training.only_matches,
+            decoding_mode=decoding_mode,
+            compress=config.input_output.compress,
+            compress_threshold_mb=\
+                config.input_output.compress_threshold_mb,
+            add_block_sep=config.input_output.add_block_separator_to_msa,
+        )
+    else:
+        aligned_insertions = make_aligned_insertions(
+            am,
+            model_index,
+            decoding_mode=decoding_mode,
+            method=config.advanced.insertion_aligner,
+            threads=config.advanced.aligner_threads,
+            verbose=config.input_output.verbose,
+        )
+        written_file = am.to_file(
+            output_file,
+            model_index,
+            aligned_insertions=aligned_insertions,
+            format=config.input_output.format,
+            decoding_mode=decoding_mode,
+            compress=config.input_output.compress,
+            compress_threshold_mb=\
+                config.input_output.compress_threshold_mb,
+            add_block_sep=config.input_output.add_block_separator_to_msa,
+        )
+
+    if config.input_output.verbose:
+        print(f"Generating output took {time.time()-t:.4f} seconds.")
+        print("Wrote file", written_file)
+    return written_file
+
+
+def _warn_compress(config : Configuration) -> None:
+    if config.input_output.compress and config.input_output.verbose \
+            and config.input_output.format not in ("fasta", "a2m"):
+        print(
+            "Warning: --compress only applies to fasta and a2m "
+            f"output. Writing an uncompressed "
+            f"{config.input_output.format} file."
+        )
 
 
 def convert_file(config : Configuration) -> None:

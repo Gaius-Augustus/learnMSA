@@ -5,16 +5,35 @@ Input/output and general control
 Arguments
 ---------
 
-``-i / --in_file`` *INPUT_FILE*
+``-i / --in_file`` *INPUT_FILE [INPUT_FILE ...]*
     Input fasta file containing the protein sequences to align. Any gaps
     present in the input sequences are ignored. learnMSA uses the alphabet
     ARNDCQEGHILKMFPSTWYVXUO. Special characters B, Z, J are mapped to X. The
     sequences must not contain any other non-standard characters.
+    Pass several files to align each of them in a single run.
 
-``-o / --out_file`` *OUTPUT_FILE*
+    Several input files are aligned independently of each other, but in a
+    single run: learnMSA trains one profile HMM per file, all of them in
+    parallel on the GPU, and writes one alignment per file. This is much
+    faster than separate runs for many small families. It requires the
+    pytorch backend (``--backend pytorch``), and the options that refer to a
+    single dataset (``--convert``, ``--scores``, ``--decode_file``,
+    ``--save_model``, ``--load_model``, ``--struct``, ``--load_emb``,
+    ``--save_emb``, ``--use_language_model``, ``--from_msa``, ``--seeded``,
+    ``--plot`` and ``--logo_gif``) are not available.
+    Families with similar sequence lengths make the best use of the GPU.
+    For example: ``learnMSA -i PF00004.fasta PF00006.fasta -o alignments/``.
+
+``-o / --out_file`` *OUTPUT_FILE [OUTPUT_FILE ...]*
     Output file path for the resulting multiple sequence
     alignment. Use ``-f`` to change the output file type.
-    LearnMSA will override existing files.
+    LearnMSA will override existing files. Several input files need one output
+    file each or a single output directory.
+
+    With several input files, provide either one output file per input file
+    (in the same order) or a single output directory. A directory receives
+    one file per input file named after it, e.g. ``alignments/PF00004.a2m``
+    for ``-f a2m``.
 
 ``-f / --format`` *FORMAT*
     Format of the output alignment file.

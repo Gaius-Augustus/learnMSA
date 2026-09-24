@@ -227,10 +227,11 @@ class LearnMSAModel(PHMMMixin, Generic[T_Tensor]):
             )
             if self.context.sequence_weights is not None:
                 io = self.context.config.input_output
-                input_path = Path(io.input_file)
-                if input_path.name:
+                # Several input files share one weights file
+                if not isinstance(io.input_file, list) \
+                        and Path(io.input_file).name:
                     weight_path = Path(io.work_dir) /\
-                        input_path.with_suffix(".weights").name
+                        Path(io.input_file).with_suffix(".weights").name
                 else:
                     weight_path = Path(io.work_dir) / "sequences.weights"
                 print("Using sequence weights and writing them to", weight_path)

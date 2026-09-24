@@ -13,7 +13,7 @@ from typing import Sequence
 import numpy as np
 
 import learnMSA.model.training_util as training_util
-from learnMSA.model.batch_generator import BatchGenerator
+from learnMSA.model.batch_generator import BatchGenerator, get_lengths
 
 
 def compute_dataset_steps(
@@ -26,7 +26,9 @@ def compute_dataset_steps(
     Compute the number of steps needed to iterate through a bucketed dataset.
 
     Args:
-        indices: The indices of the sequences to include in the dataset.
+        indices: The indices of the sequences to include in the dataset,
+            1-D or a 2-D per-model index table (see
+            :func:`~learnMSA.model.batch_generator.get_index_table`).
         batch_generator: The batch generator (must be configured).
         bucket_boundaries: Sequence length boundaries for bucketing.
         bucket_batch_sizes: Batch sizes for each bucket.
@@ -35,7 +37,7 @@ def compute_dataset_steps(
         Number of steps to iterate through the bucketed dataset.
     """
     # Compute number of steps for bucketed dataset
-    seq_lengths = batch_generator.data[0].seq_lens[indices]
+    seq_lengths = get_lengths(batch_generator.data[0].seq_lens, indices)
     total_steps = 0
     boundaries = list(bucket_boundaries) + [math.inf]
 
@@ -85,7 +87,7 @@ def make_default_bucket_scheme(
     Returns:
         A tuple of (bucket_boundaries, bucket_batch_sizes).
     """
-    seq_lens = batch_generator.data[0].seq_lens[indices]
+    seq_lens = get_lengths(batch_generator.data[0].seq_lens, indices)
 
     max_num_buckets = min(indices.size // 10000 + 1, 7)
     if max_num_buckets > 1:

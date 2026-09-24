@@ -4,6 +4,8 @@ import numpy as np
 from learnMSA.run.util import get_batch_multiplicator, get_avail_memory_bytes
 
 MAX_BATCH_SIZE = 1_024
+#: Training batches are capped at this size to avoid convergence issues.
+MAX_TRAIN_BATCH_SIZE = 512
 MAX_TOKENS_PER_BATCH = 700_000
 MEMORY_DAMP = 0.5
 

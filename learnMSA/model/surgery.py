@@ -37,7 +37,9 @@ def get_discard_or_expand_positions(
         data: A SequenceDataset or tuple of Dataset(s) used for computing the
             posterior state.
         indices: Optional indices to select a subset of the data. If None, all
-            sequences in `data` are used.
+            sequences in `data` are used. A 2-D per-model index table (see
+            :func:`~learnMSA.model.batch_generator.get_index_table`)
+            computes the statistics of every model on its own sequences.
         del_t: This number is compared to the expected number of times a match
             state is used when aligning a protein from the underlying dataset
             to the pHMM.
@@ -612,7 +614,9 @@ def model_surgery(
         data: A SequenceDataset or tuple of Dataset(s) used for computing the
             posterior state.
         indices: Optional indices to select a subset of the data. If None, all
-            sequences in `data` are used.
+            sequences in `data` are used. A 2-D per-model index table (see
+            :func:`~learnMSA.model.batch_generator.get_index_table`)
+            computes the statistics of every model on its own sequences.
         surgery_del: Discards match states for which `surgery_del` is larger
             than the expected number of times this match state is used in an
             alignment of a sequence from the underlying dataset to the model.

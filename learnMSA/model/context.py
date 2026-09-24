@@ -5,7 +5,8 @@ from typing import Any, Callable, Sequence
 import numpy as np
 
 from learnMSA.hmm.util.value_set_emb import PHMMEmbeddingValueSet
-from learnMSA.model.batch_generator import BatchGenerator
+from learnMSA.model.batch_generator import (BatchGenerator,
+                                            MultiBatchGenerator)
 import learnMSA.model.training_util as training_util
 import learnMSA.tree.initializer as initializers
 from learnMSA import Configuration
@@ -16,6 +17,7 @@ from learnMSA.util import clustering
 
 from ..tree.initializer import inverse_softplus
 from ..util.aligned_dataset import AlignedDataset
+from ..util.multi_dataset import MultiSequenceDataset
 from ..util.sequence_dataset import SequenceDataset
 
 # Type alias for model length callback
@@ -60,6 +62,8 @@ class LearnMSAContext:
     p_init: initializers.InitSpec
     t_init: initializers.InitSpec
     mix_init: initializers.InitSpec
+    head_crops: np.ndarray | None
+    prior_scale: np.ndarray
 
     """
     Is created from a Configuration and a SequenceDataset to hold all relevant
@@ -107,6 +111,9 @@ class LearnMSAContext:
                     "It will be ignored."
                 )
             self.num_seq = data.num_seq
+        is_multi = isinstance(data, MultiSequenceDataset)
+        if is_multi:
+            self._setup_multi_dataset(data)
 
         model_len_cb = self._setup_lengths()
 
@@ -117,6 +124,17 @@ class LearnMSAContext:
                     len_mul = self.config.training.len_mul
                 else:
                     len_mul = 1.0
+                if is_multi:
+                    # One model per dataset
+                    return np.concatenate([
+                        training_util.get_initial_model_lengths(
+                            part.seq_lens,
+                            self.config.training.length_init_quantile,
+                            len_mul,
+                            1,
+                        )
+                        for part in data.datasets
+                    ])
                 return training_util.get_initial_model_lengths(
                     data.seq_lens,
                     self.config.training.length_init_quantile,
@@ -156,13 +174,24 @@ class LearnMSAContext:
                 self.config.training.length_init, dtype=np.int32
             )
 
+        self.head_crops = None
         if data is not None:
             if self.config.training.auto_crop:
                 # Setup cropping length if auto_crop is enabled based on data
                 # Has to be done before the batch size setup
-                self.config.training.crop = int(np.ceil(
-                    self.config.training.auto_crop_scale * np.mean(data.seq_lens)
-                ))
+                scale = self.config.training.auto_crop_scale
+                if isinstance(data, MultiSequenceDataset):
+                    # Crop each dataset on its own; the batch size is set up
+                    # for the longest crop
+                    self.head_crops = np.array([
+                        int(np.ceil(scale * np.mean(part.seq_lens)))
+                        for part in data.datasets
+                    ])
+                    self.config.training.crop = int(self.head_crops.max())
+                else:
+                    self.config.training.crop = int(np.ceil(
+                        scale * np.mean(data.seq_lens)
+                    ))
         assert isinstance(self.config.training.crop, int)
 
         self.batch_size = self._setup_batch_size_cb()
@@ -222,7 +251,7 @@ class LearnMSAContext:
             self.config.training.max_iterations = 1
             self.config.training.epochs = [0]*3
 
-        self.batch_gen = BatchGenerator()
+        self.batch_gen = MultiBatchGenerator() if is_multi else BatchGenerator()
         self.last_runtime_batch_size = None
         if data is not None and not self.config.training.skip_training:
             self.sequence_weights, self.clusters, self.rep = self._get_clustering(data)
@@ -249,6 +278,8 @@ class LearnMSAContext:
         else:
             self.subset = np.arange(self.num_seq)
 
+        self.prior_scale = self._get_prior_scale(data)
+
         # todo: Workaround
         self.effective_num_seq = self.num_seq
 
@@ -268,6 +299,7 @@ class LearnMSAContext:
             "sequence_weights": self.sequence_weights.tolist() if self.sequence_weights is not None else None,
             "clusters": self.clusters.tolist() if isinstance(self.clusters, np.ndarray) else self.clusters,
             "subset": self.subset.tolist(),
+            "prior_scale": self.prior_scale.tolist(),
             "effective_num_seq": int(self.effective_num_seq),
             # Store whether batch_size is callable or int
             "batch_size_is_callable": callable(self.batch_size),
@@ -327,12 +359,57 @@ class LearnMSAContext:
         # Restore stored values that might differ from defaults
         context.subset = np.array(actual_config["subset"], dtype=np.int32)
         context.effective_num_seq = actual_config["effective_num_seq"]
+        if actual_config.get("prior_scale") is not None:
+            context.prior_scale = np.array(
+                actual_config["prior_scale"], dtype=np.float64
+            )
 
         # Restore batch_size if it was a fixed integer
         if not actual_config["batch_size_is_callable"]:
             context.batch_size = actual_config["batch_size_value"]
 
         return context
+
+    def _setup_multi_dataset(self, data: MultiSequenceDataset) -> None:
+        """Sets up one model per dataset of a MultiSequenceDataset."""
+        num_datasets = data.num_datasets
+        length_init = self.config.training.length_init
+        if length_init is not None and len(length_init) != num_datasets:
+            raise ValueError(
+                f"length_init has {len(length_init)} entries, but there is "
+                f"one model per dataset ({num_datasets})."
+            )
+        if self.config.init_msa.from_msa is not None \
+                or self.config.init_msa.seeded:
+            raise ValueError(
+                "Initializing from an MSA (from_msa or seeded) is not "
+                "supported for a MultiSequenceDataset."
+            )
+        self.config.training.num_model = num_datasets
+
+    def _get_prior_scale(self, data: SequenceDataset | None) -> np.ndarray:
+        """Divisor for the log_prior of each head that makes the log_prior
+        consistent with dataset size.
+
+        Returns:
+            Shape ``(num_model,)``.
+        """
+        if isinstance(data, MultiSequenceDataset):
+            parts = [
+                (data.offsets[k], data.offsets[k + 1])
+                for k in range(data.num_datasets)
+            ]
+        else:
+            parts = [(0, self.num_seq)] * self.config.training.num_model
+        scale = []
+        for start, end in parts:
+            n = end - start
+            if self.sequence_weights is not None:
+                num_cluster = float(self.sequence_weights[start:end].sum())
+                scale.append(np.sqrt(num_cluster * n))
+            else:
+                scale.append(float(n))
+        return np.array(scale, dtype=np.float64)
 
     def _setup_init_msa(
         self,
@@ -526,44 +603,83 @@ class LearnMSAContext:
     def _get_clustering(
         self, data: SequenceDataset
     ) -> tuple[np.ndarray | None, np.ndarray | None, np.ndarray | None]:
+        if self.config.training.no_sequence_weights:
+            return None, None, None
+        os.makedirs(self.config.input_output.work_dir, exist_ok=True)
+        try:
+            if isinstance(data, MultiSequenceDataset):
+                return self._get_multi_clustering(data)
+            cluster_file = self._cluster_file(
+                data,
+                Path(self.config.input_output.input_file),
+                self.config.input_output.input_format,
+                "temp_for_clustering.fasta",
+            )
+            return clustering.compute_sequence_weights(
+                cluster_file,
+                self.config.input_output.work_dir,
+                self.config.training.cluster_seq_id,
+                return_clusters=True
+            )
+        except Exception as e:
+            print(f"Error while computing sequence weights: {e}")
+            raise ValueError(
+                "Error while computing sequence weights."
+            ) from e
+
+    def _get_multi_clustering(
+        self, data: MultiSequenceDataset
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Clusters every dataset on its own and concatenates the results.
+        Cluster ids are shifted so that datasets never share a cluster, and
+        representatives are global indices."""
+        weights, clusters, reps = [], [], []
+        num_clusters = 0
+        for k, part in enumerate(data.datasets):
+            cluster_file = self._cluster_file(
+                part, part.filepath, part.fmt,
+                f"temp_for_clustering_{k}.fasta",
+            )
+            w, c, r = clustering.compute_sequence_weights(
+                cluster_file,
+                self.config.input_output.work_dir,
+                self.config.training.cluster_seq_id,
+                return_clusters=True
+            )
+            weights.append(w)
+            clusters.append(c + num_clusters)
+            reps.append(r + data.offsets[k])
+            num_clusters += int(c.max()) + 1
+        return (
+            np.concatenate(weights),
+            np.concatenate(clusters),
+            np.concatenate(reps),
+        )
+
+    def _cluster_file(
+        self,
+        data: SequenceDataset,
+        input_file: Path,
+        input_format: str,
+        temp_name: str,
+    ) -> str:
+        """A fasta file with the sequences of data for mmseqs2 clustering."""
         from ..util import SequenceDataset
-        if not self.config.training.no_sequence_weights:
-            os.makedirs(self.config.input_output.work_dir, exist_ok=True)
-            try:
-                if self.config.input_output.input_file == Path():
-                # When no input file is provided, we need to write a temporary
-                # for mmseqs2 clustering
-                    cluster_file = os.path.join(
-                        self.config.input_output.work_dir,
-                        "temp_for_clustering.fasta"
-                    )
-                    data.write(cluster_file, "fasta")
-                elif self.config.input_output.input_format == "fasta":
-                    # When the input file is fasta: all good
-                    cluster_file = self.config.input_output.input_file
-                else:
-                    # We need to convert to fasta
-                    cluster_file = os.path.join(
-                        self.config.input_output.work_dir,
-                        os.path.basename(self.config.input_output.input_file)\
-                            + ".temp_for_clustering"
-                    )
-                    with SequenceDataset(
-                        self.config.input_output.input_file,
-                        self.config.input_output.input_format
-                    ) as data:
-                        data.write(cluster_file, "fasta")
-                weights, clusters, rep = clustering.compute_sequence_weights(
-                    cluster_file,
-                    self.config.input_output.work_dir,
-                    self.config.training.cluster_seq_id,
-                    return_clusters=True
-                )
-            except Exception as e:
-                print(f"Error while computing sequence weights: {e}")
-                raise ValueError(
-                    "Error while computing sequence weights."
-                ) from e
+        work_dir = self.config.input_output.work_dir
+        if input_file == Path():
+            # When no input file is provided, we need to write a temporary
+            # for mmseqs2 clustering
+            cluster_file = os.path.join(work_dir, temp_name)
+            data.write(cluster_file, "fasta")
+        elif input_format == "fasta":
+            # When the input file is fasta: all good
+            cluster_file = str(input_file)
         else:
-            weights, clusters, rep = None, None, None
-        return weights, clusters, rep
+            # We need to convert to fasta
+            cluster_file = os.path.join(
+                work_dir,
+                os.path.basename(input_file) + ".temp_for_clustering"
+            )
+            with SequenceDataset(input_file, input_format) as converted:
+                converted.write(cluster_file, "fasta")
+        return cluster_file

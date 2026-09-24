@@ -239,6 +239,76 @@ def validate_output_file_requirements(config, parser) -> None:
             )
 
 
+def resolve_multiple_inputs(config, parser) -> None:
+    """Validate the options for several input files and assign an output
+    file to each of them. Expect that -o takes either one output file per
+    input file, in the same order, or a single directory that receives
+    ``<input stem>.<format>`` files; afterwards ``output_file`` is a list of
+    the same length as ``input_file``. Options that refer to a single dataset
+    are rejected. Lists with a single file are replaced by that file.
+
+    Args:
+        config: Configuration object (mutated in-place when resolved)
+        parser: Argument parser for error reporting
+    """
+    io = config.input_output
+    for field in ("input_file", "output_file"):
+        files = getattr(io, field)
+        if isinstance(files, list) and len(files) <= 1:
+            setattr(io, field, files[0] if files else Path())
+    if not isinstance(io.input_file, list):
+        if isinstance(io.output_file, list):
+            parser.error(
+                "argument -o/--out_file: expected a single output file for a "
+                "single input file"
+            )
+        return
+
+    unsupported = {
+        "--convert": io.convert,
+        "--scores": io.scores != Path(),
+        "--decode_file": io.decode_file != Path(),
+        "--save_model": io.save_model != "",
+        "--load_model": io.load_model != "",
+        "--struct": io.struct_file is not None,
+        "--load_emb": io.emb_file is not None,
+        "--save_emb": io.save_emb is not None and io.save_emb != Path(),
+        "--use_language_model": config.language_model.use_language_model,
+        "--from_msa": config.init_msa.from_msa is not None,
+        "--seeded": config.init_msa.seeded,
+        "--plot": config.visualization.plot != "",
+        "--logo_gif": config.visualization.logo_gif != "",
+    }
+    used = [name for name, is_used in unsupported.items() if is_used]
+    if used:
+        parser.error(
+            f"{', '.join(used)} can not be used with several input files"
+        )
+
+    num_inputs = len(io.input_file)
+    if isinstance(io.output_file, list):
+        if len(io.output_file) == num_inputs:
+            return
+        parser.error(
+            f"argument -o/--out_file: expected {num_inputs} output files or "
+            f"a single output directory for {num_inputs} input files"
+        )
+    directory = Path(io.output_file)
+    if directory.is_file():
+        parser.error(
+            f"argument -o/--out_file: {directory} is a file, but several "
+            "input files need an output directory"
+        )
+    stems = [Path(f).stem for f in io.input_file]
+    if len(set(stems)) < len(stems):
+        parser.error(
+            "argument -o/--out_file: the input files must have distinct "
+            "names to be written to an output directory; give one output "
+            "file per input file instead"
+        )
+    io.output_file = [directory / f"{stem}.{io.format}" for stem in stems]
+
+
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     """Recursively merge override into base, returning a new dict."""
     result = base.copy()

@@ -21,8 +21,10 @@ import numpy as np
 import torch
 
 import learnMSA.backend as backend
+import learnMSA.model.training_util as training_util
 from learnMSA.align.decode_util import DecodeArrays
 from learnMSA.hmm.torch.layer import TorchPHMMLayer as PHMMLayer
+from learnMSA.model.batch_generator import get_lengths
 from learnMSA.model.bucketing import make_default_bucket_scheme
 from learnMSA.model.context import LearnMSAContext
 from learnMSA.model.model import LearnMSAModel
@@ -453,7 +455,7 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
         if batch_size is None:
             batch_size = self.get_batch_size(data[0])
         # Limit the training batch size to avoid convergence issues
-        batch_size = min(batch_size, 512)
+        batch_size = min(batch_size, training_util.MAX_TRAIN_BATCH_SIZE)
 
         if indices is None:
             indices = np.arange(data[0].num_seq)
@@ -622,22 +624,22 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
         return weighted_y_pred.sum(dim=0)  # (H,)
 
     def log_prior(self) -> torch.Tensor:
-        """ Computes the logarithmic prior value of each underlying model.
+        """ Computes the logarithmic prior value of each underlying model,
+        normalized by the size of the data the model is trained on
+        (``context.prior_scale``).
 
         Returns:
             Tensor of shape (num_models,) with the log prior values.
         """
-        if self.context.sequence_weights is not None:
-            num_cluster = self.context.sequence_weights.sum()
-            # Use a geometric interpolation between the number of clusters
-            # and the actual sequence count to be more stable; because the
-            # former can be small
-            S = math.sqrt(num_cluster * self.context.num_seq)
-        else:
-            S = self.context.num_seq
         log_prior = self.phmm_layer.prior_scores()
-        if S > 0:
-            log_prior = log_prior / S
+        scale = self.context.prior_scale
+        if log_prior.shape[0] != scale.size:
+            # The prior of a head subset
+            scale = scale[list(self.phmm_layer.head_subset or [])]
+        if np.all(scale > 0):
+            log_prior = log_prior / torch.as_tensor(
+                scale, dtype=log_prior.dtype, device=log_prior.device
+            )
         return log_prior
 
     def reset_metrics(self) -> None:
@@ -696,6 +698,14 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
 
         See :meth:`learnMSA.model.tf.model.TFLearnMSAModel.predict` for the
         full description of the arguments and the shape of the result.
+
+        ``indices`` can also be a 2-D per-model index table of shape
+        ``(N, H)`` (see
+        :func:`~learnMSA.model.batch_generator.get_index_table`), which
+        runs every model on its own sequences in the same pass. The output is
+        then indexed by table row, cells with index -1 are empty and their
+        outputs meaningless, and ``reduce`` averages each model over its
+        non-empty cells.
         """
         if self._decode_msa:
             raise NotImplementedError(
@@ -747,7 +757,12 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
                     summed = y.sum(dim=(0, 1)).cpu().numpy()
                     accumulated_posteriors += summed[..., :-1]  # drop terminal
 
-            accumulated_posteriors /= len(indices)
+            if indices.ndim == 1:
+                accumulated_posteriors /= len(indices)
+            else:
+                # Average each model over its own (non-empty) cells
+                counts = np.count_nonzero(indices >= 0, axis=0)
+                accumulated_posteriors /= np.maximum(counts, 1)[:, None]
             self._finish_predict(
                 old_crop_long_seqs, prev_head_subset, start_time,
                 len(indices), steps,
@@ -785,9 +800,9 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
                 outputs = []
                 for padded_len, (preds, idxs) in bucket_preds.items():
                     bucket_idx = np.concatenate(idxs, axis=0)
-                    bucket_max_len = int(
-                        np.amax(data[0].seq_lens[indices[bucket_idx]]) + 1
-                    )
+                    bucket_max_len = int(np.amax(get_lengths(
+                        data[0].seq_lens, indices[bucket_idx]
+                    )) + 1)
                     L = min(padded_len, bucket_max_len)
                     bucket_pred = np.concatenate(
                         [p[:, :L] for p in preds], axis=0
@@ -803,7 +818,9 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
                 outputs_arr: np.ndarray | None = None
 
                 if is_posterior or is_decoding:
-                    max_len = int(np.amax(data[0].seq_lens[indices]) + 1)
+                    max_len = int(
+                        np.amax(get_lengths(data[0].seq_lens, indices)) + 1
+                    )
 
                 for batch in loader:
                     batch_pred_t, batch_idx_t = self.predict_step(batch)
