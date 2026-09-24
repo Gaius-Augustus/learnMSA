@@ -163,3 +163,47 @@ def test_shared_batch_leaves_the_bucket_scheme_alone() -> None:
                 model_lengths=[20, 20, 20, 20],
             ))
     assert schemes[0] == schemes[1]
+
+
+def test_shuffle_stays_within_training_indices() -> None:
+    filename = os.path.dirname(__file__) + "/../data/felix_insert_delete.fa"
+    with SequenceDataset(filename) as data:
+        config = Configuration()
+        config.training.num_model = 4
+        config.training.no_sequence_weights = True
+        config.training.share_batch = False
+        train = np.array([4, 1, 3, 1])
+        batch_gen = batch_generator.BatchGenerator(shuffle=True)
+        batch_gen.configure(data, LearnMSAContext(config, data), train)
+
+        # Each column is a bijection of the distinct training indices.
+        ind = np.array([1, 3, 4])
+        _, i = batch_gen(ind)
+        for k in range(i.shape[1]):
+            np.testing.assert_equal(np.sort(i[:, k]), ind)
+        # The other sequences are never touched.
+        for p in batch_gen.permutations:
+            np.testing.assert_equal(p[[0, 2, 5]], [0, 2, 5])
+
+
+def test_full_training_set_keeps_the_permutations() -> None:
+    filename = os.path.dirname(__file__) + "/../data/felix_insert_delete.fa"
+    with SequenceDataset(filename) as data:
+        config = Configuration()
+        config.training.num_model = 4
+        config.training.no_sequence_weights = True
+        config.training.share_batch = False
+        context = LearnMSAContext(config, data)
+
+        # The permutations drawn before training indices were supported.
+        np.random.seed(7)
+        expected = [np.arange(data.num_seq) for _ in range(4)]
+        for p in expected:
+            np.random.shuffle(p)
+
+        for indices in (None, np.arange(data.num_seq)):
+            batch_gen = batch_generator.BatchGenerator(shuffle=True)
+            np.random.seed(7)
+            batch_gen.configure(data, context, indices)
+            for p, q in zip(batch_gen.permutations, expected):
+                np.testing.assert_equal(p, q)

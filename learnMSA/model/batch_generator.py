@@ -39,7 +39,14 @@ class BatchGenerator():
         self,
         data: Dataset | tuple[Dataset, ...],
         context: "LearnMSAContext",
+        indices: np.ndarray | None = None,
     ):
+        """
+        Args:
+            data: The dataset(s) with the sequences to sample from.
+            context: LearnMSAContext object with the configuration.
+            indices: The sequence indices that will be used to generate batches.
+        """
         if isinstance(data, Dataset):
             data = (data,)
         self.data = data
@@ -69,13 +76,18 @@ class BatchGenerator():
                 )
 
         # One permutation per emitted model column: one per trained model
-        # normally, a single shared one when the batch is shared.
-        self.permutations = [
-            np.arange(data[0].num_seq)
-            for _ in range(self.generated_num_models)
-        ]
-        for p in self.permutations:
-            np.random.shuffle(p)
+        # normally, a single shared one when the batch is shared
+        num_seq = data[0].num_seq
+        if indices is None:
+            idx = np.arange(num_seq)
+        else:
+            idx = np.unique(indices)
+        self.permutations = []
+        for _ in range(self.generated_num_models):
+            # permutation of a subset still needs to be in a full-length array
+            p = np.arange(num_seq)
+            p[idx] = np.random.permutation(idx)
+            self.permutations.append(p)
         self.configured = True
 
     @property

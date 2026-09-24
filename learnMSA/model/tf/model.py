@@ -393,7 +393,9 @@ class TFLearnMSAModel(tf.keras.Model, LearnMSAModel[tf.Tensor]):
         data = self._pack_datasets(data, "fit")
 
         self.phmm_layer.loglik_mode()
-        self.context.batch_gen.configure(data, context=self.context)
+        self.context.batch_gen.configure(
+            data, context=self.context, indices=indices
+        )
 
         if batch_size is None:
             batch_size = self.get_batch_size(data[0])
