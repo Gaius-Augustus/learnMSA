@@ -1,8 +1,19 @@
 import sys
+from pathlib import Path
+from typing import TYPE_CHECKING, Sequence
 
 import numpy as np
 
+from learnMSA.backend import get_backend
+from learnMSA.config import Configuration
+from learnMSA.util.multi_dataset import MultiSequenceDataset
 from learnMSA.util.sequence_dataset import SequenceDataset
+
+if TYPE_CHECKING:
+    from learnMSA.align.alignment_model import AlignmentModel
+
+#: Insertions of at least this length make a position worth aligning.
+LONG_INSERTION_LENGTH = 20
 
 
 
@@ -168,7 +179,7 @@ class AlignedInsertions():
         return result
 
 
-def find_long_insertions_and_get_sequences(data : SequenceDataset, lens, starts, t = 20, k=2, max_insertions_len=500, max_insertions_len_below_seq_ok = 100, row_to_seq=None):
+def find_long_insertions_and_get_sequences(data : SequenceDataset, lens, starts, t = LONG_INSERTION_LENGTH, k=2, max_insertions_len=500, max_insertions_len_below_seq_ok = 100, row_to_seq=None, all_fragments=False):
     """
     Finds insertions that have at least length t. If there are at least k of these sequences, returns id + fragment pairs.
     Args: 
@@ -179,43 +190,65 @@ def find_long_insertions_and_get_sequences(data : SequenceDataset, lens, starts,
         row_to_seq: Maps an alignment row to its index in *data*. Required when
             the alignment covers a subset of the dataset; the returned row
             indices stay in alignment-row space either way.
+        all_fragments: If True, the long insertions only decide whether the
+            slice is aligned, and the returned slice holds every non-empty
+            insertion at this position.
     """
     at_least_t = lens >= t
     lengths = lens[at_least_t]
     if lengths.size > 1:
-        which = np.squeeze(np.argwhere(at_least_t))
-        start = starts[at_least_t]
-        id_fragment_pairs = []
-        to_delete = [] #keeps track of fragments that are too long
-        for j in range(lengths.size):
-            row = which[j]
-            seq_idx = int(row if row_to_seq is None else row_to_seq[row])
-            aa_seq = data.get_standardized_seq(seq_idx)
-            segment = aa_seq[start[j] : start[j] + lengths[j]]
-            #sometimes segments look strange (like ones consisting only of X)
-            #this can cause problems in the downstream aligner, omit these segments
-            # Count residues that are not one of the 20 standard amino acids
-            # (ambiguity codes X/B/Z/J and, unless modeled, U/O).
-            standard = SequenceDataset._default_alphabet
-            non_standard_freq = sum(
-                1 for ch in segment if ch not in standard
-            ) / max(1, len(segment))
-            mostly_non_standard_aa = non_standard_freq > 0.5
-            if (mostly_non_standard_aa or 
-                (lengths[j] > max_insertions_len and 
-                    which.size > max_insertions_len_below_seq_ok)):
-                to_delete.append(j)
-            else:
-                sid = data.seq_ids[seq_idx]+"\n"
-                id_fragment_pairs.append((sid, segment))
-        which = np.delete(which, to_delete)
+        # Very long fragments are dropped when there are many long ones
+        drop_longer_than = (
+            max_insertions_len
+            if lengths.size > max_insertions_len_below_seq_ok else np.inf
+        )
+        which, id_fragment_pairs = _get_fragments(
+            data, np.flatnonzero(at_least_t), lens, starts, row_to_seq,
+            drop_longer_than,
+        )
         if which.size > k:
+            if all_fragments:
+                return _get_fragments(
+                    data, np.flatnonzero(lens > 0), lens, starts, row_to_seq,
+                    drop_longer_than,
+                )
             return (which, id_fragment_pairs)
     return None
 
 
+def _get_fragments(data, which, lens, starts, row_to_seq, drop_longer_than):
+    """The fragments of the insertions in the rows *which*, except those
+    that consist mostly of non-standard residues or are longer than
+    drop_longer_than.
+
+    Returns:
+        The rows that were kept and their (id, fragment) pairs.
+    """
+    # Count residues that are not one of the 20 standard amino acids
+    # (ambiguity codes X/B/Z/J and, unless modeled, U/O).
+    standard = SequenceDataset._default_alphabet
+    keep = []
+    id_fragment_pairs = []
+    for row in which:
+        seq_idx = int(row if row_to_seq is None else row_to_seq[row])
+        aa_seq = data.get_standardized_seq(seq_idx)
+        segment = aa_seq[starts[row] : starts[row] + lens[row]]
+        #sometimes segments look strange (like ones consisting only of X)
+        #this can cause problems in the downstream aligner, omit these segments
+        non_standard_freq = sum(
+            1 for ch in segment if ch not in standard
+        ) / max(1, len(segment))
+        if non_standard_freq > 0.5 or lens[row] > drop_longer_than:
+            continue
+        keep.append(row)
+        sid = data.seq_ids[seq_idx]+"\n"
+        id_fragment_pairs.append((sid, segment))
+    return np.asarray(keep, dtype=np.int64), id_fragment_pairs
+
+
 def make_aligned_insertions(
-    am, best_model, decoding_mode, method="famsa", threads=0, verbose=True
+    am, best_model, decoding_mode, method="famsa", threads=0, verbose=True,
+    config: Configuration | None = None,
 ):
     """
     Aligns insertions with the given method and adds them to the alignment model.
@@ -223,19 +256,105 @@ def make_aligned_insertions(
     Args:
         am: Alignment model.
         best_model: The best model to use for extracting insertions.
-        method: Alignment method. Currently, only famsa is supported.
-        threads: Number of threads to use. If 0, uses all available threads.
         decoding_mode: Decoding mode for alignment model.
+        method: Alignment method, one of "famsa", "learnmsa" or "auto" (see
+            ``AdvancedConfig.insertion_aligner``).
+        threads: Number of threads to use (famsa). If 0, uses all available
+            threads.
+        verbose: Whether to print progress messages.
+        config: Configuration of the learnmsa aligner. Defaults to the
+            configuration of am's model.
     """
-    if not best_model in am.metadata:
-        am._build_alignment([best_model], decoding_mode)
-    meta_data = am.metadata[best_model]
+    return make_aligned_insertions_multi(
+        [(am, best_model)], decoding_mode, method, threads, verbose, config
+    )[0]
+
+
+def make_aligned_insertions_multi(
+    alignments: Sequence[tuple["AlignmentModel", int]],
+    decoding_mode,
+    method="famsa",
+    threads=0,
+    verbose=True,
+    config: Configuration | None = None,
+) -> list[AlignedInsertions]:
+    """
+    Aligns the insertions of several alignments at once, e.g. of all heads
+    of a MultiAlignmentModel, so that the learnmsa aligner trains and decodes
+    all of them jointly.
+
+    Args:
+        alignments: Pairs of an alignment model and the index of the model
+            whose insertions are aligned.
+        decoding_mode: Decoding mode for the alignment models.
+        method: See :func:`make_aligned_insertions`.
+        threads: See :func:`make_aligned_insertions`.
+        verbose: Whether to print progress messages.
+        config: Configuration of the learnmsa aligner. Defaults to the
+            configuration of the model of the first alignment.
+
+    Returns:
+        One AlignedInsertions per alignment.
+    """
+    method = _resolve_aligner(method)
+    if config is None and method == "learnmsa":
+        config = alignments[0][0].model.context.config
+
+    # Slices of all alignments, keyed by "<alignment>/<slice>"
+    meta_datas = []
+    rows: dict[str, np.ndarray] = {}
+    slices: dict[str, list] = {}
+    for a, (am, model_index) in enumerate(alignments):
+        # learnMSA trains on every insertion of a selected position
+        meta_data, am_rows, am_slices = _collect_slices(
+            am, model_index, decoding_mode,
+            all_fragments=method == "learnmsa",
+        )
+        meta_datas.append(meta_data)
+        for key in am_slices:
+            rows[f"{a}/{key}"] = am_rows[key]
+            slices[f"{a}/{key}"] = am_slices[key]
+
+    if verbose:
+        print(f"Aligning {len(slices)} insertion slices with {method}.")
+
+    # Align and reduce one slice at a time so that the raw fragments, the
+    # gapped fragments and the column maps of all slices are never all alive
+    # at the same time.
+    columns = make_slice_msas(
+        slices, rows, method, threads, config, decoding_mode
+    )
+
+    per_alignment: list[dict] = [{} for _ in alignments]
+    for key, slice_columns in columns.items():
+        a, name = key.split("/", 1)
+        per_alignment[int(a)][name] = slice_columns
+    return [
+        _build_aligned_insertions(meta_data, cols)
+        for meta_data, cols in zip(meta_datas, per_alignment)
+    ]
+
+
+def _collect_slices(am, model_index, decoding_mode, all_fragments=False):
+    """Collects the long insertions of one model of an alignment.
+
+    Args:
+        all_fragments: If True, a slice holds every insertion at its
+            position, see :func:`find_long_insertions_and_get_sequences`.
+
+    Returns:
+        ``(meta_data, rows, slices)``. ``rows`` and ``slices`` map slice keys
+        to the alignment rows and the (id, fragment) pairs of that slice.
+    """
+    if not model_index in am.metadata:
+        am.build_alignment([model_index], decoding_mode)
+    meta_data = am.metadata[model_index]
     num_seq = meta_data.left_flank_len.shape[0]
     all_rows = np.arange(num_seq)
     num_ins_pos = meta_data.insertion_lens.shape[1]
 
     # Collect the raw fragments of every slice. `rows` and `slices` are kept in
-    # lockstep and are consumed (and freed) one slice at a time below.
+    # lockstep and are consumed (and freed) one slice at a time later.
     rows: dict[str, np.ndarray] = {}
     slices: dict[str, list] = {}
 
@@ -250,13 +369,13 @@ def make_aligned_insertions(
         am.data[0],
         meta_data.left_flank_len_for(all_rows),
         meta_data.left_flank_start_for(all_rows),
-        row_to_seq=row_to_seq,
+        row_to_seq=row_to_seq, all_fragments=all_fragments,
     ))
     collect("right_flank", find_long_insertions_and_get_sequences(
         am.data[0],
         meta_data.right_flank_len_for(all_rows),
         meta_data.right_flank_start_for(all_rows),
-        row_to_seq=row_to_seq,
+        row_to_seq=row_to_seq, all_fragments=all_fragments,
     ))
     for r in range(meta_data.num_repeats):
         for i in range(num_ins_pos):
@@ -265,22 +384,22 @@ def make_aligned_insertions(
             # several times over.
             il_i, is_i = meta_data.get_repeat_insertions(r, all_rows, i)
             collect(f"ins_{r}_{i}", find_long_insertions_and_get_sequences(
-                am.data[0], il_i, is_i, row_to_seq=row_to_seq
+                am.data[0], il_i, is_i, row_to_seq=row_to_seq,
+                all_fragments=all_fragments,
             ))
     for r in range(meta_data.num_repeats-1):
         uns_l, uns_s = meta_data.get_unannotated_data(r, all_rows)
         collect(f"unannotated_{r}", find_long_insertions_and_get_sequences(
-            am.data[0], uns_l, uns_s, row_to_seq=row_to_seq
+            am.data[0], uns_l, uns_s, row_to_seq=row_to_seq,
+            all_fragments=all_fragments,
         ))
+    return meta_data, rows, slices
 
-    if verbose:
-        print(f"Aligning {len(slices)} insertion slices with {method}.")
 
-    # Align and reduce one slice at a time so that the raw fragments, the
-    # gapped fragments and the column maps of all slices are never all alive
-    # at the same time.
-    columns = make_slice_msas(slices, rows, method, threads)
-
+def _build_aligned_insertions(meta_data, columns) -> AlignedInsertions:
+    """Assembles the column maps of the slices of one alignment."""
+    num_seq = meta_data.left_flank_len.shape[0]
+    num_ins_pos = meta_data.insertion_lens.shape[1]
     insertions_long = [
         [columns.get(f"ins_{r}_{i}") for i in range(num_ins_pos)]
         for r in range(meta_data.num_repeats)
@@ -289,27 +408,141 @@ def make_aligned_insertions(
         columns.get(f"unannotated_{r}")
         for r in range(meta_data.num_repeats-1)
     ]
-
-    aligned_insertions = AlignedInsertions(
+    return AlignedInsertions(
         num_seq,
         insertions_long,
         columns.get("left_flank"),
         columns.get("right_flank"),
         unannotated_long,
     )
-    return aligned_insertions
 
 
-def make_slice_msas(slices, rows, method="famsa", threads=0):
+def _resolve_aligner(method: str) -> str:
+    """Resolves "auto" to the insertion aligner of the selected backend."""
+    if method == "auto":
+        return "learnmsa" if get_backend() == "pytorch" else "famsa"
+    if method == "learnmsa" and get_backend() != "pytorch":
+        raise ValueError(
+            "The learnmsa insertion aligner requires the pytorch backend, "
+            f"but '{get_backend()}' is selected. Use the famsa aligner "
+            "instead."
+        )
+    return method
+
+
+def make_slice_msas(
+    slices, rows, method="famsa", threads=0,
+    config: Configuration | None = None, decoding_mode=None,
+):
     """Align every slice and reduce it to a :class:`SliceColumns`.
 
     *slices* and *rows* are emptied as they are processed, so the raw fragments
     of a slice are freed as soon as its column map exists.
     """
+    method = _resolve_aligner(method)
     if method == "famsa":
         return align_with_famsa(slices, rows, threads)
+    if method == "learnmsa":
+        if config is None:
+            raise ValueError("The learnmsa aligner needs a configuration.")
+        return align_with_learnmsa(slices, rows, config, decoding_mode)
     print(f"Unknown aligner {method}")
     sys.exit(1)
+
+
+def align_with_learnmsa(
+    slices, rows, config: Configuration, decoding_mode=None
+):
+    """Aligns every slice with its own pHMM, trained and decoded by learnMSA.
+
+    The slices are sorted by the median length of their long fragments and
+    aligned in joint runs of at most ``config.advanced.insertion_max_heads``
+    slices, one pHMM head per slice. Each head is trained on all fragments of
+    its slice, starting at the median length of the long fragments (see
+    :data:`LONG_INSERTION_LENGTH`) capped at
+    ``config.advanced.insertion_max_length``, without model surgery.
+    Insertions that are much longer than the cap are underfitted.
+    """
+    # align imports alignment_model, which imports this module
+    from learnMSA.align.align import align_batch
+    from learnMSA.align.alignment_model import AlignmentModel
+
+    if decoding_mode is None:
+        decoding_mode = AlignmentModel.DecodingMode.VITERBI
+    adv = config.advanced
+    columns = {}
+    for keys in _chunk_slice_keys(slices, adv.insertion_max_heads):
+        lengths = _insertion_lengths(slices, keys, adv.insertion_max_length)
+        # The column maps only need the row order, so ids are positions
+        data = MultiSequenceDataset(
+            sequences=[
+                [(str(j), seq) for j, (_, seq) in enumerate(slices.pop(key))]
+                for key in keys
+            ],
+            model_uo=config.hmm.model_uo,
+        )
+        am = align_batch(data, _insertion_config(config, lengths))
+        am.build_alignment(decoding_mode=decoding_mode)
+        for k, key in enumerate(keys):
+            gapped = am.to_string(k, add_block_sep=False)
+            columns[key] = _slice_columns(rows.pop(key), gapped)
+        del am, data
+    return columns
+
+
+def _median_length(fragments: list) -> float:
+    """The median length of the long fragments (all if there are none)."""
+    lens = np.array([len(seq) for _, seq in fragments])
+    long_lens = lens[lens >= LONG_INSERTION_LENGTH]
+    return float(np.median(long_lens if long_lens.size else lens))
+
+
+def _chunk_slice_keys(slices, max_heads: int) -> list[list[str]]:
+    """Sorts the slice keys by the median length of their long fragments and
+    splits them into chunks of at most max_heads, so that heads of similar
+    length share a run."""
+    keys = sorted(slices, key=lambda key: _median_length(slices[key]))
+    return [keys[i:i + max_heads] for i in range(0, len(keys), max_heads)]
+
+
+def _insertion_lengths(slices, keys, max_length: int) -> list[int]:
+    """The initial model length of each slice: the median length of its long
+    fragments, capped at max_length and at least 3."""
+    return [
+        max(3, min(max_length, int(_median_length(slices[key]))))
+        for key in keys
+    ]
+
+
+def _insertion_config(
+    config: Configuration, lengths: list[int]
+) -> Configuration:
+    """The configuration of a learnMSA run that aligns insertions.
+
+    Uses default pHMM heads and training with one head per slice and no
+    model surgery. Only general settings (backend, compilation, batch size,
+    hit alignment) are taken from config.
+    """
+    inner = Configuration()
+    inner.advanced = config.advanced.model_copy(deep=True)
+    inner.hmm.model_uo = config.hmm.model_uo
+    training = inner.training
+    training.length_init = list(lengths)
+    training.max_iterations = 1
+    # Avoid one mmseqs2 run per slice
+    training.no_sequence_weights = True
+    # Short fragments dominate most slices, so cropping relative to the mean
+    # length would cut the long ones below the model length
+    training.auto_crop = False
+    training.crop = 2 * config.advanced.insertion_max_length
+    training.batch_size = config.training.batch_size
+    training.tokens_per_batch = config.training.tokens_per_batch
+    training.hit_alignment_mode = config.training.hit_alignment_mode
+    inner.input_output.verbose = False
+    inner.input_output.work_dir = str(
+        Path(config.input_output.work_dir) / "insertion_alignment"
+    )
+    return inner
 
 
 def align_with_famsa(slices, rows, threads):

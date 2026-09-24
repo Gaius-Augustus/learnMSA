@@ -169,6 +169,7 @@ def args_to_config(
     adv["initial_distance"] = args.initial_distance
     adv["compile"] = args.compile
     adv["use_triton"] = args.use_triton
+    adv["insertion_aligner"] = args.insertion_aligner
 
     # Deprecated checks
     if args.noA2M:

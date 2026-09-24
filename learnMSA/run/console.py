@@ -15,6 +15,7 @@ from learnMSA.run.help import handle_help_command
 from learnMSA.run.args import parse_args
 
 if TYPE_CHECKING:
+    from learnMSA.align.align_inserts import AlignedInsertions
     from learnMSA.align.alignment_model import AlignmentModel
 
 # Framework-specific environment (log levels, allocator, the triton guard)
@@ -246,6 +247,7 @@ def align_multiple_files(config : Configuration) -> None:
     own pHMM, training and decoding all of them jointly. The alignments are
     written to the files in the list config.input_output.output_file."""
     from learnMSA.align.align import align_batch
+    from learnMSA.align.align_inserts import make_aligned_insertions_multi
     from learnMSA.align.alignment_model import AlignmentModel
     from learnMSA.util import MultiSequenceDataset
 
@@ -267,10 +269,24 @@ def align_multiple_files(config : Configuration) -> None:
         # Decode all alignments in one pass
         am.build_alignment(decoding_mode=decoding_mode)
 
+        heads = [am.head(k) for k in range(len(io.output_file))]
+        aligned_insertions: list = [None] * len(heads)
+        if not (config.training.unaligned_insertions
+                or config.training.only_matches):
+            # Align the insertions of all alignments jointly
+            aligned_insertions = make_aligned_insertions_multi(
+                [(head, k) for k, head in enumerate(heads)],
+                decoding_mode=decoding_mode,
+                method=config.advanced.insertion_aligner,
+                threads=config.advanced.aligner_threads,
+                verbose=config.input_output.verbose,
+            )
+
         _warn_compress(config)
         for k, output_file in enumerate(io.output_file):
             write_alignment(
-                am.head(k), k, output_file, config, decoding_mode
+                heads[k], k, output_file, config, decoding_mode,
+                aligned_insertions[k],
             )
 
 
@@ -280,9 +296,14 @@ def write_alignment(
     output_file: str | Path,
     config: Configuration,
     decoding_mode: "AlignmentModel.DecodingMode",
+    aligned_insertions: "AlignedInsertions | None" = None,
 ) -> Path:
     """Writes the alignment of one model to output_file, aligning the
     insertions unless disabled in the config.
+
+    Args:
+        aligned_insertions: Insertions that were already aligned, e.g.
+            jointly for several alignments. Computed here if None.
 
     Returns:
         The path of the written file.
@@ -315,14 +336,15 @@ def write_alignment(
             add_block_sep=config.input_output.add_block_separator_to_msa,
         )
     else:
-        aligned_insertions = make_aligned_insertions(
-            am,
-            model_index,
-            decoding_mode=decoding_mode,
-            method=config.advanced.insertion_aligner,
-            threads=config.advanced.aligner_threads,
-            verbose=config.input_output.verbose,
-        )
+        if aligned_insertions is None:
+            aligned_insertions = make_aligned_insertions(
+                am,
+                model_index,
+                decoding_mode=decoding_mode,
+                method=config.advanced.insertion_aligner,
+                threads=config.advanced.aligner_threads,
+                verbose=config.input_output.verbose,
+            )
         written_file = am.to_file(
             output_file,
             model_index,

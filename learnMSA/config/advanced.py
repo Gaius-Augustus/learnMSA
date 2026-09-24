@@ -30,8 +30,20 @@ class AdvancedConfig(BaseModel):
     If weights are used, the initial distance is calculated from the cluster
     sequence identity."""
 
-    insertion_aligner: str = "famsa"
-    """Insertion aligner to use."""
+    insertion_aligner: Literal["auto", "learnmsa", "famsa"] = "auto"
+    """Aligner for long insertions. ``learnmsa`` trains one pHMM per group of
+    insertions with learnMSA itself (pytorch backend only), ``famsa`` uses
+    FAMSA. ``auto`` picks ``learnmsa`` under the pytorch backend and
+    ``famsa`` otherwise."""
+
+    insertion_max_length: int = 100
+    """Maximum number of match states of the pHMMs that align insertions
+    (``learnmsa`` aligner). Caps the longest head to avoid padding; longer
+    insertions are underfitted."""
+
+    insertion_max_heads: int = 64
+    """Maximum number of insertion groups that the ``learnmsa`` aligner
+    aligns in one run, one pHMM head each."""
 
     aligner_threads: int = 0
     """Number of threads to use for the aligner."""
@@ -53,4 +65,16 @@ class AdvancedConfig(BaseModel):
     def validate_quantiles(cls, v: float, info) -> float:
         if not v > 0:
             raise ValueError(f"{info.field_name} must be greater than 0.")
+        return v
+
+    @field_validator("insertion_max_length")
+    def validate_insertion_max_length(cls, v: int) -> int:
+        if v < 3:
+            raise ValueError("insertion_max_length must be at least 3.")
+        return v
+
+    @field_validator("insertion_max_heads")
+    def validate_insertion_max_heads(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("insertion_max_heads must be at least 1.")
         return v

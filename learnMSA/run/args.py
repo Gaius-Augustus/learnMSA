@@ -727,6 +727,16 @@ def parse_args(
             "torch scan. PyTorch only; the kernels are usually faster, but "\
             "they are opt-in because they are not available everywhere."
     )
+    advanced_group.add_argument(
+        "--insertion_aligner",
+        dest="insertion_aligner",
+        type=str,
+        choices=["auto", "learnmsa", "famsa"],
+        default=adv.insertion_aligner,
+        help="Aligner for long insertions. 'learnmsa' trains one pHMM per "\
+            "insertion site (pytorch only), 'famsa' uses FAMSA. By default "\
+            "('auto') learnmsa is used with PyTorch and famsa otherwise."
+    )
 
     deprecated_group = parser.add_argument_group("Deprecated arguments")
     deprecated_group.add_argument(

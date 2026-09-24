@@ -120,6 +120,18 @@ differ slighly in their initialization, length (number of match states) and
 ``--unaligned_insertions``
     Insertions will be left unaligned.
 
+``--insertion_aligner`` *INSERTION_ALIGNER*
+    Aligner for long insertions (at least 20 residues at the same site in at
+    least 3 sequences). With ``learnmsa``, learnMSA groups the insertions by
+    site and trains one profile HMM per site, many sites in parallel on the
+    GPU. Each model starts at the median insertion length of its site, capped
+    at 100 match states, and is trained without model surgery, so very long
+    insertions are aligned less accurately. This requires the pytorch
+    backend. With ``famsa``, the insertions are aligned with FAMSA.
+    Possible values are: ``auto``, ``learnmsa``, ``famsa``.
+
+    Default: auto (learnmsa with the pytorch backend, famsa otherwise)
+
 ``--crop`` *CROP*
     During training, sequences longer than the given value will be cropped
     randomly. Reduces training runtime and memory usage, but might produce

@@ -7,6 +7,8 @@ column maps are now read straight out of the aligner output instead of via an
 :class:`~learnMSA.util.aligned_dataset.AlignedDataset`.
 """
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -230,3 +232,98 @@ def test_reductions_on_empty_metadata() -> None:
     assert meta.repeat_occupancy_mask().shape == (0, 3)
     assert meta.insertion_lens_total.shape == (0, 2)
     assert meta.get_repeat_insertions(0, np.arange(0), 0)[0].shape == (0,)
+
+
+def _fragments(*lengths: int) -> list:
+    return [(f"s{j}", "A" * n) for j, n in enumerate(lengths)]
+
+
+def test_insertion_slices_are_chunked_by_median_length() -> None:
+    from learnMSA.align.align_inserts import _chunk_slice_keys
+
+    slices = {
+        "a": _fragments(50, 60, 70),
+        "b": _fragments(20, 21, 22),
+        "c": _fragments(30, 300, 31),
+        "d": _fragments(25, 26, 90),
+    }
+    # Medians: a 60, b 21, c 31, d 26
+    assert _chunk_slice_keys(slices, 2) == [["b", "d"], ["c", "a"]]
+    assert _chunk_slice_keys(slices, 3) == [["b", "d", "c"], ["a"]]
+    assert _chunk_slice_keys(slices, 64) == [["b", "d", "c", "a"]]
+
+
+def test_insertion_lengths_are_capped_medians() -> None:
+    from learnMSA.align.align_inserts import _insertion_lengths
+
+    slices = {
+        "short": _fragments(1, 2, 2),
+        "mid": _fragments(20, 41, 45),
+        "long": _fragments(400, 500, 600),
+        # Only the long fragments (>= 20) count for the median
+        "mixed": _fragments(1, 2, 3, 4, 30, 34, 36),
+    }
+    assert _insertion_lengths(
+        slices, ["short", "mid", "long", "mixed"], 100
+    ) == [3, 41, 100, 34]
+
+
+def test_insertion_config_uses_default_heads() -> None:
+    from learnMSA import Configuration
+    from learnMSA.align.align_inserts import _insertion_config
+
+    outer = Configuration()
+    outer.training.learning_rate = 0.5
+    outer.training.length_init = [300]
+    outer.training.batch_size = 32
+    outer.input_output.work_dir = "wd"
+    outer.input_output.subset_ids = ["x"]
+    outer.advanced.insertion_max_heads = 8
+
+    inner = _insertion_config(outer, [20, 30])
+    assert inner.training.length_init == [20, 30]
+    assert inner.training.num_model == 2
+    assert inner.training.max_iterations == 1
+    assert inner.training.no_sequence_weights
+    assert inner.training.learning_rate == Configuration().training.learning_rate
+    assert inner.training.batch_size == 32
+    assert inner.input_output.subset_ids == []
+    assert inner.input_output.work_dir == str(Path("wd") / "insertion_alignment")
+    assert inner.advanced.insertion_max_heads == 8
+    # Cropping does not depend on the many short fragments
+    assert not inner.training.auto_crop
+    assert inner.training.crop == 2 * outer.advanced.insertion_max_length
+    # The outer configuration is left alone
+    assert outer.training.length_init == [300]
+
+
+def test_explicit_famsa_is_kept() -> None:
+    from learnMSA.align.align_inserts import _resolve_aligner
+
+    assert _resolve_aligner("famsa") == "famsa"
+
+
+def test_long_insertions_select_the_slice_of_all_fragments() -> None:
+    from learnMSA.align.align_inserts import (
+        find_long_insertions_and_get_sequences)
+    from learnMSA.util.sequence_dataset import SequenceDataset
+
+    lens = np.array([0, 5, 25, 30, 22, 3])
+    starts = np.zeros_like(lens)
+    data = SequenceDataset(
+        sequences=[(f"s{i}", "A" * max(1, n)) for i, n in enumerate(lens)]
+    )
+    rows, fragments = find_long_insertions_and_get_sequences(
+        data, lens, starts
+    )
+    np.testing.assert_equal(rows, [2, 3, 4])
+    rows, fragments = find_long_insertions_and_get_sequences(
+        data, lens, starts, all_fragments=True
+    )
+    np.testing.assert_equal(rows, [1, 2, 3, 4, 5])
+    assert [len(f) for _, f in fragments] == [5, 25, 30, 22, 3]
+    # Too few long insertions: the position is not aligned at all
+    lens[4] = 19
+    assert find_long_insertions_and_get_sequences(
+        data, lens, starts, all_fragments=True
+    ) is None
