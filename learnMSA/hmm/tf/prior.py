@@ -406,12 +406,18 @@ class TFPHMMStartPrior(TFPrior):
 
             # Extract the probability of starting in the left flank state
             flank_init_prob = start_dist[h, left_idx]  # type: ignore
+            # Summed instead of 1 - flank_init_prob, which is 0 in float32
+            # once the flank start probability rounds to 1
+            other_init_prob = tf.reduce_sum(tf.concat(
+                [start_dist[h, :left_idx], start_dist[h, left_idx + 1:]],
+                axis=0,
+            ))
 
             # Compute start prior using the same alpha parameters as flank prior
             a = self.prior_config.alpha_flank
             a_c = self.prior_config.alpha_flank_compl
             score = (a - 1) * safe_log(flank_init_prob)
-            score += (a_c - 1) * safe_log(1.0 - flank_init_prob)
+            score += (a_c - 1) * safe_log(other_init_prob)
 
             scores.append(score)
 

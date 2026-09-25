@@ -23,11 +23,6 @@ def _exit_probability(
 ) -> T_TorchTensor:
     """The probability of leaving a state with a self-loop.
 
-    Summed over the out-transitions other than the loop instead of taken as
-    ``1 - loop``: in float32 that difference is exactly 0 once the loop is
-    within ~6e-8 of 1, and its log then hits the ``safe_log`` floor, which a
-    complement concentration below 1 turns into a huge reward.
-
     Args:
         transition_matrix: The transition matrix of one head, shape (Q, Q).
         state: The index of the state.
@@ -410,12 +405,17 @@ class TorchPHMMStartPrior(TorchPrior):
 
             # Extract the probability of starting in the left flank state
             flank_init_prob = start_dist[h, left_idx]
+            # Summed instead of 1 - flank_init_prob, which is 0 in float32
+            # once the flank start probability rounds to 1
+            other_init_prob = torch.cat(
+                [start_dist[h, :left_idx], start_dist[h, left_idx + 1:]]
+            ).sum()
 
             # Compute start prior using the same alphas as the flank prior
             a = self.prior_config.alpha_flank
             a_c = self.prior_config.alpha_flank_compl
             score = (a - 1) * safe_log(flank_init_prob)
-            score = score + (a_c - 1) * safe_log(1.0 - flank_init_prob)
+            score = score + (a_c - 1) * safe_log(other_init_prob)
 
             scores.append(score)
 
