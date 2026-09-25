@@ -62,6 +62,7 @@ def args_to_config(
     tr["batch_size"] = args.batch_size
     tr["tokens_per_batch"] = args.tokens_per_batch
     tr["learning_rate"] = args.learning_rate
+    tr["prior_scale"] = args.prior_scale
     tr["epochs"] = args.epochs
     tr["max_iterations"] = args.max_iterations
     tr["length_init"] = args.length_init

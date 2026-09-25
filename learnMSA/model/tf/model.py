@@ -504,22 +504,17 @@ class TFLearnMSAModel(tf.keras.Model, LearnMSAModel[tf.Tensor]):
         return weighted_loglik
 
     def log_prior(self) -> tf.Tensor:
-        """ Computes the logarithmic prior value of each underlying model.
+        """ Computes the logarithmic prior value of each underlying model,
+        normalized by the size of the data the model is trained on
+        (``context.prior_scale``).
 
         Returns:
             log_prior: Tensor of shape (num_models,) with the log prior values.
         """
-        if self.context.sequence_weights is not None:
-            num_cluster = self.context.sequence_weights.sum()
-            # Use a geometric interpolation between the number of clusters
-            # and the actual sequence count to be more stable; because the
-            # former can be small
-            S = math.sqrt(num_cluster * self.context.num_seq)
-        else:
-            S = self.context.num_seq
         log_prior = self.phmm_layer.prior_scores()
-        if S > 0:
-            log_prior /= tf.cast(S, tf.float32)
+        scale = self.context.prior_scale
+        if np.all(scale > 0):
+            log_prior /= tf.constant(scale, dtype=tf.float32)
         return log_prior
 
     def reset_metrics(self) -> None:

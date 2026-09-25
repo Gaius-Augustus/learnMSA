@@ -15,7 +15,15 @@ from learnMSA.util.sequence_dataset import SequenceDataset
 
 DIR = "tests/data/"
 
-# Test the context with a dataset
+
+def _divisor(n: float, num_eff: float | None = None) -> float:
+    """The expected log prior divisor of a head trained on n sequences with
+    the given sum of sequence weights (None: no weights)."""
+    base = n if num_eff is None else np.sqrt(num_eff * n)
+    return base / min(1.0, LearnMSAContext.PRIOR_DATA_FACTOR * (
+        n if num_eff is None else num_eff)
+    )
+
 
 @pytest.fixture
 def simple_data() -> Generator[SequenceDataset, None, None]:
@@ -490,7 +498,7 @@ def test_multi_dataset_context(
     assert config.training.crop == max(expected_crops)
     assert isinstance(context.batch_gen, MultiBatchGenerator)
     # Without weights, every model is normalized by its dataset size.
-    np.testing.assert_equal(context.prior_scale, [8, 6])
+    np.testing.assert_allclose(context.prior_scale, [_divisor(8), _divisor(6)])
 
 
 def test_single_dataset_prior_scale(
@@ -498,7 +506,7 @@ def test_single_dataset_prior_scale(
 ) -> None:
     config.training.num_model = 3
     context = LearnMSAContext(config, simple_data)
-    np.testing.assert_equal(context.prior_scale, [8, 8, 8])
+    np.testing.assert_allclose(context.prior_scale, [_divisor(8)] * 3)
     assert context.head_crops is None
 
 
@@ -549,7 +557,7 @@ def test_multi_dataset_clustering(tmp_path: Path) -> None:
     w = context.sequence_weights
     np.testing.assert_allclose(
         context.prior_scale,
-        [np.sqrt(w[:n0].sum() * n0), np.sqrt(w[n0:].sum() * n1)],
+        [_divisor(n0, w[:n0].sum()), _divisor(n1, w[n0:].sum())],
     )
 
 
@@ -564,4 +572,4 @@ def test_serialization_keeps_the_prior_scale(
     # Configs written before the prior scale existed still load.
     del config_dict["prior_scale"]
     restored = LearnMSAContext.from_config(config_dict)
-    np.testing.assert_equal(restored.prior_scale, [14, 14])
+    np.testing.assert_allclose(restored.prior_scale, [_divisor(14)] * 2)

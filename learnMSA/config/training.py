@@ -26,6 +26,9 @@ class TrainingConfig(BaseModel):
     learning_rate: float = 0.1
     """Learning rate for gradient descent."""
 
+    prior_scale: float = 1.0
+    """Factor on the log prior of all pHMMs. 0 to disable."""
+
     gradient_clipnorm: float = 1.0
     """Global norm the gradients are clipped to. Set to 0 to disable."""
 
@@ -136,6 +139,12 @@ class TrainingConfig(BaseModel):
     """Mode for aligning the domain hits during training. Options: "left",
     "right", "greedy_scores", "greedy_single"."""
 
+
+    @field_validator("prior_scale")
+    def validate_prior_scale(cls, v: float) -> float:
+        if v < 0:
+            raise ValueError("prior_scale must not be negative.")
+        return v
 
     @field_validator("learning_rate")
     def validate_learning_rate(cls, v: float) -> float:

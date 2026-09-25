@@ -20,6 +20,7 @@ from ..util.aligned_dataset import AlignedDataset
 from ..util.multi_dataset import MultiSequenceDataset
 from ..util.sequence_dataset import SequenceDataset
 
+
 # Type alias for model length callback
 ModelLengthsCallback = Callable[[SequenceDataset], np.ndarray]
 BatchSizeCallback = Callable[[SequenceDataset], int]
@@ -42,6 +43,8 @@ class LearnMSAContext:
         model_lenghts_cb: Callable that takes a SequenceDataset and Configuration
             and returns an array of initial model lengths.
     """
+
+    PRIOR_DATA_FACTOR = 3.0 / 172.0
 
     config: Configuration
     num_seq: int
@@ -405,10 +408,15 @@ class LearnMSAContext:
         for start, end in parts:
             n = end - start
             if self.sequence_weights is not None:
-                num_cluster = float(self.sequence_weights[start:end].sum())
-                scale.append(np.sqrt(num_cluster * n))
+                num_eff = float(self.sequence_weights[start:end].sum())
+                divisor = np.sqrt(num_eff * n)
             else:
-                scale.append(float(n))
+                num_eff = float(n)
+                divisor = float(n)
+            # scale down the prior on few sequences
+            weight = self.config.training.prior_scale \
+                * min(1.0, LearnMSAContext.PRIOR_DATA_FACTOR * num_eff)
+            scale.append(divisor / weight if weight > 0 else np.inf)
         return np.array(scale, dtype=np.float64)
 
     def _setup_init_msa(

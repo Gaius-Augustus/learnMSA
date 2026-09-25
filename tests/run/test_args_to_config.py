@@ -872,3 +872,13 @@ class TestArgsToConfig:
         config = args_to_config(args)
 
         assert config.hmm.noise_concentration == 10000.0
+
+
+def test_prior_scale():
+    parser = parse_args("test_version")
+    args = parser.parse_args(["-i", "input.fasta", "-o", "output.a2m"])
+    assert args_to_config(args).training.prior_scale == 1.0
+    args = parser.parse_args([
+        "-i", "input.fasta", "-o", "output.a2m", "--prior_scale", "0.3",
+    ])
+    assert args_to_config(args).training.prior_scale == 0.3

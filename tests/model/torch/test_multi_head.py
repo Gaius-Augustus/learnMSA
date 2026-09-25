@@ -42,11 +42,14 @@ def _head_indices(data: MultiSequenceDataset) -> list[np.ndarray]:
 
 def test_log_prior_is_normalized_per_head(multi_model) -> None:
     _, model = multi_model
-    np.testing.assert_equal(model.context.prior_scale, [8, 6])
+    divisor = np.array([8.0, 6.0]) / np.minimum(
+        1.0, LearnMSAContext.PRIOR_DATA_FACTOR * np.array([8.0, 6.0])
+    )
+    np.testing.assert_allclose(model.context.prior_scale, divisor)
     with torch.no_grad():
         np.testing.assert_allclose(
             model.log_prior().cpu().numpy(),
-            model.phmm_layer.prior_scores().cpu().numpy() / [8, 6],
+            model.phmm_layer.prior_scores().cpu().numpy() / divisor,
             rtol=1e-6,
         )
 

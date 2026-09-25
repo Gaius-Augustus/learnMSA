@@ -55,6 +55,13 @@ differ slighly in their initialization, length (number of match states) and
 
     Default: 0.05 if ``--use_language_model`` is set, otherwise 0.1.
 
+``--prior_scale`` *FLOAT*
+    Factor on the prior (transition priors and amino acid Dirichlet) of the
+    profile HMMs relative to the data, including the models that align
+    insertions. 0 disables the prior.
+
+    Default: 1.0
+
 ``--epochs`` *EPOCHS [EPOCHS ...]*
     Scheme for the number of training epochs during the first, an intermediate,
     and the last iteration. Provide either a single integer (used for all

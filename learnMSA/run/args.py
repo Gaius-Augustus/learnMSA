@@ -251,6 +251,16 @@ def parse_args(
         help="Number of tokens per batch for training. Default: adaptive."
     )
     train_group.add_argument(
+        "--prior_scale",
+        dest="prior_scale",
+        type=float,
+        default=tr.prior_scale,
+        help="Factor on the prior of the profile HMMs relative to the data. "\
+            "The prior is weakened automatically for families with few "\
+            "sequences on top of it. 0 disables the prior. "\
+            "(default: %(default)s)"
+    )
+    train_group.add_argument(
         "--learning_rate",
         dest="learning_rate",
         type=float,

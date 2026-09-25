@@ -521,7 +521,8 @@ def _insertion_config(
 
     Uses default pHMM heads and training with one head per slice and no
     model surgery. Only general settings (backend, compilation, batch size,
-    hit alignment) are taken from config.
+    hit alignment, prior scale) are taken from config. Like every pHMM, the
+    heads get a weaker prior when their slice has few fragments.
     """
     inner = Configuration()
     inner.advanced = config.advanced.model_copy(deep=True)
@@ -538,6 +539,7 @@ def _insertion_config(
     training.batch_size = config.training.batch_size
     training.tokens_per_batch = config.training.tokens_per_batch
     training.hit_alignment_mode = config.training.hit_alignment_mode
+    training.prior_scale = config.training.prior_scale
     inner.input_output.verbose = False
     inner.input_output.work_dir = str(
         Path(config.input_output.work_dir) / "insertion_alignment"
