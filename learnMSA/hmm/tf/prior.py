@@ -16,6 +16,17 @@ from learnMSA.hmm.tf.util import load_dirichlet
 from learnMSA.hmm.util.transition_index_set import PHMMTransitionIndexSet
 
 
+def _exit_probability(transition_matrix: T_TFTensor, state: int) -> T_TFTensor:
+    """The probability of leaving a state with a self-loop.
+
+    Args:
+        transition_matrix: The transition matrix of one head, shape (Q, Q).
+        state: The index of the state.
+    """
+    row = transition_matrix[state]
+    return tf.reduce_sum(tf.concat([row[:state], row[state + 1:]], axis=0))
+
+
 class TFPHMMTransitionPrior(TFPrior):
     """ A prior that uses Dirichlet distributions to score the transition
     probabilities of a profile HMM. Uses sub-priors for match, insert, and delete
@@ -177,10 +188,14 @@ class TFPHMMTransitionPrior(TFPrior):
             right_flank_loop = transition_matrix[h, right_idx, right_idx] # type: ignore
             end_to_right_flank = transition_matrix[h, end_idx, right_idx] # type: ignore
 
-            # Exit probabilities (1 - loop probability)
-            left_flank_exit = 1.0 - left_flank_loop
-            unannotated_exit = 1.0 - unannotated_loop
-            right_flank_exit = 1.0 - right_flank_loop
+            # Exit probabilities
+            left_flank_exit = _exit_probability(transition_matrix[h], left_idx)
+            unannotated_exit = _exit_probability(
+                transition_matrix[h], unannot_idx
+            )
+            right_flank_exit = _exit_probability(
+                transition_matrix[h], right_idx
+            )
 
             # End state transitions
             end_to_unannotated = transition_matrix[h, end_idx, unannot_idx] # type: ignore

@@ -18,6 +18,24 @@ from learnMSA.hmm.torch.util import load_dirichlet
 from learnMSA.hmm.util.transition_index_set import PHMMTransitionIndexSet
 
 
+def _exit_probability(
+    transition_matrix: T_TorchTensor, state: int
+) -> T_TorchTensor:
+    """The probability of leaving a state with a self-loop.
+
+    Summed over the out-transitions other than the loop instead of taken as
+    ``1 - loop``: in float32 that difference is exactly 0 once the loop is
+    within ~6e-8 of 1, and its log then hits the ``safe_log`` floor, which a
+    complement concentration below 1 turns into a huge reward.
+
+    Args:
+        transition_matrix: The transition matrix of one head, shape (Q, Q).
+        state: The index of the state.
+    """
+    row = transition_matrix[state]
+    return torch.cat([row[:state], row[state + 1:]]).sum()
+
+
 class TorchPHMMTransitionPrior(TorchPrior):
     """A prior that uses Dirichlet distributions to score the transition
     probabilities of a profile HMM. Uses sub-priors for match, insert, and
@@ -179,10 +197,14 @@ class TorchPHMMTransitionPrior(TorchPrior):
             right_flank_loop = transition_matrix[h, right_idx, right_idx]
             end_to_right_flank = transition_matrix[h, end_idx, right_idx]
 
-            # Exit probabilities (1 - loop probability)
-            left_flank_exit = 1.0 - left_flank_loop
-            unannotated_exit = 1.0 - unannotated_loop
-            right_flank_exit = 1.0 - right_flank_loop
+            # Exit probabilities
+            left_flank_exit = _exit_probability(transition_matrix[h], left_idx)
+            unannotated_exit = _exit_probability(
+                transition_matrix[h], unannot_idx
+            )
+            right_flank_exit = _exit_probability(
+                transition_matrix[h], right_idx
+            )
 
             # End state transitions
             end_to_unannotated = transition_matrix[h, end_idx, unannot_idx]
