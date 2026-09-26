@@ -66,6 +66,8 @@ def test_joint_decoding_equals_per_head_decoding(mode) -> None:
     config = Configuration()
     config.training.no_sequence_weights = True
     config.training.length_init = [5, 4]
+    config.hmm.use_noise = True
+    np.random.seed(0)
     context = LearnMSAContext(config, data)
     model = make_learnmsa_model(context)
     model.build()

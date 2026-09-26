@@ -1,4 +1,5 @@
 import subprocess
+import sys
 
 import pytest
 
@@ -18,7 +19,7 @@ def test_error_handling() -> None:
 
     test = subprocess.Popen(
         [
-            "python", "learnMSA.py", "--no_sequence_weights", "--silent",
+            sys.executable, "learnMSA.py", "--no_sequence_weights", "--silent",
             "-o", "test.out", "-i", single_seq
         ],
         stderr=subprocess.PIPE
@@ -28,7 +29,7 @@ def test_error_handling() -> None:
 
     test = subprocess.Popen(
         [
-            "python", "learnMSA.py", "--no_sequence_weights", "--silent",
+            sys.executable, "learnMSA.py", "--no_sequence_weights", "--silent",
             "-o", "test.out", "-i", faulty_format
         ],
         stderr=subprocess.PIPE
@@ -38,7 +39,7 @@ def test_error_handling() -> None:
 
     test = subprocess.Popen(
         [
-            "python", "learnMSA.py", "--no_sequence_weights", "--silent",
+            sys.executable, "learnMSA.py", "--no_sequence_weights", "--silent",
             "-o", "test.out", "-i", empty_seq
         ],
         stderr=subprocess.PIPE
@@ -48,7 +49,7 @@ def test_error_handling() -> None:
 
     test = subprocess.Popen(
         [
-            "python", "learnMSA.py", "--no_sequence_weights", "--silent",
+            sys.executable, "learnMSA.py", "--no_sequence_weights", "--silent",
             "-o", "test.out", "-i", unknown_symbol
         ],
         stderr=subprocess.PIPE
@@ -63,7 +64,7 @@ def test_file_conversion_and_input_format() -> None:
     # fasta -> clustal
     test = subprocess.Popen(
         [
-            "python", "learnMSA.py", "--convert", "--silent",
+            sys.executable, "learnMSA.py", "--convert", "--silent",
             "-i", input_fasta,
             "-o", output_clustal,
             "--format", "clustal"
@@ -80,7 +81,7 @@ def test_file_conversion_and_input_format() -> None:
     output_fasta = "tests/data/egf.out.fasta"
     test = subprocess.Popen(
         [
-            "python", "learnMSA.py", "--convert", "--silent",
+            sys.executable, "learnMSA.py", "--convert", "--silent",
             "-i", output_clustal,
             "-o", output_fasta,
             "--input_format", "clustal",
@@ -110,7 +111,7 @@ def test_compile_jit_rejected_under_torch() -> None:
     )
     test = subprocess.Popen(
         [
-            "python", "learnMSA.py", "--silent",
+            sys.executable, "learnMSA.py", "--silent",
             "-i", "tests/data/egf.fasta", "-o", "test.out",
             "--backend", "pytorch", "--compile", "jit",
         ],
