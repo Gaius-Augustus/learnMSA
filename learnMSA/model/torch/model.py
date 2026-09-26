@@ -417,7 +417,6 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
         self,
         data: SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]],
         indices: np.ndarray | None = None,
-        iteration: int = 0,
         batch_size: int | None = None,
         epochs: int | None = None,
         steps_per_epoch: int | None = None,
@@ -431,10 +430,9 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
             data: SequenceDataset or tuple of Dataset(s) with the first dataset
                 being a SequenceDataset.
             indices: Array of sequence indices to train on.
-            iteration: Current iteration number in the training loop.
             batch_size: Number of sequences per batch.
-            epochs: Number of epochs to train for (overrides automatic
-                setting).
+            epochs: Number of epochs to train for. Default: the epochs of
+                the first training round, ``training.epochs[0]``.
             steps_per_epoch: Number of steps per epoch (overrides automatic
                 setting).
             callbacks: Accepted for signature parity with the TensorFlow
@@ -461,7 +459,7 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
             indices = np.arange(data[0].num_seq)
 
         if epochs is None:
-            epochs = self.get_num_epochs(iteration)
+            epochs = self.context.config.training.epochs[0]
 
         if steps_per_epoch is None:
             steps_per_epoch = self.get_num_steps(indices.shape[0], batch_size)
@@ -1224,7 +1222,7 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
             consensus_score = consensus_logliks.mean(dim=1)
         return consensus_score.cpu().numpy()
 
-    def get_train_callbacks(self, iteration: int = 0) -> list:
+    def get_train_callbacks(self) -> list:
         """No callback protocol exists for the hand-written training loop.
 
         NaN termination and early stopping are handled inline in :meth:`fit`.

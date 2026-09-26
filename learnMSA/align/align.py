@@ -251,7 +251,8 @@ def _fit_and_align(
 
         # Run training
         model.fit(
-            data, indices=train_indices, iteration=i, batch_size=batch_size
+            data, indices=train_indices, batch_size=batch_size,
+            epochs=_num_epochs(config, i, last_iteration),
         )
 
         am = AlignmentModel(
@@ -292,6 +293,16 @@ def _fit_and_align(
         backend.clear_session()
 
     return am
+
+
+def _num_epochs(
+    config: Configuration, iteration: int, last_iteration: bool
+) -> int:
+    """Epochs of a training."""
+    epochs = config.training.epochs
+    if iteration == 0:
+        return epochs[0]
+    return epochs[2] if last_iteration else epochs[1]
 
 
 def _save_surgery_checkpoint(
@@ -501,8 +512,8 @@ def _fit_and_align_batch(
         model.fit(
             data,
             indices=train_indices,
-            iteration=i,
             batch_size=batch_size,
+            epochs=_num_epochs(config, i, last_iteration),
             steps_per_epoch=steps,
         )
 

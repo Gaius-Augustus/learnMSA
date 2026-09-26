@@ -360,7 +360,6 @@ class TFLearnMSAModel(tf.keras.Model, LearnMSAModel[tf.Tensor]):
         self,
         data: SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]],
         indices: np.ndarray | None = None,
-        iteration: int = 0,
         batch_size: int | None = None,
         epochs: int | None = None,
         steps_per_epoch: int | None = None,
@@ -380,9 +379,9 @@ class TFLearnMSAModel(tf.keras.Model, LearnMSAModel[tf.Tensor]):
                 and sequence lengths, although these metrics should be
                 consistent across datasets.
             indices: Array of sequence indices to train on
-            iteration: Current iteration number in the training loop
             batch_size: Number of sequences per batch
-            epochs: Number of epochs to train for (overrides automatic setting)
+            epochs: Number of epochs to train for. Default: the epochs of the
+                first training round, ``training.epochs[0]``
             steps_per_epoch: Number of steps per epoch
                 (overrides automatic setting)
             callbacks: List of Keras callbacks to use during training
@@ -406,7 +405,7 @@ class TFLearnMSAModel(tf.keras.Model, LearnMSAModel[tf.Tensor]):
             indices = np.arange(data[0].num_seq)
 
         if epochs is None:
-            epochs = self.get_num_epochs(iteration)
+            epochs = self.context.config.training.epochs[0]
 
         if steps_per_epoch is None:
             steps_per_epoch = self.get_num_steps(indices.shape[0], batch_size)

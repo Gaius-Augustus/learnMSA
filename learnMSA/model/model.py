@@ -145,24 +145,6 @@ class LearnMSAModel(PHMMMixin, Generic[T_Tensor]):
         else:
             return self.context.batch_size
 
-    def get_num_epochs(self, iteration: int) -> int:
-        """
-        Determine the number of epochs for the current training iteration.
-
-        Args:
-            iteration: Current iteration number in the training loop.
-
-        Returns:
-            Number of epochs to train for this iteration.
-        """
-        last_iteration = (
-            iteration == self.context.config.training.max_iterations - 1
-        )
-        epochs = self.context.config.training.epochs[
-            0 if iteration==0 else 1 if not last_iteration else 2
-        ]
-        return epochs
-
     def get_num_steps(
         self, num_sequences: int, batch_size: int, min_steps: int = 5
     ) -> int:
@@ -318,7 +300,7 @@ class LearnMSAModel(PHMMMixin, Generic[T_Tensor]):
 
     @abstractmethod
     def fit(
-        self, data, indices=None, iteration=0, batch_size=None,
+        self, data, indices=None, batch_size=None,
         epochs=None, steps_per_epoch=None, callbacks=None
     ) -> Any: ...
 
@@ -340,7 +322,7 @@ class LearnMSAModel(PHMMMixin, Generic[T_Tensor]):
     def compute_consensus_score(self) -> np.ndarray: ...
 
     @abstractmethod
-    def get_train_callbacks(self, iteration: int = 0) -> list: ...
+    def get_train_callbacks(self) -> list: ...
 
     @abstractmethod
     def save(self, filepath) -> None:
