@@ -2,6 +2,7 @@ import sys
 
 import numpy as np
 
+from learnMSA.util.famsa_align import to_famsa_alphabet
 from learnMSA.util.sequence_dataset import SequenceDataset
 
 
@@ -320,8 +321,11 @@ def align_with_famsa(slices, rows, threads):
     for key in list(slices):
         seqs = slices.pop(key)
         row_idx = rows.pop(key)
+        # Only the gap pattern of the slice MSA is used, so residues FAMSA
+        # cannot encode (e.g. U) can be masked without changing the output.
         enc_seqs = [
-            FamsaSequence(sid.encode(), seq.encode()) for sid, seq in seqs
+            FamsaSequence(sid.encode(), to_famsa_alphabet(seq).encode())
+            for sid, seq in seqs
         ]
         msa = aligner.align(enc_seqs)
         del enc_seqs

@@ -69,6 +69,30 @@ def test_slice_columns_is_compact() -> None:
     assert sc.cols.dtype == np.int16
 
 
+def test_famsa_accepts_residues_outside_its_alphabet() -> None:
+    """U, O and J are rejected by FAMSA; the slice must still be aligned."""
+    pytest.importorskip("pyfamsa")
+    from learnMSA.align.align_inserts import align_with_famsa
+    frags = [
+        "MKTAYIAKQRCGGPTUPFSIKAAGL",
+        "MKTAYIAKQRCGGVTUALSPSSA",
+        "MKTAYIOKQRCAGVTJALSPKSAGLA",
+        "MKTAYIAKQRCGGPTCPFSIKAAGL",
+    ]
+    rows = np.array([2, 5, 7, 9])
+    columns = align_with_famsa(
+        {"slice": [(f"s{i}\n", f) for i, f in enumerate(frags)]},
+        {"slice": rows},
+        threads=1,
+    )
+    sc = columns["slice"]
+    np.testing.assert_array_equal(sc.rows, rows)
+    for i, frag in enumerate(frags):
+        c = sc.cols[i, :len(frag)]
+        assert np.all(np.diff(c) > 0)
+        assert c[-1] < sc.width
+
+
 @pytest.mark.parametrize("batch", [
     np.arange(0, 6), np.arange(6, 12), np.arange(3, 9), np.arange(0, 20),
     np.array([0]), np.array([19]),

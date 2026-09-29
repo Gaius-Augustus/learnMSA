@@ -1,5 +1,20 @@
-import Bio.SeqIO
+import re
 from pathlib import Path
+
+import Bio.SeqIO
+
+
+# Letters outside pyfamsa's FAMSA_ALPHABET ("ARNDCQEGHILKMFPSTWYVBZX*").
+# Hard-coded so that pyfamsa is not imported at module load.
+_NON_FAMSA_PATTERN = re.compile(r"[^ARNDCQEGHILKMFPSTWYVBZX*]")
+
+
+def to_famsa_alphabet(seq: str) -> str:
+    """Replace residues FAMSA cannot encode (e.g. U, O, J) with X.
+
+    FAMSA rejects such sequences outright. The length of *seq* is preserved.
+    """
+    return _NON_FAMSA_PATTERN.sub("X", seq)
 
 
 def align_with_famsa(fasta: str | Path, output: str | Path, threads: int = 0) -> None:
@@ -8,7 +23,9 @@ def align_with_famsa(fasta: str | Path, output: str | Path, threads: int = 0) ->
 
     # Parse fasta
     sequences = [
-        FamsaSequence(r.id.encode(), str(r.seq).encode())
+        FamsaSequence(
+            r.id.encode(), to_famsa_alphabet(str(r.seq).upper()).encode()
+        )
         for r in Bio.SeqIO.parse(fasta, "fasta")
     ]
 
