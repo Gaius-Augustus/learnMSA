@@ -198,6 +198,22 @@ class TestArgsToConfig:
         assert config.structure.prior_name == "custom_struct_prior"
         assert config.structure.prior_components == 16
 
+    def test_args_to_config_joint_row_prior(self):
+        """The joint row prior defaults to hierarchical and can be switched."""
+        parser = parse_args("test_version")
+        base = ["-i", "input.fasta", "-o", "output.a2m",
+                "--struct", "3di.fasta", "--joint_emissions"]
+        config = args_to_config(parser.parse_args(base))
+        assert config.structure.joint_row_prior == "hierarchical"
+        assert config.structure.joint_row_concentration == 20.0
+
+        config = args_to_config(parser.parse_args(base + [
+            "--joint_row_prior", "per_conditional",
+            "--joint_row_concentration", "5",
+        ]))
+        assert config.structure.joint_row_prior == "per_conditional"
+        assert config.structure.joint_row_concentration == 5.0
+
     def test_args_to_config_default_save_emb_uses_workdir(self):
         """Test default save_emb path construction from work_dir and input_file."""
         parser = parse_args("test_version")

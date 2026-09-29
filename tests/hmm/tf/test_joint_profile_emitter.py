@@ -538,7 +538,7 @@ def make_conditional_prior_emitter(
 
 @pytest.mark.parametrize("low_rank", [0, 2])
 @pytest.mark.parametrize("components", [1, 9])
-def test_conditional_prior_scores_sum_over_rows(
+def test_per_conditional_prior_scores_sum_over_rows(
     low_rank: int,
     components: int,
     config: Configuration,
@@ -562,7 +562,7 @@ def test_conditional_prior_scores_sum_over_rows(
 
 
 @pytest.mark.parametrize("low_rank", [0, 2])
-def test_conditional_prior_scores_at_init(
+def test_per_conditional_prior_scores_at_init(
     low_rank: int,
     config: Configuration,
     hidten_config: HidtenHMMConfig,
@@ -608,3 +608,13 @@ def test_marginal_prior_rejected_when_conditional(
     )
     with pytest.raises(AssertionError):
         emitter.add_marginal_prior(1, prior)
+
+
+def test_hierarchical_row_prior_not_implemented(
+    config: Configuration, hidten_config: HidtenHMMConfig,
+) -> None:
+    """Only the per-conditional row prior exists in the TensorFlow backend."""
+    emitter = make_conditional_prior_emitter(config, hidten_config)
+    emitter.set_row_prior("per_conditional")
+    with pytest.raises(NotImplementedError):
+        emitter.set_row_prior("hierarchical")

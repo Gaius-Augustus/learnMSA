@@ -187,6 +187,15 @@ def parse_args() -> argparse.Namespace:
              "instead of estimating them by empirical Bayes.",
     )
     parser.add_argument(
+        "--min-alpha", "--min_alpha",
+        type=float,
+        default=0.0,
+        help="Lower bound on every concentration parameter: the fit uses "
+             "alpha = min_alpha + softplus(kernel). With 1, all alpha exceed "
+             "1, so the prior density has no pole at the simplex boundary. "
+             "0 is the unconstrained fit.",
+    )
+    parser.add_argument(
         "--init",
         type=str,
         default="data",
@@ -256,6 +265,8 @@ def parse_args() -> argparse.Namespace:
         help="Output weight file. Defaults to the shipped weights directory.",
     )
     args = parser.parse_args()
+    if args.min_alpha < 0:
+        parser.error("--min-alpha must be non-negative.")
     if args.extended_alphabet and args.alphabet != "aa":
         parser.error(
             "--extended_alphabet only applies to --alphabet aa; the "
@@ -763,6 +774,64 @@ def _dirichlet_log_pdf(p: tf.Tensor, alpha: tf.Tensor) -> tf.Tensor:
     return tf.reduce_sum(tf.math.xlogy(alpha - 1.0, p), axis=-1) - log_z
 
 
+class LowerBoundedDirichletPrior(TFDirichletPrior):
+    """A ``TFDirichletPrior`` whose concentrations are shifted by a constant.
+
+    ``matrix()`` returns ``min_alpha + softplus(kernel)`` for every
+    concentration (mixture coefficients are unchanged). All scoring methods of
+    the base class read ``matrix()``, so fitting this layer maximizes the
+    objective under the constraint ``alpha > min_alpha``. Only used for
+    fitting; the result is saved as a plain ``TFDirichletPrior`` kernel (see
+    :func:`standard_prior_model`). Create subclasses with a bound via
+    :func:`lower_bounded_prior_class`.
+    """
+
+    min_alpha: float = 0.0
+
+    def matrix(self) -> tf.Tensor:
+        matrix = super().matrix()
+        if self.config.components == 1:
+            return matrix + self.min_alpha
+        d = self.input_dim * self.config.components
+        return tf.concat(
+            [matrix[..., :d] + self.min_alpha, matrix[..., d:]], axis=-1
+        )
+
+
+def lower_bounded_prior_class(min_alpha: float) -> type[TFDirichletPrior]:
+    """The prior class to fit with: plain for ``min_alpha == 0``, otherwise a
+    :class:`LowerBoundedDirichletPrior` subclass with that bound."""
+    if min_alpha <= 0:
+        return TFDirichletPrior
+    return type(
+        "LowerBoundedDirichletPrior",
+        (LowerBoundedDirichletPrior,),
+        {"min_alpha": float(min_alpha)},
+    )
+
+
+def standard_prior_model(
+    weights: list[np.ndarray], dim: int, components: int, min_alpha: float
+) -> tf.keras.Model:
+    """Rebuild a fitted prior as a plain ``TFDirichletPrior`` model.
+
+    With a bound the fitted weights parameterize ``min_alpha + softplus``;
+    they are converted to the plain kernel ``inverse_softplus(alpha)`` that
+    :func:`learnMSA.hmm.tf.util.load_dirichlet` expects.
+    """
+    model = make_dirichlet_model(
+        dim=dim, components=components,
+        prior_class=lower_bounded_prior_class(min_alpha),
+    )
+    model.layers[1].set_weights(weights)
+    if min_alpha <= 0:
+        return model
+    fitted = model.layers[1].matrix()[0, 0].numpy().astype(np.float64)
+    return make_dirichlet_model(
+        initializer=fitted, dim=dim, components=components
+    )
+
+
 class DirichletMAPRegularizer(tf.keras.layers.Layer):
     """Training-only Dirichlet-Process MAP prior over a ``TFDirichletPrior``.
 
@@ -926,6 +995,7 @@ def build_trainable_model(
     use_map_prior: bool = True,
     freeze_hyperparams: bool = False,
     score_counts: bool = True,
+    min_alpha: float = 0.0,
 ) -> tf.keras.Model:
     """Create a trainable keras model wrapping a ``TFDirichletPrior``.
 
@@ -941,6 +1011,8 @@ def build_trainable_model(
         freeze_hyperparams: If True, freeze gamma/beta/lambda at their inits.
         score_counts: If True, train on count vectors; otherwise on
             probability vectors.
+        min_alpha: Lower bound on the concentrations (0: unconstrained).
+            The initializer then holds ``alpha - min_alpha``.
 
     Returns:
         A built keras model whose prior layer is trainable.
@@ -948,7 +1020,8 @@ def build_trainable_model(
     # make_dirichlet_model builds the prior with the correct sharing layout; we
     # reuse its (single) prior layer as the trainable component of our model.
     base = make_dirichlet_model(
-        initializer=initializer, dim=dim, components=components
+        initializer=initializer, dim=dim, components=components,
+        prior_class=lower_bounded_prior_class(min_alpha),
     )
     prior = base.layers[1]
     # Priors are frozen by default; enable training of the concentrations.
@@ -1145,6 +1218,7 @@ def summarize_prior(
         mean = alpha / total
         dom = int(mean.argmax())
         lines.append(f"  total concentration sum(alpha) = {total:.4f}")
+        lines.append(f"  min(alpha) = {float(alpha.min()):.4f}")
         lines.append(f"  dominant token {dom} (mean prob {mean[dom]:.4f})")
     else:
         conc = matrix[:components * dim].reshape(components, dim)
@@ -1153,6 +1227,7 @@ def summarize_prior(
         comp_mean = conc / totals[:, np.newaxis]
         dom = comp_mean.argmax(axis=1)
         dom_p = comp_mean.max(axis=1)
+        lines.append(f"  min(alpha) = {float(conc.min()):.4f}")
         entropy = float(-(mix * np.log(mix + 1e-12)).sum())
         effective = float(np.exp(entropy))
         lines.append(
@@ -1321,6 +1396,7 @@ def main() -> None:
             use_map_prior=use_map_prior,
             freeze_hyperparams=args.freeze_hyperparams,
             score_counts=score_counts,
+            min_alpha=args.min_alpha,
         )
         model.summary()
         val_loss = train(
@@ -1350,8 +1426,9 @@ def main() -> None:
     )
     # Rebuild a clean, prior-only model and load the best prior kernel, which
     # keeps the saved layout identical to what load_dirichlet expects.
-    best_model = make_dirichlet_model(dim=dim, components=args.components)
-    best_model.layers[1].set_weights(best_prior_weights)
+    best_model = standard_prior_model(
+        best_prior_weights, dim, args.components, args.min_alpha
+    )
 
     save_dim = dim
     if args.extended_alphabet:

@@ -160,6 +160,8 @@ def args_to_config(
     st["reset_after_surgery"] = args.struct_reset_after_surgery
     st["joint_emissions"] = args.joint_emissions
     st["joint_emission_low_rank"] = args.joint_emission_low_rank
+    st["joint_row_prior"] = args.joint_row_prior
+    st["joint_row_concentration"] = args.joint_row_concentration
     st["emitter_temperature"] = args.struct_emitter_temperature
 
     # --- Advanced ---

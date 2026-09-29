@@ -146,6 +146,23 @@ class JointProfileEmitter(ProfileEmitter):
             prior.hmm_config = self._hmm_config
         self._marginal_priors[marginal_index] = prior
 
+    def set_row_prior(
+        self,
+        mode: str,
+        concentration: float = 20.0,
+        aa_emitter: ProfileEmitter | None = None,
+    ) -> None:
+        """Selects the prior on the conditional rows. Only
+        ``"per_conditional"`` is implemented in the TensorFlow backend."""
+        if mode == "hierarchical":
+            raise NotImplementedError(
+                "The hierarchical joint row prior is only implemented in the "
+                "PyTorch backend. Use --backend pytorch or "
+                "--joint_row_prior per_conditional."
+            )
+        if mode != "per_conditional":
+            raise ValueError(f"Unknown joint row prior '{mode}'.")
+
     def get_marginal_prior(self, marginal_index: int) -> TFPrior | None:
         """Returns the prior for the marginal distribution of the joint
         distribution.
@@ -381,7 +398,7 @@ class JointProfileEmitter(ProfileEmitter):
         # Apply a prior to the joint distribution if it exists
         if hasattr(self, "_prior"):
             if self.conditional:
-                log_prior_scores += self._conditional_prior_scores(matrix)
+                log_prior_scores += self._per_conditional_prior_scores(matrix)
             else:
                 log_prior_scores += self._prior(matrix)
 
@@ -394,7 +411,7 @@ class JointProfileEmitter(ProfileEmitter):
 
         return log_prior_scores
 
-    def _conditional_prior_scores(self, matrix: T_TFTensor) -> T_TFTensor:
+    def _per_conditional_prior_scores(self, matrix: T_TFTensor) -> T_TFTensor:
         """Scores every row of the conditional table with ``self._prior``.
 
         Args:

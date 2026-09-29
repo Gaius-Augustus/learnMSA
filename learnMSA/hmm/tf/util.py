@@ -26,10 +26,12 @@ def make_dirichlet_prior(
     dim: int | None = None,
     components: int = 1,
     states: Sequence[int] = [1],
+    prior_class: type[TFDirichletPrior] = TFDirichletPrior,
 ) -> TFDirichletPrior:
     """Create and build a :class:`TFDirichletPrior` for the amino acid prior.
     If an initializer is provided, it is used to initialize the prior
-    distribution.
+    distribution. ``prior_class`` allows a subclass (e.g. a lower-bounded
+    prior used for fitting).
 
     For multi-component priors, ``dim`` must be provided explicitly since
     the initializer length encodes both components and categories.
@@ -45,7 +47,7 @@ def make_dirichlet_prior(
         raise ValueError(
             "dim must be provided for multi-component Dirichlet priors."
         )
-    prior = TFDirichletPrior(components=components)
+    prior = prior_class(components=components)
     prior.hmm_config = HidtenHMMConfig(states=states)
 
     n_param = components * n_dim + components if components > 1 else n_dim
@@ -67,10 +69,12 @@ def make_dirichlet_model(
     dim: int | None = None,
     components: int = 1,
     states: Sequence[int] = [1],
+    prior_class: type[TFDirichletPrior] = TFDirichletPrior,
 ) -> tf.keras.Model:
     """Wrap a Dirichlet prior in a keras model, for the prior fitting tooling."""
     prior = make_dirichlet_prior(
-        initializer=initializer, dim=dim, components=components, states=states
+        initializer=initializer, dim=dim, components=components, states=states,
+        prior_class=prior_class,
     )
     return make_model(prior.input_dim, prior)
 

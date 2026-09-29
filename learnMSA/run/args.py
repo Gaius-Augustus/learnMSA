@@ -881,6 +881,21 @@ def parse_args(
         help=argparse.SUPPRESS
     )
     parser.add_argument(
+        "--joint_row_prior",
+        dest="joint_row_prior",
+        type=str,
+        choices=["hierarchical", "per_conditional"],
+        default=st.joint_row_prior,
+        help=argparse.SUPPRESS
+    )
+    parser.add_argument(
+        "--joint_row_concentration",
+        dest="joint_row_concentration",
+        type=float,
+        default=st.joint_row_concentration,
+        help=argparse.SUPPRESS
+    )
+    parser.add_argument(
         "--struct_emitter_temperature",
         dest="struct_emitter_temperature",
         type=float,

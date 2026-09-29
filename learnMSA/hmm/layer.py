@@ -578,6 +578,16 @@ class PHMMLayer(Generic[T_Tensor]):
                 # The amino acid emitter P(aa | state) adds the amino acid prior
                 if self.structural_config.prior_name:
                     joint_emitter.prior = struct_prior
+                    row_prior = self.structural_config.joint_row_prior
+                    if row_prior == "hierarchical":
+                        assert self.profile_emitter is not None, \
+                            "The hierarchical joint row prior requires the " \
+                            "amino acid emitter (incompatible with no_aa)."
+                    joint_emitter.set_row_prior(
+                        row_prior,
+                        self.structural_config.joint_row_concentration,
+                        self.profile_emitter,
+                    )
             else:
                 # Add priors on both marginals
                 if self.prior_config.use_amino_acid_prior:

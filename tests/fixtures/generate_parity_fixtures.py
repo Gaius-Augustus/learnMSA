@@ -56,6 +56,8 @@ def make_configs(scenario: str):
         struct_config = StructureConfig()
         struct_config.use_structure = True
         struct_config.joint_emissions = True
+        # The TensorFlow backend implements only this row prior
+        struct_config.joint_row_prior = "per_conditional"
     elif scenario != "aa":
         raise ValueError(f"Unknown scenario {scenario!r}")
     return config, prior_config, struct_config

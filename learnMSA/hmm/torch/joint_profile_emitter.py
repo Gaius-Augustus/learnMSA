@@ -15,7 +15,7 @@ from hidten.torch.emitter.categorical import (T_shapelike, T_TorchTensor,
                                               n_shared_parameters)
 from hidten.torch.prior import TorchPrior
 from hidten.torch.util import (T_Initializer, safe_log, setup_initializer,
-                               zero_row_softmax)
+                               zero, zero_row_softmax)
 
 from learnMSA.hmm.joint_util import (AB_init, assert_value_sets, flatten_AB,
                                      outer_product_flat_np, tile_conditional)
@@ -32,6 +32,14 @@ class TorchJointProfileEmitter(TorchProfileEmitter):
     """
 
     marginal_dims: list[int]
+
+    row_prior: str = "per_conditional"
+    """The prior on the conditional rows, see
+    :attr:`learnMSA.config.structure.StructureConfig.joint_row_prior`. Set via
+    :meth:`set_row_prior`."""
+
+    row_concentration: float = 20.0
+    """Pseudo-count mass of the hierarchical row prior."""
 
     @TorchCategoricalEmitter.initializer.setter
     def initializer(self, initializer: T_Initializer) -> None:
@@ -144,6 +152,38 @@ class TorchJointProfileEmitter(TorchProfileEmitter):
         if hasattr(self, "_hmm_config"):
             prior.hmm_config = self._hmm_config
         self._marginal_priors[str(marginal_index)] = prior
+
+    def set_row_prior(
+        self,
+        mode: str,
+        concentration: float = 20.0,
+        aa_emitter: TorchProfileEmitter | None = None,
+    ) -> None:
+        """Selects the prior on the conditional rows.
+
+        Args:
+            mode: ``"per_conditional"`` applies ``self.prior`` to every
+                conditional row. ``"hierarchical"`` applies it once per state
+                to the implied marginal ``sum_a P(a | s) P(. | a, s)`` and
+                shrinks each row toward that marginal.
+            concentration: Pseudo-count mass per row of the hierarchical
+                prior. 0 disables the row term and keeps only the prior on
+                the marginal.
+            aa_emitter: The emitter of ``P(a | s)``. Required for
+                ``"hierarchical"``.
+        """
+        if mode not in ("hierarchical", "per_conditional"):
+            raise ValueError(f"Unknown joint row prior '{mode}'.")
+        if mode == "hierarchical":
+            assert self.conditional, \
+                "The hierarchical row prior requires conditional=True."
+            assert aa_emitter is not None, \
+                "The hierarchical row prior needs the amino acid emitter."
+        self.row_prior = mode
+        self.row_concentration = concentration
+        # A tuple, so that torch does not register the amino acid emitter as a
+        # submodule a second time (state_dict and checkpoints stay unchanged).
+        self._aa_emitter = (aa_emitter,)
 
     def get_marginal_prior(self, marginal_index: int) -> TorchPrior | None:
         """Returns the prior for the marginal distribution of the joint
@@ -382,9 +422,12 @@ class TorchJointProfileEmitter(TorchProfileEmitter):
 
         # Apply a prior to the joint distribution if it exists
         if hasattr(self, "_prior"):
-            if self.conditional:
+            if self.conditional and self.row_prior == "hierarchical":
                 log_prior_scores = log_prior_scores \
-                    + self._conditional_prior_scores(matrix)
+                    + self._hierarchical_prior_scores(matrix)
+            elif self.conditional:
+                log_prior_scores = log_prior_scores \
+                    + self._per_conditional_prior_scores(matrix)
             else:
                 log_prior_scores = log_prior_scores + self._prior(matrix)
 
@@ -397,7 +440,7 @@ class TorchJointProfileEmitter(TorchProfileEmitter):
 
         return log_prior_scores
 
-    def _conditional_prior_scores(
+    def _per_conditional_prior_scores(
         self, matrix: T_TorchTensor
     ) -> T_TorchTensor:
         """Scores every row of the conditional matrix with ``self._prior``.
@@ -414,6 +457,38 @@ class TorchJointProfileEmitter(TorchProfileEmitter):
         for i in range(1, self.marginal_dims[0]):
             scores = scores + self._prior(rows[:, :, i])
         return scores
+
+    def _hierarchical_prior_scores(
+        self, matrix: T_TorchTensor
+    ) -> T_TorchTensor:
+        """Scores the conditional matrix with the hierarchical row prior.
+
+        With ``m = sum_a sg(P(a | s)) P(. | a, s)`` (``sg`` = stop gradient)
+        and concentration ``c`` the log prior is
+        ``prior(m) + c * sum_a sum_b sg(m_b) log P(b | a, s)``. The second term
+        is ``Dir(c * sg(m) + 1)`` on every row without its normaliser, which is
+        constant. Row MAP estimates are ``(n_ab + c * m_b) / (n_a + c)``.
+
+        Args:
+            matrix: The conditional matrix of shape ``(H, Q, D1 * D2)``.
+
+        Returns:
+            The summed prior scores of shape ``(H)``.
+        """
+        H, Q = matrix.shape[0], matrix.shape[1]
+        rows = matrix.reshape([H, Q] + self.marginal_dims)
+        aa_matrix = self._aa_emitter[0].matrix().detach()
+        assert aa_matrix.shape == rows.shape[:3], \
+            "The amino acid emitter and the joint emitter disagree in shape " \
+            f"({tuple(aa_matrix.shape)} vs {tuple(rows.shape[:3])})."
+        marginal = torch.einsum("hqa,hqab->hqb", aa_matrix, rows)
+        scores = self._prior(marginal)
+        if self.row_concentration == 0:
+            return scores
+        row_scores = torch.xlogy(
+            marginal.detach()[:, :, None, :], rows.clamp_min(zero(rows))
+        ).sum(dim=(1, 2, 3))
+        return scores + self.row_concentration * row_scores
 
 
 def _identity(x: T_TorchTensor) -> T_TorchTensor:
