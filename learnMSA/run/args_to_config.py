@@ -163,6 +163,10 @@ def args_to_config(
     st["joint_row_prior"] = args.joint_row_prior
     st["joint_row_concentration"] = args.joint_row_concentration
     st["emitter_temperature"] = args.struct_emitter_temperature
+    st["observation_noise"] = args.struct_noise
+    st["observation_noise_strength"] = args.struct_noise_strength
+    st["observation_confusion_name"] = args.struct_noise_confusion
+    st["trainable_observation_noise"] = args.struct_noise_trainable
 
     # --- Advanced ---
     adv["backend"] = args.backend

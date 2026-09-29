@@ -902,5 +902,33 @@ def parse_args(
         default=st.emitter_temperature,
         help=argparse.SUPPRESS
     )
+    parser.add_argument(
+        "--struct_noise",
+        dest="struct_noise",
+        type=str,
+        choices=["none", "background", "confusion"],
+        default=st.observation_noise,
+        help=argparse.SUPPRESS
+    )
+    parser.add_argument(
+        "--struct_noise_strength",
+        dest="struct_noise_strength",
+        type=float,
+        default=st.observation_noise_strength,
+        help=argparse.SUPPRESS
+    )
+    parser.add_argument(
+        "--struct_noise_confusion",
+        dest="struct_noise_confusion",
+        type=str,
+        default=st.observation_confusion_name,
+        help=argparse.SUPPRESS
+    )
+    parser.add_argument(
+        "--struct_noise_trainable",
+        dest="struct_noise_trainable",
+        action="store_true",
+        help=argparse.SUPPRESS
+    )
 
     return parser

@@ -26,6 +26,7 @@ from learnMSA.hmm.torch.layer import TorchPHMMLayer as PHMMLayer
 from learnMSA.model.bucketing import make_default_bucket_scheme
 from learnMSA.model.context import LearnMSAContext
 from learnMSA.model.model import LearnMSAModel
+from learnMSA.model.torch.struct_observation import StructObservationLayer
 from learnMSA.model.torch.training import make_dataset
 from learnMSA.tree.torch.anc_probs_layer import TorchAncProbsLayer
 from learnMSA.util.sequence_dataset import Dataset, SequenceDataset
@@ -120,6 +121,16 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
         # Declared on the instance rather than the class so that torch's
         # submodule lookup is reachable; see learnMSA.hmm.layer for why.
         self.anc_probs_layer = None
+        self.struct_observation_layer = None
+
+        # Misclassification of observed structural tokens. Kept separate from
+        # the evolutionary model: it maps an observed token to likelihoods
+        # over true tokens before anc-probs sees the track.
+        st_cfg = context.config.structure
+        if st_cfg.use_structure and st_cfg.observation_noise != "none":
+            self.struct_observation_layer = StructObservationLayer(
+                st_cfg, strength=context.struct_observation_strength
+            )
 
         # Create the ancestral probabilities layer
         if tree_cfg.use_anc_probs and not train_cfg.no_aa:
@@ -290,6 +301,8 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
         anc_prob_inputs = [sequences_onehot]
 
         if self.context.config.structure.use_structure:
+            if self.struct_observation_layer is not None:
+                adds = [self.struct_observation_layer(adds[0]), *adds[1:]]
             anc_prob_inputs.append(adds[0])
 
         if self.context.config.tree.use_anc_probs \

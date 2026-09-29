@@ -214,6 +214,31 @@ class TestArgsToConfig:
         assert config.structure.joint_row_prior == "per_conditional"
         assert config.structure.joint_row_concentration == 5.0
 
+    def test_args_to_config_struct_noise(self):
+        """The structural observation model is off by default."""
+        parser = parse_args("test_version")
+        base = ["-i", "input.fasta", "-o", "output.a2m",
+                "--struct", "3di.fasta"]
+        config = args_to_config(parser.parse_args(base))
+        assert config.structure.observation_noise == "none"
+        assert config.structure.trainable_observation_noise is False
+
+        config = args_to_config(parser.parse_args(base + [
+            "--struct_noise", "confusion",
+            "--struct_noise_strength", "0.25",
+            "--struct_noise_confusion", "my_confusion",
+            "--struct_noise_trainable",
+        ]))
+        assert config.structure.observation_noise == "confusion"
+        assert config.structure.observation_noise_strength == 0.25
+        assert config.structure.observation_confusion_name == "my_confusion"
+        assert config.structure.trainable_observation_noise is True
+
+        with pytest.raises(ValueError):
+            args_to_config(parser.parse_args(base + [
+                "--struct_noise_strength", "1.5",
+            ]))
+
     def test_args_to_config_default_save_emb_uses_workdir(self):
         """Test default save_emb path construction from work_dir and input_file."""
         parser = parse_args("test_version")

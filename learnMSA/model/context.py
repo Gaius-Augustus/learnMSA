@@ -55,6 +55,7 @@ class LearnMSAContext:
     struct_values: Sequence[PHMMValueSet] | None
     emb_values: Sequence[PHMMEmbeddingValueSet] | None
     joint_values: Sequence[PHMMValueSet] | None
+    struct_observation_strength: float | None
     R_init: initializers.InitSpec
     R_delta_init: initializers.InitSpec
     p_init: initializers.InitSpec
@@ -91,6 +92,9 @@ class LearnMSAContext:
         self.struct_values = None
         self.emb_values = None
         self.joint_values = None
+        # Trained mixing weight of the structural observation model, carried
+        # across surgery. None means the configured initial value.
+        self.struct_observation_strength = None
         if data is None:
             assert num_seq is not None, (
                 "When no data is provided, num_seq must be specified."

@@ -148,6 +148,26 @@ def _transfer_model_weights(
             assign(dst_anc.tau_kernel, src_anc.tau_kernel)
 
 
+def _print_struct_diagnostics(model: LearnMSAModel) -> None:
+    """Prints per-head median branch lengths per track and the mixing weight
+    of the structural observation model."""
+    anc = getattr(model, "anc_probs_layer", None)
+    if anc is not None:
+        # (num_clusters, H, I): median over clusters, per head and track
+        tau = np.median(to_numpy(anc.make_tau()), axis=0)
+        for track, name in enumerate(["aa", "struct"][:tau.shape[-1]]):
+            print(
+                f"Median branch length ({name}) per head:",
+                np.array2string(tau[:, track], precision=5),
+            )
+    obs = getattr(model, "struct_observation_layer", None)
+    if obs is not None:
+        print(
+            f"Structural observation noise ({obs.mode}) strength:",
+            f"{float(to_numpy(obs.strength())):.5f}",
+        )
+
+
 def _fit_and_align(
     data : SequenceDataset | tuple[SequenceDataset, *tuple[Dataset, ...]],
     context : LearnMSAContext
@@ -251,6 +271,8 @@ def _fit_and_align(
         model.fit(
             data, indices=train_indices, iteration=i, batch_size=batch_size
         )
+        if config.input_output.verbose and config.structure.use_structure:
+            _print_struct_diagnostics(model)
 
         am = AlignmentModel(
             data, model, decode_indices,
@@ -291,6 +313,11 @@ def _fit_and_align(
         context.emb_values = surgery_result.emb_values
         context.struct_values = surgery_result.struct_values
         context.joint_values = surgery_result.joint_aa_struct_values
+        obs = getattr(model, "struct_observation_layer", None)
+        if obs is not None and obs.trainable:
+            context.struct_observation_strength = float(
+                to_numpy(obs.strength())
+            )
         surgery_converged = surgery_result.surgery_converged
         if model.anc_probs_layer is not None:
             if not context.config.advanced.reset_evo_model:

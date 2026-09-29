@@ -136,6 +136,9 @@ class LearnMSAModel(PHMMMixin, Generic[T_Tensor]):
         if loglik is None:
             loglik = self.estimate_loglik(data, max_seq, reduce=True)
         num_param = 34 * np.array(self.phmm_layer.lengths) + 25
+        obs = getattr(self, "struct_observation_layer", None)
+        if obs is not None:
+            num_param = num_param + obs.num_parameters()
         aic = -2 * loglik * data[0].num_seq + 2 * num_param
         return aic
 
