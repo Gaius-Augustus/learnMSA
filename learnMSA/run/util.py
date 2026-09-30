@@ -287,8 +287,17 @@ def load_struct_data(
     config: Configuration,
     data: "SequenceDataset",
     stack: ExitStack | None = None,
-) -> "SequenceDataset | None":
-    if config.input_output.struct_file is not None:
+) -> "SequenceDataset | EmbeddingDataset | None":
+    """Loads the structural track: a 3Di FASTA file, or an ``.npz`` of
+    per-residue 3Di logits (e.g. from ``learnMSA-3di``)."""
+    if config.input_output.struct_file is None:
+        return None
+    from learnMSA.structure.io import is_logits_file
+
+    if is_logits_file(config.input_output.struct_file):
+        struct_data = _load_struct_logits(config)
+    else:
+        config.structure.input_format = "tokens"
         from learnMSA.util import SequenceDataset
         dataset = SequenceDataset(
             config.input_output.struct_file,
@@ -304,15 +313,42 @@ def load_struct_data(
 
         # Check if the data is valid
         struct_data.validate_dataset()
-        if set(struct_data.seq_ids) != set(data.seq_ids):
+    if set(struct_data.seq_ids) != set(data.seq_ids):
+        raise ValueError(
+            "The sequence IDs in the structural dataset do not match "\
+            "those in the input dataset."
+        )
+    struct_data.adapt_order(data)
+    if config.structure.input_format == "logits":
+        mismatch = [
+            i for i in range(data.num_seq)
+            if struct_data.seq_lens[i] != data.seq_lens[i]
+        ]
+        if mismatch:
+            i = mismatch[0]
             raise ValueError(
-                "The sequence IDs in the structural dataset do not match "\
-                "those in the input dataset."
+                f"{len(mismatch)} sequences differ in length between the 3Di "
+                f"logits and the input, e.g. {data.seq_ids[i]}: "
+                f"{int(struct_data.seq_lens[i])} vs {int(data.seq_lens[i])}."
             )
-        struct_data.adapt_order(data)
+    return struct_data
 
-        return struct_data
-    return None
+
+def _load_struct_logits(config: Configuration) -> "EmbeddingDataset":
+    """Per-residue 3Di logits; marks the structural input as logits."""
+    from learnMSA.structure.io import read_logits
+
+    if get_backend() != "pytorch":
+        raise NotImplementedError(
+            "Per-residue 3Di logits (.npz) are only supported by the PyTorch "
+            "backend. Use --backend pytorch or a 3Di FASTA file."
+        )
+    config.structure.input_format = "logits"
+    return read_logits(
+        config.input_output.struct_file,
+        config.structure.structural_alphabet,
+    )
+
 
 def load_emb_data(
     config: Configuration,

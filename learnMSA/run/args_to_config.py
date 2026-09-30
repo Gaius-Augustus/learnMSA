@@ -167,6 +167,9 @@ def args_to_config(
     st["observation_noise_strength"] = args.struct_noise_strength
     st["observation_confusion_name"] = args.struct_noise_confusion
     st["trainable_observation_noise"] = args.struct_noise_trainable
+    st["soft_input"] = args.struct_soft_input
+    st["soft_input_temperature"] = args.struct_soft_temperature
+    st["soft_input_sharpness"] = args.struct_soft_sharpness
 
     # --- Advanced ---
     adv["backend"] = args.backend

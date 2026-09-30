@@ -187,3 +187,77 @@ def test_fixed_strength_adds_no_parameters() -> None:
     assert model.struct_observation_layer.num_parameters() == 0
     assert sum(p.numel() for p in model.parameters()) == \
         sum(p.numel() for p in base.parameters())
+
+
+# --- per-residue 3Di logits (StructLogitObservationLayer) -----------------
+
+
+def _logit_config(mode: str, use_anc_probs: bool = True,
+                  temperature: float = 1.0,
+                  sharpness: float = 1.0) -> Configuration:
+    config = _make_config(use_anc_probs=use_anc_probs)
+    config.structure.input_format = "logits"
+    config.structure.soft_input = mode
+    config.structure.soft_input_temperature = temperature
+    config.structure.soft_input_sharpness = sharpness
+    return config
+
+
+def _manual_v(z: np.ndarray, mode: str, temperature: float,
+              sharpness: float) -> np.ndarray:
+    if mode == "argmax":
+        v = np.zeros_like(z)
+        np.put_along_axis(v, z.argmax(-1)[..., None], 1.0, axis=-1)
+        return v
+    zt = z / temperature
+    post = np.exp(zt - zt.max(-1, keepdims=True))
+    post /= post.sum(-1, keepdims=True)
+    if mode == "posterior":
+        return post
+    pi = np.asarray(StructureConfig().background_distribution, float)
+    score = sharpness * (np.log(post) - np.log(pi / pi.sum()))
+    return np.exp(score - score.max(-1, keepdims=True))
+
+
+@pytest.mark.parametrize("use_anc_probs", [True, False])
+@pytest.mark.parametrize("mode, temperature, sharpness", [
+    ("argmax", 1.0, 1.0),
+    ("posterior", 1.0, 1.0),
+    ("posterior", 2.0, 1.0),
+    ("likelihood", 1.0, 1.0),
+    ("likelihood", 1.5, 0.5),
+])
+def test_logits_equal_the_transformed_token_input(
+    mode, temperature, sharpness, use_anc_probs
+) -> None:
+    """The logit layer acts once on the struct track, before anc-probs; the
+    rest of the model sees v exactly like a (soft) token input."""
+    logit_model = _build(_logit_config(mode, use_anc_probs, temperature,
+                                       sharpness))
+    token_model = _build(_make_config(use_anc_probs=use_anc_probs))
+    aa, _, indices = _inputs(_make_config())
+    z = np.random.default_rng(5).normal(
+        scale=3.0, size=(BATCH, SEQ_LEN, NUM_HEADS, 20)).astype(np.float32)
+    v = _manual_v(z, mode, temperature, sharpness).astype(np.float32)
+    out_logits = _run(logit_model, (aa, z, indices))
+    out_tokens = _run(token_model, (aa, v, indices))
+    torch.testing.assert_close(out_logits, out_tokens, rtol=1e-5, atol=1e-4)
+    assert torch.isfinite(out_logits).all()
+
+
+def test_argmax_logits_reproduce_the_fasta_path() -> None:
+    logit_model = _build(_logit_config("argmax"))
+    token_model = _build(_make_config())
+    aa, struct, indices = _inputs(_make_config())
+    # Logits whose argmax is the one-hot token of the FASTA path.
+    z = struct * 5.0 + np.random.default_rng(6).normal(
+        scale=0.1, size=struct.shape).astype(np.float32)
+    torch.testing.assert_close(_run(logit_model, (aa, z, indices)),
+                               _run(token_model, (aa, struct, indices)))
+
+
+def test_logits_and_token_noise_are_exclusive() -> None:
+    config = _logit_config("likelihood")
+    config.structure.observation_noise = "confusion"
+    with pytest.raises(ValueError, match="cannot be combined"):
+        LearnMSAModel(LearnMSAContext(config=config, num_seq=10))

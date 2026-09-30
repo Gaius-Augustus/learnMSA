@@ -108,6 +108,33 @@ class StructureConfig(BaseModel):
     """Whether ``observation_noise_strength`` is only the initial value of a
     trainable mixing weight (one scalar shared by all heads)."""
 
+    input_format: Literal["tokens", "logits"] = "tokens"
+    """Set when the structural data are loaded: ``"tokens"`` for a 3Di FASTA
+    file, ``"logits"`` for per-residue 3Di logits (an ``.npz`` written by
+    ``learnMSA-3di``)."""
+
+    soft_input: Literal["argmax", "posterior", "likelihood"] = "likelihood"
+    """How per-residue 3Di logits z become the observation vector v over
+    true 3Di letters (only with ``input_format == "logits"``).
+
+    - ``"argmax"``: one-hot of the most likely letter (like a 3Di FASTA).
+    - ``"posterior"``: ``v = softmax(z / T)``.
+    - ``"likelihood"``: ``v ~ (softmax(z / T) / pi) ** k``, the predictor's
+      posterior divided by the letter prior ``pi``
+      (``background_distribution``), i.e. a scaled likelihood.
+
+    ``T`` is ``soft_input_temperature`` and ``k`` is
+    ``soft_input_sharpness``. (EXPERIMENTAL)"""
+
+    soft_input_temperature: float = 1.25
+    """Calibration temperature ``T`` applied to the 3Di logits. The default
+    minimises the NLL of true 3Di letters (Homstrad PDB chains, 155k
+    residues) under ProstT5 via ``util/calibrate_prostt5.py``: 1.25, with
+    1.22 and 1.28 on either half of the families."""
+
+    soft_input_sharpness: float = 1.0
+    """Exponent ``k`` of the scaled likelihood; below 1 flattens it."""
+
     match_emissions: (Sequence[float] | Sequence[Sequence[float]] |
                       Sequence[Sequence[Sequence[float]]] |
                       NPArray | None) = None
@@ -137,6 +164,12 @@ class StructureConfig(BaseModel):
     def validate_joint_row_concentration(cls, v: float) -> float:
         if v < 0:
             raise ValueError("joint_row_concentration must be non-negative.")
+        return v
+
+    @field_validator("soft_input_temperature", "soft_input_sharpness")
+    def validate_positive(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("must be positive.")
         return v
 
     @field_validator("observation_noise_strength")

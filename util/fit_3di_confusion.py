@@ -22,7 +22,9 @@ from pathlib import Path
 
 import numpy as np
 
-ALPHABET = "ACDEFGHIKLMNPQRSTVWY"
+from learnMSA.config.structure import StructureConfig
+
+ALPHABET = StructureConfig().structural_alphabet
 
 
 def read_fasta(path: Path) -> dict[str, str]:

@@ -70,6 +70,7 @@ Homepage = "https://github.com/Gaius-Augustus/learnMSA"
 
 [project.scripts]
 learnMSA = "learnMSA.run:run_main"
+learnMSA-3di = "learnMSA.structure.predict_3di:main"
 
 [tool.setuptools.dynamic]
 version = { attr = "learnMSA._version.__version__" }
@@ -84,6 +85,7 @@ learnMSA = [
     "docs/*",
     "hmm/weights/*",
     "protein_language_models/scoring_models/*",
+    "structure/weights/*",
 ]
 
 [tool.setuptools]

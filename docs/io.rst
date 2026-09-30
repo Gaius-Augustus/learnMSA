@@ -97,6 +97,20 @@ Arguments
     option is used, learnMSA will use the structural information to guide the
     alignment process.
 
+    Alternatively, *STRUCT_FILE* can be an ``.npz`` file with per-residue 3Di
+    logits written by ``learnMSA-3di`` (PyTorch backend only). learnMSA then
+    uses the predictor's uncertainty per residue instead of one letter.
+
+``learnMSA-3di -i`` *FASTA* ``-o`` *OUT.npz* [``--fasta`` *OUT.fasta*]
+    A separate command shipped with learnMSA. It predicts 3Di from the amino
+    acid sequences with ProstT5 (the same model and weights as
+    ``foldseek createdb --prostt5-model``) and writes the per-residue logits
+    for ``--struct``; ``--fasta`` also writes the most likely letters, as
+    Foldseek does. It needs ``torch`` and ``transformers<5`` (the
+    ``plm-torch`` extra) and downloads ``Rostlab/ProstT5_fp16`` (MIT license,
+    about 5.6 GB) once into ``~/.cache/learnmsa/prostt5``. A GPU is strongly
+    recommended.
+
 ``--load_emb`` *EMB_FILE*
     Path to a file containing embeddings for each sequence. This file should be
     a binary file in the format produced by the ``--save_emb`` option.
