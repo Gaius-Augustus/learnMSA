@@ -791,8 +791,9 @@ class AlignmentModel():
             from_packed: Pass true or false depending on the pack argument used
                 with write_models_to_file.
             config: Configuration of the current run. Settings that describe
-                how a run executes rather than what the model is (``--compile``,
-                ``--triton``) are taken from it instead of from the file.
+                how a run executes or decodes rather than what the model is
+                (``--compile``, ``--triton``, ``--struct_emitter_temperature``)
+                are taken from it instead of from the file.
 
         Returns:
             An AlignmentModel instance with equivalent behavior as the

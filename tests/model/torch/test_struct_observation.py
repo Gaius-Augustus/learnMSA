@@ -176,7 +176,7 @@ def test_trainable_strength_gets_gradient_and_is_carried() -> None:
     # A later round starts from the carried value (as align.py sets it).
     context.struct_observation_strength = 0.37
     carried = LearnMSAModel(context)
-    assert abs(float(carried.struct_observation_layer.strength()) - 0.37) \
+    assert abs(float(carried.struct_observation_layer.strength().detach()) - 0.37) \
         < 1e-6
 
 

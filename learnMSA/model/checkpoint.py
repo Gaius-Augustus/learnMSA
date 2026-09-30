@@ -26,6 +26,11 @@ FORMATS = {"tensorflow": "keras", "pytorch": "pt"}
 #: with, say, ``--triton`` is not stuck with the kernels when it is loaded.
 RUNTIME_ADVANCED_FIELDS = ("compile", "use_triton", "seed")
 
+#: Structure settings that only change how an alignment is decoded. Training,
+#: surgery and model selection score the structural track at temperature 1,
+#: so a loaded model is decoded with the current run's value.
+RUNTIME_STRUCTURE_FIELDS = ("emitter_temperature",)
+
 
 def checkpoint_format(backend_name: str | None = None) -> str:
     """The checkpoint format identifier of a backend."""
@@ -45,7 +50,8 @@ def apply_runtime_config(
     restored: "Configuration",
     config: "Configuration | None",
 ) -> None:
-    """Let the current run's execution settings win over a checkpoint's.
+    """Let the current run's execution and decoding settings win over a
+    checkpoint's.
 
     Args:
         restored: The configuration deserialized from the checkpoint. Modified
@@ -57,6 +63,8 @@ def apply_runtime_config(
         return
     for field in RUNTIME_ADVANCED_FIELDS:
         setattr(restored.advanced, field, getattr(config.advanced, field))
+    for field in RUNTIME_STRUCTURE_FIELDS:
+        setattr(restored.structure, field, getattr(config.structure, field))
 
 
 def load_model(
@@ -68,7 +76,8 @@ def load_model(
     Args:
         filepath: Path of the checkpoint, without the backend's suffix.
         config: Configuration of the current run. Its
-            :data:`RUNTIME_ADVANCED_FIELDS` replace the ones stored in the
+            :data:`RUNTIME_ADVANCED_FIELDS` and
+            :data:`RUNTIME_STRUCTURE_FIELDS` replace the ones stored in the
             checkpoint; the rest of the checkpoint's configuration is kept.
     """
     from learnMSA.backend import resolve

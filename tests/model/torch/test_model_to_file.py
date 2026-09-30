@@ -142,6 +142,49 @@ def test_runtime_settings_come_from_the_current_run(
     )
 
 
+@pytest.mark.parametrize("noise", ["none", "confusion"])
+def test_decoding_temperature_comes_from_the_current_run(
+    noise: str, tmp_path
+) -> None:
+    """The structural emitter temperature only changes decoding, so a loaded
+    model is decoded with the current run's ``--struct_emitter_temperature``.
+    """
+    config = Configuration(training=TrainingConfig(length_init=[4, 3]))
+    config.structure.use_structure = True
+    config.structure.observation_noise = noise
+    config.structure.observation_noise_strength = 0.5
+    model = TorchLearnMSAModel(LearnMSAContext(config=config, num_seq=10))
+    model.build()
+    path = tmp_path / "model"
+    save_model(model, path)
+    trained_temperature = config.structure.emitter_temperature
+
+    # Without a run config, the checkpoint's own temperature stands.
+    kept = load_model(path)
+    kept.viterbi_mode()
+    assert kept.phmm_layer.struct_emitter.temperature == trained_temperature
+
+    run_config = config.model_copy(deep=True)
+    run_config.structure.emitter_temperature = 2.0
+    loaded = load_model(path, run_config)
+    assert loaded.context.config.structure.emitter_temperature == 2.0
+    loaded.viterbi_mode()
+    assert loaded.phmm_layer.struct_emitter.temperature == 2.0
+    # Likelihoods are still computed at temperature 1.
+    loaded.loglik_mode()
+    assert loaded.phmm_layer.struct_emitter.temperature == 1
+
+    if noise == "none":
+        assert loaded.struct_observation_layer is None
+    else:
+        torch.testing.assert_close(
+            loaded.struct_observation_layer.matrix(),
+            model.struct_observation_layer.matrix().to(
+                loaded.struct_observation_layer.matrix().device
+            ),
+        )
+
+
 def test_refuses_a_foreign_checkpoint_format(
     model: TorchLearnMSAModel, tmp_path
 ) -> None:
