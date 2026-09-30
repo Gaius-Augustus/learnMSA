@@ -1,6 +1,7 @@
 import gzip
 import json
 import shutil
+import tempfile
 import time
 import warnings
 from enum import Enum
@@ -801,14 +802,31 @@ class AlignmentModel():
         """
         filepath = Path(filepath)
         if from_packed:
-            shutil.unpack_archive(str(filepath) + ".zip", filepath)
+            # Never write next to the archive: it may belong to another run.
+            # Unpack into a private directory in the current run's work dir
+            # (or the system temp dir without a run config).
+            unpack_root = None
+            if config is not None:
+                unpack_root = Path(config.input_output.work_dir)
+                unpack_root.mkdir(parents=True, exist_ok=True)
+            archive_dir = Path(tempfile.mkdtemp(
+                prefix=filepath.name + "_", dir=unpack_root
+            ))
+            shutil.unpack_archive(str(filepath) + ".zip", archive_dir)
+        else:
+            archive_dir = filepath
 
         # Deserialize metadata
-        with open(filepath / "meta.json") as metafile:
+        with open(archive_dir / "meta.json") as metafile:
             d = json.load(metafile)
 
         # Deserialize indices
-        indices = np.loadtxt(filepath / "indices", dtype=int)
+        indices = np.loadtxt(archive_dir / "indices", dtype=int)
+
+        if from_packed:
+            # The model file sits next to the archive and is only read, so
+            # the unpacked metadata is no longer needed.
+            shutil.rmtree(archive_dir, ignore_errors=True)
 
         # Select the backend the model was saved with before loading it, so
         # that no framework is imported until the choice is settled. Archives
@@ -824,13 +842,6 @@ class AlignmentModel():
 
         # Load the model
         model = load_model(filepath, config)
-
-        if from_packed:
-            #after loading remove unpacked files and keep only the archive
-            try:
-                shutil.rmtree(filepath)
-            except OSError as e:
-                print("Error: %s - %s." % (e.filename, e.strerror))
 
         am = cls(
             data,

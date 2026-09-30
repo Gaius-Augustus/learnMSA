@@ -12,6 +12,7 @@ import torch
 from hidten.torch.triton import step_launch
 
 import tests.hmm.ref as ref
+from learnMSA.align.alignment_model import AlignmentModel
 from learnMSA.config import Configuration, TrainingConfig, TreeConfig
 from learnMSA.config.hmm import PHMMPriorConfig
 from learnMSA.model.checkpoint import checkpoint_format
@@ -183,6 +184,38 @@ def test_decoding_temperature_comes_from_the_current_run(
                 loaded.struct_observation_layer.matrix().device
             ),
         )
+
+
+def test_loading_writes_only_into_the_current_work_dir(tmp_path) -> None:
+    """A saved model may belong to another run, so loading must not write
+    next to it; scratch files go to the current run's work dir and are
+    removed again."""
+    config = Configuration()
+    config.training.num_model = 1
+    config.training.no_sequence_weights = True
+    config.training.length_init = [5]
+    data = SequenceDataset("tests/data/simple.fa")
+    model = TorchLearnMSAModel(LearnMSAContext(config, data))
+    model.build()
+    am = AlignmentModel(data, model, np.array([0, 1]))
+    am.best_head = 0
+    saved = tmp_path / "other_run"
+    saved.mkdir()
+    am.save(saved / "model")
+    before = sorted(p.name for p in saved.iterdir())
+
+    run_config = config.model_copy(deep=True)
+    run_config.input_output.work_dir = str(tmp_path / "this_run")
+    saved.chmod(0o555)  # any write next to the archive now fails
+    try:
+        loaded = AlignmentModel.load(saved / "model", data, config=run_config)
+    finally:
+        saved.chmod(0o755)
+
+    assert sorted(p.name for p in saved.iterdir()) == before
+    assert list((tmp_path / "this_run").iterdir()) == []
+    assert loaded.best_head == 0
+    np.testing.assert_array_equal(loaded.indices, [0, 1])
 
 
 def test_refuses_a_foreign_checkpoint_format(
