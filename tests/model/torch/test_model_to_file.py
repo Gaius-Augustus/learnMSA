@@ -143,17 +143,17 @@ def test_runtime_settings_come_from_the_current_run(
     )
 
 
-@pytest.mark.parametrize("noise", ["none", "confusion"])
+@pytest.mark.parametrize("input_format", ["tokens", "logits"])
 def test_decoding_temperature_comes_from_the_current_run(
-    noise: str, tmp_path
+    input_format: str, tmp_path
 ) -> None:
     """The structural emitter temperature only changes decoding, so a loaded
     model is decoded with the current run's ``--struct_emitter_temperature``.
     """
     config = Configuration(training=TrainingConfig(length_init=[4, 3]))
     config.structure.use_structure = True
-    config.structure.observation_noise = noise
-    config.structure.observation_noise_strength = 0.5
+    config.structure.input_format = input_format
+    config.structure.soft_input_sharpness = 0.5
     model = TorchLearnMSAModel(LearnMSAContext(config=config, num_seq=10))
     model.build()
     path = tmp_path / "model"
@@ -175,14 +175,17 @@ def test_decoding_temperature_comes_from_the_current_run(
     loaded.loglik_mode()
     assert loaded.phmm_layer.struct_emitter.temperature == 1
 
-    if noise == "none":
-        assert loaded.struct_observation_layer is None
+    if input_format == "tokens":
+        assert loaded.struct_logit_layer is None
     else:
+        # The logit layer and its settings round-trip with the checkpoint.
+        layer = loaded.struct_logit_layer
+        assert layer.mode == "likelihood" and layer.sharpness == 0.5
+        z = torch.randn((2, 5, 1, 20))
         torch.testing.assert_close(
-            loaded.struct_observation_layer.matrix(),
-            model.struct_observation_layer.matrix().to(
-                loaded.struct_observation_layer.matrix().device
-            ),
+            layer(z.to(layer.log_prior.device)).cpu(),
+            model.struct_logit_layer(
+                z.to(model.struct_logit_layer.log_prior.device)).cpu(),
         )
 
 

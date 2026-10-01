@@ -26,8 +26,8 @@ from learnMSA.hmm.torch.layer import TorchPHMMLayer as PHMMLayer
 from learnMSA.model.bucketing import make_default_bucket_scheme
 from learnMSA.model.context import LearnMSAContext
 from learnMSA.model.model import LearnMSAModel
-from learnMSA.model.torch.struct_observation import (
-    StructLogitObservationLayer, StructObservationLayer)
+from learnMSA.model.torch.struct_observation import \
+    StructLogitObservationLayer
 from learnMSA.model.torch.training import make_dataset
 from learnMSA.tree.torch.anc_probs_layer import TorchAncProbsLayer
 from learnMSA.util.sequence_dataset import Dataset, SequenceDataset
@@ -122,25 +122,14 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
         # Declared on the instance rather than the class so that torch's
         # submodule lookup is reachable; see learnMSA.hmm.layer for why.
         self.anc_probs_layer = None
-        self.struct_observation_layer = None
         self.struct_logit_layer = None
 
-        # Misclassification of observed structural tokens. Kept separate from
-        # the evolutionary model: it maps an observed token (or a predictor's
-        # per-residue logits) to likelihoods over true tokens before
-        # anc-probs sees the track.
+        # Per-residue 3Di logits of a predictor (e.g. ProstT5) become
+        # observation vectors over true 3Di letters before anc-probs sees
+        # the track. Kept separate from the evolutionary model.
         st_cfg = context.config.structure
         if st_cfg.use_structure and st_cfg.input_format == "logits":
-            if st_cfg.observation_noise != "none":
-                raise ValueError(
-                    "--struct_noise models misclassified 3Di tokens and "
-                    "cannot be combined with per-residue 3Di logits."
-                )
             self.struct_logit_layer = StructLogitObservationLayer(st_cfg)
-        if st_cfg.use_structure and st_cfg.observation_noise != "none":
-            self.struct_observation_layer = StructObservationLayer(
-                st_cfg, strength=context.struct_observation_strength
-            )
 
         # Create the ancestral probabilities layer
         if tree_cfg.use_anc_probs and not train_cfg.no_aa:
@@ -313,8 +302,6 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
         if self.context.config.structure.use_structure:
             if self.struct_logit_layer is not None:
                 adds = [self.struct_logit_layer(adds[0]), *adds[1:]]
-            if self.struct_observation_layer is not None:
-                adds = [self.struct_observation_layer(adds[0]), *adds[1:]]
             anc_prob_inputs.append(adds[0])
 
         if self.context.config.tree.use_anc_probs \

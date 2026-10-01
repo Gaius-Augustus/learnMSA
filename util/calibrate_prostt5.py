@@ -6,8 +6,7 @@
 2. Run ``learnMSA-3di -i that.fasta -o that.npz``.
 3. ``fit``: fit one temperature T minimising the NLL of the true letters
    under softmax(z / T), and report accuracy, NLL, ECE and a reliability
-   table before and after, plus the NLL of the Bayes-inverted global
-   confusion channel P(y | o) for comparison.
+   table before and after.
 
 Example:
     python util/calibrate_prostt5.py fasta \\
@@ -20,13 +19,31 @@ Example:
 """
 
 import argparse
-import sys
 from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from fit_3di_confusion import ALPHABET, read_fasta  # noqa: E402
+from learnMSA.config.structure import StructureConfig
+
+ALPHABET = StructureConfig().structural_alphabet
+
+
+def read_fasta(path: Path) -> dict[str, str]:
+    """Gap-free, uppercase sequences by ID (first word of the header)."""
+    seqs: dict[str, list[str]] = {}
+    name = None
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            if line.startswith(">"):
+                name = line[1:].split()[0]
+                seqs[name] = []
+            elif name is not None:
+                seqs[name].append(line)
+    return {k: "".join(v).replace("-", "").replace(".", "").upper()
+            for k, v in seqs.items()}
 
 
 def cmd_fasta(args) -> None:
@@ -120,17 +137,6 @@ def cmd_fit(args) -> None:
             print(f"  [{lo:.1f}, {lo + 0.1:.1f})  {sel.mean():.3f}  "
                   f"{correct[sel].mean():.3f}")
 
-    if args.confusion is not None:
-        with np.load(args.confusion) as c:
-            conf_mat = c["confusion"].astype(np.float64)  # P(o | y)
-        prior = np.bincount(y, minlength=20) + 1.0
-        prior /= prior.sum()
-        o = z.argmax(1)
-        post = conf_mat[:, o].T * prior  # P(y | o) up to a constant
-        post /= post.sum(1, keepdims=True)
-        print(f"global confusion channel P(y|o) NLL "
-              f"{-np.log(post[np.arange(len(y)), y]).mean():.4f} nats "
-              "(argmax token only)")
     print(f"fitted temperature: {t_star:.4f}")
 
 
@@ -145,8 +151,6 @@ def main() -> None:
     p = sub.add_parser("fit")
     p.add_argument("--true-dir", type=Path, required=True)
     p.add_argument("--logits", type=Path, required=True)
-    p.add_argument("--confusion", type=Path, default=Path(
-        "learnMSA/hmm/weights/prostt5_3Di_confusion_homstrad.npz"))
     args = parser.parse_args()
     {"fasta": cmd_fasta, "fit": cmd_fit}[args.cmd](args)
 

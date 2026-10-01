@@ -214,29 +214,28 @@ class TestArgsToConfig:
         assert config.structure.joint_row_prior == "per_conditional"
         assert config.structure.joint_row_concentration == 5.0
 
-    def test_args_to_config_struct_noise(self):
-        """The structural observation model is off by default."""
+    def test_args_to_config_struct_soft_input(self):
+        """Settings for per-residue 3Di logits (--struct file.npz)."""
         parser = parse_args("test_version")
         base = ["-i", "input.fasta", "-o", "output.a2m",
-                "--struct", "3di.fasta"]
+                "--struct", "3di.npz"]
         config = args_to_config(parser.parse_args(base))
-        assert config.structure.observation_noise == "none"
-        assert config.structure.trainable_observation_noise is False
+        assert config.structure.soft_input == "likelihood"
+        assert config.structure.soft_input_temperature == 1.25
+        assert config.structure.soft_input_sharpness == 1.0
 
         config = args_to_config(parser.parse_args(base + [
-            "--struct_noise", "confusion",
-            "--struct_noise_strength", "0.25",
-            "--struct_noise_confusion", "my_confusion",
-            "--struct_noise_trainable",
+            "--struct_soft_input", "posterior",
+            "--struct_soft_temperature", "2",
+            "--struct_soft_sharpness", "0.5",
         ]))
-        assert config.structure.observation_noise == "confusion"
-        assert config.structure.observation_noise_strength == 0.25
-        assert config.structure.observation_confusion_name == "my_confusion"
-        assert config.structure.trainable_observation_noise is True
+        assert config.structure.soft_input == "posterior"
+        assert config.structure.soft_input_temperature == 2.0
+        assert config.structure.soft_input_sharpness == 0.5
 
         with pytest.raises(ValueError):
             args_to_config(parser.parse_args(base + [
-                "--struct_noise_strength", "1.5",
+                "--struct_soft_sharpness", "0",
             ]))
 
     def test_args_to_config_default_save_emb_uses_workdir(self):

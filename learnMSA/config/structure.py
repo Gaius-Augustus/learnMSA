@@ -83,31 +83,6 @@ class StructureConfig(BaseModel):
     """If joint_emissions is True, this specifies the rank of the low-rank
     approximation of the joint emission matrix."""
 
-    observation_noise: Literal["none", "background", "confusion"] = "none"
-    """Observation model for misclassified structural tokens, e.g. by a
-    predictor such as ProstT5. The observed token o becomes the likelihood
-    vector ``v_y = M[y, o] = P(o | true token y)`` before the evolutionary
-    model and the emitters see it. (EXPERIMENTAL)
-
-    - ``"none"``: tokens are taken as error-free (``M = I``).
-    - ``"background"``: ``M = (1 - s) I + s 1 pi^T`` with ``pi`` the
-      ``background_distribution``.
-    - ``"confusion"``: ``M = (1 - s) I + s C`` with ``C`` loaded from
-      ``observation_confusion_name``.
-
-    ``s`` is ``observation_noise_strength``."""
-
-    observation_noise_strength: float = 0.1
-    """Mixing weight ``s`` in [0, 1] of the observation noise model."""
-
-    observation_confusion_name: str = "prostt5_3Di_confusion_homstrad"
-    """Name of the shipped ``.npz`` with the row-stochastic confusion matrix
-    ``confusion[y, o] = P(observed o | true y)``."""
-
-    trainable_observation_noise: bool = False
-    """Whether ``observation_noise_strength`` is only the initial value of a
-    trainable mixing weight (one scalar shared by all heads)."""
-
     input_format: Literal["tokens", "logits"] = "tokens"
     """Set when the structural data are loaded: ``"tokens"`` for a 3Di FASTA
     file, ``"logits"`` for per-residue 3Di logits (an ``.npz`` written by
@@ -170,14 +145,6 @@ class StructureConfig(BaseModel):
     def validate_positive(cls, v: float) -> float:
         if v <= 0:
             raise ValueError("must be positive.")
-        return v
-
-    @field_validator("observation_noise_strength")
-    def validate_observation_noise_strength(cls, v: float) -> float:
-        if not 0.0 <= v <= 1.0:
-            raise ValueError(
-                "observation_noise_strength must be in [0, 1]."
-            )
         return v
 
     @property
