@@ -16,7 +16,7 @@
 
 ## Current limitations
 
-- requires many sequences (in most cases starting at 1000, a few 100 might still be enough) to achieve high accuracy
+- requires enough training sequences to achieve high accuracy (>100 recommended, >500 for best performance)
 - only for proteins
 - increasingly slow for long proteins with a length > 1000 residues
 
