@@ -5,18 +5,21 @@ import pytest
 
 from learnMSA.config import Configuration
 from learnMSA.run.util import load_struct_data
-from learnMSA.structure.io import write_logits
+from learnMSA.structure.io import KIND
+from learnMSA.util import EmbeddingCache, EmbeddingDataset
 from learnMSA.util.sequence_dataset import SequenceDataset
 
 ALPHABET = "ACDEFGHIKLMNPQRSTVWY"
 
 
-def _setup(tmp_path, lens=(4, 6), ids=("s1", "s2")):
+def _setup(tmp_path, lens=(4, 6), ids=("s1", "s2"), stored=ALPHABET[::-1]):
     data = SequenceDataset(sequences=[("s2", "MKTAYI"), ("s1", "GAVL")])
     logits = np.random.default_rng(0).normal(
         size=(sum(lens), 20)).astype(np.float16)
-    path = write_logits(tmp_path / "z.npz", logits, np.array(lens),
-                        list(ids), ALPHABET[::-1])
+    path = EmbeddingDataset(
+        embedding_cache=EmbeddingCache(np.array(lens), 20, cache=logits),
+        seq_ids=list(ids),
+    ).write(tmp_path / "z.npz", metadata={"alphabet": stored, "kind": KIND})
     config = Configuration()
     config.input_output.struct_file = path
     config.structure.use_structure = True
@@ -41,5 +44,11 @@ def test_length_mismatch_is_rejected(tmp_path) -> None:
 
 def test_id_mismatch_is_rejected(tmp_path) -> None:
     config, data, _ = _setup(tmp_path, ids=("s1", "s3"))
+    with pytest.raises(ValueError, match="do not match"):
+        load_struct_data(config, data)
+
+
+def test_foreign_alphabet_is_rejected(tmp_path) -> None:
+    config, data, _ = _setup(tmp_path, stored="ACDEFGHIKLMNPQRSTVWX")
     with pytest.raises(ValueError, match="do not match"):
         load_struct_data(config, data)

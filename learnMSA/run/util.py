@@ -335,8 +335,13 @@ def load_struct_data(
 
 
 def _load_struct_logits(config: Configuration) -> "EmbeddingDataset":
-    """Per-residue 3Di logits; marks the structural input as logits."""
-    from learnMSA.structure.io import read_logits
+    """Per-residue 3Di logits; marks the structural input as logits.
+
+    The columns are permuted if the file stores the letters of the
+    structural alphabet in another order. A file over a different set of
+    letters is rejected.
+    """
+    from learnMSA.util import EmbeddingDataset
 
     if get_backend() != "pytorch":
         raise NotImplementedError(
@@ -344,10 +349,18 @@ def _load_struct_logits(config: Configuration) -> "EmbeddingDataset":
             "backend. Use --backend pytorch or a 3Di FASTA file."
         )
     config.structure.input_format = "logits"
-    return read_logits(
-        config.input_output.struct_file,
-        config.structure.structural_alphabet,
-    )
+    filepath = config.input_output.struct_file
+    alphabet = config.structure.structural_alphabet
+    dataset = EmbeddingDataset(filepath)
+    stored = str(dataset.metadata["alphabet"])
+    if sorted(stored) != sorted(alphabet) or len(set(stored)) != len(stored):
+        raise ValueError(
+            f"The 3Di letters of {filepath} ({stored}) do not match the "
+            f"structural alphabet ({alphabet})."
+        )
+    if stored != alphabet:
+        dataset.reorder_dims([stored.index(c) for c in alphabet])
+    return dataset
 
 
 def load_emb_data(

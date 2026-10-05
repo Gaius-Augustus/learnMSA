@@ -23,10 +23,6 @@ from pathlib import Path
 
 import numpy as np
 
-from learnMSA.config.structure import StructureConfig
-
-ALPHABET = StructureConfig().structural_alphabet
-
 
 def read_fasta(path: Path) -> dict[str, str]:
     """Gap-free, uppercase sequences by ID (first word of the header)."""
@@ -85,10 +81,11 @@ def _ece(prob: np.ndarray, y: np.ndarray, bins: int = 15) -> float:
 def cmd_fit(args) -> None:
     from scipy.optimize import minimize_scalar
 
-    from learnMSA.structure.io import read_logits
+    from learnMSA.util import EmbeddingDataset
 
-    data = read_logits(args.logits, ALPHABET)
-    index = {c: i for i, c in enumerate(ALPHABET)}
+    data = EmbeddingDataset(args.logits)
+    # Columns follow the alphabet stored in the file.
+    index = {c: i for i, c in enumerate(str(data.metadata["alphabet"]))}
     zs, ys, fams = [], [], []
     for i, key in enumerate(data.seq_ids):
         fam, sid = key.split("|", 1)

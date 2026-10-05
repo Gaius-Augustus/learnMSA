@@ -6,11 +6,12 @@ import torch
 
 import learnMSA.structure.prostt5 as prostt5
 from learnMSA.config.structure import StructureConfig
-from learnMSA.structure.io import read_logits
+from learnMSA.structure.io import KIND
 from learnMSA.structure.predict_3di import main as predict_3di_main
 from learnMSA.structure.prostt5 import (CNN_WEIGHTS, PROSTT5_CLASS_ORDER,
                                         ProstT5CNN, ProstT5Predictor,
                                         split_chunks, tokenize)
+from learnMSA.util import EmbeddingDataset
 
 
 def _tiny_encoder() -> torch.nn.Module:
@@ -104,7 +105,9 @@ def test_cli_writes_logits_and_argmax_fasta(tmp_path, monkeypatch) -> None:
     predict_3di_main(["-i", str(fasta), "-o", str(tmp_path / "out"),
                       "--fasta", str(tmp_path / "out.fasta"),
                       "--device", "cpu", "--silent"])
-    data = read_logits(tmp_path / "out.npz", PROSTT5_CLASS_ORDER)
+    data = EmbeddingDataset(tmp_path / "out.npz")
+    assert str(data.metadata["kind"]) == KIND
+    assert str(data.metadata["alphabet"]) == PROSTT5_CLASS_ORDER
     assert data.seq_ids == ["s1", "s2", "s3"]
     np.testing.assert_array_equal(data.seq_lens, [10, 4, 6])
     lines = (tmp_path / "out.fasta").read_text().split()

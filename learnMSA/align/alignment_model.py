@@ -791,10 +791,8 @@ class AlignmentModel():
             filepath: Path of the file to load.
             from_packed: Pass true or false depending on the pack argument used
                 with write_models_to_file.
-            config: Configuration of the current run. Settings that describe
-                how a run executes or decodes rather than what the model is
-                (``--compile``, ``--triton``, ``--struct_emitter_temperature``)
-                are taken from it instead of from the file.
+            config: Configuration of the current run. Can inject transient
+            settings that changes between runs (like `--compile`).
 
         Returns:
             An AlignmentModel instance with equivalent behavior as the
@@ -802,9 +800,7 @@ class AlignmentModel():
         """
         filepath = Path(filepath)
         if from_packed:
-            # Never write next to the archive: it may belong to another run.
             # Unpack into a private directory in the current run's work dir
-            # (or the system temp dir without a run config).
             unpack_root = None
             if config is not None:
                 unpack_root = Path(config.input_output.work_dir)
@@ -824,8 +820,6 @@ class AlignmentModel():
         indices = np.loadtxt(archive_dir / "indices", dtype=int)
 
         if from_packed:
-            # The model file sits next to the archive and is only read, so
-            # the unpacked metadata is no longer needed.
             shutil.rmtree(archive_dir, ignore_errors=True)
 
         # Select the backend the model was saved with before loading it, so

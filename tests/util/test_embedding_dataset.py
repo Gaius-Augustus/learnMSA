@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from learnMSA.util import EmbeddingCache, EmbeddingDataset, SequenceDataset
+from learnMSA.util.embedding_dataset import DEFAULT_KEYS
 from tests.embedding_data import make_aa_dataset, make_embedding_dataset
 
 
@@ -145,3 +146,79 @@ def test_adapt_order_embedding_dataset(embedding_dataset: EmbeddingDataset) -> N
         np.testing.assert_array_equal(
             embedding_dataset.get_encoded_seq(i), ref.get_encoded_seq(i)
         )
+
+
+def test_metadata_roundtrip(
+    embedding_dataset: EmbeddingDataset,
+    tmp_path: Path,
+) -> None:
+    """Extra keys are written and read back; the npz path is returned."""
+    path = embedding_dataset.write(
+        tmp_path / "meta.emb",
+        metadata={"kind": "test", "extra": np.arange(3)},
+    )
+    assert path == tmp_path / "meta.emb.npz" and path.is_file()
+    loaded = EmbeddingDataset(filepath=path)
+    assert set(loaded.metadata) == {"kind", "extra"}
+    assert str(loaded.metadata["kind"]) == "test"
+    np.testing.assert_array_equal(loaded.metadata["extra"], np.arange(3))
+    assert embedding_dataset.metadata == {}
+
+
+@pytest.mark.parametrize("key", DEFAULT_KEYS)
+def test_metadata_rejects_reserved_keys(
+    embedding_dataset: EmbeddingDataset,
+    tmp_path: Path,
+    key: str,
+) -> None:
+    with pytest.raises(ValueError, match="Reserved"):
+        embedding_dataset.write(tmp_path / "x.npz", metadata={key: "x"})
+
+
+def test_reorder_dims_after_reorder() -> None:
+    seq_lens = np.array([2, 3, 1])
+    cache = np.arange(seq_lens.sum() * 4, dtype=np.float32).reshape(-1, 4)
+    dataset = EmbeddingDataset(
+        embedding_cache=EmbeddingCache(seq_lens, 4, cache=cache),
+        seq_ids=["a", "b", "c"],
+    )
+    dataset.reorder([2, 0, 1])
+    dataset.reorder_dims([3, 1])
+    assert dataset.seq_ids == ["c", "a", "b"]
+    assert dataset.empty((1,)).shape == (1, 2)
+    np.testing.assert_array_equal(dataset.get_encoded_seq(0),
+                                  cache[5:6, [3, 1]])
+    np.testing.assert_array_equal(dataset.get_encoded_seq(2),
+                                  cache[2:5, [3, 1]])
+
+
+def test_reads_legacy_3di_logits_layout(tmp_path: Path) -> None:
+    """Files of the removed ``write_logits`` load unchanged.
+
+    They hold the default keys plus 0-d string arrays ``alphabet``, ``kind``
+    and ``source``, with a stored permutation.
+    """
+    seq_lens = np.array([3, 5, 2])
+    logits = np.random.default_rng(0).normal(
+        size=(seq_lens.sum(), 3)).astype(np.float16)
+    path = tmp_path / "legacy.npz"
+    # seq_ids[i] names cache row permutation[i].
+    np.savez(
+        path,
+        cache=logits,
+        seq_lens=seq_lens,
+        seq_ids=np.array(["c", "a", "b"], dtype=str),
+        permutation=np.array([2, 0, 1]),
+        dim=np.array([3]),
+        alphabet=np.array("ACD"),
+        kind=np.array("3di_logits"),
+        source=np.array("predictor@rev"),
+    )
+    loaded = EmbeddingDataset(filepath=path)
+    assert loaded.seq_ids == ["c", "a", "b"]
+    np.testing.assert_array_equal(loaded.seq_lens, [2, 3, 5])
+    np.testing.assert_array_equal(loaded.get_encoded_seq(0), logits[8:10])
+    np.testing.assert_array_equal(loaded.get_encoded_seq(2), logits[3:8])
+    assert {k: str(v) for k, v in loaded.metadata.items()} == {
+        "alphabet": "ACD", "kind": "3di_logits", "source": "predictor@rev",
+    }

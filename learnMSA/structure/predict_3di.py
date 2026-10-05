@@ -49,10 +49,12 @@ def main(argv: list[str] | None = None) -> None:
     # before torch initializes CUDA.
     os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF",
                           "expandable_segments:True")
-    from learnMSA.structure.io import write_logits
+    from learnMSA.structure.io import KIND
     from learnMSA.structure.prostt5 import (PROSTT5_CLASS_ORDER,
                                             PROSTT5_REPO, PROSTT5_REVISION,
                                             predict_logits)
+    from learnMSA.util.embedding_cache import EmbeddingCache
+    from learnMSA.util.embedding_dataset import EmbeddingDataset
     from learnMSA.util.sequence_dataset import SequenceDataset
 
     t0 = time.time()
@@ -65,10 +67,17 @@ def main(argv: list[str] | None = None) -> None:
         split_length=args.split_length, verbose=not args.silent,
         batch_memory=args.batch_memory * 2**30,
     )
-    path = write_logits(
-        args.output, logits, lengths, seq_ids, PROSTT5_CLASS_ORDER,
-        source=f"{PROSTT5_REPO}@{PROSTT5_REVISION}",
+    dataset = EmbeddingDataset(
+        embedding_cache=EmbeddingCache(
+            lengths, len(PROSTT5_CLASS_ORDER), cache=logits
+        ),
+        seq_ids=seq_ids,
     )
+    path = dataset.write(args.output, metadata={
+        "alphabet": PROSTT5_CLASS_ORDER,
+        "kind": KIND,
+        "source": f"{PROSTT5_REPO}@{PROSTT5_REVISION}",
+    })
     if args.fasta:
         letters = np.array(list(PROSTT5_CLASS_ORDER))
         best = letters[np.argmax(logits, axis=1)]
