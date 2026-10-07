@@ -9,6 +9,7 @@ the reloaded model has the same parameters *and* computes the same thing.
 import numpy as np
 import pytest
 import torch
+from hidten.torch.triton import step_launch
 
 import tests.hmm.ref as ref
 from learnMSA.config import Configuration, TrainingConfig, TreeConfig
@@ -102,8 +103,17 @@ def test_round_trip_preserves_context(
         model.context.config.hmm.alphabet
 
 
+@pytest.fixture
+def restore_triton_thresholds():
+    """A model built with ``use_triton`` sets hidten's process-wide
+    step-launch thresholds; put them back for the other tests."""
+    saved = (step_launch.AUTO_MIN_Q, step_launch.AUTO_MIN_Q_UNALIGNED)
+    yield
+    step_launch.set_auto_min_q(*saved)
+
+
 def test_runtime_settings_come_from_the_current_run(
-    model: TorchLearnMSAModel, tmp_path
+    model: TorchLearnMSAModel, tmp_path, restore_triton_thresholds
 ) -> None:
     """``--compile`` and ``--triton`` say how *this* run executes, so the
     values a checkpoint was trained with must not carry over."""

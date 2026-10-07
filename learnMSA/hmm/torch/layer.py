@@ -31,6 +31,9 @@ from learnMSA.hmm.util.value_set_emb import PHMMEmbeddingValueSet
 from learnMSA.util.tensor import to_numpy
 
 
+TRITON_MIN_Q = 129 # toggle Triton kernels depending on HMM size
+
+
 class TorchPHMMLayer(torch.nn.Module, PHMMLayer[T_TorchTensor]):
     """A profile HMM as a torch module."""
 
@@ -77,6 +80,11 @@ class TorchPHMMLayer(torch.nn.Module, PHMMLayer[T_TorchTensor]):
         """
         torch.nn.Module.__init__(self)
         self.use_triton = use_triton
+        if use_triton:
+            from hidten.torch.triton import step_launch
+            step_launch.set_auto_min_q(
+                min_q=TRITON_MIN_Q, min_q_unaligned=TRITON_MIN_Q
+            )
         self._init_phmm(
             lengths=lengths,
             config=config,
