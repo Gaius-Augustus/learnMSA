@@ -903,25 +903,10 @@ def parse_args(
         help=argparse.SUPPRESS
     )
     parser.add_argument(
-        "--struct_soft_input",
-        dest="struct_soft_input",
-        type=str,
-        choices=["argmax", "posterior", "likelihood"],
-        default=st.soft_input,
-        help=argparse.SUPPRESS
-    )
-    parser.add_argument(
         "--struct_soft_temperature",
         dest="struct_soft_temperature",
         type=float,
         default=st.soft_input_temperature,
-        help=argparse.SUPPRESS
-    )
-    parser.add_argument(
-        "--struct_soft_sharpness",
-        dest="struct_soft_sharpness",
-        type=float,
-        default=st.soft_input_sharpness,
         help=argparse.SUPPRESS
     )
 

@@ -153,7 +153,7 @@ def test_decoding_temperature_comes_from_the_current_run(
     config = Configuration(training=TrainingConfig(length_init=[4, 3]))
     config.structure.use_structure = True
     config.structure.input_format = input_format
-    config.structure.soft_input_sharpness = 0.5
+    config.structure.soft_input_temperature = 2.0
     model = TorchLearnMSAModel(LearnMSAContext(config=config, num_seq=10))
     model.build()
     path = tmp_path / "model"
@@ -180,7 +180,7 @@ def test_decoding_temperature_comes_from_the_current_run(
     else:
         # The logit layer and its settings round-trip with the checkpoint.
         layer = loaded.struct_logit_layer
-        assert layer.mode == "likelihood" and layer.sharpness == 0.5
+        assert layer.temperature == 2.0
         z = torch.randn((2, 5, 1, 20))
         torch.testing.assert_close(
             layer(z.to(layer.log_prior.device)).cpu(),

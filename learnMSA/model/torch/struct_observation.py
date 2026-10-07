@@ -19,26 +19,17 @@ class StructLogitObservationLayer(torch.nn.Module):
 
     For logits z over the true letters (columns in structural alphabet
     order) the observation vector v, which anc-probs and the emitters use
-    like a one-hot input, is
-
-    - ``argmax``: the one-hot of ``argmax z``,
-    - ``posterior``: ``softmax(z / T)``,
-    - ``likelihood``: ``(softmax(z / T) / pi) ** k``, scaled to a maximum of
-      1 per residue. Dividing the predictor's posterior by the letter prior
-      pi gives a likelihood up to a per-residue constant, which does not
-      change posteriors or alignments.
+    like a one-hot input, is ``softmax(z / T) / pi``, scaled to a maximum
+    of 1 per residue.
 
     Args:
-        config: Structure configuration (``soft_input``,
-            ``soft_input_temperature``, ``soft_input_sharpness``,
+        config: Structure configuration (``soft_input_temperature``,
             ``background_distribution``).
     """
 
     def __init__(self, config: StructureConfig) -> None:
         super().__init__()
-        self.mode = config.soft_input
         self.temperature = float(config.soft_input_temperature)
-        self.sharpness = float(config.soft_input_sharpness)
         pi = np.asarray(config.background_distribution, dtype=np.float64)
         pi = pi / pi.sum()
         self.register_buffer(
@@ -47,12 +38,6 @@ class StructLogitObservationLayer(torch.nn.Module):
 
     def forward(self, z: torch.Tensor) -> torch.Tensor:
         z = z.to(torch.float32)
-        if self.mode == "argmax":
-            return torch.nn.functional.one_hot(
-                z.argmax(-1), z.shape[-1]
-            ).to(torch.float32)
         log_post = torch.log_softmax(z / self.temperature, dim=-1)
-        if self.mode == "posterior":
-            return log_post.exp()
-        score = self.sharpness * (log_post - self.log_prior)
+        score = log_post - self.log_prior
         return (score - score.amax(-1, keepdim=True)).exp()

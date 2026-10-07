@@ -1,8 +1,10 @@
 """Calibrate ProstT5 3Di logits against true 3Di (descriptive statistics).
 
 1. ``fasta``: collect the amino acid sequences that have a true 3Di string
-   (e.g. Homstrad reference chains inside the Homfam families) into one
-   FASTA, with IDs ``<family>|<id>``.
+   (e.g. the SCOP2 superfamily corpus) into one FASTA, with IDs
+   ``<family>|<id>``. Amino acids come from per-family FASTA files
+   (``--aa-dir``) or from one ``name<TAB>AA[<TAB>...]`` table
+   (``--aa-tsv``).
 2. Run ``learnMSA-3di -i that.fasta -o that.npz``.
 3. ``fit``: fit one temperature T minimising the NLL of the true letters
    under softmax(z / T), and report accuracy, NLL, ECE and a reliability
@@ -10,15 +12,17 @@
 
 Example:
     python util/calibrate_prostt5.py fasta \\
-        --true-dir ~/src/snakeMSA/data/homstrad/3Di \\
-        --aa-dir ~/src/snakeMSA/data/homfam/unaligned --out homstrad.fasta
-    learnMSA-3di -i homstrad.fasta -o homstrad.3di.npz
+        --true-dir ~/data/SCOP/superfamily_3Di_filtered \\
+        --aa-tsv ~/data/SCOP/superfamily_3Di_alignments/domains_3di.tsv \\
+        --out scop.fasta
+    learnMSA-3di -i scop.fasta -o scop.3di.npz
     python util/calibrate_prostt5.py fit \\
-        --true-dir ~/src/snakeMSA/data/homstrad/3Di \\
-        --logits homstrad.3di.npz
+        --true-dir ~/data/SCOP/superfamily_3Di_filtered \\
+        --logits scop.3di.npz
 """
 
 import argparse
+from functools import cache
 from pathlib import Path
 
 import numpy as np
@@ -42,16 +46,27 @@ def read_fasta(path: Path) -> dict[str, str]:
             for k, v in seqs.items()}
 
 
+def read_tsv(path: Path) -> dict[str, str]:
+    """Uppercase sequences by name from ``name<TAB>sequence[<TAB>...]``."""
+    with open(path) as f:
+        rows = (line.rstrip("\n").split("\t") for line in f)
+        return {r[0]: r[1].upper() for r in rows if len(r) > 1}
+
+
 def cmd_fasta(args) -> None:
     n = 0
+    aa_table = read_tsv(args.aa_tsv) if args.aa_tsv else None
     with open(args.out, "w") as out:
         for true_file in sorted(args.true_dir.glob("*.fasta")):
             fam = true_file.stem
-            aa_file = args.aa_dir / f"{fam}{args.aa_suffix}"
-            if not aa_file.exists():
-                continue
+            if aa_table is None:
+                aa_file = args.aa_dir / f"{fam}{args.aa_suffix}"
+                if not aa_file.exists():
+                    continue
+                aa = read_fasta(aa_file)
+            else:
+                aa = aa_table
             true = read_fasta(true_file)
-            aa = read_fasta(aa_file)
             for sid, t in true.items():
                 s = aa.get(sid)
                 if s is not None and len(s) == len(t):
@@ -83,13 +98,14 @@ def cmd_fit(args) -> None:
 
     from learnMSA.util import EmbeddingDataset
 
+    true_seqs = cache(lambda fam: read_fasta(args.true_dir / f"{fam}.fasta"))
     data = EmbeddingDataset(args.logits)
     # Columns follow the alphabet stored in the file.
     index = {c: i for i, c in enumerate(str(data.metadata["alphabet"]))}
     zs, ys, fams = [], [], []
     for i, key in enumerate(data.seq_ids):
         fam, sid = key.split("|", 1)
-        true = read_fasta(args.true_dir / f"{fam}.fasta")[sid]
+        true = true_seqs(fam)[sid]
         y = np.array([index.get(c, -1) for c in true])
         z = data.get_encoded_seq(i).astype(np.float64)
         keep = y >= 0
@@ -100,9 +116,18 @@ def cmd_fit(args) -> None:
     best = minimize_scalar(nll, bounds=(0.1, 10.0), method="bounded")
     t_star = float(best.x)
 
+    # Diagnostic: every family gets the same total weight, since deep
+    # families otherwise dominate the residue-pooled fit.
+    uniq, fam_idx, fam_count = np.unique(fams, return_inverse=True,
+                                         return_counts=True)
+    w = 1.0 / fam_count[fam_idx]
+    w /= w.sum()
+    nll_fam = lambda t: -(w * _log_softmax(z / t)[np.arange(len(y)), y]).sum()
+    t_fam = float(minimize_scalar(nll_fam, bounds=(0.1, 10.0),
+                                  method="bounded").x)
+
     # Stability: fit T on each half of the families, score the other half.
     rng = np.random.default_rng(0)
-    uniq = np.unique(fams)
     half = set(rng.permutation(uniq)[: len(uniq) // 2])
     in_a = np.array([f in half for f in fams])
     splits = []
@@ -124,6 +149,7 @@ def cmd_fit(args) -> None:
               f"mean max-prob {p.max(1).mean():.4f}")
     print("family half-splits (T fitted on one half, NLL on the other): "
           + ", ".join(f"T={t:.3f} NLL={v:.4f}" for t, v in splits))
+    print(f"family-weighted fit (each family weight 1): T={t_fam:.3f}")
 
     p = np.exp(_log_softmax(z / t_star))
     conf, correct = p.max(1), p.argmax(1) == y
@@ -142,7 +168,9 @@ def main() -> None:
     sub = parser.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("fasta")
     p.add_argument("--true-dir", type=Path, required=True)
-    p.add_argument("--aa-dir", type=Path, required=True)
+    aa = p.add_mutually_exclusive_group(required=True)
+    aa.add_argument("--aa-dir", type=Path)
+    aa.add_argument("--aa-tsv", type=Path)
     p.add_argument("--aa-suffix", default=".vie")
     p.add_argument("--out", type=Path, required=True)
     p = sub.add_parser("fit")

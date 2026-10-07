@@ -220,23 +220,23 @@ class TestArgsToConfig:
         base = ["-i", "input.fasta", "-o", "output.a2m",
                 "--struct", "3di.npz"]
         config = args_to_config(parser.parse_args(base))
-        assert config.structure.soft_input == "likelihood"
-        assert config.structure.soft_input_temperature == 1.25
-        assert config.structure.soft_input_sharpness == 1.0
+        assert config.structure.soft_input_temperature == 1.24
 
         config = args_to_config(parser.parse_args(base + [
-            "--struct_soft_input", "posterior",
             "--struct_soft_temperature", "2",
-            "--struct_soft_sharpness", "0.5",
         ]))
-        assert config.structure.soft_input == "posterior"
         assert config.structure.soft_input_temperature == 2.0
-        assert config.structure.soft_input_sharpness == 0.5
 
         with pytest.raises(ValueError):
             args_to_config(parser.parse_args(base + [
-                "--struct_soft_sharpness", "0",
+                "--struct_soft_temperature", "0",
             ]))
+
+        # The observation mode and sharpness are no longer options.
+        for removed in (["--struct_soft_input", "posterior"],
+                        ["--struct_soft_sharpness", "0.5"]):
+            with pytest.raises(SystemExit):
+                parser.parse_args(base + removed)
 
     def test_args_to_config_default_save_emb_uses_workdir(self):
         """Test default save_emb path construction from work_dir and input_file."""
