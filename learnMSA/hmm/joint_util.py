@@ -33,7 +33,8 @@ def AB_init(
         batch_shape (tuple[int, ...]): Optional leading batch dimensions.
         noise_std (float): Standard deviation for A's Gaussian noise.
             Pass 0.0 for exact zeros (e.g. for surgery-inserted positions).
-        seed (int | None): Random seed for reproducibility.
+        seed (int | None): Random seed for reproducibility. If None, it is
+            drawn from numpy's global random state.
 
     Returns:
         tuple[np.ndarray, np.ndarray]: A of shape
@@ -41,6 +42,8 @@ def AB_init(
             ``batch_shape + (n2, low_rank)``.
     """
     assert low_rank >= 1, "low_rank must be at least 1"
+    if seed is None:
+        seed = np.random.randint(2**31)
     rng = np.random.default_rng(seed)
     A = rng.normal(scale=noise_std,
                    size=batch_shape + (n1, low_rank)).astype(np.float64)

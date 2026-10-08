@@ -157,6 +157,12 @@ def make_dataset(
             ds = ds.shuffle(indices.size, reshuffle_each_iteration=True)
             ds = ds.repeat()
         ds = ds.batch(batch_size)
+        if shuffle:
+            # The batches are assembled in parallel threads, so their crops
+            # are drawn from a seed per batch number rather than from numpy's
+            # global random state, whose draw order would be arbitrary.
+            crop_seed = np.random.randint(2**31)
+            ds = tf.data.Dataset.zip((ds, tf.data.Dataset.counter()))
 
         if batch_generator.static_shape_mode:
             seq_dims = [
@@ -169,9 +175,16 @@ def make_dataset(
         batch_generator.bucket_boundaries = None
         num_batch_outputs = len(batch_generator.data)
 
-        def _batch_func(i):
+        def _crop_seeded_batch(i, k):
+            return batch_generator(i, (crop_seed, int(k)))
+
+        def _batch_func(i, k=None):
+            if k is None:
+                func, inp = batch_generator, [i]
+            else:
+                func, inp = _crop_seeded_batch, [i, k]
             results = tf.numpy_function(
-                batch_generator, [i], _tf_out_types(batch_generator)
+                func, inp, _tf_out_types(batch_generator)
             )
 
             if not isinstance(results, (tuple, list)):
@@ -208,6 +221,9 @@ def make_dataset(
         if bucket_by_seq_length:
             def batch_func(i,j):
                 return *_batch_func(i), j
+        elif shuffle:
+            def batch_func(i, k):
+                return _batch_func(i, k)
         else:
             def batch_func(i):
                 return _batch_func(i)

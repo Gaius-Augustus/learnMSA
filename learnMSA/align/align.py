@@ -50,6 +50,8 @@ def align(
     work_dir = Path(config.input_output.work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
 
+    backend.set_random_seed(config.advanced.seed)
+
     # Create a context that automatically sets up data-dependent parameters
     context = LearnMSAContext(config, data[0])
 

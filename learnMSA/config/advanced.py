@@ -22,6 +22,9 @@ class AdvancedConfig(BaseModel):
     usually faster, but they are opt-in because they are not available
     everywhere and can misbehave."""
 
+    seed: int = 42
+    """Seed of all random number generators."""
+
     dist_out: str = ""
     """Distribution output file."""
 
@@ -53,4 +56,10 @@ class AdvancedConfig(BaseModel):
     def validate_quantiles(cls, v: float, info) -> float:
         if not v > 0:
             raise ValueError(f"{info.field_name} must be greater than 0.")
+        return v
+
+    @field_validator("seed")
+    def validate_seed(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError("seed must be non-negative.")
         return v

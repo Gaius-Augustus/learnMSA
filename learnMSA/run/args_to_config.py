@@ -111,7 +111,7 @@ def args_to_config(
     im["match_threshold"] = args.match_threshold
     im["global_factor"] = args.global_factor
     im["pseudocounts"] = args.pseudocounts
-    im["seeded"] = args.seeded
+    im["seeded_msa"] = args.seeded_msa
 
     load_emb = args.emb_file is not None
     save_emb = args.save_emb != "" and args.save_emb != "<workdir>"
@@ -168,6 +168,7 @@ def args_to_config(
     adv["initial_distance"] = args.initial_distance
     adv["compile"] = args.compile
     adv["use_triton"] = args.use_triton
+    adv["seed"] = args.seed
 
     # Deprecated checks
     if args.noA2M:

@@ -207,3 +207,21 @@ def test_full_training_set_keeps_the_permutations() -> None:
             batch_gen.configure(data, context, indices)
             for p, q in zip(batch_gen.permutations, expected):
                 np.testing.assert_equal(p, q)
+
+
+def test_crops_are_determined_by_the_crop_seed() -> None:
+    filename = os.path.dirname(__file__) + "/../data/felix_insert_delete.fa"
+    with SequenceDataset(filename) as data:
+        config = Configuration()
+        config.training.num_model = 1
+        config.training.no_sequence_weights = True
+        config.training.auto_crop = False
+        config.training.crop = 3
+        batch_gen = batch_generator.BatchGenerator(shuffle=False)
+        batch_gen.configure(data, LearnMSAContext(config, data))
+        ind = np.arange(data.num_seq)
+        s1, _ = batch_gen(ind, crop_seed=(5, 0))
+        s2, _ = batch_gen(ind, crop_seed=(5, 0))
+        np.testing.assert_equal(s1, s2)
+        others = [batch_gen(ind, crop_seed=(5, k))[0] for k in range(1, 11)]
+        assert any(not np.array_equal(s1, o) for o in others)

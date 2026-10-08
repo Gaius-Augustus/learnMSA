@@ -24,7 +24,7 @@ FORMATS = {"tensorflow": "keras", "pytorch": "pt"}
 #: model is. A checkpoint carries the whole configuration it was trained with,
 #: but these are taken from the current run instead, so that a model trained
 #: with, say, ``--triton`` is not stuck with the kernels when it is loaded.
-RUNTIME_ADVANCED_FIELDS = ("compile", "use_triton")
+RUNTIME_ADVANCED_FIELDS = ("compile", "use_triton", "seed")
 
 
 def checkpoint_format(backend_name: str | None = None) -> str:

@@ -97,8 +97,19 @@ class BatchGenerator():
         return 1 if self.share_batch else self.num_models
 
     def __call__(
-        self, indices: np.ndarray
+        self,
+        indices: np.ndarray,
+        crop_seed: int | Sequence[int] | None = None,
     ) -> tuple[np.ndarray, ...] | np.ndarray:
+        """Assembles the batch of the given sequence indices.
+
+        Args:
+            indices: The sequence indices of the batch.
+            crop_seed: Seed of the random crops of this batch. Lets an input
+                pipeline that assembles batches in parallel crop independently
+                of the order the batches are assembled in. If None, the crops
+                are drawn from numpy's global random state.
+        """
         if not self.configured:
             raise ValueError(
                 "A batch generator must be configured with the "\
@@ -158,13 +169,17 @@ class BatchGenerator():
             (indices.shape[0], num_gen),
             dtype=np.int32,
         )
+        if crop_seed is None:
+            randint = np.random.randint
+        else:
+            randint = np.random.default_rng(crop_seed).integers
         for i, perm_ind in enumerate(permutated_indices):
             for k, j in enumerate(perm_ind):
                 seq_len = int(self.data[0].seq_lens[j])
                 if np.isfinite(self.crop_long_seqs):
                     crop_len = int(self.crop_long_seqs)
                     if seq_len > crop_len:
-                        crop_start = np.random.randint(
+                        crop_start = randint(
                             0,
                             seq_len - crop_len + 1,
                         )

@@ -54,6 +54,11 @@ Arguments
     when inferring HMM parameters from the MSA. This can help if the MSA contains few sequences
     and you don't trust its correctness. For large input MSAs this option has little effect.
 
+``--seeded_msa``
+    Computes an initial MSA of the input sequences with FAMSA and initializes the model from it,
+    as if it had been passed with ``--from_msa``. Useful for aligning low numbers of sequences
+    without providing an initial MSA. Replaces the deprecated ``--seeded``.
+
 
 Practical tips and example commands
 -----------------------------------

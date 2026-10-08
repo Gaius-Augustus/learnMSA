@@ -130,7 +130,7 @@ class LearnMSAContext:
             model_len_cb, self.aa_values = self._setup_init_msa(
                 msa_file=self.config.init_msa.from_msa
             )
-        elif self.config.init_msa.seeded and data is not None:
+        elif self.config.init_msa.seeded_msa and data is not None:
             from learnMSA.util.famsa_align import align_with_famsa
 
             wd = self.config.input_output.work_dir

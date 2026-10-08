@@ -173,6 +173,25 @@ def configure_runtime() -> None:
     # torch.set_float32_matmul_precision("high")
 
 
+def set_random_seed(seed: int) -> None:
+    """Seed all random state of learnMSA.
+    """
+    import random
+
+    import numpy as np
+
+    random.seed(seed)
+    np.random.seed(seed % 2**32)
+    if get_backend() == "tensorflow":
+        import tensorflow as tf
+
+        # also seeds keras' own generator, which the initializers use
+        tf.keras.utils.set_random_seed(seed % 2**32)
+    else:
+        import torch
+        torch.manual_seed(seed)
+
+
 def clear_session() -> None:
     """Release framework-held memory between training runs."""
     if get_backend() == "tensorflow":

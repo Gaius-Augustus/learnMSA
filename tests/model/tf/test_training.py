@@ -6,12 +6,17 @@ because keras expects a target, while the PyTorch ``DataLoader`` yields the
 inputs alone.
 """
 
+import os
+from itertools import islice
+
 import numpy as np
 
+from learnMSA.backend import set_random_seed
 from learnMSA.config.config import Configuration
 from learnMSA.model.batch_generator import BatchGenerator
 from learnMSA.model.context import LearnMSAContext
 from learnMSA.model.tf.training import make_dataset
+from learnMSA.util.sequence_dataset import SequenceDataset
 from tests.embedding_data import make_aa_dataset, make_embedding_dataset
 
 
@@ -64,3 +69,34 @@ def test_make_dataset_shared_batch() -> None:
     assert np.all(i.numpy() == np.array([[0], [2], [3]]))
     # The tracks stay aligned: sequence j is filled with j + 1.
     assert np.all(e[:, 0].numpy() == np.array([1.0, 3.0, 4.0])[:, None, None])
+
+
+def _first_shuffled_batches(seed: int) -> list[np.ndarray]:
+    """The first training batches after seeding learnMSA with ``seed``."""
+    set_random_seed(seed)
+    filename = os.path.dirname(__file__) + "/../../data/felix_insert_delete.fa"
+    with SequenceDataset(filename) as data:
+        config = Configuration()
+        config.training.num_model = 2
+        config.training.no_sequence_weights = True
+        config.training.auto_crop = False
+        config.training.crop = 5
+        batch_gen = BatchGenerator()
+        batch_gen.configure(data, LearnMSAContext(config, data))
+        dataset, _ = make_dataset(
+            np.arange(data.num_seq), batch_gen, batch_size=4, shuffle=True
+        )
+        batches = []
+        for element in islice(dataset, 6):
+            (s, i), _ = element
+            batches += [s.numpy(), i.numpy()]
+    return batches
+
+
+def test_shuffled_batches_are_reproducible() -> None:
+    """Seeding fixes the batch order, the permutations and the crops."""
+    first = _first_shuffled_batches(3)
+    for a, b in zip(first, _first_shuffled_batches(3)):
+        np.testing.assert_equal(a, b)
+    other = _first_shuffled_batches(4)
+    assert any(not np.array_equal(a, b) for a, b in zip(first, other))

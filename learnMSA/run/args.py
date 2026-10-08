@@ -532,8 +532,8 @@ def parse_args(
             "input via --from_msa."
     )
     init_msa_group.add_argument(
-        "--seeded",
-        dest="seeded",
+        "--seeded_msa",
+        dest="seeded_msa",
         action="store_true",
         help="Computes an initial MSA with the tool FAMSA. Useful for aligning" \
         " low numbers of sequences without providing an initial MSA."
@@ -722,6 +722,15 @@ def parse_args(
             "torch scan. PyTorch only; the kernels are usually faster, but "\
             "they are opt-in because they are not available everywhere."
     )
+    advanced_group.add_argument(
+        "--seed",
+        dest="seed",
+        type=int,
+        default=adv.seed,
+        help="Seed of all random number generators. Two runs with the same "\
+            "seed and backend are identical up to fluctuations of the "\
+            "compute operations. (default: %(default)s)"
+    )
 
     deprecated_group = parser.add_argument_group("Deprecated arguments")
     deprecated_group.add_argument(
@@ -729,6 +738,12 @@ def parse_args(
         dest="noA2M",
         action='store_true',
         help="Deprecated: Use --format fasta instead."
+    )
+    deprecated_group.add_argument(
+        "--seeded",
+        dest="seeded_msa",
+        action="store_true",
+        help="Deprecated: Use --seeded_msa instead."
     )
     deprecated_group.add_argument(
         "--cluster_dir",
