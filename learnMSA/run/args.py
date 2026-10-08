@@ -727,9 +727,7 @@ def parse_args(
         dest="seed",
         type=int,
         default=adv.seed,
-        help="Seed of all random number generators. Two runs with the same "\
-            "seed and backend are identical up to fluctuations of the "\
-            "compute operations. (default: %(default)s)"
+        help="Seed of all random number generators. (default: %(default)s)"
     )
 
     deprecated_group = parser.add_argument_group("Deprecated arguments")
