@@ -163,7 +163,7 @@ def args_to_config(
     st["joint_row_prior"] = args.joint_row_prior
     st["joint_row_concentration"] = args.joint_row_concentration
     st["emitter_temperature"] = args.struct_emitter_temperature
-    st["soft_input_temperature"] = args.struct_soft_temperature
+    st["input_temperature"] = args.struct_input_temperature
 
     # --- Advanced ---
     adv["backend"] = args.backend

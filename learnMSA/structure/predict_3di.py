@@ -49,7 +49,7 @@ def main(argv: list[str] | None = None) -> None:
     # before torch initializes CUDA.
     os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF",
                           "expandable_segments:True")
-    from learnMSA.structure.io import KIND
+    from learnMSA.structure.io import KIND, PROSTT5, SOURCE_KEY
     from learnMSA.structure.prostt5 import (PROSTT5_CLASS_ORDER,
                                             PROSTT5_REPO, PROSTT5_REVISION,
                                             predict_logits)
@@ -77,6 +77,7 @@ def main(argv: list[str] | None = None) -> None:
         "alphabet": PROSTT5_CLASS_ORDER,
         "kind": KIND,
         "source": f"{PROSTT5_REPO}@{PROSTT5_REVISION}",
+        SOURCE_KEY: PROSTT5,
     })
     if args.fasta:
         letters = np.array(list(PROSTT5_CLASS_ORDER))

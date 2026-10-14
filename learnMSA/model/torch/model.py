@@ -128,7 +128,7 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
         # observation vectors over true 3Di letters before anc-probs sees
         # the track. Kept separate from the evolutionary model.
         st_cfg = context.config.structure
-        if st_cfg.use_structure and st_cfg.input_format == "logits":
+        if st_cfg.use_structure and st_cfg.is_logits:
             self.struct_logit_layer = StructLogitObservationLayer(st_cfg)
 
         # Create the ancestral probabilities layer

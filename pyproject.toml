@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "learnMSA"
 dynamic = ["version"]
 description = "learnMSA: Learning and Aligning large Protein Families"
-license-files = ["LICENSE.md"]
+license-files = ["LICENSE.md", "LICENSES/GPL-3.0-or-later.txt"]
 authors = [{ name = "Felix Becker", email = "beckerfelix94@gmail.com" }]
 readme = "README.md"
 requires-python = ">=3.11"
@@ -64,6 +64,10 @@ plm-torch = [
     "transformers<5.0",
     "SentencePiece"
 ]
+# learnMSA-3di-translate (structures to 3Di logits)
+structure = [
+    "gemmi"
+]
 
 [project.urls]
 Homepage = "https://github.com/Gaius-Augustus/learnMSA"
@@ -71,6 +75,7 @@ Homepage = "https://github.com/Gaius-Augustus/learnMSA"
 [project.scripts]
 learnMSA = "learnMSA.run:run_main"
 learnMSA-3di = "learnMSA.structure.predict_3di:main"
+learnMSA-3di-translate = "learnMSA.structure.translate_3di:main"
 
 [tool.setuptools.dynamic]
 version = { attr = "learnMSA._version.__version__" }

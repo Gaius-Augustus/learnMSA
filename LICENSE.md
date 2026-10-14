@@ -19,3 +19,12 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+Exception: `learnMSA/structure/translate_3di.py` (the `learnMSA-3di-translate`
+command) is a port of code from Foldseek
+(https://github.com/steineggerlab/foldseek) and is licensed under the GNU
+General Public License v3.0 or later (`LICENSES/GPL-3.0-or-later.txt`), as is
+`util/calibrate_translate_3di.py`, which imports it. No other module of learnMSA
+imports these files; everything else remains under the MIT License above.

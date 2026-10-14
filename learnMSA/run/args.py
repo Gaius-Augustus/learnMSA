@@ -901,10 +901,10 @@ def parse_args(
         help=argparse.SUPPRESS
     )
     parser.add_argument(
-        "--struct_soft_temperature",
-        dest="struct_soft_temperature",
+        "--struct_input_temperature",
+        dest="struct_input_temperature",
         type=float,
-        default=st.soft_input_temperature,
+        default=st.input_temperature,
         help=argparse.SUPPRESS
     )
 

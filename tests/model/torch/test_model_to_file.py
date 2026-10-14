@@ -143,7 +143,7 @@ def test_runtime_settings_come_from_the_current_run(
     )
 
 
-@pytest.mark.parametrize("input_format", ["tokens", "logits"])
+@pytest.mark.parametrize("input_format", ["tokens", "prostt5_logits"])
 def test_decoding_temperature_comes_from_the_current_run(
     input_format: str, tmp_path
 ) -> None:
@@ -153,7 +153,7 @@ def test_decoding_temperature_comes_from_the_current_run(
     config = Configuration(training=TrainingConfig(length_init=[4, 3]))
     config.structure.use_structure = True
     config.structure.input_format = input_format
-    config.structure.soft_input_temperature = 2.0
+    config.structure.input_temperature = 2.0
     model = TorchLearnMSAModel(LearnMSAContext(config=config, num_seq=10))
     model.build()
     path = tmp_path / "model"
