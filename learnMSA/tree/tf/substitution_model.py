@@ -3,7 +3,7 @@ import tensorflow as tf
 import numpy as np
 
 from evoten import backend
-from evoten.expm_gtr_tf import expm_gtr, precompute_gtr, expm_gtr_from_decomp
+from evoten.expm_tf import expm_gtr, precompute_gtr, expm_gtr_from_decomp
 
 
 class SubstitutionModel(tf.keras.layers.Layer):

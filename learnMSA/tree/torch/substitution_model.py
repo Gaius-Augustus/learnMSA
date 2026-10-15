@@ -1,14 +1,14 @@
 import numpy as np
 import torch
 from evoten import backend
-from evoten.expm_gtr_torch import (GTRDecomp, expm_gtr, expm_gtr_from_decomp,
-                                   precompute_gtr)
+from evoten.expm_torch import (GTRDecomp, expm_gtr, expm_gtr_from_decomp,
+                               precompute_gtr)
 
 from learnMSA.tree.initializer import InitSpec
 from learnMSA.tree.torch.initializer import T_TorchInitializer, to_torch
 
 #: Buffer names holding the cached GTR eigendecomposition, in the field order
-#: of :class:`~evoten.expm_gtr_torch.GTRDecomp`.
+#: of :class:`~evoten.expm_torch.GTRDecomp`.
 _GTR_BUFFERS = (
     "_gtr_eigvals", "_gtr_eigvecs", "_gtr_sqrt_pi", "_gtr_inv_sqrt_pi",
 )
