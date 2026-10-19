@@ -6,15 +6,6 @@ from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from .util import NPArray
 
-#: Calibrated temperatures of per-residue 3Di logits, by input format.
-DEFAULT_INPUT_TEMPERATURES = {
-    # util/calibrate_prostt5.py: the true 3Di letters of SCOP2 domains.
-    "prostt5_logits": 1.24,
-    # util/calibrate_translate_3di.py: the 3Di letter distributions of SCOP2
-    # superfamily alignment columns.
-    "pdb_logits": 2.25,
-}
-
 
 class StructureConfig(BaseModel):
     """Configuration for settings related to protein structure."""
@@ -92,20 +83,16 @@ class StructureConfig(BaseModel):
     """If joint_emissions is True, this specifies the rank of the low-rank
     approximation of the joint emission matrix."""
 
-    input_format: Literal["tokens", "prostt5_logits", "pdb_logits"] = \
-        "tokens"
+    input_format: Literal["tokens", "logits"] = "tokens"
     """Set when the structural data are loaded: ``"tokens"`` for a 3Di FASTA
-    file; for per-residue 3Di logits (an ``.npz``), from the file's
-    ``logit_source``: ``"prostt5_logits"`` for ProstT5 predictions
-    (``learnMSA-3di``), ``"pdb_logits"`` for logits translated from
-    structures (``learnMSA-3di-translate``)."""
+    file, ``"logits"`` for per-residue 3Di logits predicted by ProstT5 (an
+    ``.npz`` written by ``learnMSA-3di``)."""
 
-    input_temperature: float = -1.0
-    """Temperature T of per-residue 3Di logits: the posterior is
-    ``softmax(z / T)`` for ProstT5 predictions and
-    ``softmax(-d^2 / T + log(background))`` for logits translated from
-    structures. -1 (auto) is replaced by the calibrated value of the input
-    format (``DEFAULT_INPUT_TEMPERATURES``) when the logits are loaded."""
+    input_temperature: float = 1.24
+    """Temperature T of the ProstT5 3Di logits z: the posterior over the
+    true 3Di letters is ``softmax(z / T)``. Calibrated on the 3Di letters of
+    SCOP2 domains (``util/calibrate_prostt5.py``). Unused for a 3Di FASTA
+    file."""
 
     match_emissions: (Sequence[float] | Sequence[Sequence[float]] |
                       Sequence[Sequence[Sequence[float]]] |
@@ -138,46 +125,28 @@ class StructureConfig(BaseModel):
             raise ValueError("joint_row_concentration must be non-negative.")
         return v
 
-    @field_validator("input_format", mode="before")
-    @classmethod
-    def validate_input_format(cls, v: str) -> str:
-        # Saved models from before the logit sources were told apart.
-        return "prostt5_logits" if v == "logits" else v
-
     @field_validator("input_temperature")
     def validate_input_temperature(cls, v: float) -> float:
-        if v <= 0 and v != -1:
-            raise ValueError("input_temperature must be positive or -1 "
-                             "(auto).")
+        if v <= 0:
+            raise ValueError("input_temperature must be positive.")
         return v
 
     @model_validator(mode="before")
     @classmethod
-    def _legacy_input_temperature(cls, data):
-        """Saved models from before the single input temperature."""
-        if isinstance(data, dict) and "input_temperature" not in data:
-            key = {"logits": "soft_input_temperature",
-                   "prostt5_logits": "soft_input_temperature",
-                   "pdb_logits": "pdb_input_temperature",
-                   }.get(data.get("input_format"))
-            if key in data:
-                data = {**data, "input_temperature": data[key]}
+    def _legacy_fields(cls, data):
+        """Saved models from earlier versions of the logit input."""
+        if not isinstance(data, dict):
+            return data
+        data = dict(data)
+        if data.get("input_format") == "prostt5_logits":
+            data["input_format"] = "logits"
+        if data.get("input_temperature") == -1:
+            # The former "auto" value.
+            del data["input_temperature"]
+        if "soft_input_temperature" in data:
+            data.setdefault("input_temperature",
+                            data.pop("soft_input_temperature"))
         return data
-
-    def resolved_input_temperature(self) -> float:
-        """``input_temperature``, or the calibrated value of the logit input
-        format if it is -1 (auto)."""
-        if self.input_temperature > 0:
-            return self.input_temperature
-        if not self.is_logits:
-            raise ValueError("The input temperature applies to 3Di logits "
-                             "only.")
-        return DEFAULT_INPUT_TEMPERATURES[self.input_format]
-
-    @property
-    def is_logits(self) -> bool:
-        """Whether the structural input is per-residue 3Di logits."""
-        return self.input_format != "tokens"
 
     @property
     def alphabet_size(self) -> int:

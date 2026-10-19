@@ -43,6 +43,7 @@ class SequenceDataset(Dataset):
         validate_alphabet: bool = True,
         remap: bool = True,
         model_uo: bool = False,
+        unknown_ends: bool = False,
     ) -> None:
         """
         Args:
@@ -79,8 +80,14 @@ class SequenceDataset(Dataset):
             model_uo (bool): Amino acid mode only. If True, U (selenocysteine)
                 and O (pyrrolysine) are modeled explicitly (22-letter alphabet);
                 otherwise they are resolved like X.
+            unknown_ends (bool): If True, get_encoded_seq encodes the first
+                and last residue of every sequence as unknown, an all-ones
+                row that every distribution over the alphabet scores with
+                probability 1. For 3Di computed from structures: Foldseek
+                cannot compute a 3Di state for the termini and writes D.
         """
         self.model_uo = model_uo
+        self.unknown_ends = unknown_ends
         self.remap = remap
         # Amino acid mode is used whenever no explicit alphabet is provided.
         if alphabet is not None:
@@ -309,6 +316,9 @@ class SequenceDataset(Dataset):
             seq = self._remap_matrix[tokens]
         else:
             seq = np.eye(len(self.output_alphabet), dtype=np.float32)[tokens]
+        if self.unknown_ends and seq.shape[0] > 0:
+            # Before cropping, so that only the true termini are unknown.
+            seq[[0, -1]] = 1.0
 
         start = 0 if crop_start is None else crop_start
         end = seq.shape[0] if crop_end is None else crop_end

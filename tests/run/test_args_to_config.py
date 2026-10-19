@@ -220,8 +220,7 @@ class TestArgsToConfig:
         base = ["-i", "input.fasta", "-o", "output.a2m",
                 "--struct", "3di.npz"]
         config = args_to_config(parser.parse_args(base))
-        # Auto: chosen from the logit source when the file is loaded.
-        assert config.structure.input_temperature == -1
+        assert config.structure.input_temperature == 1.24
 
         config = args_to_config(parser.parse_args(base + [
             "--struct_input_temperature", "0.5",
@@ -235,8 +234,7 @@ class TestArgsToConfig:
         # Replaced or no longer options.
         for removed in (["--struct_soft_input", "posterior"],
                         ["--struct_soft_sharpness", "0.5"],
-                        ["--struct_soft_temperature", "2"],
-                        ["--struct_pdb_temperature", "2"]):
+                        ["--struct_soft_temperature", "2"]):
             with pytest.raises(SystemExit):
                 parser.parse_args(base + removed)
 

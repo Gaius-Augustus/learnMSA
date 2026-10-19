@@ -50,3 +50,25 @@ def test_load_struct_data_reordering(tmp_path: Path) -> None:
     assert struct_data.seq_ids == data.seq_ids
     # After reordering, seqA should be first, seqB second, seqC third
     assert struct_data.seq_ids == ["seqA", "seqB", "seqC"]
+
+
+def test_3di_fasta_termini_are_unknown(tmp_path: Path) -> None:
+    """Foldseek writes D for the termini, where it cannot compute a 3Di
+    state; learnMSA reads them as unknown."""
+    aa_file = tmp_path / "aa.fasta"
+    struct_file = tmp_path / "struct.fasta"
+    _write_fasta(aa_file, [("seqA", "ACDEF"), ("seqB", "GHI")])
+    _write_fasta(struct_file, [("seqA", "DVLPD"), ("seqB", "DPD")])
+    config = Configuration()
+    config.input_output.struct_file = struct_file
+    alphabet = config.structure.structural_alphabet
+
+    with ExitStack() as stack:
+        data = stack.enter_context(SequenceDataset(aa_file, "fasta"))
+        struct_data = load_struct_data(config, data, stack)
+        encoded = struct_data.get_encoded_seq(0)
+
+    assert config.structure.input_format == "tokens"
+    np.testing.assert_equal(encoded[[0, -1]], 1.0)
+    expected = np.eye(len(alphabet))[[alphabet.index(c) for c in "VLP"]]
+    np.testing.assert_equal(encoded[1:-1], expected)

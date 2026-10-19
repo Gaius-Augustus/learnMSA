@@ -5,12 +5,9 @@ import pytest
 import torch
 
 from learnMSA.config import Configuration, TrainingConfig
-from learnMSA.config.structure import (DEFAULT_INPUT_TEMPERATURES,
-                                       StructureConfig)
+from learnMSA.config.structure import StructureConfig
 from learnMSA.model.context import LearnMSAContext
 from learnMSA.model.torch.model import TorchLearnMSAModel as LearnMSAModel
-from learnMSA.model.torch.struct_observation import \
-    StructLogitObservationLayer
 
 LENGTHS = [6, 4]
 NUM_HEADS = len(LENGTHS)
@@ -71,7 +68,7 @@ def _run(model: LearnMSAModel, inputs) -> torch.Tensor:
 def _logit_config(use_anc_probs: bool = True, temperature: float = 1.0,
                   joint_emissions: bool = False) -> Configuration:
     config = _make_config(use_anc_probs, joint_emissions)
-    config.structure.input_format = "prostt5_logits"
+    config.structure.input_format = "logits"
     config.structure.input_temperature = temperature
     return config
 
@@ -106,41 +103,20 @@ def test_logits_equal_the_transformed_token_input(
     assert torch.isfinite(out_logits).all()
 
 
-@pytest.mark.parametrize("temperature", [0.5, 2.25])
-def test_pdb_logits_temper_the_distances(temperature) -> None:
-    """Logits translated from structures are -d^2; the posterior is
-    softmax(-d^2 / T + log(pi)), so v is exp(-d^2 / T) scaled to a maximum
-    of 1, and a residue without a 3Di (z = 0) is uninformative."""
-    config = StructureConfig(input_format="pdb_logits",
-                             input_temperature=temperature)
-    d2 = np.random.default_rng(0).random((5, 20)) * 4
-    z = np.concatenate([-d2, np.zeros((1, 20))])
-    v = StructLogitObservationLayer(config)(
-        torch.as_tensor(z, dtype=torch.float32)).numpy()
-    expected = np.exp(-(d2 - d2.min(1, keepdims=True)) / temperature)
-    np.testing.assert_allclose(v[:5], expected, rtol=1e-4, atol=1e-5)
-    np.testing.assert_allclose(v[5], 1.0, atol=1e-5)
-
-
-def test_old_logits_input_format_is_prostt5() -> None:
-    """Saved models from before the logit sources were told apart."""
-    config = StructureConfig(input_format="logits")
-    assert config.input_format == "prostt5_logits" and config.is_logits
-    assert not StructureConfig().is_logits
-    # Their soft_input_temperature becomes the input temperature.
+def test_saved_models_of_earlier_logit_inputs_load() -> None:
+    """Checkpoints with the former input format and temperature fields."""
+    config = StructureConfig.model_validate(
+        {"input_format": "prostt5_logits", "input_temperature": 0.8})
+    assert config.input_format == "logits"
+    assert config.input_temperature == 0.8
     config = StructureConfig.model_validate(
         {"input_format": "logits", "soft_input_temperature": 1.5})
     assert config.input_temperature == 1.5
-
-
-def test_auto_input_temperature_depends_on_the_input_format() -> None:
-    assert StructureConfig().input_temperature == -1
-    for fmt, t in DEFAULT_INPUT_TEMPERATURES.items():
-        config = StructureConfig(input_format=fmt)
-        assert config.resolved_input_temperature() == t
-        assert StructureConfig(input_format=fmt, input_temperature=0.3
-                               ).resolved_input_temperature() == 0.3
-    with pytest.raises(ValueError):
-        StructureConfig().resolved_input_temperature()
+    # The former "auto" temperature of a 3Di FASTA input.
+    config = StructureConfig.model_validate(
+        {"input_format": "tokens", "input_temperature": -1})
+    assert config.input_temperature == StructureConfig().input_temperature
     with pytest.raises(ValueError):
         StructureConfig(input_temperature=0)
+    with pytest.raises(ValueError):
+        StructureConfig(input_format="pdb_logits")

@@ -503,6 +503,28 @@ def test_custom_alphabet() -> None:
         np.testing.assert_equal(data.get_column_map(1), [0, 2, 3, 4])
 
 
+def test_unknown_ends() -> None:
+    """unknown_ends encodes the first and last residue as all-ones rows,
+    also when a crop window leaves out the other terminus."""
+    with SequenceDataset(
+        sequences=[("s1", "ABBAB"), ("s2", "A")], alphabet="AB",
+        remap=False, unknown_ends=True,
+    ) as data:
+        np.testing.assert_equal(
+            data.get_encoded_seq(0),
+            [[1, 1], [0, 1], [0, 1], [1, 0], [1, 1]],
+        )
+        np.testing.assert_equal(
+            data.get_encoded_seq(0, crop_start=1, crop_end=4),
+            [[0, 1], [0, 1], [1, 0]],
+        )
+        np.testing.assert_equal(
+            data.get_encoded_seq(0, crop_start=0, crop_end=2),
+            [[1, 1], [0, 1]],
+        )
+        np.testing.assert_equal(data.get_encoded_seq(1), [[1, 1]])
+
+
 def test_reorder() -> None:
     sequences = [("s1", "AAAA"), ("s2", "BBB"), ("s3", "CC")]
     with SequenceDataset(sequences=sequences) as data:

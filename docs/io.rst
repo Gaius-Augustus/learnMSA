@@ -96,6 +96,16 @@ Arguments
     by sequence ID. When this option is used, learnMSA will use the structural
     information to guide the alignment process.
 
+    To get 3Di letters from structure files, use Foldseek::
+
+        foldseek createdb structures/ db
+        foldseek lndb db_h db_ss_h
+        foldseek convert2fasta db_ss 3di.fasta
+
+    learnMSA reads the first and last 3Di letter of every sequence as
+    unknown, because Foldseek cannot compute a 3Di state for the termini and
+    writes ``D`` there.
+
 ``learnMSA-3di -i`` *FASTA* ``-o`` *OUT.npz* [``--fasta`` *OUT.fasta*]
     A separate command to predict 3Di logits from the amino acid sequences with
     ProstT5 for ``--struct``; ``--fasta`` also writes argmax letters.

@@ -305,6 +305,7 @@ def load_struct_data(
             indexed=config.training.indexed_data,
             alphabet=config.structure.structural_alphabet,
             remap=False,
+            unknown_ends=True,
         )
         if stack is None:
             struct_data = dataset
@@ -319,7 +320,7 @@ def load_struct_data(
             "those in the input dataset."
         )
     struct_data.adapt_order(data)
-    if config.structure.is_logits:
+    if config.structure.input_format == "logits":
         mismatch = [
             i for i in range(data.num_seq)
             if struct_data.seq_lens[i] != data.seq_lens[i]
@@ -341,7 +342,6 @@ def _load_struct_logits(config: Configuration) -> "EmbeddingDataset":
     structural alphabet in another order. A file over a different set of
     letters is rejected.
     """
-    from learnMSA.structure.io import logit_source
     from learnMSA.util import EmbeddingDataset
 
     if get_backend() != "pytorch":
@@ -349,6 +349,7 @@ def _load_struct_logits(config: Configuration) -> "EmbeddingDataset":
             "Per-residue 3Di logits (.npz) are only supported by the PyTorch "
             "backend. Use --backend pytorch or a 3Di FASTA file."
         )
+    config.structure.input_format = "logits"
     filepath = config.input_output.struct_file
     alphabet = config.structure.structural_alphabet
     dataset = EmbeddingDataset(filepath)
@@ -360,11 +361,6 @@ def _load_struct_logits(config: Configuration) -> "EmbeddingDataset":
         )
     if stored != alphabet:
         dataset.reorder_dims([stored.index(c) for c in alphabet])
-    config.structure.input_format = \
-        f"{logit_source(dataset.metadata)}_logits"
-    # The job's config records the temperature chosen for this input.
-    config.structure.input_temperature = \
-        config.structure.resolved_input_temperature()
     return dataset
 
 

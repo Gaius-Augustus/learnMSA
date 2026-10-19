@@ -107,7 +107,6 @@ def test_cli_writes_logits_and_argmax_fasta(tmp_path, monkeypatch) -> None:
                       "--device", "cpu", "--silent"])
     data = EmbeddingDataset(tmp_path / "out.npz")
     assert str(data.metadata["kind"]) == KIND
-    assert str(data.metadata["logit_source"]) == "prostt5"
     assert str(data.metadata["alphabet"]) == PROSTT5_CLASS_ORDER
     assert data.seq_ids == ["s1", "s2", "s3"]
     np.testing.assert_array_equal(data.seq_lens, [10, 4, 6])

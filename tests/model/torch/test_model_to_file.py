@@ -143,7 +143,7 @@ def test_runtime_settings_come_from_the_current_run(
     )
 
 
-@pytest.mark.parametrize("input_format", ["tokens", "prostt5_logits"])
+@pytest.mark.parametrize("input_format", ["tokens", "logits"])
 def test_decoding_temperature_comes_from_the_current_run(
     input_format: str, tmp_path
 ) -> None:
