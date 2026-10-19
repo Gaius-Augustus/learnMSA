@@ -17,8 +17,8 @@ import importlib.util
 import os
 import sys
 
-#: The backends learnMSA knows about.
-SUPPORTED_BACKENDS: tuple[str, ...] = ("tensorflow", "pytorch")
+#: The backends learnMSA knows about, in auto-detection preference order.
+SUPPORTED_BACKENDS: tuple[str, ...] = ("pytorch", "tensorflow")
 
 #: Maps a backend name to the name of its on-disk subpackage.
 _SUBPACKAGE: dict[str, str] = {"tensorflow": "tf", "pytorch": "torch"}
@@ -28,6 +28,14 @@ _OPPOSING_MODULE: dict[str, str] = {"tensorflow": "torch", "pytorch": "tensorflo
 
 #: Maps a backend name to the top-level module of its own framework.
 _OWN_MODULE: dict[str, str] = {"tensorflow": "tensorflow", "pytorch": "torch"}
+
+#: Modules a backend needs installed. hidten's torch subpackage requires
+#: triton, and a CPU-only torch without it (as pulled in next to TensorFlow)
+#: must not be auto-detected as a usable backend.
+_REQUIRED_MODULES: dict[str, tuple[str, ...]] = {
+    "tensorflow": ("tensorflow",),
+    "pytorch": ("torch", "triton"),
+}
 
 #: Environment variable that overrides automatic backend detection.
 BACKEND_ENV_VAR = "LEARNMSA_BACKEND"
@@ -273,8 +281,8 @@ def _default_backend() -> str:
     """Pick a backend when the user did not select one.
 
     Precedence: the ``LEARNMSA_BACKEND`` environment variable, then a framework
-    that is already imported, then an installed framework (TensorFlow first,
-    since it is learnMSA's reference backend).
+    that is already imported, then an installed framework (PyTorch first,
+    since it is learnMSA's actively maintained backend).
     """
     env = os.environ.get(BACKEND_ENV_VAR)
     if env:
@@ -288,13 +296,22 @@ def _default_backend() -> str:
         if _OWN_MODULE[backend] in sys.modules:
             return backend
     for backend in SUPPORTED_BACKENDS:
-        if importlib.util.find_spec(_OWN_MODULE[backend]) is not None:
+        if all(_is_installed(m) for m in _REQUIRED_MODULES[backend]):
             return backend
     raise ImportError(
         "learnMSA needs a tensor framework but neither tensorflow nor torch is "
         "installed. Install one with 'pip install learnMSA[tensorflow]' or "
         "'pip install learnMSA[pytorch]'."
     )
+
+
+def _is_installed(module: str) -> bool:
+    """Whether ``module`` can be found without importing it."""
+    try:
+        return importlib.util.find_spec(module) is not None
+    except ValueError:
+        # Set to None in sys.modules, as the TensorFlow setup does to triton.
+        return False
 
 
 def _reset_for_testing() -> None:

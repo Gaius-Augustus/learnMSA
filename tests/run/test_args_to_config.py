@@ -368,17 +368,27 @@ class TestArgsToConfig:
             ])
 
     def test_args_to_config_triton(self):
-        """--triton switches the torch HMM over to the Triton kernels."""
+        """The torch HMM uses the Triton kernels unless --no_triton."""
         parser = parse_args("test_version")
         base = parser.parse_args(["-i", "input.fasta", "-o", "output.a2m"])
         args = parser.parse_args([
             "-i", "input.fasta",
             "-o", "output.a2m",
-            "--triton",
+            "--no_triton",
         ])
 
-        assert args_to_config(base).advanced.use_triton is False
-        assert args_to_config(args).advanced.use_triton is True
+        assert args_to_config(base).advanced.use_triton is True
+        assert args_to_config(args).advanced.use_triton is False
+
+    def test_triton_flag_is_gone(self):
+        """The kernels are the default, so --triton no longer exists."""
+        parser = parse_args("test_version")
+        with pytest.raises(SystemExit):
+            parser.parse_args([
+                "-i", "input.fasta",
+                "-o", "output.a2m",
+                "--triton",
+            ])
 
     def test_no_jit_is_gone(self):
         """--no_jit was replaced by --compile off."""

@@ -815,8 +815,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Value of advanced.compile used for the probes.",
     )
     parser.add_argument(
-        "--triton", dest="use_triton", action="store_true",
-        help="Enable Triton kernels in the probes (PyTorch only).",
+        "--no-triton", dest="use_triton", action="store_false",
+        help="Disable Triton kernels in the probes (PyTorch only).",
     )
     parser.add_argument(
         "--num-model", type=int, default=4,

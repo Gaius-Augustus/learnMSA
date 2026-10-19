@@ -698,7 +698,7 @@ def parse_args(
         choices=["auto", "tensorflow", "pytorch"],
         default=adv.backend,
         help="Tensor framework used for training and decoding. By default "\
-            "whichever framework is installed is used, preferring TensorFlow "\
+            "whichever framework is installed is used, preferring PyTorch "\
             "when both are available."
     )
     advanced_group.add_argument(
@@ -715,12 +715,12 @@ def parse_args(
             "and PyTorch does not."
     )
     advanced_group.add_argument(
-        "--triton",
+        "--no_triton",
         dest="use_triton",
-        action="store_true",
-        help="Run the HMM recursions with the Triton kernels instead of the "\
-            "torch scan. PyTorch only; the kernels are usually faster, but "\
-            "they are opt-in because they are not available everywhere."
+        action="store_false",
+        help="Run the HMM recursions with the plain torch scan instead of the "\
+            "Triton kernels. PyTorch only; the kernels are the default and "\
+            "usually faster, but they are not available everywhere."
     )
     advanced_group.add_argument(
         "--seed",

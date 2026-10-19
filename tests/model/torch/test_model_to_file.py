@@ -116,7 +116,7 @@ def restore_triton_thresholds():
 def test_runtime_settings_come_from_the_current_run(
     model: TorchLearnMSAModel, tmp_path, restore_triton_thresholds
 ) -> None:
-    """``--compile`` and ``--triton`` say how *this* run executes, so the
+    """``--compile`` and ``--no_triton`` say how *this* run executes, so the
     values a checkpoint was trained with must not carry over."""
     model.context.config.advanced.use_triton = False
     model.context.config.advanced.compile = "off"

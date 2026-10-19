@@ -8,7 +8,7 @@ class AdvancedConfig(BaseModel):
 
     backend: Literal["auto", "tensorflow", "pytorch"] = "auto"
     """Tensor framework used for training and decoding. ``auto`` picks whichever
-    framework is installed, preferring TensorFlow when both are available."""
+    framework is installed, preferring PyTorch when both are available."""
 
     compile: Literal["auto", "on", "off", "jit"] = "off"
     """Graph compilation policy. ``auto`` compiles only when the run is long
@@ -16,11 +16,11 @@ class AdvancedConfig(BaseModel):
     XLA under TensorFlow, ``torch.compile(fullgraph=True)`` under PyTorch),
     ``off`` never does, and ``jit`` forces XLA -- TensorFlow only."""
 
-    use_triton: bool = False
+    use_triton: bool = True
     """Whether to run the HMM's forward and Viterbi recursions with the Triton
-    kernels instead of the plain torch scan. PyTorch only; the kernels are
-    usually faster, but they are opt-in because they are not available
-    everywhere and can misbehave."""
+    kernels instead of the plain torch scan. PyTorch only; hidten still falls
+    back to the scan where the kernels do not pay off. Disable with
+    ``--no_triton``."""
 
     seed: int = 42
     """Seed of all random number generators."""
