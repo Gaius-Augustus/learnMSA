@@ -305,7 +305,7 @@ def load_struct_data(
             indexed=config.training.indexed_data,
             alphabet=config.structure.structural_alphabet,
             remap=False,
-            unknown_ends=True,
+            unknown_ends=config.structure.mask_ends,
         )
         if stack is None:
             struct_data = dataset

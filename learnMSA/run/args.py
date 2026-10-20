@@ -663,6 +663,14 @@ def parse_args(
         help="Whether to reset the structural information emission parameters "\
         "after model surgery. default: False."
     )
+    struct_group.add_argument(
+        "--struct_mask_ends",
+        dest="struct_mask_ends",
+        action="store_true",
+        help="Read the first and last 3Di letter of every sequence as "\
+        "unknown (3Di FASTA input only). Foldseek writes D there, where it "\
+        "cannot compute a 3Di state. default: False."
+    )
 
     vis_group = parser.add_argument_group("Visualization")
     vis_group.add_argument(

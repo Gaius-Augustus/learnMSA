@@ -158,6 +158,7 @@ def args_to_config(
     st["prior_components"] = args.struct_prior_components
     st["prior_temperature"] = args.struct_prior_temperature
     st["reset_after_surgery"] = args.struct_reset_after_surgery
+    st["mask_ends"] = args.struct_mask_ends
     st["joint_emissions"] = args.joint_emissions
     st["joint_emission_low_rank"] = args.joint_emission_low_rank
     st["joint_row_prior"] = args.joint_row_prior

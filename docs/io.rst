@@ -102,9 +102,9 @@ Arguments
         foldseek lndb db_h db_ss_h
         foldseek convert2fasta db_ss 3di.fasta
 
-    learnMSA reads the first and last 3Di letter of every sequence as
-    unknown, because Foldseek cannot compute a 3Di state for the termini and
-    writes ``D`` there.
+    Foldseek cannot compute a 3Di state for the termini and writes ``D``
+    there. With ``--struct_mask_ends``, learnMSA reads the first and last 3Di
+    letter of every sequence as unknown.
 
 ``learnMSA-3di -i`` *FASTA* ``-o`` *OUT.npz* [``--fasta`` *OUT.fasta*]
     A separate command to predict 3Di logits from the amino acid sequences with

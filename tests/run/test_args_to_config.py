@@ -214,6 +214,18 @@ class TestArgsToConfig:
         assert config.structure.joint_row_prior == "per_conditional"
         assert config.structure.joint_row_concentration == 5.0
 
+    def test_args_to_config_struct_mask_ends(self):
+        """--struct_mask_ends is off by default."""
+        parser = parse_args("test_version")
+        base = ["-i", "input.fasta", "-o", "output.a2m",
+                "--struct", "3di.fasta"]
+        config = args_to_config(parser.parse_args(base))
+        assert config.structure.mask_ends is False
+        config = args_to_config(parser.parse_args(base + [
+            "--struct_mask_ends",
+        ]))
+        assert config.structure.mask_ends is True
+
     def test_args_to_config_struct_soft_input(self):
         """Settings for per-residue 3Di logits (--struct file.npz)."""
         parser = parse_args("test_version")

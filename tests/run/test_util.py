@@ -52,15 +52,19 @@ def test_load_struct_data_reordering(tmp_path: Path) -> None:
     assert struct_data.seq_ids == ["seqA", "seqB", "seqC"]
 
 
-def test_3di_fasta_termini_are_unknown(tmp_path: Path) -> None:
+@pytest.mark.parametrize("mask_ends", [False, True])
+def test_3di_fasta_termini_are_unknown_if_masked(
+    tmp_path: Path, mask_ends: bool
+) -> None:
     """Foldseek writes D for the termini, where it cannot compute a 3Di
-    state; learnMSA reads them as unknown."""
+    state; with mask_ends, learnMSA reads them as unknown."""
     aa_file = tmp_path / "aa.fasta"
     struct_file = tmp_path / "struct.fasta"
     _write_fasta(aa_file, [("seqA", "ACDEF"), ("seqB", "GHI")])
     _write_fasta(struct_file, [("seqA", "DVLPD"), ("seqB", "DPD")])
     config = Configuration()
     config.input_output.struct_file = struct_file
+    config.structure.mask_ends = mask_ends
     alphabet = config.structure.structural_alphabet
 
     with ExitStack() as stack:
@@ -69,6 +73,7 @@ def test_3di_fasta_termini_are_unknown(tmp_path: Path) -> None:
         encoded = struct_data.get_encoded_seq(0)
 
     assert config.structure.input_format == "tokens"
-    np.testing.assert_equal(encoded[[0, -1]], 1.0)
-    expected = np.eye(len(alphabet))[[alphabet.index(c) for c in "VLP"]]
-    np.testing.assert_equal(encoded[1:-1], expected)
+    one_hot = np.eye(len(alphabet))[[alphabet.index(c) for c in "DVLPD"]]
+    if mask_ends:
+        one_hot[[0, -1]] = 1.0
+    np.testing.assert_equal(encoded, one_hot)
