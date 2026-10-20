@@ -96,19 +96,36 @@ Arguments
     by sequence ID. When this option is used, learnMSA will use the structural
     information to guide the alignment process.
 
-    To get 3Di letters from structure files, use Foldseek::
+    - **With structures:** compute 3Di letters with Foldseek::
 
-        foldseek createdb structures/ db
-        foldseek lndb db_h db_ss_h
-        foldseek convert2fasta db_ss 3di.fasta
+          foldseek createdb structures/ db
+          foldseek lndb db_h db_ss_h
+          foldseek convert2fasta db_ss 3di.fasta
 
-    Foldseek cannot compute a 3Di state for the termini and writes ``D``
-    there. With ``--struct_mask_ends``, learnMSA reads the first and last 3Di
-    letter of every sequence as unknown.
+      Foldseek cannot compute a 3Di state for the termini and writes ``D``
+      there, so learnMSA reads the first and last 3Di letter of every
+      sequence in a 3Di FASTA file as unknown (see ``--struct_no_mask_ends``).
+    - **Without structures:** predict 3Di logits from the sequences with
+      ``learnMSA-3di`` and pass the ``.npz`` file. The logits are used as
+      they are; no positions are masked.
+
+    3Di letters predicted by ProstT5 (``learnMSA-3di --fasta``,
+    ``foldseek createdb --prostt5-model`` or your own ProstT5 run) are
+    informative at the termini. Pass ``--struct_no_mask_ends`` when you
+    align with such a 3Di FASTA file.
+
+``--struct_no_mask_ends``
+    Do not read the first and last 3Di letter of every sequence as unknown.
+    Use it for 3Di FASTA files predicted by ProstT5. Only affects 3Di FASTA
+    input.
+
+    Default: off, i.e. the termini of a 3Di FASTA file are masked.
 
 ``learnMSA-3di -i`` *FASTA* ``-o`` *OUT.npz* [``--fasta`` *OUT.fasta*]
     A separate command to predict 3Di logits from the amino acid sequences with
-    ProstT5 for ``--struct``; ``--fasta`` also writes argmax letters.
+    ProstT5 for ``--struct``; ``--fasta`` also writes argmax letters. Align
+    with the ``.npz`` as it is; with the ``--fasta`` letters, pass
+    ``--struct_no_mask_ends``.
     It needs ``torch`` and ``transformers<5`` (the
     ``plm-torch`` extra) and downloads ``Rostlab/ProstT5_fp16`` (MIT license,
     about 5.6 GB) once into ``~/.cache/learnmsa/prostt5``. A GPU is strongly

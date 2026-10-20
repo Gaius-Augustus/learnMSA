@@ -24,7 +24,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("-o", "--output", required=True,
                         help="Output .npz with per-residue 3Di logits.")
     parser.add_argument("--fasta", default=None,
-                        help="Also write the argmax 3Di sequences as FASTA.")
+                        help="Also write the argmax 3Di sequences as FASTA. "
+                        "Pass --struct_no_mask_ends to learnMSA when aligning "
+                        "with this file.")
     parser.add_argument("--device", default=None,
                         help="Torch device (default: cuda if available).")
     parser.add_argument("--cache_dir", default=None,

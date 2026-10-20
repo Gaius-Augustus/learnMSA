@@ -57,7 +57,8 @@ def test_3di_fasta_termini_are_unknown_if_masked(
     tmp_path: Path, mask_ends: bool
 ) -> None:
     """Foldseek writes D for the termini, where it cannot compute a 3Di
-    state; with mask_ends, learnMSA reads them as unknown."""
+    state; with mask_ends (the default), learnMSA reads them as unknown."""
+    assert Configuration().structure.mask_ends is True
     aa_file = tmp_path / "aa.fasta"
     struct_file = tmp_path / "struct.fasta"
     _write_fasta(aa_file, [("seqA", "ACDEF"), ("seqB", "GHI")])

@@ -664,12 +664,13 @@ def parse_args(
         "after model surgery. default: False."
     )
     struct_group.add_argument(
-        "--struct_mask_ends",
+        "--struct_no_mask_ends",
         dest="struct_mask_ends",
-        action="store_true",
-        help="Read the first and last 3Di letter of every sequence as "\
-        "unknown (3Di FASTA input only). Foldseek writes D there, where it "\
-        "cannot compute a 3Di state. default: False."
+        action="store_false",
+        help="Do not read the first and last 3Di letter of every sequence as "\
+        "unknown. By default they are, because Foldseek writes D where it "\
+        "cannot compute a 3Di state. Use this for 3Di FASTA predicted by "\
+        "ProstT5 (e.g. learnMSA-3di --fasta). 3Di FASTA input only."
     )
 
     vis_group = parser.add_argument_group("Visualization")

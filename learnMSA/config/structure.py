@@ -53,11 +53,11 @@ class StructureConfig(BaseModel):
     """Whether to reset the structural information emission parameters after
     model surgery. default: False."""
 
-    mask_ends: bool = False
-    """Whether to read the first and last letter of every sequence in a 3Di
-    FASTA file as unknown. Foldseek cannot compute a 3Di state for the
-    termini and writes D there; ProstT5 learned to predict D at the start.
-    Does not apply to 3Di logits."""
+    mask_ends: bool = True
+    """Whether to replace the first and last input with unknown values. Only
+    applies to structural FASTA input, not logits. This should be enabled for
+    structural alphabets that have no meaningful representation of the sequence
+    ends, such as Foldseek 3Di. Disable for predicted ProstT5 3Di."""
 
     joint_emissions: bool = False
     """Whether to model structural tokens conditionally on the amino acid. If
