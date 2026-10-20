@@ -5,13 +5,16 @@ import pytest
 import torch
 
 import learnMSA.structure.prostt5 as prostt5
+from learnMSA.config import Configuration
 from learnMSA.config.structure import StructureConfig
+from learnMSA.run.util import load_struct_data
 from learnMSA.structure.io import KIND
 from learnMSA.structure.predict_3di import main as predict_3di_main
 from learnMSA.structure.prostt5 import (CNN_WEIGHTS, PROSTT5_CLASS_ORDER,
                                         ProstT5CNN, ProstT5Predictor,
                                         split_chunks, tokenize)
 from learnMSA.util import EmbeddingDataset
+from learnMSA.util.sequence_dataset import SequenceDataset
 
 
 def _tiny_encoder() -> torch.nn.Module:
@@ -115,3 +118,35 @@ def test_cli_writes_logits_and_argmax_fasta(tmp_path, monkeypatch) -> None:
     for i, letters in enumerate(lines[1::2]):
         best = np.argmax(data.get_encoded_seq(i), axis=1)
         assert letters == "".join(PROSTT5_CLASS_ORDER[j] for j in best)
+
+
+def test_struct_without_path_matches_the_cli(tmp_path, monkeypatch) -> None:
+    """``learnMSA --struct`` equals ``learnMSA-3di`` + ``--struct out.npz``."""
+    fasta = tmp_path / "in.fasta"
+    fasta.write_text(">s1\nMKTAYIAKQR\n>s2 desc\nGAbu\n>s3\nMSTNPK\n")
+    monkeypatch.setattr(prostt5, "load_encoder",
+                        lambda device, cache_dir=None: _tiny_encoder())
+    # Neither route takes a device here; keep both on the CPU.
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    predict_3di_main(["-i", str(fasta), "-o", str(out_dir / "z.npz"),
+                      "--silent"])
+    with SequenceDataset(fasta, "fasta") as data:
+        config = Configuration()
+        config.input_output.struct_file = out_dir / "z.npz"
+        config.structure.use_structure = True
+        from_file = load_struct_data(config, data)
+
+        config = Configuration()
+        config.input_output.verbose = False
+        config.structure.use_structure = True
+        config.structure.predict_3di = True
+        in_memory = load_struct_data(config, data)
+
+        assert config.structure.input_format == "logits"
+        assert in_memory.seq_ids == from_file.seq_ids
+        for i in range(data.num_seq):
+            np.testing.assert_array_equal(in_memory.get_encoded_seq(i),
+                                          from_file.get_encoded_seq(i))
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["in.fasta", "out"]

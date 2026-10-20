@@ -288,13 +288,16 @@ def load_struct_data(
     data: "SequenceDataset",
     stack: ExitStack | None = None,
 ) -> "SequenceDataset | EmbeddingDataset | None":
-    """Loads the structural track: a 3Di FASTA file, or an ``.npz`` of
-    per-residue 3Di logits (e.g. from ``learnMSA-3di``)."""
-    if config.input_output.struct_file is None:
-        return None
+    """Loads the structural track: a 3Di FASTA file, an ``.npz`` of
+    per-residue 3Di logits (e.g. from ``learnMSA-3di``) or, with
+    ``structure.predict_3di``, 3Di logits predicted in memory."""
     from learnMSA.structure.io import is_logits_file
 
-    if is_logits_file(config.input_output.struct_file):
+    if config.structure.predict_3di:
+        struct_data = _predict_struct_logits(config, data)
+    elif config.input_output.struct_file is None:
+        return None
+    elif is_logits_file(config.input_output.struct_file):
         struct_data = _load_struct_logits(config)
     else:
         config.structure.input_format = "tokens"
@@ -335,6 +338,31 @@ def load_struct_data(
     return struct_data
 
 
+def _require_torch_for_logits() -> None:
+    # Checked before anything imports torch: a process must never load both
+    # frameworks.
+    if get_backend() != "pytorch":
+        raise NotImplementedError(
+            "Per-residue 3Di logits (an .npz file or --struct without a path) "
+            "are only supported by the PyTorch backend. Use --backend pytorch "
+            "or a 3Di FASTA file."
+        )
+
+
+def _match_alphabet(
+    dataset: "EmbeddingDataset", stored: str, alphabet: str, source: str
+) -> None:
+    """Permutes the logit columns of ``dataset`` from the letter order
+    ``stored`` to ``alphabet``; rejects a different set of letters."""
+    if sorted(stored) != sorted(alphabet) or len(set(stored)) != len(stored):
+        raise ValueError(
+            f"The 3Di letters of {source} ({stored}) do not match the "
+            f"structural alphabet ({alphabet})."
+        )
+    if stored != alphabet:
+        dataset.reorder_dims([stored.index(c) for c in alphabet])
+
+
 def _load_struct_logits(config: Configuration) -> "EmbeddingDataset":
     """Per-residue 3Di logits; marks the structural input as logits.
 
@@ -344,23 +372,31 @@ def _load_struct_logits(config: Configuration) -> "EmbeddingDataset":
     """
     from learnMSA.util import EmbeddingDataset
 
-    if get_backend() != "pytorch":
-        raise NotImplementedError(
-            "Per-residue 3Di logits (.npz) are only supported by the PyTorch "
-            "backend. Use --backend pytorch or a 3Di FASTA file."
-        )
+    _require_torch_for_logits()
     config.structure.input_format = "logits"
     filepath = config.input_output.struct_file
-    alphabet = config.structure.structural_alphabet
     dataset = EmbeddingDataset(filepath)
-    stored = str(dataset.metadata["alphabet"])
-    if sorted(stored) != sorted(alphabet) or len(set(stored)) != len(stored):
-        raise ValueError(
-            f"The 3Di letters of {filepath} ({stored}) do not match the "
-            f"structural alphabet ({alphabet})."
-        )
-    if stored != alphabet:
-        dataset.reorder_dims([stored.index(c) for c in alphabet])
+    _match_alphabet(dataset, str(dataset.metadata["alphabet"]),
+                    config.structure.structural_alphabet, str(filepath))
+    return dataset
+
+
+def _predict_struct_logits(
+    config: Configuration, data: "SequenceDataset"
+) -> "EmbeddingDataset":
+    """Per-residue 3Di logits predicted with ProstT5, kept in memory.
+
+    Equivalent to loading the ``.npz`` that ``learnMSA-3di`` writes for the
+    input sequences with its default settings.
+    """
+    _require_torch_for_logits()
+    from learnMSA.structure.prostt5 import (PROSTT5_CLASS_ORDER,
+                                            predict_dataset)
+
+    config.structure.input_format = "logits"
+    dataset = predict_dataset(data, verbose=config.input_output.verbose)
+    _match_alphabet(dataset, PROSTT5_CLASS_ORDER,
+                    config.structure.structural_alphabet, "ProstT5")
     return dataset
 
 

@@ -15,6 +15,12 @@ class StructureConfig(BaseModel):
     use_structure: bool = False
     """Whether to use structural information."""
 
+    predict_3di: bool = False
+    """If True, per-residue 3Di logits are predicted from the input sequences
+    with ProstT5 when the data are loaded and kept only in memory, as if
+    ``learnMSA-3di`` had written them to the file passed as ``struct_file``.
+    """
+
     structural_alphabet: str = "ACDEFGHIKLMNPQRSTVWY"
     """The structural alphabet. Default: 3Di."""
 

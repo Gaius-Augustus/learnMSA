@@ -64,7 +64,8 @@ class InputOutputConfig(BaseModel):
     train on all sequences."""
 
     struct_file: PathField | None = None
-    """If set, path to a fasta file containing 3Di states for each sequence."""
+    """If set, path to a fasta file containing 3Di states for each sequence or
+    to an ``.npz`` of per-residue 3Di logits (``learnMSA-3di``)."""
 
     emb_file: PathField | None = None
     """If set, path to a file containing embeddings for each sequence."""

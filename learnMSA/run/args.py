@@ -191,8 +191,11 @@ def parse_args(
         "--struct",
         dest="struct_file",
         type=str,
+        nargs="?",
+        const="<prostt5>",
         default=None,
-        help="Path to a fasta file containing 3Di states for each sequence."
+        help="Path to a fasta file with 3Di states, an .npz file with 3Di" \
+        "logits, or leave empty to predict 3Di logits with ProstT5."
     )
     io_group.add_argument(
         "--load_emb",

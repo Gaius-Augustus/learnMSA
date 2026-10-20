@@ -3,6 +3,7 @@
 Writes an ``.npz`` that ``learnMSA --struct`` accepts, and optionally the
 argmax 3Di sequences as FASTA (what ``foldseek createdb --prostt5-model``
 produces). Requires the PyTorch extras (``torch``, ``transformers<5``).
+``learnMSA --struct`` without a path predicts the same logits in memory.
 """
 
 import argparse
@@ -54,27 +55,16 @@ def main(argv: list[str] | None = None) -> None:
     from learnMSA.structure.io import KIND
     from learnMSA.structure.prostt5 import (PROSTT5_CLASS_ORDER,
                                             PROSTT5_REPO, PROSTT5_REVISION,
-                                            predict_logits)
-    from learnMSA.util.embedding_cache import EmbeddingCache
-    from learnMSA.util.embedding_dataset import EmbeddingDataset
+                                            predict_dataset)
     from learnMSA.util.sequence_dataset import SequenceDataset
 
     t0 = time.time()
     with SequenceDataset(args.input, "fasta") as data:
-        seq_ids = list(data.seq_ids)
-        seqs = [data.get_standardized_seq(i) for i in range(data.num_seq)]
-    lengths = np.array([len(s) for s in seqs], dtype=np.int64)
-    logits = predict_logits(
-        seqs, device=args.device, cache_dir=args.cache_dir,
-        split_length=args.split_length, verbose=not args.silent,
-        batch_memory=args.batch_memory * 2**30,
-    )
-    dataset = EmbeddingDataset(
-        embedding_cache=EmbeddingCache(
-            lengths, len(PROSTT5_CLASS_ORDER), cache=logits
-        ),
-        seq_ids=seq_ids,
-    )
+        dataset = predict_dataset(
+            data, device=args.device, cache_dir=args.cache_dir,
+            split_length=args.split_length, verbose=not args.silent,
+            batch_memory=args.batch_memory * 2**30,
+        )
     path = dataset.write(args.output, metadata={
         "alphabet": PROSTT5_CLASS_ORDER,
         "kind": KIND,
@@ -82,12 +72,11 @@ def main(argv: list[str] | None = None) -> None:
     })
     if args.fasta:
         letters = np.array(list(PROSTT5_CLASS_ORDER))
-        best = letters[np.argmax(logits, axis=1)]
-        offsets = np.concatenate([[0], np.cumsum(lengths)])
         with open(args.fasta, "w") as f:
-            for i, seq_id in enumerate(seq_ids):
+            for i, seq_id in enumerate(dataset.seq_ids):
+                best = letters[np.argmax(dataset.get_encoded_seq(i), axis=1)]
                 f.write(f">{seq_id}\n")
-                f.write("".join(best[offsets[i]:offsets[i + 1]]) + "\n")
+                f.write("".join(best) + "\n")
     if not args.silent:
         print(f"Wrote {path}" + (f" and {args.fasta}" if args.fasta else "")
               + f" ({time.time() - t0:.1f} s in total).", file=sys.stderr)

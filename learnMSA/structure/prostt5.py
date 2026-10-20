@@ -14,12 +14,17 @@ keeps the logits instead of only the argmax letter:
 """
 
 import math
+import os
 import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
+
+if TYPE_CHECKING:
+    from learnMSA.util import EmbeddingDataset, SequenceDataset
 
 #: Hugging Face model and the pinned revision. Foldseek's
 #: ``prostt5-f16.gguf`` records this revision as ``general.finetune``.
@@ -136,6 +141,8 @@ def load_encoder(
     device: torch.device, cache_dir: str | Path | None = None
 ) -> torch.nn.Module:
     """The ProstT5 encoder, fp16 on GPU and fp32 on CPU."""
+    # transformers < 5 imports tensorflow when it is installed.
+    os.environ.setdefault("USE_TF", "0")
     import transformers
     from packaging.version import Version
     from transformers import T5EncoderModel
@@ -334,3 +341,26 @@ def predict_logits(
               f"{elapsed:.1f} s ({total / max(elapsed, 1e-9):.0f} "
               "residues/s).", flush=True)
     return out
+
+
+def predict_dataset(
+    data: "SequenceDataset", verbose: bool = True, **kwargs
+) -> "EmbeddingDataset":
+    """Logits of all sequences in ``data``, as an in-memory dataset.
+
+    Columns follow ``PROSTT5_CLASS_ORDER``. ``kwargs`` go to
+    ``predict_logits``. Frees the cached GPU memory of the encoder.
+    """
+    from learnMSA.util import EmbeddingCache, EmbeddingDataset
+
+    seqs = [data.get_standardized_seq(i) for i in range(data.num_seq)]
+    lengths = np.array([len(s) for s in seqs], dtype=np.int64)
+    logits = predict_logits(seqs, verbose=verbose, **kwargs)
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    return EmbeddingDataset(
+        embedding_cache=EmbeddingCache(
+            lengths, len(PROSTT5_CLASS_ORDER), cache=logits
+        ),
+        seq_ids=list(data.seq_ids),
+    )

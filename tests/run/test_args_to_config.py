@@ -197,6 +197,21 @@ class TestArgsToConfig:
         assert config.structure.use_structure is True
         assert config.structure.prior_name == "custom_struct_prior"
         assert config.structure.prior_components == 16
+        assert config.structure.predict_3di is False
+
+    def test_args_to_config_with_struct_without_path(self):
+        """--struct without a path predicts 3Di logits in memory."""
+        parser = parse_args("test_version")
+        args = parser.parse_args([
+            "-i", "input.fasta", "--struct", "-o", "output.a2m",
+        ])
+
+        config = args_to_config(args)
+
+        assert config.input_output.struct_file is None
+        assert config.structure.use_structure is True
+        assert config.structure.predict_3di is True
+        assert config.input_output.output_file == Path("output.a2m")
 
     def test_args_to_config_joint_row_prior(self):
         """The joint row prior defaults to hierarchical and can be switched."""

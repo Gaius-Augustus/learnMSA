@@ -48,7 +48,8 @@ def args_to_config(
     io["cuda_visible_devices"] = args.cuda_visible_devices
     io["work_dir"] = args.work_dir
     io["convert"] = args.convert
-    io["struct_file"] = args.struct_file
+    predict_3di = args.struct_file == "<prostt5>"
+    io["struct_file"] = None if predict_3di else args.struct_file
     io["emb_file"] = args.emb_file
     io["save_emb"] = _get_save_emb(args)
     io["add_block_separator_to_msa"] = args.block_sep
@@ -154,6 +155,7 @@ def args_to_config(
 
     # --- Structure ---
     st["use_structure"] = bool(args.struct_file)
+    st["predict_3di"] = predict_3di
     st["prior_name"] = args.struct_prior_name
     st["prior_components"] = args.struct_prior_components
     st["prior_temperature"] = args.struct_prior_temperature
