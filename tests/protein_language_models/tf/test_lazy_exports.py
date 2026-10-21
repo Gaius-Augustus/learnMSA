@@ -1,10 +1,8 @@
 """The lazy-export contract for ``learnMSA.protein_language_models``.
 
-Same shape as ``tests/backend/test_lazy_exports.py``, but this package's
-submodules import TensorFlow -- the language models use ``TFEsmModel`` /
-``TFT5EncoderModel`` and keras scoring weights -- so the checks can only run
-under the TensorFlow backend. Under PyTorch, embeddings are supplied through
-``--load_emb`` instead and this module is never imported.
+Same shape as ``tests/backend/test_lazy_exports.py``. The package itself is
+backend-neutral, so the same checks run under PyTorch in
+``tests/protein_language_models/torch/test_lazy_exports.py``.
 """
 
 from tests.backend import lazy_exports
