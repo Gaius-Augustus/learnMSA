@@ -270,6 +270,6 @@ def _check_backend_supports(name: str) -> None:
         f"The '{name}' language model is only available with the tensorflow "
         f"backend, but the '{get_backend()}' backend is active. Either pick "
         "another language model, or precompute the embeddings once with "
-        f"'learnMSA --backend tensorflow --save-emb <file> ...' and pass them "
-        "to this run with '--load-emb <file>'."
+        f"'learnMSA --backend tensorflow --save_emb <file> ...' and pass them "
+        "to this run with '--load_emb <file>'."
     )

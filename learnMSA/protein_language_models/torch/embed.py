@@ -5,19 +5,6 @@ import torch
 
 from learnMSA.protein_language_models.common import LanguageModel
 
-
-def _enable_scalar_capture() -> None:
-    """Let dynamo trace the data-dependent crop instead of breaking on it.
-
-    Both ``eliminate_start_stop_tokens`` and the ProtT5 wrapper end by cropping
-    all-padding columns off the batch, which needs the padded length as a
-    Python int. Without this, ``Tensor.item()`` splits the traced region in two
-    right at the end of the language model's forward pass. The resulting shape
-    is unbacked, which is exactly what ``dynamic=True`` is already set up for.
-    """
-    torch._dynamo.config.capture_scalar_outputs = True
-
-
 #: Numpy dtypes the encoders emit, mapped to their torch equivalents.
 _DTYPES: dict[str, torch.dtype] = {
     "int32": torch.int32,
@@ -31,7 +18,10 @@ def make_embedding_fn(
     language_model: LanguageModel,
     reduction_layer: torch.nn.Module | None = None,
 ) -> Callable[[tuple[np.ndarray, ...]], np.ndarray]:
-    """Build the compiled embed-and-reduce call.
+    """Build the embed-and-reduce call.
+
+    Runs eagerly: every batch has a different shape and each sequence passes
+    the language model only once, so compiling would cost more than it saves.
 
     Args:
         language_model: The wrapped language model.
@@ -42,26 +32,24 @@ def make_embedding_fn(
         A callable mapping the encoder's output to a numpy array of shape
         ``(batch, max_len, dim)``.
     """
-    _enable_scalar_capture()
-
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     language_model.to(device)
     if reduction_layer is not None:
         reduction_layer.to(device)
 
-    def _call(lm_inputs: tuple[torch.Tensor, ...]) -> torch.Tensor:
-        emb = language_model(lm_inputs)
-        if reduction_layer is None:
-            return emb
-        return reduction_layer.reduce(emb, training=False)
-
-    compiled = torch.compile(_call, dynamic=True)
-
     def embed(lm_inputs: tuple[np.ndarray, ...]) -> np.ndarray:
         tensors = tuple(_to_tensor(x, device) for x in lm_inputs)
         with torch.inference_mode():
-            emb = compiled(tensors)
-        return emb.to(torch.float32).cpu().numpy()
+            emb = language_model(tensors)
+            if reduction_layer is not None:
+                emb = reduction_layer.reduce(emb, training=False)
+            emb = emb.to(torch.float32).cpu().numpy()
+        if device.type == "cuda":
+            # The adaptive batch size is derived from the free memory that
+            # nvidia-smi reports, which counts memory held by the caching
+            # allocator as used.
+            torch.cuda.empty_cache()
+        return emb
 
     return embed
 

@@ -32,16 +32,21 @@ class TorchProtT5LanguageModel(TorchLanguageModel):
             cache_dir: Where to cache the downloaded checkpoint.
         """
         super().__init__()
+        import transformers
+        from packaging.version import Version
         from transformers import T5EncoderModel, logging
 
         logging.set_verbosity_error()
         if dtype == torch.float16 and not torch.cuda.is_available():
             dtype = torch.float32
         self.compute_dtype = dtype
+        # transformers 4.56 renamed torch_dtype to dtype.
+        dtype_key = "dtype" if Version(transformers.__version__) >= \
+            Version("4.56") else "torch_dtype"
         self.model = T5EncoderModel.from_pretrained(
             prot_t5.MODEL_CHECKPOINT,
-            dtype=dtype,
             cache_dir=make_cache_dir(cache_dir, prot_t5.CACHE_ID),
+            **{dtype_key: dtype},
         )
         self.model.requires_grad_(trainable)
         if not trainable:
