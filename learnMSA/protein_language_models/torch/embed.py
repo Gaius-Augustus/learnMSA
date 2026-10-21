@@ -4,6 +4,7 @@ import numpy as np
 import torch
 
 from learnMSA.protein_language_models.common import LanguageModel
+from learnMSA.protein_language_models.t5_compile import compile_pays_off
 
 #: Numpy dtypes the encoders emit, mapped to their torch equivalents.
 _DTYPES: dict[str, torch.dtype] = {
@@ -13,19 +14,6 @@ _DTYPES: dict[str, torch.dtype] = {
     "float32": torch.float32,
 }
 
-#: Seconds that compiling the language model costs up front. Measured for
-#: ProtT5 on an RTX 3090 with a cold inductor cache (~60 s; ~25 s warm).
-COMPILE_OVERHEAD = 60.0
-
-#: Seconds that compiling saves per residue and per residue of sequence
-#: length: the compiled model is faster mostly in attention, so the saving per
-#: residue grows linearly with the sequence length. Measured for ProtT5 on an
-#: RTX 3090 (6% faster at length 100, 13% at 300, 27% at 600, 30% at 1000;
-#: 4,000 proteins of length ~1000 took 505 s compiled from a cold cache and
-#: 557 s eagerly).
-COMPILE_SAVING = 3e-8
-
-
 def should_compile(seq_lens: np.ndarray) -> bool:
     """Whether compiling the language model pays off for these sequences.
 
@@ -33,12 +21,9 @@ def should_compile(seq_lens: np.ndarray) -> bool:
         seq_lens: Lengths of all sequences that will be embedded.
 
     Returns:
-        True if the estimated saving exceeds the compile overhead.
+        True on a GPU if the estimated saving exceeds the compile overhead.
     """
-    if not torch.cuda.is_available():
-        return False
-    seq_lens = np.asarray(seq_lens, dtype=np.float64)
-    return COMPILE_SAVING * float(np.sum(seq_lens**2)) > COMPILE_OVERHEAD
+    return torch.cuda.is_available() and compile_pays_off(seq_lens)
 
 
 def make_embedding_fn(

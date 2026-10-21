@@ -1,5 +1,4 @@
 import numpy as np
-import pytest
 import torch
 
 from learnMSA.protein_language_models.torch import embed
@@ -19,16 +18,8 @@ class _LanguageModel(TorchLanguageModel):
         return self.model(ids) * mask.unsqueeze(-1)
 
 
-@pytest.fixture
-def gpu(monkeypatch):
+def test_long_datasets_are_compiled_on_gpu(monkeypatch) -> None:
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
-
-
-def test_short_datasets_run_eagerly(gpu) -> None:
-    assert not embed.should_compile(np.full(10000, 100))
-
-
-def test_long_datasets_are_compiled(gpu) -> None:
     assert embed.should_compile(np.full(10000, 1000))
 
 

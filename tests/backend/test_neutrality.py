@@ -69,6 +69,7 @@ NEUTRAL_MODULES = [
     "learnMSA.protein_language_models.esm2",
     "learnMSA.protein_language_models.prot_t5",
     "learnMSA.protein_language_models.zeros",
+    "learnMSA.protein_language_models.t5_compile",
     "learnMSA.protein_language_models.compute_embeddings",
     "learnMSA.run.args",
     "learnMSA.run.args_to_config",
