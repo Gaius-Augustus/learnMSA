@@ -406,3 +406,94 @@ def test_alignment_metadata_shift() -> None:
         # Positions after the last repeat should return padding
         dh, il, _, _, has_r = meta.get_repeat_data(s + R, np.array([row_i]))
         assert not has_r[0], f"row {row_i} repeat {s+R} should be empty (post-shift)"
+
+
+@pytest.fixture
+def felix_with_duplicates(tmp_path) -> str:
+    """felix.fa with copies of sequences 0 and 3 (one lowercase) mixed in."""
+    with SequenceDataset(os.path.join(DATA, "felix.fa")) as src:
+        records = [
+            (src.seq_ids[i], src.get_standardized_seq(i))
+            for i in range(src.num_seq)
+        ]
+    records.insert(2, ("dup_of_1 copy", records[0][1].lower()))
+    records.insert(5, ("dup_of_4", records[3][1]))
+    records.append(("dup_of_1b", records[0][1]))
+    path = tmp_path / "felix_dups.fa"
+    path.write_text("".join(f">{i}\n{s}\n" for i, s in records))
+    return str(path)
+
+
+def _duplicate_models(simple_config, path):
+    """Alignment models over all sequences and over unique sequences."""
+    from learnMSA.model.context import LearnMSAContext
+    from learnMSA.model.model import make_learnmsa_model
+
+    models = []
+    for dedup in (False, True):
+        data = SequenceDataset(path)
+        if dedup:
+            data.filter_duplicates()
+        model = make_learnmsa_model(LearnMSAContext(simple_config, data))
+        model.build()
+        models.append(AlignmentModel(data, model))
+    return models
+
+
+def test_duplicates_are_copied_to_output(
+    simple_config: Configuration, felix_with_duplicates: str, tmp_path
+) -> None:
+    """Decoding only unique sequences writes the same alignment as decoding
+    all sequences."""
+    full, dedup = _duplicate_models(simple_config, felix_with_duplicates)
+    assert dedup.data[0].num_seq == 8 and full.data[0].num_seq == 11
+    for head in range(2):
+        assert dedup.to_string(head) == full.to_string(head)
+        assert dedup.states_to_string(head) == full.states_to_string(head)
+    for fmt in ("fasta", "a2m"):
+        paths = [tmp_path / f"{name}.{fmt}" for name in ("full", "dedup")]
+        for am, path in zip((full, dedup), paths):
+            am.to_file(path, 0, batch_size=3, format=fmt)
+        assert paths[0].read_bytes() == paths[1].read_bytes()
+        assert b">dup_of_1 copy\n" in paths[1].read_bytes()
+    paths = [tmp_path / f"{name}.states" for name in ("full", "dedup")]
+    for am, path in zip((full, dedup), paths):
+        am.states_to_file(path, 0, batch_size=3)
+    assert paths[0].read_bytes() == paths[1].read_bytes()
+    assert dedup.estimate_fasta_size(0) == full.estimate_fasta_size(0)
+
+
+def test_duplicates_output_subset(
+    simple_config: Configuration, felix_with_duplicates: str
+) -> None:
+    """output_seqs selects and orders the written sequences, including hidden
+    duplicates."""
+    full, dedup = _duplicate_models(simple_config, felix_with_duplicates)
+    full.output_seqs = np.array([5, 0, 10])
+    dedup.output_seqs = np.array([5, 0, 10])
+    assert dedup.to_string(0) == full.to_string(0)
+    dedup.indices = np.array([0, 1])
+    with pytest.raises(ValueError):
+        dedup.to_string(0)
+
+
+def test_duplicates_scores(
+    simple_config: Configuration, felix_with_duplicates: str, tmp_path
+) -> None:
+    """Hidden duplicates get the scores of their representative."""
+    full, dedup = _duplicate_models(simple_config, felix_with_duplicates)
+    scores = []
+    for am, name in ((full, "full"), (dedup, "dedup")):
+        path = tmp_path / f"{name}.tsv"
+        am.write_scores(path, 0)
+        lines = path.read_text().splitlines()[1:]
+        scores.append({
+            l.split("\t")[0]: np.array(l.split("\t")[1:], dtype=float)
+            for l in lines
+        })
+    assert scores[0].keys() == scores[1].keys()
+    assert len(scores[1]) == 11
+    for seq_id in scores[0]:
+        np.testing.assert_allclose(
+            scores[0][seq_id], scores[1][seq_id], rtol=1e-4
+        )

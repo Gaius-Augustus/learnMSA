@@ -566,6 +566,15 @@ def parse_args(
         help="Name of the language model to use. (default: %(default)s)"
     )
     plm_group.add_argument(
+        "--plm_reuse_identity",
+        dest="plm_reuse_identity",
+        type=float,
+        default=lm.plm_reuse_identity,
+        help="Sequence id at which embeddings (or ProstT5 3Di logits) are "\
+            "shared. 1.0 shares only between identical sequences. Values "\
+            "below 1 require mmseqs2. (default: %(default)s)"
+    )
+    plm_group.add_argument(
         "--scoring_model_dim",
         dest="scoring_model_dim",
         type=int,

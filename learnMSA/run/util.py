@@ -3,6 +3,7 @@ import json
 import subprocess as sp
 import sys
 from argparse import ArgumentParser
+from collections.abc import Callable
 from contextlib import ExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -12,7 +13,9 @@ from learnMSA import Configuration
 from learnMSA.backend import get_backend
 
 if TYPE_CHECKING:
-    from learnMSA.util import EmbeddingDataset, SequenceDataset
+    from learnMSA.util import (EmbeddingCache, EmbeddingDataset,
+                               SequenceDataset)
+    from learnMSA.util.redundancy import RedundancyMap
 
 
 DEFAULT_FALLBACK_MEMORY_MB = 4096
@@ -287,14 +290,16 @@ def load_struct_data(
     config: Configuration,
     data: "SequenceDataset",
     stack: ExitStack | None = None,
+    reuse: "RedundancyMap | None" = None,
 ) -> "SequenceDataset | EmbeddingDataset | None":
     """Loads the structural track: a 3Di FASTA file, an ``.npz`` of
     per-residue 3Di logits (e.g. from ``learnMSA-3di``) or, with
-    ``structure.predict_3di``, 3Di logits predicted in memory."""
+    ``structure.predict_3di``, 3Di logits predicted in memory (only for the
+    representatives in ``reuse``, if given)."""
     from learnMSA.structure.io import is_logits_file
 
     if config.structure.predict_3di:
-        struct_data = _predict_struct_logits(config, data)
+        struct_data = _predict_struct_logits(config, data, reuse)
     elif config.input_output.struct_file is None:
         return None
     elif is_logits_file(config.input_output.struct_file):
@@ -382,22 +387,82 @@ def _load_struct_logits(config: Configuration) -> "EmbeddingDataset":
 
 
 def _predict_struct_logits(
-    config: Configuration, data: "SequenceDataset"
+    config: Configuration,
+    data: "SequenceDataset",
+    reuse: "RedundancyMap | None" = None,
 ) -> "EmbeddingDataset":
     """Per-residue 3Di logits predicted with ProstT5, kept in memory.
 
     Equivalent to loading the ``.npz`` that ``learnMSA-3di`` writes for the
-    input sequences with its default settings.
+    input sequences with its default settings, except that sequences share
+    the logits of their representative in ``reuse``.
     """
     _require_torch_for_logits()
     from learnMSA.structure.prostt5 import (PROSTT5_CLASS_ORDER,
                                             predict_dataset)
 
     config.structure.input_format = "logits"
-    dataset = predict_dataset(data, verbose=config.input_output.verbose)
+    if reuse is None:
+        dataset = predict_dataset(data, verbose=config.input_output.verbose)
+    else:
+        dataset = embed_representatives(
+            data, reuse,
+            lambda reps: predict_dataset(
+                reps, verbose=config.input_output.verbose
+            ).embedding_cache,
+        )
     _match_alphabet(dataset, PROSTT5_CLASS_ORDER,
                     config.structure.structural_alphabet, "ProstT5")
     return dataset
+
+
+def find_plm_representatives(
+    config: Configuration, data: "SequenceDataset"
+) -> "RedundancyMap":
+    """Groups sequences that share their language model embeddings, see
+    ``language_model.plm_reuse_identity``."""
+    from learnMSA.util.redundancy import find_near_identical
+
+    reuse = find_near_identical(
+        data,
+        config.language_model.plm_reuse_identity,
+        config.input_output.work_dir,
+        verbose=config.input_output.verbose,
+    )
+    if config.input_output.verbose and not reuse.is_trivial:
+        residues = data.seq_lens[reuse.rep_full_index].sum()
+        print(
+            f"Running language models on {reuse.num_rep} representatives of "
+            f"{reuse.num_full} sequences "
+            f"({residues / data.seq_lens.sum():.1%} of the residues)."
+        )
+    return reuse
+
+
+def embed_representatives(
+    data: "SequenceDataset",
+    reuse: "RedundancyMap",
+    embed: Callable[["SequenceDataset"], "EmbeddingCache"],
+) -> "EmbeddingDataset":
+    """Embeds only the representatives in ``reuse``; every other sequence
+    shares the embeddings of its representative (same length).
+
+    Args:
+        data: All sequences.
+        reuse: Representatives of the sequences in data.
+        embed: Computes the per-residue embeddings of a dataset.
+
+    Returns:
+        Embeddings of all sequences in data, in the same order.
+    """
+    from learnMSA.util import EmbeddingDataset
+
+    reps = data if reuse.is_trivial else data.subset(reuse.rep_full_index)
+    return EmbeddingDataset(
+        embedding_cache=embed(reps),
+        seq_ids=list(data.seq_ids),
+        cache_indices=reuse.rep_index,
+    )
 
 
 def load_emb_data(

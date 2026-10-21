@@ -73,7 +73,7 @@ def run_main() -> None:
     from learnMSA.align.align import align
     from learnMSA.align.alignment_model import AlignmentModel
     from learnMSA.align.align_inserts import make_aligned_insertions
-    from learnMSA.util import SequenceDataset, EmbeddingDataset
+    from learnMSA.util import SequenceDataset
 
     with ExitStack() as stack:
         ## Load the amino acid dataset (mandatory)
@@ -92,8 +92,20 @@ def run_main() -> None:
         )
         datasets = (data, )
 
+        # Language models (ProstT5, ProtT5, ...) only embed representatives
+        # of identical or near-identical sequences
+        compute_emb = (
+            (config.language_model.use_language_model
+                or config.language_model.only_embeddings)
+            and config.input_output.emb_file is None
+        )
+        if config.structure.predict_3di or compute_emb:
+            reuse = util.find_plm_representatives(config, data)
+        else:
+            reuse = None
+
         ## Load a structural dataset (optional)
-        struct_data = util.load_struct_data(config, data, stack)
+        struct_data = util.load_struct_data(config, data, stack, reuse)
 
         if config.structure.use_structure:
             assert struct_data is not None,\
@@ -111,13 +123,14 @@ def run_main() -> None:
                     import compute_embeddings
 
                 # Compute the embeddings if not provided as a file
-                cache = compute_embeddings(
-                    data,
-                    config.language_model,
-                    verbose=config.input_output.verbose,
-                )
-                emb_data = EmbeddingDataset(
-                    embedding_cache=cache, seq_ids=data.seq_ids,
+                assert reuse is not None
+                emb_data = util.embed_representatives(
+                    data, reuse,
+                    lambda reps: compute_embeddings(
+                        reps,
+                        config.language_model,
+                        verbose=config.input_output.verbose,
+                    ),
                 )
 
                 # Save the computed embeddings if a save path is provided

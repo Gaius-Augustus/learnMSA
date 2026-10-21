@@ -46,6 +46,18 @@ def align(
     if config.input_output.input_file == Path():
         config.input_output.input_file = data[0].filepath
 
+    # Train and decode only one copy of identical sequences. Sequences that
+    # are identical in the amino acid dataset are assumed to be identical in
+    # all other datasets. The written output contains all sequences.
+    redundancy = data[0].filter_duplicates()
+    for d in data[1:]:
+        d.filter_duplicates(redundancy)
+    if config.input_output.verbose and not redundancy.is_trivial:
+        print(
+            f"Aligning {redundancy.num_rep} unique of {redundancy.num_full} "
+            "sequences. Duplicates are copied to the output."
+        )
+
     # Create working directory if it does not exist
     work_dir = Path(config.input_output.work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -113,6 +125,13 @@ def align(
             sys.exit(getattr(e, "error_code", 1))
 
     backend.clear_session()
+
+    # Write exactly the requested subset, including hidden duplicates
+    if config.input_output.subset_ids:
+        full_ids = data[0].unfiltered().seq_ids
+        am.output_seqs = np.array([
+            full_ids.index(sid) for sid in config.input_output.subset_ids
+        ])
 
     return am
 

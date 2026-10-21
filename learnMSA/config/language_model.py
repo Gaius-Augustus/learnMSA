@@ -25,6 +25,12 @@ class LanguageModelConfig(BaseModel):
     language_model: str = "protT5"
     """Name of the language model to use."""
 
+    plm_reuse_identity: float = 1.0
+    """Sequences of equal length with at least this fraction of identical
+    positions share the per-residue embeddings (or ProstT5 3Di logits) of a
+    representative, which is the only one the language model sees. 1.0 shares
+    only between identical sequences. Values below 1 require mmseqs2."""
+
     scoring_model_dim: int = 16
     """Reduced embedding dimension of the scoring model."""
 
@@ -134,6 +140,12 @@ class LanguageModelConfig(BaseModel):
                 "language_model must be one of 'protT5', 'esm2', "
                 "'proteinBERT', or 'zeros'."
             )
+        return v
+
+    @field_validator("plm_reuse_identity")
+    def validate_identity(cls, v: float) -> float:
+        if not 0 < v <= 1:
+            raise ValueError("plm_reuse_identity must be in (0, 1].")
         return v
 
     @field_validator("scoring_model_dim", "embedding_prior_components")

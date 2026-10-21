@@ -122,6 +122,7 @@ def args_to_config(
     lm["only_embeddings"] = save_emb and not args.use_language_model
     lm["plm_cache_dir"] = args.plm_cache_dir
     lm["language_model"] = args.language_model
+    lm["plm_reuse_identity"] = args.plm_reuse_identity
     lm["scoring_model_dim"] = args.scoring_model_dim
     lm["scoring_model_activation"] = args.scoring_model_activation
     lm["scoring_model_suffix"] = args.scoring_model_suffix

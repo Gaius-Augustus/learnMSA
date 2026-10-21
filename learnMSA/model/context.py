@@ -243,9 +243,16 @@ class LearnMSAContext:
 
         # If required, find indices of sequences for a subset
         if data is not None and config.input_output.subset_ids:
-            self.subset = np.array([
-                data.seq_ids.index(sid) for sid in config.input_output.subset_ids
-            ])
+            # The ids may name hidden duplicates; use their representatives
+            full_ids = data.unfiltered().seq_ids
+            subset = [
+                full_ids.index(sid) for sid in config.input_output.subset_ids
+            ]
+            if data.redundancy is not None:
+                subset = list(dict.fromkeys(
+                    data.redundancy.rep_index[subset].tolist()
+                ))
+            self.subset = np.array(subset)
         else:
             self.subset = np.arange(self.num_seq)
 
@@ -530,9 +537,14 @@ class LearnMSAContext:
         if not self.config.training.no_sequence_weights:
             os.makedirs(self.config.input_output.work_dir, exist_ok=True)
             try:
-                if self.config.input_output.input_file == Path():
-                # When no input file is provided, we need to write a temporary
-                # for mmseqs2 clustering
+                has_duplicates = (
+                    data.redundancy is not None
+                    and not data.redundancy.is_trivial
+                )
+                if self.config.input_output.input_file == Path() \
+                        or has_duplicates:
+                # When no input file is provided or duplicates are hidden, we
+                # need to write a temporary file for mmseqs2 clustering
                     cluster_file = os.path.join(
                         self.config.input_output.work_dir,
                         "temp_for_clustering.fasta"

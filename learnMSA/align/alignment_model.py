@@ -56,6 +56,12 @@ class AlignmentModel():
     hit_alignment_mode: HitAlignmentMode
     """Mode for aligning the domain hits."""
 
+    output_seqs: np.ndarray | None
+    """Indices into data[0].unfiltered() of the sequences that are written,
+    in output order. Each must be decoded itself or have its representative
+    decoded. If None, all sequences whose representative is decoded are
+    written in input order."""
+
     class DecodingMode(Enum):
         VITERBI = "viterbi"
         MEA = "mea"
@@ -108,6 +114,7 @@ class AlignmentModel():
         self.best_head = best_head
         self.hit_alignment_mode = hit_alignment_mode
         self.metadata = {}
+        self.output_seqs = None
 
     def get_output_alphabet(self, a2m: bool = True) -> np.ndarray:
         """ Returns the output alphabet used for string representation of
@@ -178,9 +185,10 @@ class AlignmentModel():
             decoding_mode: The mode used for decoding the alignment.
         """
         output_alphabet = self.get_output_alphabet(a2m)
-        batch_alignment = self.get_batch_alignment(
+        rows, _ = self._output_rows()
+        batch_alignment = self._get_rows_alignment(
             model_index=model_index,
-            batch_indices=np.arange(self.indices.size),
+            rows=rows,
             add_block_sep=add_block_sep,
             aligned_insertions=aligned_insertions,
             only_matches=only_matches,
@@ -259,9 +267,11 @@ class AlignmentModel():
             lut = np.array(
                 [ord(c) for c in output_alphabet.tolist()], dtype=np.uint8
             )
+            rows, seqs = self._output_rows()
+            full_data = self.data[0].unfiltered()
             # Use a large write buffer only when the output is large enough to
             # benefit from it. Total residues is a lower bound on output size.
-            total_residues = int(np.sum(self.data[0].seq_lens[self.indices]))
+            total_residues = int(np.sum(full_data.seq_lens[seqs]))
             write_buffer = 8 * 1024 * 1024 if total_residues > 1_000_000 else -1
             _GZIP_LEVEL = 6
             if use_gzip:
@@ -272,13 +282,13 @@ class AlignmentModel():
             else:
                 output_file = open(filepath, "wb", buffering=write_buffer)
             with output_file:
-                n = self.indices.size
+                n = rows.size
                 i = 0
                 while i < n:
                     batch_indices = np.arange(i, min(n, i+batch_size))
-                    batch_alignment = self.get_batch_alignment(
+                    batch_alignment = self._get_rows_alignment(
                         model_index=model_index,
-                        batch_indices=batch_indices,
+                        rows=rows[batch_indices],
                         add_block_sep=add_block_sep,
                         aligned_insertions=aligned_insertions,
                         only_matches=only_matches,
@@ -312,8 +322,8 @@ class AlignmentModel():
                     buf = bytearray()
                     for k, j in enumerate(batch_indices):
                         buf += b">"
-                        buf += self.data[0].get_header(
-                            self.indices[int(j)]
+                        buf += full_data.get_header(
+                            int(seqs[j])
                         ).encode("utf-8")
                         buf += b"\n"
                         buf += wrapped[k].tobytes()
@@ -325,10 +335,9 @@ class AlignmentModel():
             msa = self.to_string(
                 model_index, add_block_sep, aligned_insertions
             )
-            msa = [
-                (self.data[0].seq_ids[self.indices[i]], msa[i])
-                for i in range(len(msa))
-            ]
+            _, seqs = self._output_rows()
+            full_ids = self.data[0].unfiltered().seq_ids
+            msa = [(full_ids[seqs[i]], msa[i]) for i in range(len(msa))]
             data = AlignedDataset(sequences=msa)
             data.write(filepath, format)
         return filepath
@@ -367,7 +376,9 @@ class AlignmentModel():
                 aligned_insertions.ext_unannotated,
             ),
         )
-        n = int(self.indices.size)
+        _, seqs = self._output_rows()
+        full_data = self.data[0].unfiltered()
+        n = int(seqs.size)
         if n == 0:
             return 0
         num_lines = max(1, (width + fasta_line_limit - 1) // fasta_line_limit)
@@ -377,7 +388,7 @@ class AlignmentModel():
         else:
             sample = np.linspace(0, n - 1, _HEADER_SAMPLE_SIZE).astype(int)
         sample_bytes = sum(
-            len(self.data[0].get_header(int(self.indices[j])).encode("utf-8"))
+            len(full_data.get_header(int(seqs[j])).encode("utf-8"))
             + 2
             for j in sample
         )
@@ -551,6 +562,49 @@ class AlignmentModel():
 
         return out
 
+    def _output_rows(self) -> tuple[np.ndarray, np.ndarray]:
+        """ Rows of the alignment and sequences of the output.
+
+        Duplicates hidden in data[0] (see Dataset.filter_duplicates) are
+        output with the row of their representative.
+
+        Returns:
+            rows: Alignment row (index into indices) of each output sequence.
+            seqs: Index of each output sequence in data[0].unfiltered().
+                Without hidden duplicates, these are the indices.
+        """
+        redundancy = self.data[0].redundancy
+        trivial = redundancy is None or redundancy.is_trivial
+        if self.output_seqs is None:
+            if trivial:
+                return np.arange(self.indices.size), np.asarray(self.indices)
+            seqs = np.arange(redundancy.num_full)
+        else:
+            seqs = np.asarray(self.output_seqs)
+        reps = seqs if trivial else redundancy.rep_index[seqs]
+        row_of = np.full(self.data[0].num_seq, -1, dtype=np.int64)
+        row_of[self.indices] = np.arange(self.indices.size)
+        rows = row_of[reps]
+        if self.output_seqs is None:
+            seqs = seqs[rows >= 0]
+            rows = rows[rows >= 0]
+        elif np.any(rows < 0):
+            raise ValueError("Some output sequences were not decoded.")
+        return rows, seqs
+
+    def _get_rows_alignment(
+        self, model_index: int, rows: np.ndarray, **kwargs
+    ) -> np.ndarray:
+        """ Like get_batch_alignment, but rows may repeat and be unsorted.
+        """
+        unique_rows, inverse = np.unique(rows, return_inverse=True)
+        alignment = self.get_batch_alignment(
+            model_index=model_index, batch_indices=unique_rows, **kwargs
+        )
+        if np.array_equal(unique_rows, rows):
+            return alignment
+        return alignment[inverse]
+
     def batch_to_string(
         self, batch_alignment: np.ndarray, output_alphabet: np.ndarray
     ) -> list[str]:
@@ -643,9 +697,8 @@ class AlignmentModel():
             a list of strings with one space-separated token per residue.
             See :func:`get_state_tokens` for the token format.
         """
-        return self._states_to_strings(
-            model_index, np.arange(self.indices.size), decoding_mode
-        )
+        rows, _ = self._output_rows()
+        return self._states_to_strings(model_index, rows, decoding_mode)
 
     def states_to_file(
         self,
@@ -666,18 +719,20 @@ class AlignmentModel():
                 file at a time.
             decoding_mode: The mode used for decoding the alignment.
         """
+        rows, seqs = self._output_rows()
+        full_data = self.data[0].unfiltered()
         with open(filepath, "wb") as output_file:
-            n = self.indices.size
+            n = rows.size
             for i in range(0, n, batch_size):
                 batch_indices = np.arange(i, min(n, i+batch_size))
                 strings = self._states_to_strings(
-                    model_index, batch_indices, decoding_mode
+                    model_index, rows[batch_indices], decoding_mode
                 )
                 buf = bytearray()
                 for j, s in zip(batch_indices, strings):
                     buf += b">"
-                    buf += self.data[0].get_header(
-                        self.indices[int(j)]
+                    buf += full_data.get_header(
+                        int(seqs[j])
                     ).encode("utf-8")
                     buf += b"\n"
                     buf += s.encode("ascii")
@@ -687,17 +742,20 @@ class AlignmentModel():
     def _states_to_strings(
         self,
         model_index: int,
-        batch_indices: np.ndarray,
+        rows: np.ndarray,
         decoding_mode: DecodingMode,
     ) -> list[str]:
+        # Rows may repeat (duplicates); decode each row once
+        unique_rows, inverse = np.unique(rows, return_inverse=True)
         states = self.get_batch_states(
-            model_index, batch_indices, decoding_mode
+            model_index, unique_rows, decoding_mode
         )
         tokens = self.get_state_tokens(model_index)
-        seq_lens = self.data[0].seq_lens[self.indices[batch_indices]]
-        return [
+        seq_lens = self.data[0].seq_lens[self.indices[unique_rows]]
+        strings = [
             " ".join(tokens[row[:l]]) for row, l in zip(states, seq_lens)
         ]
+        return [strings[k] for k in inverse]
 
     def write_scores(self, filepath: Path, model: int) -> None:
         """ Writes per-sequence scores (loglik, bitscore) to a
@@ -729,6 +787,15 @@ class AlignmentModel():
         )
         bitscore = (loglik - log_null) / np.log(2.0)
 
+        # Duplicates hidden in the dataset get the scores of their
+        # representative
+        seq_ids = self.data[0].seq_ids
+        redundancy = self.data[0].redundancy
+        if redundancy is not None and not redundancy.is_trivial:
+            loglik = loglik[redundancy.rep_index]
+            bitscore = bitscore[redundancy.rep_index]
+            seq_ids = self.data[0].unfiltered().seq_ids
+
         # Sort by bitscore in descending order
         sorted_indices = np.argsort(-bitscore)
 
@@ -739,7 +806,7 @@ class AlignmentModel():
             )
             for idx in sorted_indices:
                 scorefile.write("\t".join([
-                    f"{self.data[0].seq_ids[idx]}",
+                    f"{seq_ids[idx]}",
                     f"{loglik[idx]}",
                     f"{bitscore[idx]}"
                 ]) + "\n")

@@ -11,6 +11,8 @@ DEFAULT_KEYS = ("cache", "seq_lens", "seq_ids", "permutation", "dim")
 
 
 class EmbeddingDataset(Dataset):
+    _index_attrs = ("seq_ids", "seq_lens", "_permutation")
+
     """
     Manages a set of embeddings that are stored in a file or provided via an
     embedding cache.
@@ -31,6 +33,7 @@ class EmbeddingDataset(Dataset):
         filepath: Path | str | None = None,
         embedding_cache: EmbeddingCache | None = None,
         seq_ids: list[str] | None = None,
+        cache_indices: np.ndarray | None = None,
     ) -> None:
         """
         Args:
@@ -42,6 +45,9 @@ class EmbeddingDataset(Dataset):
                 initialized from the cache.
             seq_ids (list[str]): Optional list of sequence IDs. Needs to be
                 provided if embedding_cache is given.
+            cache_indices (np.ndarray): Optional entry of the cache for each
+                sequence in seq_ids. Several sequences may share an entry.
+                Defaults to the i-th entry for the i-th sequence.
         """
         self.filepath = Path(filepath) if filepath is not None else Path()
         self.fmt = ".npz"
@@ -56,9 +62,11 @@ class EmbeddingDataset(Dataset):
                 "seq_ids must be provided if embedding_cache is given."
             self.parsing_ok = True
             self._embedding_cache = embedding_cache
+            if cache_indices is None:
+                cache_indices = np.arange(embedding_cache.seq_lens.size)
             self.seq_ids = seq_ids
-            self.seq_lens = embedding_cache.seq_lens
-            self._permutation = np.arange(self.seq_lens.size)
+            self._permutation = np.asarray(cache_indices, dtype=np.int64)
+            self.seq_lens = embedding_cache.seq_lens[self._permutation]
         else:
             self._parse_embedding_file(filepath)
 
@@ -67,6 +75,11 @@ class EmbeddingDataset(Dataset):
             self.max_len = int(np.amax(self.seq_lens))
         else:
             self.max_len = 0
+
+    @property
+    def embedding_cache(self) -> EmbeddingCache:
+        """The cache that stores the embeddings."""
+        return self._embedding_cache
 
     def close(self) -> None:
         pass

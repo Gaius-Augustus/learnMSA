@@ -28,6 +28,17 @@ Arguments
 
     Default: protT5
 
+``--plm_reuse_identity`` *PLM_REUSE_IDENTITY*
+    Runs the language model only on representatives of near-identical
+    sequences. Sequences of equal length with at least this fraction of
+    identical positions share the per-residue embeddings of their
+    representative. Also applies to the 3Di logits that ProstT5 predicts with
+    ``--struct``. The alignment always uses the true amino acid sequences.
+    1.0 only shares between identical sequences, which gives the same result
+    faster. Values below 1 save more runtime and require mmseqs2.
+
+    Default: 1.0
+
 
 Usage Example
 -------------

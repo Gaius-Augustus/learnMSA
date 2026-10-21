@@ -149,6 +149,7 @@ class TestArgsToConfig:
             "--use_language_model",
             "--plm_cache_dir", "/models/cache",
             "--language_model", "esm2",
+            "--plm_reuse_identity", "0.98",
             "--scoring_model_dim", "32",
             "--scoring_model_activation", "relu",
             "--scoring_model_suffix", "_v2",
@@ -167,6 +168,7 @@ class TestArgsToConfig:
         assert config.language_model.use_language_model is True
         assert config.language_model.plm_cache_dir == "/models/cache"
         assert config.language_model.language_model == "esm2"
+        assert config.language_model.plm_reuse_identity == 0.98
         assert config.language_model.scoring_model_dim == 32
         assert config.language_model.scoring_model_activation == "relu"
         assert config.language_model.scoring_model_suffix == "_v2"

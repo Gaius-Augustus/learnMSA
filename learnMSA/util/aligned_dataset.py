@@ -33,7 +33,13 @@ class AlignedDataset(SequenceDataset):
             model_uo=model_uo,
         )
         self.validate_dataset()
+        self._build_alignment_arrays()
 
+    def _select(self, indices: np.ndarray) -> None:
+        super()._select(indices)
+        self._build_alignment_arrays()
+
+    def _build_alignment_arrays(self) -> None:
         # The gap symbol is the last token of the output alphabet
         gap_idx = self.output_alphabet.index('-')
 

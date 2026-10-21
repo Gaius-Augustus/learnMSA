@@ -10,6 +10,40 @@ from learnMSA.util.dataset import Dataset
 from learnMSA.util.sequence_dataset import SequenceDataset
 
 
+def run_linclust(
+    fasta_filename: str,
+    prefix: str,
+    min_seq_id: float,
+    extra_args: list[str],
+) -> pd.DataFrame:
+    """Runs mmseqs2 easy-linclust and returns the clustering.
+
+    Args:
+        fasta_filename: The sequences to cluster.
+        prefix: Prefix of the output files (``<prefix>_cluster.tsv``, ...).
+        min_seq_id: Minimum sequence identity of a cluster member.
+        extra_args: Further mmseqs2 options.
+
+    Returns:
+        A data frame with the columns ``representative`` and ``sequence``
+        (mmseqs2 IDs, one row per sequence).
+    """
+    command = ["mmseqs",
+                "easy-linclust",
+                fasta_filename,
+                prefix,
+                prefix+"_tmp",
+                *extra_args,
+                "--min-seq-id", str(min_seq_id),
+                "--remove-tmp-files", "true",
+                "-v", "1"]
+    subprocess.run(command, check=True)
+    return pd.read_csv(
+        prefix + "_cluster.tsv", sep="\t",
+        names=["representative", "sequence"], dtype=str,
+    )
+
+
 #computes clustering based sequence weights if mmseqs2 is installed
 def compute_sequence_weights(fasta_filename, directory, cluster_seq_id=0.5, return_clusters=False):
     if which("mmseqs") is None:
@@ -21,20 +55,15 @@ def compute_sequence_weights(fasta_filename, directory, cluster_seq_id=0.5, retu
         sys.exit(1)
     else:
         cluster_files = directory+"/"+os.path.splitext(os.path.basename(fasta_filename))[0]
-        command = ["mmseqs",
-                    "easy-linclust",
-                    fasta_filename,
-                    cluster_files,
-                    cluster_files+"_tmp",
-                    "--cov-mode", "1",
-                    "--cluster-mode", "2",
-                    "--alignment-mode", "3",
-                    "--kmer-per-seq", "100",
-                    "--min-seq-id", str(cluster_seq_id),
-                    "--remove-tmp-files", "true",
-                    "-v", "1"]
-        result = subprocess.run(command, check=True)
-        clustering = pd.read_csv(cluster_files + "_cluster.tsv", sep="\t", names=["representative", "sequence"])
+        clustering = run_linclust(
+            fasta_filename,
+            cluster_files,
+            cluster_seq_id,
+            ["--cov-mode", "1",
+             "--cluster-mode", "2",
+             "--alignment-mode", "3",
+             "--kmer-per-seq", "100"],
+        )
         cluster_counts = clustering.groupby("representative").size().to_frame("cluster_size")
         clustering = clustering.merge(cluster_counts, how="left", on="representative")
         clustering["weight"] = 1/clustering["cluster_size"]

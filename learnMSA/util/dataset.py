@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import copy
 from abc import ABC, abstractmethod
 from pathlib import Path
 from types import TracebackType
 from typing import Self
 
 import numpy as np
+
+from learnMSA.util.redundancy import RedundancyMap
 
 
 class Dataset(ABC):
@@ -35,6 +38,15 @@ class Dataset(ABC):
 
     parsing_ok: bool
     """Whether parsing the source was successful."""
+
+    redundancy: RedundancyMap | None = None
+    """Set by filter_duplicates: maps the original sequences to the
+    representatives that the dataset exposes."""
+
+    _index_attrs: tuple[str, ...] = ("seq_ids", "seq_lens")
+    """Per-sequence attributes that select and filter_duplicates index."""
+
+    _full_index_state: dict | None = None
 
     def __len__(self) -> int:
         """Return the number of sequences in the dataset."""
@@ -107,6 +119,86 @@ class Dataset(ABC):
     @abstractmethod
     def get_dtype(self) -> type[np.integer | np.floating]:
         """Return the dtype of the encoded sequences."""
+
+    def filter_duplicates(
+        self, redundancy: RedundancyMap | None = None
+    ) -> RedundancyMap:
+        """
+        Hides all but one copy of identical sequences in-place. Afterwards,
+        the dataset only shows the representatives (in input order) and
+        ``unfiltered()`` shows all sequences. Calling it again returns the
+        existing map.
+
+        Args:
+            redundancy: Use this map instead of finding the duplicates in
+                this dataset, e.g. the map of the amino acid dataset for an
+                auxiliary dataset in the same order.
+
+        Returns:
+            The map from the original sequences to the representatives.
+        """
+        if self.redundancy is not None:
+            if redundancy is not None and redundancy is not self.redundancy:
+                raise ValueError(
+                    "The dataset was already filtered with another map."
+                )
+            return self.redundancy
+        if redundancy is None:
+            redundancy = self._find_duplicates()
+        if redundancy.num_full != self.num_seq:
+            raise ValueError(
+                f"The redundancy map covers {redundancy.num_full} sequences, "
+                f"but the dataset has {self.num_seq}."
+            )
+        if not redundancy.is_trivial:
+            self._full_index_state = {
+                a: getattr(self, a) for a in self._index_attrs
+            }
+            self._select(redundancy.rep_full_index)
+        self.redundancy = redundancy
+        return redundancy
+
+    def unfiltered(self) -> Self:
+        """A view of the dataset with all sequences, including those hidden
+        by filter_duplicates. The dataset itself if nothing is hidden."""
+        if self._full_index_state is None:
+            return self
+        view = copy.copy(self)
+        for a, value in self._full_index_state.items():
+            setattr(view, a, value)
+        view.redundancy = None
+        view._full_index_state = None
+        view._update_counts()
+        return view
+
+    def subset(self, indices: np.ndarray) -> Self:
+        """A view of the dataset with the sequences at ``indices``."""
+        view = copy.copy(self)
+        view.redundancy = None
+        view._full_index_state = None
+        view._select(np.asarray(indices))
+        return view
+
+    def _find_duplicates(self) -> RedundancyMap:
+        raise NotImplementedError(
+            f"{type(self).__name__} can not find duplicates itself. Pass the "
+            "redundancy map of the corresponding sequence dataset."
+        )
+
+    def _select(self, indices: np.ndarray) -> None:
+        """Keeps the sequences at ``indices`` in-place."""
+        for a in self._index_attrs:
+            value = getattr(self, a)
+            if isinstance(value, list):
+                value = [value[i] for i in indices]
+            else:
+                value = value[indices]
+            setattr(self, a, value)
+        self._update_counts()
+
+    def _update_counts(self) -> None:
+        self.num_seq = len(self.seq_ids)
+        self.max_len = int(np.amax(self.seq_lens)) if self.num_seq > 0 else 0
 
     def __enter__(self) -> Self:
         """Enter context manager and return the dataset."""

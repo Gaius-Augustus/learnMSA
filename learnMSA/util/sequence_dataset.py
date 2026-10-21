@@ -9,6 +9,7 @@ from Bio import Seq, SeqIO, SeqRecord
 from Bio.File import _IndexedSeqFileDict
 
 from .dataset import Dataset
+from .redundancy import RedundancyMap, find_duplicates
 
 
 class SequenceDataset(Dataset):
@@ -423,14 +424,18 @@ class SequenceDataset(Dataset):
                 uppercase and non-standard amino acids are replaced with 'X'.
                 Dots are replaced with dashes.
         """
-        sequences = list(self.record_dict.values())
-        for s in sequences:
+        # Write copies of the records of the visible sequences; the stored
+        # records keep their descriptions (headers of the output alignment)
+        sequences = []
+        for i in range(self.num_seq):
+            record = self.get_record(i)
             if standardize_sequences:
-                seq = self.get_standardized_seq(self.seq_ids.index(s.id or ""))
-                s.seq = Seq.Seq(seq)
+                seq = Seq.Seq(self.get_standardized_seq(i))
             else:
-                s.seq = Seq.Seq(s.seq)
-            s.description = ""
+                seq = Seq.Seq(record.seq)
+            sequences.append(
+                SeqRecord.SeqRecord(seq, id=record.id, description="")
+            )
         SeqIO.write(sequences, filepath, fmt)
 
     def reorder(self, permutation: list[int] | np.ndarray) -> None:
@@ -445,6 +450,9 @@ class SequenceDataset(Dataset):
         perm = perm.astype(np.int64, copy=False)
         self.seq_ids = np.array(self.seq_ids, dtype=object)[perm].tolist()
         self.seq_lens = self.seq_lens[perm]
+
+    def _find_duplicates(self) -> RedundancyMap:
+        return find_duplicates(self)
 
     def get_dtype(self) -> type[np.integer | np.floating]:
         """Return the dtype of the encoded sequences (always one-hot float32)."""
