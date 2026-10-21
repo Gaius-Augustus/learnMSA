@@ -1296,8 +1296,12 @@ class AlignmentModel():
                     axis=0
                 )
 
-                # (R, N), -1 for empty
-                occupancy = meta_data.occupancy_matrix() > 0
+                # (R, N), True for every hit, including hits that use no
+                # match state (MEA can decode those); occupancy_matrix()
+                # reports them as empty
+                virt_rep, flat_to_row = meta_data._flat_virt_rep_and_row()
+                occupancy = np.zeros((meta_data.num_repeats, n), dtype=bool)
+                occupancy[virt_rep, flat_to_row] = True
                 multi_hit_occupancy = occupancy[:, multi_hit_rows]
                 idx = np.arange(meta_data.total_repeats, dtype=np.int32)
                 idx_helper = np.full(
