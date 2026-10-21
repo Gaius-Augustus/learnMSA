@@ -23,8 +23,6 @@ from typing import TYPE_CHECKING
 import numpy as np
 import torch
 
-from learnMSA.protein_language_models.t5_compile import compile_pays_off
-
 if TYPE_CHECKING:
     from learnMSA.util import EmbeddingDataset, SequenceDataset
 
@@ -192,8 +190,6 @@ class ProstT5Predictor:
             at most half of the free GPU memory. Larger batches are not
             faster: on an RTX 3090, 2 GiB and 11 GiB give the same speed.
         max_batch: Upper bound on the number of pieces per batch.
-        compile: Compile the encoder with dynamic shapes. None decides per
-            ``predict`` call whether that pays off on a GPU.
     """
 
     def __init__(
@@ -204,7 +200,6 @@ class ProstT5Predictor:
         cnn: torch.nn.Module | None = None,
         batch_memory: float = 2 * 2**30,
         max_batch: int = 512,
-        compile: bool | None = None,
     ) -> None:
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -216,22 +211,6 @@ class ProstT5Predictor:
                     else ProstT5CNN.from_npz()).to(self.device).eval()
         self.batch_memory = batch_memory
         self.max_batch = max_batch
-        self.compile = compile
-        self._compiled = False
-
-    def _maybe_compile(self, lengths: Sequence[int]) -> None:
-        """Compile the encoder once, if requested or if it pays off."""
-        if self._compiled:
-            return
-        if self.compile is None:
-            wanted = self.device.type == "cuda" and compile_pays_off(
-                np.asarray(lengths)
-            )
-        else:
-            wanted = self.compile
-        if wanted:
-            self.encoder = torch.compile(self.encoder, dynamic=True)
-            self._compiled = True
 
     def _memory_budget(self) -> float:
         if self.device.type == "cuda":
@@ -246,11 +225,6 @@ class ProstT5Predictor:
     @torch.inference_mode()
     def _forward(self, pieces: Sequence[np.ndarray]) -> torch.Tensor:
         """Logits (B, Lmax, 20), float32, for a batch of token pieces."""
-        batch_size = len(pieces)
-        if self._compiled and batch_size == 1:
-            # Dynamo specializes on size 1, so a single piece (e.g. the last
-            # batch) would trigger a full recompile. Duplicate it.
-            pieces = [pieces[0], pieces[0]]
         lengths = [len(p) for p in pieces]
         width = max(lengths) + 2
         ids = torch.full((len(pieces), width), PAD_ID, dtype=torch.long)
@@ -270,7 +244,7 @@ class ProstT5Predictor:
         lengths_t = torch.as_tensor(lengths, device=self.device)
         positions = torch.arange(hidden.shape[1], device=self.device)
         hidden = hidden * (positions[None, :] < lengths_t[:, None])[..., None]
-        return self.cnn(hidden, lengths_t)[:batch_size, :width - 2]
+        return self.cnn(hidden, lengths_t)[:, :width - 2]
 
     def predict(
         self,
@@ -302,7 +276,6 @@ class ProstT5Predictor:
                 pieces.append(tokens[start:end])
                 targets.append(offsets[i] + start)
         order = sorted(range(len(pieces)), key=lambda k: -len(pieces[k]))
-        self._maybe_compile([len(p) for p in pieces])
         budget = self._memory_budget()
         done, pos = 0, 0
         while pos < len(order):

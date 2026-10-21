@@ -9,7 +9,6 @@ from learnMSA.protein_language_models.tf.language_model import TFLanguageModel
 def make_embedding_fn(
     language_model: TFLanguageModel,
     reduction_layer=None,
-    seq_lens: np.ndarray | None = None,
 ) -> Callable[[tuple[np.ndarray, ...]], np.ndarray]:
     """Build the compiled embed-and-reduce call.
 
@@ -18,8 +17,6 @@ def make_embedding_fn(
             is what the traced function is specialized on.
         reduction_layer: Projects the embeddings onto the scoring model's
             reduced dimension. ``None`` leaves them unreduced.
-        seq_lens: Unused; the call is always traced. Accepted for parity
-            with the PyTorch backend, which compiles only when it pays off.
 
     Returns:
         A callable mapping the encoder's output to a numpy array of shape

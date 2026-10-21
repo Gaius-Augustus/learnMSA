@@ -91,23 +91,6 @@ def test_logits_do_not_depend_on_the_batch(predictor) -> None:
     assert np.isfinite(together).all()
 
 
-def test_compiled_encoder_matches_eager(predictor) -> None:
-    """Includes a single-piece batch, which is padded to avoid a recompile."""
-    seqs = ["MSTNPKPQRKTKRNTNRRPQDVKFPGG" * 3, "MKTAYIAKQR", "GA"]
-    compiled = ProstT5Predictor(device="cpu", encoder=_tiny_encoder(),
-                                cnn=predictor.cnn, compile=True)
-    np.testing.assert_allclose(compiled.predict(seqs[1:2]),
-                               predictor.predict(seqs[1:2]),
-                               rtol=1e-4, atol=1e-5)
-    np.testing.assert_allclose(compiled.predict(seqs), predictor.predict(seqs),
-                               rtol=1e-4, atol=1e-5)
-
-
-def test_short_inputs_are_not_compiled(predictor) -> None:
-    predictor.predict(["MKTAYIAKQR"] * 3)
-    assert not predictor._compiled
-
-
 def test_split_pieces_are_predicted_separately(predictor) -> None:
     seq = "MKTAYIAKQRQISFVKSHFSRQ"
     got = predictor.predict([seq], split_length=8)
