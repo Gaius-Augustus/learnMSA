@@ -64,7 +64,9 @@ def compute_embeddings(
     make_embedding_fn = backend.resolve(
         "protein_language_models.embed", "make_embedding_fn"
     )
-    embedding_fn = make_embedding_fn(language_model, reduction_layer)
+    embedding_fn = make_embedding_fn(
+        language_model, reduction_layer, seq_lens=data.seq_lens
+    )
 
     cache = EmbeddingCache(
         data.seq_lens, language_model_config.scoring_model_dim

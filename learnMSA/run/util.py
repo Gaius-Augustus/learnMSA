@@ -124,8 +124,8 @@ def get_gpu_memory() -> list[int]:
         return []
     command = "nvidia-smi --query-gpu=memory.total --format=csv"
     try:
-        memory_free_info = sp.check_output(command.split()).decode('ascii').split('\n')[:-1][1:]
-        memory_free_values = [int(x.split()[0]) for i, x in enumerate(memory_free_info)]
+        memory_total_info = sp.check_output(command.split()).decode('ascii').split('\n')[:-1][1:]
+        memory_total_values = [int(x.split()[0]) for i, x in enumerate(memory_total_info)]
     except (sp.CalledProcessError, FileNotFoundError, OSError) as e:
         print(
             "Warning: There were GPU(s) detected, but nvidia-smi failed to "\
@@ -137,7 +137,7 @@ def get_gpu_memory() -> list[int]:
             "-b option."
         )
         return []
-    return memory_free_values
+    return memory_total_values
 
 def get_avail_memory_bytes() -> float:
     """Returns the available VRAM in bytes. If no GPU is available, returns
