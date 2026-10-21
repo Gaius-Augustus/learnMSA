@@ -7,14 +7,16 @@ sequence length and the total saving with the sum of squared lengths.
 
 import numpy as np
 
-#: Seconds that compiling the encoder costs up front. Measured for ProtT5 on
-#: an RTX 3090 with a cold inductor cache (~60 s; ~25 s warm).
-COMPILE_OVERHEAD = 60.0
+#: Seconds that compiling the encoder costs up front. Measured on an RTX 3090
+#: with a cold inductor cache: ~60 s for ProtT5 and ~95 s for ProstT5 (~25 s
+#: and ~40 s warm).
+COMPILE_OVERHEAD = 90.0
 
 #: Seconds that compiling saves per residue and per residue of sequence
-#: length. Measured for ProtT5 on an RTX 3090 (6% faster at length 100, 13%
-#: at 300, 27% at 600, 30% at 1000; 4,000 proteins of length ~1000 took
-#: 505 s compiled from a cold cache and 557 s eagerly).
+#: length. Measured on an RTX 3090; ProtT5 runs 6% faster at length 100, 13%
+#: at 300, 27% at 600 and 30% at 1000, ProstT5 6%, 12%, 24% and 27%. 4,000
+#: proteins of length ~1000 took 505 s with ProtT5 compiled from a cold cache
+#: and 557 s eagerly.
 COMPILE_SAVING = 3e-8
 
 
