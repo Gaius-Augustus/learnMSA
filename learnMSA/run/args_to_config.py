@@ -186,14 +186,23 @@ def args_to_config(
     return Configuration.model_validate(data)
 
 
+def _structure_dir_stem(args: Namespace) -> str | None:
+    """Name of the --struct directory, which replaces -i if omitted."""
+    if args.struct_file is None or not Path(args.struct_file).is_dir():
+        return None
+    return Path(args.struct_file).resolve().name
+
+
 def _get_save_emb(args: Namespace) -> str:
     """Determine the save_emb path based on command-line arguments."""
     if args.save_emb == "<workdir>":
-        if args.input_file is None:
-            return ""
+        if args.input_file is not None:
+            stem = Path(args.input_file).stem
         else:
-            p = Path(args.work_dir) / (Path(args.input_file).stem + ".emb")
-            return str(p)
+            stem = _structure_dir_stem(args)
+        if stem is None:
+            return ""
+        return str(Path(args.work_dir) / (stem + ".emb"))
     else:
         return args.save_emb
 
@@ -201,11 +210,12 @@ def _get_save_emb(args: Namespace) -> str:
 def _get_save_model(args: Namespace) -> str:
     """Determine the save_model path based on command-line arguments."""
     if args.save_model == "<workdir>":
-        stem = (
-            Path(args.input_file).stem
-            if args.input_file is not None
-            else Path(args.from_msa).stem
-        )
+        if args.input_file is not None:
+            stem = Path(args.input_file).stem
+        elif args.from_msa is not None:
+            stem = Path(args.from_msa).stem
+        else:
+            stem = _structure_dir_stem(args) or ""
         return str(Path(args.work_dir) / (stem + ".model"))
     else:
         return args.save_model if args.save_model is not None else ""

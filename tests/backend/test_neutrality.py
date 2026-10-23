@@ -37,6 +37,7 @@ NEUTRAL_MODULES = [
     "learnMSA.util.embedding_dataset",
     "learnMSA.util.embedding_cache",
     "learnMSA.util.clustering",
+    "learnMSA.structure.foldseek",
     "learnMSA.hmm.util.value_set",
     "learnMSA.hmm.util.value_set_emb",
     "learnMSA.hmm.util.transition_index_set",

@@ -182,11 +182,13 @@ def validate_filepath(filepath : str, expected_ext : str) -> Path:
 
 
 def resolve_input_file(config, parser) -> None:
-    """Resolve the input file from --from_msa when -i is omitted.
+    """Resolve the input file when -i is omitted.
 
-    When no input file is given, both --from_msa and --save_model must be
-    provided so that the MSA can be converted directly into a saved model.
-    In that case the MSA file is used as the sequence input.
+    When no input file is given, either --struct is a directory of
+    structures, whose amino acid sequences are inferred with Foldseek, or
+    both --from_msa and --save_model must be provided so that the MSA can be
+    converted directly into a saved model. In that case the MSA file is used
+    as the sequence input.
 
     Args:
         config: Configuration object (mutated in-place when resolved)
@@ -195,12 +197,83 @@ def resolve_input_file(config, parser) -> None:
     if config.input_output.input_file != Path():
         return
 
+    struct_file = config.input_output.struct_file
+    if struct_file is not None and Path(struct_file).is_dir():
+        infer_sequences_from_structures(config, parser)
+        return
+
     if config.init_msa.from_msa is None or config.input_output.save_model == "":
         parser.error(
-            "argument -i/--in_file is required unless both "
-            "--from_msa and --save_model are provided"
+            "argument -i/--in_file is required unless --struct is a "
+            "directory of structures or both --from_msa and --save_model "
+            "are provided"
         )
     config.input_output.input_file = config.init_msa.from_msa
+
+
+def infer_sequences_from_structures(config, parser) -> None:
+    """Computes the amino acid sequences and the 3Di letters of the
+    structures in the --struct directory with Foldseek, writes both as FASTA
+    to the work dir and uses them as -i and --struct.
+
+    Fails with a request for -i if a sequence cannot be inferred, i.e. it is
+    missing or has a different length than its 3Di. Unknown residues are
+    kept as X, which learnMSA scores with the background distribution, with
+    a warning.
+
+    Args:
+        config: Configuration object (mutated in-place)
+        parser: Argument parser for error reporting
+    """
+    from Bio import SeqIO
+
+    from learnMSA.structure.foldseek import structures_to_3di
+
+    pdb_dir = Path(config.input_output.struct_file)
+    work_dir = Path(config.input_output.work_dir)
+    stem = pdb_dir.resolve().name
+    aa_file = work_dir / f"{stem}.fasta"
+    struct_file = work_dir / f"{stem}.3di.fasta"
+    structures_to_3di(
+        pdb_dir, struct_file, work_dir, aa_output=aa_file,
+        verbose=config.input_output.verbose,
+    )
+
+    def read(path: Path) -> dict[str, str]:
+        return {r.id: str(r.seq) for r in SeqIO.parse(path, "fasta")}
+
+    aa_seqs, struct_seqs = read(aa_file), read(struct_file)
+    if not aa_seqs:
+        parser.error(f"Foldseek found no structures in {pdb_dir}.")
+    failed = [
+        seq_id for seq_id in struct_seqs.keys() | aa_seqs.keys()
+        if len(aa_seqs.get(seq_id, "")) != len(struct_seqs.get(seq_id, ""))
+    ]
+    if failed:
+        parser.error(
+            f"Could not infer the amino acid sequence of {len(failed)} "
+            f"structure(s) in {pdb_dir}, e.g. {sorted(failed)[0]} (missing "
+            "or a different length than its 3Di sequence). Please "
+            "provide the sequences with -i/--in_file; their IDs must equal "
+            "the Foldseek IDs (file name without extension, plus _<chain> "
+            "for files with several chains)."
+        )
+    unknown = sorted(
+        seq_id for seq_id, seq in aa_seqs.items() if "X" in seq.upper()
+    )
+    if config.input_output.verbose:
+        print(
+            f"Inferred {len(aa_seqs)} amino acid sequences from the "
+            f"structures in {pdb_dir}: {aa_file}"
+        )
+        if unknown:
+            print(
+                f"Warning: {len(unknown)} structure(s) have unknown residues "
+                f"(e.g. {unknown[0]}), which are aligned as X. Provide the "
+                "sequences with -i/--in_file if they are known."
+            )
+    config.input_output.input_file = aa_file
+    config.input_output.struct_file = struct_file
 
 
 def validate_output_file_requirements(config, parser) -> None:
@@ -293,22 +366,40 @@ def load_struct_data(
     reuse: "RedundancyMap | None" = None,
 ) -> "SequenceDataset | EmbeddingDataset | None":
     """Loads the structural track: a 3Di FASTA file, an ``.npz`` of
-    per-residue 3Di logits (e.g. from ``learnMSA-3di``) or, with
+    per-residue 3Di logits (e.g. from ``learnMSA-3di``), a directory of
+    PDB/mmCIF files (3Di computed with Foldseek into the work dir) or, with
     ``structure.predict_3di``, 3Di logits predicted in memory (only for the
     representatives in ``reuse``, if given)."""
     from learnMSA.structure.io import is_logits_file
 
+    struct_file = config.input_output.struct_file
+    from_structures = (
+        not config.structure.predict_3di
+        and struct_file is not None
+        and Path(struct_file).is_dir()
+    )
     if config.structure.predict_3di:
         struct_data = _predict_struct_logits(config, data, reuse)
-    elif config.input_output.struct_file is None:
+    elif struct_file is None:
         return None
-    elif is_logits_file(config.input_output.struct_file):
+    elif is_logits_file(struct_file):
         struct_data = _load_struct_logits(config)
     else:
+        if from_structures:
+            from learnMSA.structure.foldseek import structures_to_3di
+
+            work_dir = Path(config.input_output.work_dir)
+            struct_file = work_dir / (
+                Path(config.input_output.input_file).stem + ".3di.fasta"
+            )
+            structures_to_3di(
+                config.input_output.struct_file, struct_file, work_dir,
+                verbose=config.input_output.verbose,
+            )
         config.structure.input_format = "tokens"
         from learnMSA.util import SequenceDataset
         dataset = SequenceDataset(
-            config.input_output.struct_file,
+            struct_file,
             "fasta",
             indexed=config.training.indexed_data,
             alphabet=config.structure.structural_alphabet,
@@ -323,9 +414,14 @@ def load_struct_data(
         # Check if the data is valid
         struct_data.validate_dataset()
     if set(struct_data.seq_ids) != set(data.seq_ids):
+        hint = (
+            " Foldseek names a structure after its file without the "\
+            "extension, plus _<chain> for files with several chains."
+            if from_structures else ""
+        )
         raise ValueError(
             "The sequence IDs in the structural dataset do not match "\
-            "those in the input dataset."
+            "those in the input dataset." + hint
         )
     struct_data.adapt_order(data)
     if config.structure.input_format == "logits":

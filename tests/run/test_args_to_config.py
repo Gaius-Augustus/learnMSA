@@ -201,6 +201,36 @@ class TestArgsToConfig:
         assert config.structure.prior_components == 16
         assert config.structure.predict_3di is False
 
+    def test_args_to_config_with_struct_directory(self):
+        """--struct with a directory is kept as a path, no ProstT5."""
+        parser = parse_args("test_version")
+        args = parser.parse_args([
+            "-i", "input.fasta", "-o", "output.a2m", "--struct", "pdbs/",
+        ])
+
+        config = args_to_config(args)
+
+        assert config.input_output.struct_file == Path("pdbs/")
+        assert config.structure.use_structure is True
+        assert config.structure.predict_3di is False
+        assert config.structure.mask_ends is True
+
+    def test_args_to_config_struct_directory_without_input(self, tmp_path):
+        """Without -i, default output paths are named after the structure
+        directory."""
+        (tmp_path / "pdbs").mkdir()
+        parser = parse_args("test_version")
+        args = parser.parse_args([
+            "--struct", str(tmp_path / "pdbs"), "-o", "output.a2m",
+            "--save_model", "--save_emb", "--work_dir", "wd",
+        ])
+
+        config = args_to_config(args)
+
+        assert config.input_output.input_file == Path()
+        assert config.input_output.save_model == str(Path("wd/pdbs.model"))
+        assert config.input_output.save_emb == Path("wd/pdbs.emb")
+
     def test_args_to_config_with_struct_without_path(self):
         """--struct without a path predicts 3Di logits in memory."""
         parser = parse_args("test_version")

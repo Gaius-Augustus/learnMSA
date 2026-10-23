@@ -81,8 +81,8 @@ def parse_args(
         type=str,
         required=False,
         default=None,
-        help="Input fasta file. Optional when --from_msa and --save_model "
-            "are both provided."
+        help="Input fasta file. Optional when --struct is a directory of "
+            "structures or when --from_msa and --save_model are both provided."
     )
     io_group.add_argument(
         "-o",
@@ -194,8 +194,9 @@ def parse_args(
         nargs="?",
         const="<prostt5>",
         default=None,
-        help="Path to a fasta file with 3Di states, an .npz file with 3Di" \
-        "logits, or leave empty to predict 3Di logits with ProstT5."
+        help="Path to a fasta file with 3Di states, an .npz file with 3Di " \
+        "logits, a directory with PDB/mmCIF files, or leave empty to predict 3Di " \
+        "logits with ProstT5."
     )
     io_group.add_argument(
         "--load_emb",

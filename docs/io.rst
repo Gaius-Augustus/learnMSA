@@ -10,6 +10,8 @@ Arguments
     present in the input sequences are ignored. learnMSA uses the alphabet
     ARNDCQEGHILKMFPSTWYVXUO. Special characters B, Z, J are mapped to X. The
     sequences must not contain any other non-standard characters.
+    Optional if ``--struct PDB/mmCIF`` is used and amino acid sequences can be
+    inferred.
 
 ``-o / --out_file`` *OUTPUT_FILE*
     Output file path for the resulting multiple sequence
@@ -90,21 +92,16 @@ Arguments
     Default: off. Without *THRESHOLD*, the output is always compressed.
 
 ``--struct`` *STRUCT_FILE*
-    Path to a fasta file with 3Di letters or ``.npz`` file with per-residue 3Di
-    logits written by ``learnMSA-3di``. It must be possible to match the
+    Path to a fasta file with 3Di letters, an ``.npz`` file with per-residue 3Di
+    logits written by ``learnMSA-3di`` or a directory with PDB/mmCIF files. It
+    must be possible to match the
     sequences in the input fasta file to the sequences in the structural file
     by sequence ID. When this option is used, learnMSA will use the structural
     information to guide the alignment process.
 
-    - **With structures:** compute 3Di letters with Foldseek::
-
-          foldseek createdb structures/ db
-          foldseek lndb db_h db_ss_h
-          foldseek convert2fasta db_ss 3di.fasta
-
-      Foldseek cannot compute a 3Di state for the termini and writes ``D``
-      there, so learnMSA reads the first and last 3Di letter of every
-      sequence in a 3Di FASTA file as unknown (see ``--struct_no_mask_ends``).
+    - **With a folder of structures:** pass the directory (``--struct
+      structures/``). learnMSA runs Foldseek (it must be installed) and writes
+      the 3Di FASTA to the work directory. ``-i`` can be omitted.
     - **Without structures:** predict 3Di logits from the sequences with
       ``learnMSA-3di`` and pass the ``.npz`` file. The logits are used as
       they are; no positions are masked.
