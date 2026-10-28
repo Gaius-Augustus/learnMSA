@@ -422,8 +422,16 @@ class TorchPHMMTransitioner(TorchTransitioner):
 
         A_log = A_log_T = None
         if TransitionMode.LOG_SUM_EXP in mode or TransitionMode.MAX in mode:
-            # Build A_log directly from the log-space folded_transition_probs
-            A_log = self._build_folded_log_matrix(folded_transition_probs)
+            if TransitionMode.ALLOWED in mode:
+                # MEA: A_log must be the 0/log_zero mask of allowed
+                # transitions, not the transition log-probabilities
+                A_log = safe_log(A)
+            else:
+                # Build A_log directly from the log-space
+                # folded_transition_probs
+                A_log = self._build_folded_log_matrix(
+                    folded_transition_probs
+                )
             A_log_T = A_log.transpose(-2, -1)
 
         return start_dist, TransitionerState(A, A_log, A_log_T, mode)

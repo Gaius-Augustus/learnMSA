@@ -301,8 +301,16 @@ class PHMMTransitioner(TFTransitioner):
             start_dist = tf.where(start_dist > tiny(start_dist), 1., 0.)
 
         if TransitionMode.LOG_SUM_EXP in mode or TransitionMode.MAX in mode:
-            # Build _A_log directly from the log-space folded_transition_probs
-            self._A_log = self._build_folded_log_matrix(folded_transition_probs)
+            if TransitionMode.ALLOWED in mode:
+                # MEA: _A_log must be the 0/log_zero mask of allowed
+                # transitions, not the transition log-probabilities
+                self._A_log = safe_log(self._A)
+            else:
+                # Build _A_log directly from the log-space
+                # folded_transition_probs
+                self._A_log = self._build_folded_log_matrix(
+                    folded_transition_probs
+                )
             self._A_log_T = tf.transpose(self._A_log, [0, 2, 1])
 
         return start_dist
