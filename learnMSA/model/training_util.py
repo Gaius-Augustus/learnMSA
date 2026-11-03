@@ -16,28 +16,31 @@ MEMORY_DAMP = 0.5
 # over the measured modes, so falling back never underestimates.
 #
 # To recalibrate use util/calibrate_impl_factor.py.
+#
+# The TensorFlow inference entries are the measured factor times 1.2 to account
+# for memory fragmentation and other overheads.
 IMPL_FACTORS: dict[str, dict[str, float]] = {
     "tensorflow": {
         "train": 27.0,                                  # 26.30
-        "inference": 15.0,                              # 14.32
-        "viterbi": 13.0,                                # 12.31
-        "posterior": 15.0,                              # 14.32
-        "loglik": 7.0,                                  # 6.18
+        "inference": 18.0,                              # 14.32 x 1.2
+        "viterbi": 15.0,                                # 12.31 x 1.2
+        "posterior": 18.0,                              # 14.32 x 1.2
+        "loglik": 18.0,                                 # 6.18, see above
         "structure_train": 33.0,                        # 32.47
-        "structure_inference": 15.0,                    # 14.52
-        "structure_viterbi": 13.0,                      # 12.51
-        "structure_posterior": 15.0,                    # 14.52
-        "structure_loglik": 9.0,                        # 8.32
+        "structure_inference": 18.0,                    # 14.52 x 1.2
+        "structure_viterbi": 16.0,                      # 12.51 x 1.2
+        "structure_posterior": 18.0,                    # 14.52 x 1.2
+        "structure_loglik": 18.0,                       # 8.32, see above
         "language_model_train": 83.0,                   # 82.99
-        "language_model_inference": 54.0,               # 53.19
-        "language_model_viterbi": 54.0,                 # 53.19
-        "language_model_posterior": 54.0,               # 53.10
-        "language_model_loglik": 54.0,                  # 53.10
+        "language_model_inference": 64.0,               # 53.19 x 1.2
+        "language_model_viterbi": 64.0,                 # 53.19 x 1.2
+        "language_model_posterior": 64.0,               # 53.10 x 1.2
+        "language_model_loglik": 64.0,                  # 53.10 x 1.2
         "language_model_and_structure_train": 90.0,     # 89.51
-        "language_model_and_structure_inference": 56.0, # 55.54
-        "language_model_and_structure_viterbi": 56.0,   # 55.54
-        "language_model_and_structure_posterior": 56.0, # 55.53
-        "language_model_and_structure_loglik": 56.0,    # 55.53
+        "language_model_and_structure_inference": 67.0, # 55.54 x 1.2
+        "language_model_and_structure_viterbi": 67.0,   # 55.54 x 1.2
+        "language_model_and_structure_posterior": 67.0, # 55.53 x 1.2
+        "language_model_and_structure_loglik": 67.0,    # 55.53 x 1.2
     },
     "pytorch": {
         "train": 17.0,                                  # 16.22
