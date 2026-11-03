@@ -8,6 +8,8 @@ from contextlib import ExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
+
 import learnMSA.backend as backend
 from learnMSA import Configuration
 from learnMSA.backend import get_backend
@@ -190,15 +192,21 @@ def resolve_input_file(config, parser) -> None:
     converted directly into a saved model. In that case the MSA file is used
     as the sequence input.
 
+    When -i is given together with a directory of structures, see
+    ``select_structure_sequences``.
+
     Args:
         config: Configuration object (mutated in-place when resolved)
         parser: Argument parser for error reporting
     """
+    struct_file = config.input_output.struct_file
+    from_structures = struct_file is not None and Path(struct_file).is_dir()
     if config.input_output.input_file != Path():
+        if from_structures:
+            select_structure_sequences(config, parser)
         return
 
-    struct_file = config.input_output.struct_file
-    if struct_file is not None and Path(struct_file).is_dir():
+    if from_structures:
         infer_sequences_from_structures(config, parser)
         return
 
@@ -225,8 +233,6 @@ def infer_sequences_from_structures(config, parser) -> None:
         config: Configuration object (mutated in-place)
         parser: Argument parser for error reporting
     """
-    from Bio import SeqIO
-
     from learnMSA.structure.foldseek import structures_to_3di
 
     pdb_dir = Path(config.input_output.struct_file)
@@ -239,10 +245,7 @@ def infer_sequences_from_structures(config, parser) -> None:
         verbose=config.input_output.verbose,
     )
 
-    def read(path: Path) -> dict[str, str]:
-        return {r.id: str(r.seq) for r in SeqIO.parse(path, "fasta")}
-
-    aa_seqs, struct_seqs = read(aa_file), read(struct_file)
+    aa_seqs, struct_seqs = _read_fasta(aa_file), _read_fasta(struct_file)
     if not aa_seqs:
         parser.error(f"Foldseek found no structures in {pdb_dir}.")
     failed = [
@@ -274,6 +277,143 @@ def infer_sequences_from_structures(config, parser) -> None:
             )
     config.input_output.input_file = aa_file
     config.input_output.struct_file = struct_file
+
+
+def _has_structure_files(pdb_dir: Path) -> bool:
+    return any(path.is_file() for path in pdb_dir.rglob("*"))
+
+
+def _read_fasta(path: Path) -> dict[str, str]:
+    from Bio import SeqIO
+
+    return {r.id: str(r.seq) for r in SeqIO.parse(path, "fasta")}
+
+
+def _standardize(seq: str) -> str:
+    return seq.upper().replace("-", "").replace(".", "")
+
+
+def select_structure_sequences(config, parser) -> None:
+    """Prepares -i together with a --struct directory that may hold
+    structures for only some of the input sequences. The set of IDs from the
+    structures must be a subset of the IDs in -i. Structures whose ID is not
+    in -i are an error. Sequences that are in both inputs should agree; if they
+    don't, the structure file's sequence takes precedence, with a warning.
+
+    Args:
+        config: Configuration object (mutated in-place)
+        parser: Argument parser for error reporting
+    """
+    from Bio import SeqIO
+
+    from learnMSA.structure.foldseek import structures_to_3di
+
+    io = config.input_output
+    verbose = io.verbose
+    pdb_dir = Path(io.struct_file)
+    input_file = Path(io.input_file)
+    work_dir = Path(io.work_dir)
+    if not _has_structure_files(pdb_dir):
+        if verbose:
+            print(
+                f"Warning: {pdb_dir} contains no structure files. The 3Di "
+                "letters of all sequences are predicted with ProstT5."
+            )
+        io.struct_file = None
+        config.structure.predict_3di = True
+        return
+
+    work_dir.mkdir(parents=True, exist_ok=True)
+    stem = input_file.stem
+    struct_file = work_dir / f"{stem}.3di.fasta"
+    aa_file = work_dir / f"{stem}.structure_aa.fasta"
+    structures_to_3di(
+        pdb_dir, struct_file, work_dir, aa_output=aa_file, verbose=verbose,
+    )
+    struct_seqs, aa_seqs = _read_fasta(struct_file), _read_fasta(aa_file)
+
+    # Only the input sequences that have a structure are kept in memory.
+    input_seqs: dict[str, str] = {}
+    num_input = 0
+    for record in SeqIO.parse(input_file, io.input_format):
+        num_input += 1
+        if record.id in struct_seqs:
+            input_seqs[record.id] = str(record.seq)
+    extra = sorted(struct_seqs.keys() - input_seqs.keys())
+    if extra:
+        parser.error(
+            f"{len(extra)} structure(s) in {pdb_dir} have no sequence in "
+            f"{input_file}, e.g. {extra[0]}. Foldseek names a structure "
+            "after its file without the extension, plus _<chain> for files "
+            "with several chains."
+        )
+
+    replaced: dict[str, str] = {}
+    rescued: list[str] = []
+    ignored: set[str] = set()
+    for seq_id, letters in struct_seqs.items():
+        aa = aa_seqs.get(seq_id, "")
+        seq = _standardize(input_seqs[seq_id])
+        if len(aa) == len(letters):
+            if aa.upper() != seq:
+                replaced[seq_id] = aa
+        elif len(seq) == len(letters):
+            rescued.append(seq_id)
+        else:
+            ignored.add(seq_id)
+    num_struct = len(struct_seqs) - len(ignored)
+
+    if verbose:
+        others = (
+            f", the others with the sequence in {input_file}"
+            if num_struct < num_input else ""
+        )
+        print(
+            f"{num_struct} of {num_input} sequences have a structure in "
+            f"{pdb_dir}. They are aligned with the amino acid sequence of "
+            f"their structure file{others}."
+        )
+    if replaced:
+        new_input = work_dir / f"{stem}.input.fasta"
+        with open(new_input, "w") as f:
+            for record in SeqIO.parse(input_file, io.input_format):
+                seq = replaced.get(record.id, str(record.seq))
+                f.write(f">{record.id}\n{seq}\n")
+        if verbose:
+            example = sorted(replaced)[0]
+            print(
+                f"Warning: {len(replaced)} sequence(s) in {input_file} "
+                f"differ from the sequence of their structure file (e.g. "
+                f"{example}). learnMSA aligns the structure sequences, "
+                f"see {new_input}."
+            )
+        io.input_file = new_input
+        io.input_format = "fasta"
+    if rescued and verbose:
+        print(
+            f"Warning: the amino acid sequence of {len(rescued)} "
+            f"structure(s) could not be inferred (e.g. {sorted(rescued)[0]}). "
+            f"Their sequence in {input_file} is used instead, since it has "
+            "the length of the 3Di sequence."
+        )
+    if ignored:
+        if verbose:
+            print(
+                f"Warning: {len(ignored)} structure(s) are ignored (e.g. "
+                f"{sorted(ignored)[0]}): neither the structure file nor "
+                f"{input_file} has an amino acid sequence of the length of "
+                "their 3Di sequence. Their 3Di is predicted like that of "
+                "sequences without a structure."
+            )
+        with open(struct_file, "w") as f:
+            for seq_id, letters in struct_seqs.items():
+                if seq_id not in ignored:
+                    f.write(f">{seq_id}\n{letters}\n")
+    if num_struct == 0:
+        io.struct_file = None
+        config.structure.predict_3di = True
+    else:
+        io.struct_file = struct_file
 
 
 def validate_output_file_requirements(config, parser) -> None:
@@ -369,7 +509,11 @@ def load_struct_data(
     per-residue 3Di logits (e.g. from ``learnMSA-3di``), a directory of
     PDB/mmCIF files (3Di computed with Foldseek into the work dir) or, with
     ``structure.predict_3di``, 3Di logits predicted in memory (only for the
-    representatives in ``reuse``, if given)."""
+    representatives in ``reuse``, if given).
+
+    A file or directory may cover only some of the sequences in ``data``.
+    The 3Di of the others is then predicted with ProstT5, see
+    ``_complete_struct_logits``."""
     from learnMSA.structure.io import is_logits_file
 
     struct_file = config.input_output.struct_file
@@ -411,9 +555,14 @@ def load_struct_data(
         else:
             struct_data = stack.enter_context(dataset)
 
-        # Check if the data is valid
-        struct_data.validate_dataset()
-    if set(struct_data.seq_ids) != set(data.seq_ids):
+        # Check if the data is valid. A single structure is fine when it
+        # covers only some of the sequences.
+        struct_data.validate_dataset(single_seq_ok=True)
+    index = {seq_id: i for i, seq_id in enumerate(struct_data.seq_ids)}
+    data_ids = set(data.seq_ids)
+    extra = [seq_id for seq_id in struct_data.seq_ids
+             if seq_id not in data_ids]
+    if extra:
         hint = (
             " Foldseek names a structure after its file without the "\
             "extension, plus _<chain> for files with several chains."
@@ -421,22 +570,84 @@ def load_struct_data(
         )
         raise ValueError(
             "The sequence IDs in the structural dataset do not match "\
-            "those in the input dataset." + hint
+            f"those in the input dataset: {len(extra)} are not in the "\
+            f"input, e.g. {extra[0]}." + hint
         )
+    mismatch = [
+        (seq_id, int(struct_data.seq_lens[index[seq_id]]), int(length))
+        for seq_id, length in zip(data.seq_ids, data.seq_lens)
+        if seq_id in index and struct_data.seq_lens[index[seq_id]] != length
+    ]
+    if mismatch:
+        seq_id, struct_len, length = mismatch[0]
+        raise ValueError(
+            f"{len(mismatch)} sequences differ in length between the "
+            f"structural dataset and the input, e.g. {seq_id}: "
+            f"{struct_len} vs {length}."
+        )
+    if len(index) < data.num_seq:
+        return _complete_struct_logits(config, data, struct_data)
     struct_data.adapt_order(data)
-    if config.structure.input_format == "logits":
-        mismatch = [
-            i for i in range(data.num_seq)
-            if struct_data.seq_lens[i] != data.seq_lens[i]
-        ]
-        if mismatch:
-            i = mismatch[0]
-            raise ValueError(
-                f"{len(mismatch)} sequences differ in length between the 3Di "
-                f"logits and the input, e.g. {data.seq_ids[i]}: "
-                f"{int(struct_data.seq_lens[i])} vs {int(data.seq_lens[i])}."
-            )
     return struct_data
+
+
+def _complete_struct_logits(
+    config: Configuration,
+    data: "SequenceDataset",
+    struct_data: "SequenceDataset | EmbeddingDataset",
+) -> "EmbeddingDataset":
+    """The structural track of all sequences in ``data`` when
+    ``struct_data`` covers only some of them.
+
+    The 3Di of sequences with missing structures is predicted with ProstT5.
+    Everything is stored as logits: 3Di letters are encoded such that the
+    observation layer maps them back to their one-hot vectors.
+    """
+    from learnMSA.structure.io import tokens_as_logits
+    from learnMSA.util import EmbeddingCache, EmbeddingDataset
+
+    index = {seq_id: i for i, seq_id in enumerate(struct_data.seq_ids)}
+    if config.language_model.plm_reuse_identity < 1:
+        raise ValueError(
+            f"--struct covers only {len(index)} of {data.num_seq} sequences. "
+            "--plm_reuse_identity can not be used with such mixed structural "
+            "inputs, only with --struct without a path (ProstT5 predicts the "
+            "3Di of all sequences). Please remove --plm_reuse_identity."
+        )
+    _require_torch_for_logits()
+    st = config.structure
+    from_tokens = st.input_format == "tokens"
+    missing = data.subset(np.array(
+        [i for i, seq_id in enumerate(data.seq_ids) if seq_id not in index]
+    ))
+    if config.input_output.verbose:
+        print(
+            f"{len(index)} of {data.num_seq} sequences have a structure. "
+            f"The 3Di of the other {missing.num_seq} is predicted with "
+            "ProstT5."
+        )
+    predicted = _predict_struct_logits(config, missing)
+
+    seq_lens = np.asarray(data.seq_lens, dtype=np.int64)
+    starts = np.cumsum(seq_lens) - seq_lens
+    dim = len(st.structural_alphabet)
+    cache = np.empty((int(seq_lens.sum()), dim), dtype=np.float16)
+    k = 0
+    for i, seq_id in enumerate(data.seq_ids):
+        if seq_id in index:
+            z = struct_data.get_encoded_seq(index[seq_id])
+            if from_tokens:
+                z = tokens_as_logits(
+                    z, st.background_distribution, st.input_temperature
+                )
+        else:
+            z = predicted.get_encoded_seq(k)
+            k += 1
+        cache[starts[i]:starts[i] + seq_lens[i]] = z
+    return EmbeddingDataset(
+        embedding_cache=EmbeddingCache(seq_lens, dim, cache=cache),
+        seq_ids=list(data.seq_ids),
+    )
 
 
 def _require_torch_for_logits() -> None:
@@ -444,9 +655,10 @@ def _require_torch_for_logits() -> None:
     # frameworks.
     if get_backend() != "pytorch":
         raise NotImplementedError(
-            "Per-residue 3Di logits (an .npz file or --struct without a path) "
-            "are only supported by the PyTorch backend. Use --backend pytorch "
-            "or a 3Di FASTA file."
+            "Per-residue 3Di logits (an .npz file, --struct without a path "
+            "or structures for only some of the sequences) are only "
+            "supported by the PyTorch backend. Use --backend pytorch or a "
+            "3Di FASTA file for all sequences."
         )
 
 

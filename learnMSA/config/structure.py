@@ -61,7 +61,8 @@ class StructureConfig(BaseModel):
 
     mask_ends: bool = True
     """Whether to replace the first and last input with unknown values. Only
-    applies to structural FASTA input, not logits. This should be enabled for
+    applies to 3Di letters (a structural FASTA or a directory of structures),
+    not logits. This should be enabled for
     structural alphabets that have no meaningful representation of the sequence
     ends, such as Foldseek 3Di. Disable for predicted ProstT5 3Di."""
 

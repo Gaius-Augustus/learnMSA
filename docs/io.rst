@@ -102,6 +102,22 @@ Arguments
     - **With a folder of structures:** pass the directory (``--struct
       structures/``). learnMSA runs Foldseek (it must be installed) and writes
       the 3Di FASTA to the work directory. ``-i`` can be omitted.
+    - **With structures for only some sequences:** pass all sequences with
+      ``-i`` and the structures (a directory, a 3Di FASTA or an ``.npz``)
+      with ``--struct``. The 3Di of the sequences without a structure is
+      predicted with ProstT5 (as for ``--struct`` without a path; PyTorch
+      backend only). Structures whose ID is not in ``-i`` are an error, and
+      so is ``--plm_reuse_identity``.
+    - **Which sequence is aligned:** with a directory and ``-i``, a sequence
+      that has a structure is aligned in the version of its structure file,
+      all others in the version of ``-i``; residues of the two are never
+      mixed. The two are expected to match. learnMSA warns if they do not:
+      a sequence that differs from its structure is replaced by the
+      structure's sequence (written to ``<work_dir>/<stem>.input.fasta``);
+      if a structure's sequence cannot be inferred, the ``-i`` sequence is
+      used when it has the length of the 3Di letters, otherwise the structure
+      is ignored and its 3Di predicted. An empty directory predicts the 3Di
+      of all sequences.
     - **Without structures:** predict 3Di logits from the sequences with
       ``learnMSA-3di`` and pass the ``.npz`` file. The logits are used as
       they are; no positions are masked.

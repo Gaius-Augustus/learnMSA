@@ -196,7 +196,8 @@ def parse_args(
         default=None,
         help="Path to a fasta file with 3Di states, an .npz file with 3Di " \
         "logits, a directory with PDB/mmCIF files, or leave empty to predict 3Di " \
-        "logits with ProstT5."
+        "logits with ProstT5. May cover a subset of the input sequences; " \
+        "ProstT5 predictions replace missing structures."
     )
     io_group.add_argument(
         "--load_emb",
@@ -573,7 +574,8 @@ def parse_args(
         default=lm.plm_reuse_identity,
         help="Sequence id at which embeddings (or ProstT5 3Di logits) are "\
             "shared. 1.0 shares only between identical sequences. Values "\
-            "below 1 require mmseqs2. (default: %(default)s)"
+            "below 1 require mmseqs2 and are not supported when --struct "\
+            "covers only some of the sequences. (default: %(default)s)"
     )
     plm_group.add_argument(
         "--scoring_model_dim",

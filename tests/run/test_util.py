@@ -216,3 +216,122 @@ def test_resolve_input_file_requires_input_without_structures() -> None:
 
     with pytest.raises(SystemExit):
         resolve_input_file(Configuration(), argparse.ArgumentParser())
+
+
+def _select(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+            seqs: list[tuple[str, str]], aa: str | None = None,
+            ) -> tuple[Configuration, Path]:
+    """Runs resolve_input_file for -i with the given sequences and a
+    structure directory (Foldseek stub: seqA DVLPD/ACDEF, seqB DPD/GHI)."""
+    import argparse
+
+    from learnMSA.run.util import resolve_input_file
+    from tests.structure.foldseek_fake import install_fake_foldseek
+
+    log = install_fake_foldseek(tmp_path / "bin", monkeypatch)
+    if aa is not None:
+        monkeypatch.setenv("FAKE_FOLDSEEK_AA", aa)
+    config = _structure_dir_config(tmp_path)
+    (tmp_path / "pdbs" / "seqA.pdb").write_text("")
+    config.input_output.verbose = True
+    aa_file = tmp_path / "aa.fasta"
+    _write_fasta(aa_file, seqs)
+    config.input_output.input_file = aa_file
+    resolve_input_file(config, argparse.ArgumentParser())
+    return config, log
+
+
+def _read(path: Path) -> list[tuple[str, str]]:
+    from Bio import SeqIO
+    return [(r.id, str(r.seq)) for r in SeqIO.parse(path, "fasta")]
+
+
+def test_structures_for_some_sequences(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Matching sequences: -i is kept as it is and the 3Di of the
+    structures becomes --struct."""
+    seqs = [("seqC", "KLMN"), ("seqA", "ACDEF"), ("seqB", "ghi")]
+    config, _ = _select(tmp_path, monkeypatch, seqs)
+
+    work = tmp_path / "work"
+    assert config.input_output.input_file == tmp_path / "aa.fasta"
+    assert config.input_output.struct_file == work / "aa.3di.fasta"
+    assert not config.structure.predict_3di
+    out = capsys.readouterr().out
+    assert "2 of 3 sequences have a structure" in out
+    assert "Warning" not in out
+
+
+def test_structure_sequences_take_precedence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    seqs = [("seqC", "KLMN"), ("seqA", "ACDEW"), ("seqB", "GHI")]
+    config, _ = _select(tmp_path, monkeypatch, seqs)
+
+    new_input = tmp_path / "work" / "aa.input.fasta"
+    assert config.input_output.input_file == new_input
+    assert _read(new_input) == [
+        ("seqC", "KLMN"), ("seqA", "ACDEF"), ("seqB", "GHI")]
+    assert _read(tmp_path / "aa.fasta") == seqs
+    out = capsys.readouterr().out
+    assert "1 sequence(s) in" in out and "(e.g. seqA)" in out
+
+
+def test_input_sequence_rescues_a_structure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """If the structure's sequence is unknown, the -i sequence of the
+    length of the 3Di letters is used."""
+    seqs = [("seqA", "ACDEF"), ("seqB", "GHL")]
+    config, _ = _select(tmp_path, monkeypatch, seqs, aa=">seqA\nACDEF\n")
+
+    assert config.input_output.input_file == tmp_path / "aa.fasta"
+    assert _read(config.input_output.struct_file) == [
+        ("seqA", "DVLPD"), ("seqB", "DPD")]
+    out = capsys.readouterr().out
+    assert "could not be inferred (e.g. seqB)" in out
+
+
+def test_structure_without_any_sequence_is_ignored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    seqs = [("seqA", "ACDEF"), ("seqB", "GHIK")]
+    config, _ = _select(tmp_path, monkeypatch, seqs, aa=">seqA\nACDEF\n")
+
+    assert _read(config.input_output.struct_file) == [("seqA", "DVLPD")]
+    out = capsys.readouterr().out
+    assert "1 of 2 sequences have a structure" in out
+    assert "1 structure(s) are ignored (e.g. seqB)" in out
+
+
+def test_structures_must_have_an_input_sequence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit):
+        _select(tmp_path, monkeypatch, [("seqA", "ACDEF")])
+    assert "_<chain>" in capsys.readouterr().err
+
+
+def test_empty_structure_directory_predicts_all(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import argparse
+
+    from learnMSA.run.util import resolve_input_file
+    from tests.structure.foldseek_fake import install_fake_foldseek
+
+    log = install_fake_foldseek(tmp_path / "bin", monkeypatch)
+    config = _structure_dir_config(tmp_path)
+    _write_fasta(tmp_path / "aa.fasta", [("seqA", "ACDEF")])
+    config.input_output.input_file = tmp_path / "aa.fasta"
+    resolve_input_file(config, argparse.ArgumentParser())
+
+    assert config.input_output.struct_file is None
+    assert config.structure.predict_3di
+    assert not log.exists()
