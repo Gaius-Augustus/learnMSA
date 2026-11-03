@@ -40,7 +40,7 @@ class StructLogitObservationLayer(torch.nn.Module):
         z = z.to(torch.float32)
         # z = logit of P(true letter | predicted letter)
         # pi = P(true letter)
-        # compute log P(predicted letter | true letter) with Bayes
+        # compute P(predicted letter | true letter) with Bayes
         log_post = torch.log_softmax(z / self.temperature, dim=-1)
         score = log_post - self.log_prior
         return (score - score.amax(-1, keepdim=True)).exp()
