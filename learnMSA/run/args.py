@@ -568,14 +568,15 @@ def parse_args(
         help="Name of the language model to use. (default: %(default)s)"
     )
     plm_group.add_argument(
-        "--plm_reuse_identity",
-        dest="plm_reuse_identity",
+        "--plm_cluster_id",
+        dest="plm_cluster_id",
         type=float,
-        default=lm.plm_reuse_identity,
-        help="Sequence id at which embeddings (or ProstT5 3Di logits) are "\
-            "shared. 1.0 shares only between identical sequences. Values "\
-            "below 1 require mmseqs2 and are not supported when --struct "\
-            "covers only some of the sequences. (default: %(default)s)"
+        default=lm.plm_cluster_id,
+        help="Sequence identity at which sequences are clustered to save "\
+            "runtime. The language model sees only cluster representatives; "\
+            "members copy their embeddings (or ProstT5 3Di logits) at "\
+            "aligned residues. 1.0 clusters only identical sequences. "\
+            "Values below 1 require mmseqs2. (default: %(default)s)"
     )
     plm_group.add_argument(
         "--scoring_model_dim",

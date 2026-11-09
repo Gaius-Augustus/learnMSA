@@ -607,12 +607,12 @@ def _complete_struct_logits(
     from learnMSA.util import EmbeddingCache, EmbeddingDataset
 
     index = {seq_id: i for i, seq_id in enumerate(struct_data.seq_ids)}
-    if config.language_model.plm_reuse_identity < 1:
+    if config.language_model.plm_cluster_id < 1:
         raise ValueError(
             f"--struct covers only {len(index)} of {data.num_seq} sequences. "
-            "--plm_reuse_identity can not be used with such mixed structural "
+            "--plm_cluster_id can not be used with such mixed structural "
             "inputs, only with --struct without a path (ProstT5 predicts the "
-            "3Di of all sequences). Please remove --plm_reuse_identity."
+            "3Di of all sequences). Please remove --plm_cluster_id."
         )
     _require_torch_for_logits()
     st = config.structure
@@ -706,34 +706,42 @@ def _predict_struct_logits(
     the logits of their representative in ``reuse``.
     """
     _require_torch_for_logits()
+    from learnMSA.structure.io import tokens_as_logits
     from learnMSA.structure.prostt5 import (PROSTT5_CLASS_ORDER,
                                             predict_dataset)
 
-    config.structure.input_format = "logits"
+    st = config.structure
+    st.input_format = "logits"
+
+    def predict(seqs: "SequenceDataset") -> "EmbeddingDataset":
+        dataset = predict_dataset(seqs, verbose=config.input_output.verbose)
+        _match_alphabet(dataset, PROSTT5_CLASS_ORDER,
+                        st.structural_alphabet, "ProstT5")
+        return dataset
+
     if reuse is None:
-        dataset = predict_dataset(data, verbose=config.input_output.verbose)
-    else:
-        dataset = embed_representatives(
-            data, reuse,
-            lambda reps: predict_dataset(
-                reps, verbose=config.input_output.verbose
-            ).embedding_cache,
-        )
-    _match_alphabet(dataset, PROSTT5_CLASS_ORDER,
-                    config.structure.structural_alphabet, "ProstT5")
-    return dataset
+        return predict(data)
+    # Residues without a counterpart in their representative carry no letter
+    no_letter = tokens_as_logits(
+        np.ones(len(st.structural_alphabet)),
+        st.background_distribution,
+        st.input_temperature,
+    )
+    return embed_representatives(
+        data, reuse, lambda reps: predict(reps).embedding_cache, no_letter
+    )
 
 
 def find_plm_representatives(
     config: Configuration, data: "SequenceDataset"
 ) -> "RedundancyMap":
     """Groups sequences that share their language model embeddings, see
-    ``language_model.plm_reuse_identity``."""
+    ``language_model.plm_cluster_id``."""
     from learnMSA.util.redundancy import find_near_identical
 
     reuse = find_near_identical(
         data,
-        config.language_model.plm_reuse_identity,
+        config.language_model.plm_cluster_id,
         config.input_output.work_dir,
         verbose=config.input_output.verbose,
     )
@@ -751,25 +759,50 @@ def embed_representatives(
     data: "SequenceDataset",
     reuse: "RedundancyMap",
     embed: Callable[["SequenceDataset"], "EmbeddingCache"],
+    placeholder: np.ndarray | None = None,
 ) -> "EmbeddingDataset":
     """Embeds only the representatives in ``reuse``; every other sequence
-    shares the embeddings of its representative (same length).
+    shares the embeddings of its representative. Sequences in
+    ``reuse.positions`` get a copy of the representative's embeddings at
+    their aligned residues and ``placeholder`` at the others.
 
     Args:
         data: All sequences.
         reuse: Representatives of the sequences in data.
         embed: Computes the per-residue embeddings of a dataset.
+        placeholder: Embedding of residues without a counterpart in their
+            representative. Defaults to the mean embedding.
 
     Returns:
         Embeddings of all sequences in data, in the same order.
     """
-    from learnMSA.util import EmbeddingDataset
+    from learnMSA.util import EmbeddingCache, EmbeddingDataset
 
     reps = data if reuse.is_trivial else data.subset(reuse.rep_full_index)
+    cache = embed(reps)
+    cache_indices = reuse.rep_index
+    if reuse.positions:
+        members = np.array(sorted(reuse.positions))
+        starts = cache.cum_lens[cache_indices[members]]
+        rows = np.concatenate([
+            np.where(pos >= 0, start + pos, -1)
+            for start, pos in zip(starts, map(reuse.positions.get, members))
+        ])
+        extra = cache.cache[rows]
+        if placeholder is None:
+            placeholder = cache.cache.mean(axis=0, dtype=np.float32)
+        extra[rows < 0] = placeholder
+        cache_indices = cache_indices.copy()
+        cache_indices[members] = cache.seq_lens.size + np.arange(members.size)
+        cache = EmbeddingCache(
+            np.concatenate([cache.seq_lens, data.seq_lens[members]]),
+            cache.dim,
+            cache=np.concatenate([cache.cache, extra]),
+        )
     return EmbeddingDataset(
-        embedding_cache=embed(reps),
+        embedding_cache=cache,
         seq_ids=list(data.seq_ids),
-        cache_indices=reuse.rep_index,
+        cache_indices=cache_indices,
     )
 
 

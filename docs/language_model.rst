@@ -28,14 +28,16 @@ Arguments
 
     Default: protT5
 
-``--plm_reuse_identity`` *PLM_REUSE_IDENTITY*
-    Runs the language model only on representatives of near-identical
-    sequences. Sequences of equal length with at least this fraction of
-    identical positions share the per-residue embeddings of their
-    representative. Also applies to the 3Di logits that ProstT5 predicts with
-    ``--struct``. The alignment always uses the true amino acid sequences.
-    1.0 only shares between identical sequences, which gives the same result
-    faster. Values below 1 save more runtime and require mmseqs2.
+``--plm_cluster_id`` *PLM_CLUSTER_ID*
+    Sequence identity at which sequences are clustered before the language
+    model runs. The language model runs only on the cluster representatives.
+    A member joins a cluster if its alignment to the representative has at
+    least this sequence identity and covers 95% of both sequences.
+    Cluster members copy embedding vectors at positions aligned to their
+    representative.
+    Also applies to the 3Di logits that ProstT5 predicts with ``--struct``.
+    1.0 only clusters identical sequences, which gives the same
+    result faster. Values below 1 save more runtime and require mmseqs2.
 
     Default: 1.0
 

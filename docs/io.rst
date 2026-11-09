@@ -107,7 +107,7 @@ Arguments
       with ``--struct``. The 3Di of the sequences without a structure is
       predicted with ProstT5 (as for ``--struct`` without a path; PyTorch
       backend only). Structures whose ID is not in ``-i`` are an error, and
-      so is ``--plm_reuse_identity``.
+      so is ``--plm_cluster_id``.
     - **Which sequence is aligned:** with a directory and ``-i``, a sequence
       that has a structure is aligned in the version of its structure file,
       all others in the version of ``-i``; residues of the two are never

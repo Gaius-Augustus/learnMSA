@@ -4,11 +4,14 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
-from dataclasses import dataclass
+import subprocess
+import tempfile
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
+import pandas as pd
 
 if TYPE_CHECKING:
     from learnMSA.util.sequence_dataset import SequenceDataset
@@ -30,6 +33,11 @@ class RedundancyMap:
     """Shape (num_rep,). Ascending original indices of the
     representatives."""
 
+    positions: dict[int, np.ndarray] = field(default_factory=dict)
+    """Contains sequences by original index whose residues do not map 1:1
+    to those of its representative. For each residue reports the index in the
+    representative it is aligned to or -1 for unaligned residues."""
+
     @property
     def num_full(self) -> int:
         return int(self.rep_index.size)
@@ -44,9 +52,14 @@ class RedundancyMap:
         return self.num_rep == self.num_full
 
     @classmethod
-    def from_rep_of(cls, rep_of: np.ndarray) -> RedundancyMap:
+    def from_rep_of(
+        cls,
+        rep_of: np.ndarray,
+        positions: dict[int, np.ndarray] | None = None,
+    ) -> RedundancyMap:
         """Builds the map from the original index of the representative of
-        every sequence (``rep_of[r] == r`` for representatives)."""
+        every sequence (``rep_of[r] == r`` for representatives) and the
+        optional residue ``positions``."""
         rep_of = np.asarray(rep_of, dtype=np.int64)
         reps = np.flatnonzero(rep_of == np.arange(rep_of.size))
         slot = np.full(rep_of.size, -1, dtype=np.int64)
@@ -54,7 +67,8 @@ class RedundancyMap:
         rep_index = slot[rep_of]
         assert np.all(rep_index >= 0), \
             "Every representative must represent itself."
-        return cls(rep_index=rep_index, rep_full_index=reps)
+        return cls(rep_index=rep_index, rep_full_index=reps,
+                   positions=positions or {})
 
 
 def find_duplicates(data: SequenceDataset) -> RedundancyMap:
@@ -81,13 +95,11 @@ def find_near_identical(
     work_dir: Path | str,
     verbose: bool = False,
 ) -> RedundancyMap:
-    """Groups identical sequences and, if ``identity < 1``, sequences of equal
-    length that differ only by substitutions.
-
-    A sequence joins the group of an mmseqs2 cluster representative if both
-    have the same length and at least ``identity`` of their positions match.
-    Other members of the cluster represent themselves. Without mmseqs2, only
-    identical sequences are grouped.
+    """Groups identical or closely related (``identity < 1``) sequences and
+    returns a ``RedundancyMap`` including member-to-representative alignments.
+    A member joins the group of the representative if the alignment has at
+    least ``identity`` identical positions and spans 95% of both sequences
+    (span: `(end - start + 1) / len`).
 
     Args:
         data: The sequences.
@@ -95,8 +107,6 @@ def find_near_identical(
         work_dir: Directory for the temporary clustering files.
         verbose: Print a warning if mmseqs2 is missing.
     """
-    from learnMSA.util.clustering import run_linclust
-
     duplicates = find_duplicates(data)
     if identity >= 1 or duplicates.num_rep < 2:
         return duplicates
@@ -109,41 +119,80 @@ def find_near_identical(
         return duplicates
 
     unique = duplicates.rep_full_index
+    lens = np.asarray(data.seq_lens)[unique]
     os.makedirs(work_dir, exist_ok=True)
-    prefix = os.path.join(work_dir, "plm_reuse")
-    fasta = prefix + ".fasta"
-    with open(fasta, "w") as f:
-        for k, i in enumerate(unique):
-            f.write(f">s{k}\n{data.get_standardized_seq(int(i))}\n")
-    try:
-        clustering = run_linclust(
-            fasta, prefix, identity,
-            ["-c", "0.95", "--cov-mode", "0", "--cluster-mode", "2",
-             "--alignment-mode", "3", "--kmer-per-seq", "100"],
-        )
-    finally:
-        for suffix in (".fasta", "_cluster.tsv", "_rep_seq.fasta",
-                       "_all_seqs.fasta"):
-            if os.path.exists(prefix + suffix):
-                os.remove(prefix + suffix)
-        shutil.rmtree(prefix + "_tmp", ignore_errors=True)
+    with tempfile.TemporaryDirectory(dir=work_dir) as tmp:
+        fasta = os.path.join(tmp, "seqs.fasta")
+        with open(fasta, "w") as f:
+            for k, i in enumerate(unique):
+                f.write(f">{k}\n{data.get_standardized_seq(int(i))}\n")
+        alignments = _align_to_representatives(fasta, tmp, identity)
 
     # Representative of each unique sequence, as a position in unique
     unique_rep = np.arange(unique.size)
-    for rep, member in zip(clustering.representative, clustering.sequence):
-        r, m = int(rep[1:]), int(member[1:])
+    unique_pos: dict[int, np.ndarray] = {}
+    for r, m, qstart, tstart, qaln, taln in alignments.itertuples(
+        index=False
+    ):
         if r == m:
             continue
-        a = data.get_standardized_seq(int(unique[r]))
-        b = data.get_standardized_seq(int(unique[m]))
-        if len(a) != len(b):
-            continue
-        mismatches = np.count_nonzero(
-            np.frombuffer(a.encode(), np.uint8)
-            != np.frombuffer(b.encode(), np.uint8)
-        )
-        if mismatches <= (1 - identity) * len(a):
-            unique_rep[m] = r
-    return RedundancyMap.from_rep_of(
-        unique[unique_rep[duplicates.rep_index]]
+        unique_rep[m] = r
+        pos = _aligned_positions(qaln, taln, qstart, tstart, lens[m])
+        if lens[m] != lens[r] or np.any(pos != np.arange(lens[m])):
+            unique_pos[m] = pos
+    remapped = np.flatnonzero(
+        np.isin(duplicates.rep_index, list(unique_pos))
     )
+    return RedundancyMap.from_rep_of(
+        unique[unique_rep[duplicates.rep_index]],
+        {int(i): unique_pos[duplicates.rep_index[i]] for i in remapped},
+    )
+
+
+def _align_to_representatives(
+    fasta: str, tmp: str, identity: float
+) -> pd.DataFrame:
+    """Clusters the sequences in ``fasta`` (named by their index) and aligns
+    each member to its representative with mmseqs2.
+
+    ``mmseqs cluster`` rather than ``linclust``: the ungapped prefilter of
+    linclust misses members with internal indels.
+
+    Returns:
+        One row per member (representatives included) whose alignment passes
+        the filters, with the columns ``rep``, ``member`` (indices),
+        ``qstart``, ``tstart`` (1-based) and the aligned strings ``qaln``
+        (representative) and ``taln`` (member).
+    """
+    db, clu, aln, out = (
+        os.path.join(tmp, name) for name in ("db", "clu", "aln", "aln.tsv")
+    )
+    filters = ["--min-seq-id", str(identity), "-c", "0.95", "--cov-mode", "0"]
+    for args in (
+        ["createdb", fasta, db],
+        ["cluster", db, clu, os.path.join(tmp, "tmp"), *filters,
+         "--cluster-mode", "2", "--alignment-mode", "3"],
+        ["align", db, db, clu, aln, "-a", "-e", "inf", *filters],
+        ["convertalis", db, db, aln, out, "--format-output",
+         "query,target,qstart,tstart,qaln,taln"],
+    ):
+        subprocess.run(["mmseqs", *args, "-v", "1"], check=True)
+    return pd.read_csv(
+        out, sep="\t",
+        names=["rep", "member", "qstart", "tstart", "qaln", "taln"],
+    )
+
+
+def _aligned_positions(
+    qaln: str, taln: str, qstart: int, tstart: int, length: int
+) -> np.ndarray:
+    """Position in the representative of each residue of a member of the
+    given length, -1 where the alignment does not match it."""
+    gap = ord("-")
+    q = np.frombuffer(qaln.encode(), np.uint8) != gap
+    t = np.frombuffer(taln.encode(), np.uint8) != gap
+    pos = np.full(length, -1, dtype=np.int32)
+    pos[tstart - 1:tstart - 1 + t.sum()] = np.where(
+        q, qstart - 2 + np.cumsum(q), -1
+    )[t]
+    return pos

@@ -164,32 +164,47 @@ def near_identical_fasta(tmp_path: Path) -> Path:
     other = _random_seq(rng, 120)
     records = [
         ("base", base),
-        ("one_sub", _mutate(base, [10])),            # 99% identical
+        ("one_sub", _mutate(base, [10])),             # 99% identical
         ("three_subs", _mutate(base, [10, 40, 70])),  # 97% identical
-        ("shorter", base[:99]),                        # different length
+        ("shorter", base[2:]),                        # N-terminal truncation
         ("other", other),
         ("base_copy", base),
+        # base stays the representative: mmseqs2 picks the longest sequence
+        ("indels", base[:30] + base[31:50] + "G" + base[50:]),
+        ("deletion", base[:60] + base[61:]),
     ]
     path = tmp_path / "near.fasta"
     path.write_text("".join(f">{i}\n{s}\n" for i, s in records))
     return path
 
 
-@pytest.mark.skipif(shutil.which("mmseqs") is None,
-                    reason="mmseqs2 is not installed")
+# Positions of the residues of indels and deletion in base
+INDELS_POS = np.r_[0:30, 31:50, -1, 50:100]
+DELETION_POS = np.r_[0:60, 61:100]
+
+needs_mmseqs = pytest.mark.skipif(shutil.which("mmseqs") is None,
+                                  reason="mmseqs2 is not installed")
+
+
+@needs_mmseqs
 def test_find_near_identical(near_identical_fasta: Path, tmp_path: Path) -> None:
     work_dir = tmp_path / "work"
     with SequenceDataset(near_identical_fasta) as data:
         red = find_near_identical(data, 0.98, work_dir)
-        # base, three_subs, shorter and other represent themselves; one_sub
-        # and base_copy share the embeddings of base
-        np.testing.assert_equal(red.rep_full_index, [0, 2, 3, 4])
-        np.testing.assert_equal(red.rep_index, [0, 0, 1, 2, 3, 0])
+        # three_subs and other represent themselves; all other sequences
+        # share the embeddings of base
+        np.testing.assert_equal(red.rep_full_index, [0, 2, 4])
+        np.testing.assert_equal(red.rep_index, [0, 0, 1, 0, 2, 0, 0, 0])
+        # Equal length without indels needs no positions
+        assert sorted(red.positions) == [3, 6, 7]
+        np.testing.assert_equal(red.positions[3], np.arange(2, 100))
+        np.testing.assert_equal(red.positions[6], INDELS_POS)
+        np.testing.assert_equal(red.positions[7], DELETION_POS)
 
         red = find_near_identical(data, 0.97, work_dir)
-        np.testing.assert_equal(red.rep_full_index, [0, 3, 4])
+        np.testing.assert_equal(red.rep_full_index, [0, 4])
 
-        assert find_near_identical(data, 1.0, work_dir).num_rep == 5
+        assert find_near_identical(data, 1.0, work_dir).num_rep == 7
     assert list(work_dir.iterdir()) == []
 
 
@@ -199,7 +214,7 @@ def test_find_near_identical_without_mmseqs(
     monkeypatch.setattr(shutil, "which", lambda _: None)
     with SequenceDataset(near_identical_fasta) as data:
         red = find_near_identical(data, 0.9, tmp_path)
-    np.testing.assert_equal(red.rep_full_index, [0, 1, 2, 3, 4])
+    np.testing.assert_equal(red.rep_full_index, [0, 1, 2, 3, 4, 6, 7])
 
 
 def test_embed_representatives(dup_fasta: Path, tmp_path: Path) -> None:
@@ -223,3 +238,33 @@ def test_embed_representatives(dup_fasta: Path, tmp_path: Path) -> None:
         np.testing.assert_equal(emb.seq_lens, data.seq_lens)
         values = [emb.get_encoded_seq(i)[0, 0] for i in range(6)]
         assert values == [0, 1, 0, 2, 1, 0]
+
+
+@needs_mmseqs
+def test_embed_representatives_aligned(
+    near_identical_fasta: Path, tmp_path: Path
+) -> None:
+    config = Configuration()
+    config.input_output.work_dir = str(tmp_path)
+    config.input_output.verbose = False
+    config.language_model.plm_cluster_id = 0.98
+
+    def embed(reps: SequenceDataset) -> EmbeddingCache:
+        # The embedding of a residue is its position
+        values = np.concatenate([np.arange(n) for n in reps.seq_lens])
+        return EmbeddingCache(
+            reps.seq_lens, 1, cache=values[:, None].astype(np.float32)
+        )
+
+    with SequenceDataset(near_identical_fasta) as data:
+        reuse = util.find_plm_representatives(config, data)
+        emb = util.embed_representatives(
+            data, reuse, embed, np.array([-1.0])
+        )
+        np.testing.assert_equal(emb.seq_lens, data.seq_lens)
+        values = [emb.get_encoded_seq(i)[:, 0] for i in range(data.num_seq)]
+    for i in [0, 1, 5]:
+        np.testing.assert_equal(values[i], np.arange(100))
+    np.testing.assert_equal(values[3], np.arange(2, 100))
+    np.testing.assert_equal(values[6], INDELS_POS)
+    np.testing.assert_equal(values[7], DELETION_POS)

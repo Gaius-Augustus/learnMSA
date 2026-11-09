@@ -99,12 +99,12 @@ def test_partial_logits_file_is_completed_with_prostt5(tmp_path) -> None:
         rtol=1e-3, atol=1e-3)
 
 
-def test_partial_structures_reject_plm_reuse(tmp_path) -> None:
+def test_partial_structures_reject_plm_cluster_id(tmp_path) -> None:
     (tmp_path / "s.fasta").write_text(">s2\nDVLP\n")
     config = Configuration()
     config.input_output.struct_file = tmp_path / "s.fasta"
-    config.language_model.plm_reuse_identity = 0.9
-    with pytest.raises(ValueError, match="plm_reuse_identity"):
+    config.language_model.plm_cluster_id = 0.9
+    with pytest.raises(ValueError, match="plm_cluster_id"):
         load_struct_data(config, SequenceDataset(sequences=SEQS))
 
 

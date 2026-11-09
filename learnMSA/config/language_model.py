@@ -25,11 +25,16 @@ class LanguageModelConfig(BaseModel):
     language_model: str = "protT5"
     """Name of the language model to use."""
 
-    plm_reuse_identity: float = 1.0
-    """Sequences of equal length with at least this fraction of identical
-    positions share the per-residue embeddings (or ProstT5 3Di logits) of a
-    representative, which is the only one the language model sees. 1.0 shares
-    only between identical sequences. Values below 1 require mmseqs2."""
+    plm_cluster_id: float = 1.0
+    """Sequence identity at which sequences are clustered before the language
+    model runs. The language model runs only on the cluster representatives.
+    A member joins a cluster if its alignment to the representative has at
+    least this sequence identity and covers 95% of both sequences.
+    Cluster members copy embedding vectors at positions aligned to their
+    representative.
+    Also applies to the 3Di logits that ProstT5 predicts with ``--struct``.
+    1.0 only clusters identical sequences, which gives the same
+    result faster. Values below 1 save more runtime and require mmseqs2."""
 
     scoring_model_dim: int = 16
     """Reduced embedding dimension of the scoring model."""
@@ -142,10 +147,10 @@ class LanguageModelConfig(BaseModel):
             )
         return v
 
-    @field_validator("plm_reuse_identity")
+    @field_validator("plm_cluster_id")
     def validate_identity(cls, v: float) -> float:
         if not 0 < v <= 1:
-            raise ValueError("plm_reuse_identity must be in (0, 1].")
+            raise ValueError("plm_cluster_id must be in (0, 1].")
         return v
 
     @field_validator("scoring_model_dim", "embedding_prior_components")
