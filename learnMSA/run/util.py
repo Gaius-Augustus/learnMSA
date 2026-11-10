@@ -430,6 +430,10 @@ def validate_output_file_requirements(config, parser) -> None:
     """
     output_file_provided = config.input_output.output_file != Path()
 
+    if config.input_output.posterior_full \
+            and config.input_output.posterior_file == Path():
+        parser.error("--posterior_full requires --posterior_file")
+
     # Check if output_file is required
     if not output_file_provided:
         # Convert mode always requires output_file
@@ -440,7 +444,8 @@ def validate_output_file_requirements(config, parser) -> None:
 
         # If not using any output options, output_file is required for alignment
         using_scores = config.input_output.scores != Path()
-        using_decode = config.input_output.decode_file != Path()
+        using_decode = config.input_output.decode_file != Path() \
+            or config.input_output.posterior_file != Path()
         using_save_model = config.input_output.save_model != ""
         using_logo = config.visualization.plot != ""
 
@@ -450,8 +455,8 @@ def validate_output_file_requirements(config, parser) -> None:
                 or using_logo):
             parser.error(
                 "argument -o/--out_file is required (or use --scores, "
-                "--decode_file, --save_model, or --logo to save alternative "
-                "outputs)"
+                "--decode_file, --posterior_file, --save_model, or --logo to "
+                "save alternative outputs)"
             )
 
 

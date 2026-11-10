@@ -1,3 +1,5 @@
+from typing import Literal
+
 import numpy as np
 
 from learnMSA.hmm.layer import PHMMLayer
@@ -26,16 +28,22 @@ class PHMMMixin():
         self.phmm_layer.loglik_mode()
         self._decode_msa = False
 
-    def viterbi_mode(self) -> None:
-        """Makes the model return Viterbi paths.
+    def viterbi_mode(
+        self, posterior: Literal["decoded"] | None = None
+    ) -> None:
+        """Makes the model return Viterbi paths (see
+        :meth:`PHMMLayer.viterbi_mode` for ``posterior``).
         """
-        self.phmm_layer.viterbi_mode()
+        self.phmm_layer.viterbi_mode(posterior)
         self._decode_msa = False
 
-    def mea_mode(self) -> None:
-        """Makes the model return MEA paths.
+    def mea_mode(
+        self, posterior: Literal["decoded", "full"] | None = None
+    ) -> None:
+        """Makes the model return MEA paths (see
+        :meth:`PHMMLayer.mea_mode` for ``posterior``).
         """
-        self.phmm_layer.mea_mode()
+        self.phmm_layer.mea_mode(posterior)
         self._decode_msa = False
 
     def viterbi_decode_mode(self) -> None:
@@ -50,8 +58,9 @@ class PHMMMixin():
         self.phmm_layer.mea_mode()
         self._decode_msa = True
 
-    def posterior_mode(self) -> None:
-        """Makes the model return state posterior probabilities.
+    def posterior_mode(self, decoding_temperature: bool = False) -> None:
+        """Makes the model return state posterior probabilities (see
+        :meth:`PHMMLayer.posterior_mode` for ``decoding_temperature``).
         """
-        self.phmm_layer.posterior_mode()
+        self.phmm_layer.posterior_mode(decoding_temperature)
         self._decode_msa = False

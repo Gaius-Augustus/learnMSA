@@ -708,6 +708,10 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
 
         See :meth:`learnMSA.model.tf.model.TFLearnMSAModel.predict` for the
         full description of the arguments and the shape of the result.
+
+        Torch only: in the decoding modes with posteriors (e.g.
+        ``viterbi_mode("decoded")``), only ``ragged_output=True`` is
+        supported and each list entry is ``((states, posteriors), idx)``.
         """
         if self._decode_msa:
             raise NotImplementedError(
@@ -783,15 +787,21 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
                 # fixed-size array per bucket is unreliable.
                 bucket_preds: dict[int, tuple[list, list]] = {}
 
+                # Decoding modes with posteriors yield (states, posteriors)
+                is_tuple = False
                 for batch in loader:
                     batch_pred_t, batch_idx_t = self.predict_step(batch)
-                    batch_pred = batch_pred_t.cpu().numpy()
+                    is_tuple = isinstance(batch_pred_t, tuple)
+                    batch_preds = tuple(
+                        p.cpu().numpy() for p in
+                        (batch_pred_t if is_tuple else (batch_pred_t,))
+                    )
                     batch_idx = batch_idx_t.cpu().numpy()
                     del batch_pred_t, batch_idx_t
 
-                    padded_len = batch_pred.shape[1]
+                    padded_len = batch_preds[0].shape[1]
                     acc = bucket_preds.setdefault(padded_len, ([], []))
-                    acc[0].append(batch_pred)
+                    acc[0].append(batch_preds)
                     acc[1].append(batch_idx)
 
                 outputs = []
@@ -801,11 +811,16 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
                         np.amax(data[0].seq_lens[indices[bucket_idx]]) + 1
                     )
                     L = min(padded_len, bucket_max_len)
-                    bucket_pred = np.concatenate(
-                        [p[:, :L] for p in preds], axis=0
+                    bucket_preds_k = tuple(
+                        np.concatenate([p[k][:, :L] for p in preds], axis=0)
+                        for k in range(len(preds[0]))
                     )
-                    _replace_padding(bucket_pred)
-                    outputs.append((bucket_pred, bucket_idx))
+                    # padding replacement applies to the states only
+                    _replace_padding(bucket_preds_k[0])
+                    outputs.append((
+                        bucket_preds_k if is_tuple else bucket_preds_k[0],
+                        bucket_idx,
+                    ))
             else:
                 # Pre-allocate the full output array and write each batch
                 # directly at the original sequence positions, eliminating list
@@ -819,6 +834,11 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
 
                 for batch in loader:
                     batch_pred_t, batch_idx_t = self.predict_step(batch)
+                    if isinstance(batch_pred_t, tuple):
+                        raise NotImplementedError(
+                            "Decoding modes with posteriors require "
+                            "ragged_output=True."
+                        )
                     batch_pred = batch_pred_t.cpu().numpy()
                     batch_idx = batch_idx_t.cpu().numpy()
                     del batch_pred_t, batch_idx_t
@@ -930,7 +950,9 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
             steps=steps,
         )
 
-    def predict_step(self, batch: Any) -> tuple[torch.Tensor, torch.Tensor]:
+    def predict_step(
+        self, batch: Any
+    ) -> tuple[torch.Tensor | tuple[torch.Tensor, ...], torch.Tensor]:
         """
         Runs one bucketed batch through the model.
 
@@ -940,6 +962,7 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
 
         Returns:
             ``(predictions, j)`` so the caller can restore the original order.
+            ``predictions`` is a tuple in the decoding modes with posteriors.
         """
         x = tuple(t.to(self._device, non_blocking=True) for t in batch)
         self._record_batch_size(x)
@@ -947,7 +970,10 @@ class TorchLearnMSAModel(torch.nn.Module, LearnMSAModel[torch.Tensor]):
         inputs, n_padded = self._pad_batch(tuple(inputs))
         pred = self(inputs)
         if n_padded:
-            pred = pred[:-n_padded]
+            if isinstance(pred, tuple):
+                pred = tuple(p[:-n_padded] for p in pred)
+            else:
+                pred = pred[:-n_padded]
         return pred, j
 
     def _pad_batch(

@@ -739,6 +739,76 @@ class AlignmentModel():
                     buf += b"\n"
                 output_file.write(buf)
 
+    def posterior_to_file(
+        self,
+        filepath: str | Path,
+        model_index: int,
+        decoding_mode: DecodingMode = DecodingMode.VITERBI,
+        full: bool = False,
+        batch_size: int = 10000,
+    ) -> None:
+        """ Decodes the sequences and writes state posterior probabilities to
+            a file, either only the posterior of the decoded state (fasta-like,
+            4 decimal probabilities space-separated) or full (all state
+            posterior probabilities as numpy array of shape
+            ``(total residues, 2L+2)``, written by memmap; slice it per
+            sequence with the sequence lengths, e.g.
+            ``np.load(path, mmap_mode="r")``).
+
+        Args:
+            filepath: Path of the output file.
+            model_index: Specifies the model for decoding.
+            decoding_mode: The mode used for decoding the alignment.
+            full: Write full posterior vectors instead of the posterior of
+                the decoded state.
+            batch_size: Number of records formatted at a time (text only).
+        """
+        # Row-flat posteriors in the order of self.indices
+        flat = self.build_alignment(
+            [model_index], decoding_mode, "full" if full else "decoded"
+        )
+        assert flat is not None
+        row_offsets = self._row_residue_offsets()
+        rows, seqs = self._output_rows()
+
+        def record(o: int) -> np.ndarray:
+            """Posteriors of output record o (duplicates share a row)."""
+            r = rows[o]
+            return flat[row_offsets[r]:row_offsets[r+1]]
+
+        if full:
+            out_lens = np.diff(row_offsets)[rows]
+            total = int(out_lens.sum())
+            values = np.lib.format.open_memmap(
+                filepath, mode="w+", dtype=np.float32,
+                shape=(total, flat.shape[1]),
+            )
+            offset = 0
+            for o in range(rows.size):
+                v = record(o)
+                values[offset:offset+len(v)] = v
+                offset += len(v)
+            values.flush()
+            del values
+            return
+
+        # Format via a lookup table, much faster than per-value f-strings
+        table = np.array([f"{v/10000:.4f}" for v in range(10001)])
+        full_data = self.data[0].unfiltered()
+        with open(filepath, "wb") as output_file:
+            n = rows.size
+            for i in range(0, n, batch_size):
+                buf = bytearray()
+                for o in range(i, min(n, i+batch_size)):
+                    v = record(o)
+                    q = np.rint(np.clip(v, 0, 1) * 10000).astype(np.int64)
+                    buf += b">"
+                    buf += full_data.get_header(int(seqs[o])).encode("utf-8")
+                    buf += b"\n"
+                    buf += " ".join(table[q]).encode("ascii")
+                    buf += b"\n"
+                output_file.write(buf)
+
     def _states_to_strings(
         self,
         model_index: int,
@@ -1293,8 +1363,24 @@ class AlignmentModel():
     #computes an implicit alignment (without storing gaps)
     #eventually, an alignment with explicit gaps can be written
     #in a memory friendly manner to file
-    def build_alignment(self, models, decoding_mode: DecodingMode):
+    def build_alignment(
+        self,
+        models,
+        decoding_mode: DecodingMode,
+        posterior: str | None = None,
+    ) -> np.ndarray | None:
+        """ Decodes the sequences with the given model and stores the
+            alignment metadata.
 
+        Args:
+            posterior: ``"decoded"`` or ``"full"`` to also compute state
+                posteriors under the decoding HMM (PyTorch only).
+
+        Returns:
+            None, or the posteriors of all residues in the order of
+            ``indices`` (sequences concatenated): the posterior of the
+            decoded state ``(R,)`` or the full posterior ``(R, 2L+2)``.
+        """
         assert len(models) == 1, "Not implemented for multiple models."
 
         if self.model.context.config.input_output.verbose:
@@ -1304,10 +1390,14 @@ class AlignmentModel():
                 f"with decoding mode {decoding_mode}..."
             )
 
-        if decoding_mode == AlignmentModel.DecodingMode.VITERBI:
-            self.model.viterbi_mode()
+        is_viterbi = decoding_mode == AlignmentModel.DecodingMode.VITERBI
+        if is_viterbi:
+            # Full posteriors come from a second pass, see below
+            self.model.viterbi_mode(
+                "decoded" if posterior == "decoded" else None
+            )
         elif decoding_mode == AlignmentModel.DecodingMode.MEA:
-            self.model.mea_mode()
+            self.model.mea_mode(posterior)  # type: ignore[arg-type]
         else:
             raise ValueError(f"Unsupported decoding mode: {decoding_mode}")
 
@@ -1315,6 +1405,13 @@ class AlignmentModel():
             self.data, indices=self.indices, models=models,
             ragged_output=True
         ) # (B, T, H)
+
+        # Decoding modes with posteriors return ((states, posteriors), idx)
+        posteriors = None
+        if outputs and isinstance(outputs[0][0], tuple):
+            post_outputs = [(post, idx) for (_, post), idx in outputs]
+            outputs = [(states, idx) for (states, _), idx in outputs]
+            posteriors = self._ragged_to_flat(post_outputs)
 
         t = time.time()
 
@@ -1343,6 +1440,11 @@ class AlignmentModel():
                 # Re-run Viterbi for all sequences with more than one hit
                 # and a model where multi-hits are forbidden
                 self.model.phmm_layer.enable_multi_hits(False)
+                # plain decoding without posteriors
+                if is_viterbi:
+                    self.model.viterbi_mode()
+                else:
+                    self.model.mea_mode()
     
                 outputs_single = self.model.predict(
                     self.data, indices=multi_hit_rows, models=models,
@@ -1410,6 +1512,51 @@ class AlignmentModel():
                 f"Building alignment took {time.time() - t:.2f} "+
                 "seconds."
             )
+
+        if posterior == "full" and is_viterbi:
+            # Viterbi has no fused full-posterior mode: second pass under
+            # the same (decoding) emitter temperature
+            self.model.posterior_mode(decoding_temperature=True)
+            posteriors = self._ragged_to_flat(self.model.predict(
+                self.data, indices=self.indices, models=models,
+                ragged_output=True
+            ))
+
+        return posteriors
+
+    def _row_residue_offsets(self) -> np.ndarray:
+        """ Offsets of each row's residues when the sequences in
+            ``indices`` are concatenated; shape ``(len(indices) + 1,)``.
+        """
+        lens = self.data[0].seq_lens[self.indices].astype(np.int64)
+        offsets = np.zeros(lens.size + 1, dtype=np.int64)
+        np.cumsum(lens, out=offsets[1:])
+        return offsets
+
+    def _ragged_to_flat(
+        self, outputs: list[tuple[np.ndarray, np.ndarray]]
+    ) -> np.ndarray:
+        """ Concatenates ragged per-bucket posteriors of a single model,
+            ``(b, T, 1)`` or ``(b, T, 1, Q+1)``, over the residues of all
+            rows in the order of ``indices``. Drops the terminal state of
+            full posteriors. Consumes ``outputs``.
+        """
+        offsets = self._row_residue_offsets()
+        flat = None
+        while outputs:
+            post, idx = outputs.pop(0)
+            post = post[:, :, 0]
+            if post.ndim == 3:
+                post = post[..., :-1]  # drop the terminal state
+            if flat is None:
+                flat = np.empty(
+                    (int(offsets[-1]),) + post.shape[2:], dtype=post.dtype
+                )
+            for k, r in enumerate(idx):
+                flat[offsets[r]:offsets[r+1]] = \
+                    post[k, :offsets[r+1]-offsets[r]]
+        assert flat is not None, "No posteriors were predicted."
+        return flat
 
     def _stack_ragged_outputs(
         self,
@@ -1607,3 +1754,32 @@ def read_state_file(
                     model_length = max(model_length, int(t[1:]) + 1)
 
     return headers, [parse_state_string(s, model_length) for s in strings]
+
+
+def read_posterior_file(
+    filepath: str | Path,
+) -> tuple[list[str], list[np.ndarray]]:
+    """ Reads a text file written by :meth:`AlignmentModel.posterior_to_file`
+    (without ``full``; the full output is a plain ``.npy`` file).
+
+    Returns:
+        The fasta headers and, per record, a float32 array with the
+        posterior probability of the decoded state of each residue.
+    """
+    headers: list[str] = []
+    records: list[list[str]] = []
+    with open(filepath) as f:
+        for line in f:
+            line = line.strip()
+            if line.startswith(">"):
+                headers.append(line[1:])
+                records.append([])
+            elif line:
+                if not records:
+                    raise ValueError(
+                        f"{filepath} does not start with a fasta header."
+                    )
+                records[-1].append(line)
+    return headers, [
+        np.array(" ".join(r).split(), dtype=np.float32) for r in records
+    ]

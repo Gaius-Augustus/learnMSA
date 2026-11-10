@@ -69,6 +69,11 @@ def run_main() -> None:
             "--compile jit selects TensorFlow's XLA JIT and is not available "
             "under the pytorch backend. Use --compile on for torch.compile."
         )
+    if config.input_output.posterior_file != Path() and \
+            backend.get_backend() != "pytorch":
+        parser.error(
+            "--posterior_file is only available under the pytorch backend."
+        )
 
     from learnMSA.align.align import align
     from learnMSA.align.alignment_model import AlignmentModel
@@ -163,7 +168,24 @@ def run_main() -> None:
             config.training.decoding_mode
         )
 
-        if config.input_output.output_file != Path() \
+        if config.input_output.posterior_file != Path():
+            # Decodes and computes the posteriors in one pass; this also
+            # builds the alignment metadata used by the outputs below.
+            Path(config.input_output.posterior_file).parent.mkdir(
+                parents=True, exist_ok=True
+            )
+            am.posterior_to_file(
+                config.input_output.posterior_file,
+                am.best_head,
+                decoding_mode=decoding_mode,
+                full=config.input_output.posterior_full,
+            )
+            if config.input_output.verbose:
+                print(
+                    "Wrote posteriors to",
+                    config.input_output.posterior_file,
+                )
+        elif config.input_output.output_file != Path() \
                 or config.input_output.decode_file != Path():
             # build the alignment (predict state sequences, create metadata)
             am.build_alignment([am.best_head], decoding_mode=decoding_mode)

@@ -44,6 +44,8 @@ def args_to_config(
     io["load_model"] = args.load_model
     io["scores"] = args.scores
     io["decode_file"] = args.decode_file
+    io["posterior_file"] = args.posterior_file
+    io["posterior_full"] = args.posterior_full
     io["verbose"] = not args.silent
     io["cuda_visible_devices"] = args.cuda_visible_devices
     io["work_dir"] = args.work_dir

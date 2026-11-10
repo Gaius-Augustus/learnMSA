@@ -16,7 +16,7 @@ subclasses this alongside its framework layer type, mirroring hidten::
 from abc import abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Callable, ClassVar, Generic, TypeVar
+from typing import Any, Callable, ClassVar, Generic, Literal, TypeVar
 
 import numpy as np
 from hidten import HMMMode
@@ -220,45 +220,67 @@ class PHMMLayer(Generic[T_Tensor]):
         """Makes the layer return log-likelihoods.
         """
         self._mode = HMMMode.LIKELIHOOD_LOG
-        if self.struct_emitter is not None:
-            self.struct_emitter.temperature = 1
-        if self.joint_emitter is not None:
-            self.joint_emitter.temperature = 1
+        self._set_emitter_temperature(decoding=False)
 
-    def viterbi_mode(self) -> None:
+    def viterbi_mode(
+        self, posterior: Literal["decoded"] | None = None
+    ) -> None:
         """Makes the layer return Viterbi paths.
-        """
-        self._mode = HMMMode.VITERBI
-        if self.struct_emitter is not None:
-            st_conf = self.structural_config
-            assert st_conf is not None
-            self.struct_emitter.temperature = st_conf.emitter_temperature
-        if self.joint_emitter is not None:
-            st_conf = self.structural_config
-            assert st_conf is not None
-            self.joint_emitter.temperature = st_conf.emitter_temperature
 
-    def mea_mode(self) -> None:
+        Args:
+            posterior: With ``"decoded"``, the layer returns a tuple of the
+                paths and the posterior probability of each decoded state.
+                PyTorch backend only.
+        """
+        if posterior == "decoded":
+            self._mode = HMMMode.VITERBI_WITH_POSTERIOR
+        elif posterior is None:
+            self._mode = HMMMode.VITERBI
+        else:
+            raise ValueError(
+                f"Unsupported posterior output for Viterbi: {posterior}. "
+                "Use posterior_mode(decoding_temperature=True) for full "
+                "posteriors."
+            )
+        self._set_emitter_temperature(decoding=True)
+
+    def mea_mode(
+        self, posterior: Literal["decoded", "full"] | None = None
+    ) -> None:
         """Makes the layer return MEA paths.
-        """
-        self._mode = HMMMode.MEA
-        if self.struct_emitter is not None:
-            st_conf = self.structural_config
-            assert st_conf is not None
-            self.struct_emitter.temperature = st_conf.emitter_temperature
-        if self.joint_emitter is not None:
-            st_conf = self.structural_config
-            assert st_conf is not None
-            self.joint_emitter.temperature = st_conf.emitter_temperature
 
-    def posterior_mode(self) -> None:
+        Args:
+            posterior: With ``"decoded"``, the layer returns a tuple of the
+                paths and the posterior probability of each decoded state;
+                with ``"full"``, a tuple of the paths and the full posterior
+                they were decoded from. PyTorch backend only.
+        """
+        self._mode = {
+            None: HMMMode.MEA,
+            "decoded": HMMMode.MEA_WITH_POSTERIOR,
+            "full": HMMMode.MEA_WITH_FULL_POSTERIOR,
+        }[posterior]
+        self._set_emitter_temperature(decoding=True)
+
+    def posterior_mode(self, decoding_temperature: bool = False) -> None:
         """Makes the layer return state posterior probabilities.
+
+        Args:
+            decoding_temperature: Use the emitter temperature of the
+                decoding modes, i.e. the same HMM that decodes the alignment.
         """
         self._mode = HMMMode.POSTERIOR
-        if self.struct_emitter is not None:
-            self.struct_emitter.temperature = 1
-        if self.joint_emitter is not None:
-            self.joint_emitter.temperature = 1
+        self._set_emitter_temperature(decoding=decoding_temperature)
+
+    def _set_emitter_temperature(self, decoding: bool) -> None:
+        """Sets the structural emitter temperature: the configured one for
+        decoding, 1 otherwise."""
+        temperature = 1
+        if decoding and self.structural_config is not None:
+            temperature = self.structural_config.emitter_temperature
+        for emitter in (self.struct_emitter, self.joint_emitter):
+            if emitter is not None:
+                emitter.temperature = temperature
 
     def is_loglik_mode(self) -> bool:
         """Check if the layer is in log-likelihood mode.
@@ -268,17 +290,23 @@ class PHMMLayer(Generic[T_Tensor]):
     def is_viterbi_mode(self) -> bool:
         """Check if the layer is in Viterbi mode.
         """
-        return self._mode == HMMMode.VITERBI
+        return self._mode in {
+            HMMMode.VITERBI, HMMMode.VITERBI_WITH_POSTERIOR
+        }
 
     def is_mea_mode(self) -> bool:
         """Check if the layer is in MEA mode.
         """
-        return self._mode == HMMMode.MEA
+        return self._mode in {
+            HMMMode.MEA,
+            HMMMode.MEA_WITH_POSTERIOR,
+            HMMMode.MEA_WITH_FULL_POSTERIOR,
+        }
 
     def is_decoding_mode(self) -> bool:
         """Check if the layer is in decoding mode.
         """
-        return self._mode in {HMMMode.VITERBI, HMMMode.MEA}
+        return self.is_viterbi_mode() or self.is_mea_mode()
 
     def is_posterior_mode(self) -> bool:
         """Check if the layer is in posterior mode.
@@ -286,6 +314,8 @@ class PHMMLayer(Generic[T_Tensor]):
         return self._mode == HMMMode.POSTERIOR
 
     def mode_name(self) -> str:
+        if self._mode == HMMMode.VITERBI_WITH_POSTERIOR:
+            return "mea"  # costs about as much as MEA (incl. posterior)
         if self.is_viterbi_mode():
             return "viterbi"
         if self.is_mea_mode():

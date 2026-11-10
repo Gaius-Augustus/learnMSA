@@ -47,6 +47,14 @@ class InputOutputConfig(BaseModel):
     """If set, the decoded state sequences will be saved to the specified file
     in fasta-like format."""
 
+    posterior_file: PathField = Path()
+    """If set, the posterior probability of the decoded state of each residue
+    will be saved to the specified file in fasta-like format."""
+
+    posterior_full: bool = False
+    """If True, posterior_file instead holds a float32 .npy matrix with the
+    full posterior distributions."""
+
     verbose: bool = False
     """If False, all output messages will be disabled."""
 

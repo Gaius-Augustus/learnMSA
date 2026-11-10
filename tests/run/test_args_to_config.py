@@ -77,6 +77,8 @@ class TestArgsToConfig:
             "--only_matches",
             "--scores", "scores.tsv",
             "--decode_file", "states.fasta",
+            "--posterior_file", "post.npy",
+            "--posterior_full",
             "--no_noise",
         ])
 
@@ -108,6 +110,8 @@ class TestArgsToConfig:
         assert config.input_output.verbose is False
         assert config.input_output.scores == Path("scores.tsv")
         assert config.input_output.decode_file == Path("states.fasta")
+        assert config.input_output.posterior_file == Path("post.npy")
+        assert config.input_output.posterior_full is True
 
     def test_args_to_config_with_epochs_single_value(self):
         """Test that single epoch value is expanded to 3."""

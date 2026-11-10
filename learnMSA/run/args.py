@@ -176,6 +176,25 @@ def parse_args(
             "Uses the decoding mode set by --decode.",
     )
     io_group.add_argument(
+        "--posterior_file",
+        dest="posterior_file",
+        type=str,
+        default="" if io.posterior_file == Path() else str(io.posterior_file),
+        help="Additional fasta-like file with, per residue, the posterior "
+            "probability of the state decoded by --decode (the state written "
+            "to --decode_file). PyTorch backend only.",
+    )
+    io_group.add_argument(
+        "--posterior_full",
+        dest="posterior_full",
+        action="store_true",
+        help="Write the full posterior distribution over all HMM states for "
+            "each residue to --posterior_file instead: a float32 .npy matrix "
+            "of shape (residues, states), sequences concatenated in input "
+            "order, states ordered like the tokens of --decode_file "
+            "(M1..ML, I1..I(L-1), L, U, R).",
+    )
+    io_group.add_argument(
         "--compress",
         dest="compress",
         nargs="?",
@@ -573,7 +592,7 @@ def parse_args(
         type=float,
         default=lm.plm_cluster_id,
         help="Sequence identity at which sequences are clustered to save "\
-            "runtime. The language model sees only cluster representatives; "\
+            "runtime. The language model only runs on cluster representatives; "\
             "members copy their embeddings (or ProstT5 3Di logits) at "\
             "aligned residues. 1.0 clusters only identical sequences. "\
             "Values below 1 require mmseqs2. (default: %(default)s)"
