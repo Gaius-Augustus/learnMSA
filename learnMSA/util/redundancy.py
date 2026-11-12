@@ -98,8 +98,10 @@ def find_near_identical(
     """Groups identical or closely related (``identity < 1``) sequences and
     returns a ``RedundancyMap`` including member-to-representative alignments.
     A member joins the group of the representative if the alignment has at
-    least ``identity`` identical positions and spans 95% of both sequences
-    (span: `(end - start + 1) / len`).
+    least ``identity`` identical positions and spans 70% of the member
+    (span: `(end - start + 1) / len`). The representative may be longer.
+    The coverage criterion follows the template selection of Expresso
+    (Armougom et al., 2006), which uses an identity of 0.6.
 
     Args:
         data: The sequences.
@@ -167,7 +169,9 @@ def _align_to_representatives(
     db, clu, aln, out = (
         os.path.join(tmp, name) for name in ("db", "clu", "aln", "aln.tsv")
     )
-    filters = ["--min-seq-id", str(identity), "-c", "0.95", "--cov-mode", "0"]
+    # --cov-mode 1: coverage of the target (the member); the representative
+    # (query) may be longer
+    filters = ["--min-seq-id", str(identity), "-c", "0.7", "--cov-mode", "1"]
     for args in (
         ["createdb", fasta, db],
         ["cluster", db, clu, os.path.join(tmp, "tmp"), *filters,

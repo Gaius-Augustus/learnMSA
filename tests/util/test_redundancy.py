@@ -172,6 +172,11 @@ def near_identical_fasta(tmp_path: Path) -> Path:
         # base stays the representative: mmseqs2 picks the longest sequence
         ("indels", base[:30] + base[31:50] + "G" + base[50:]),
         ("deletion", base[:60] + base[61:]),
+        # Covered fully, but spans only 60% of base: joins base with
+        # --cov-mode 1 (with mode 2 it would represent base instead)
+        ("fragment", base[20:80]),
+        # Alignment spans only 50 of 90 residues: represents itself
+        ("chimera", base[:50] + _random_seq(rng, 40)),
     ]
     path = tmp_path / "near.fasta"
     path.write_text("".join(f">{i}\n{s}\n" for i, s in records))
@@ -193,18 +198,21 @@ def test_find_near_identical(near_identical_fasta: Path, tmp_path: Path) -> None
         red = find_near_identical(data, 0.98, work_dir)
         # three_subs and other represent themselves; all other sequences
         # share the embeddings of base
-        np.testing.assert_equal(red.rep_full_index, [0, 2, 4])
-        np.testing.assert_equal(red.rep_index, [0, 0, 1, 0, 2, 0, 0, 0])
+        np.testing.assert_equal(red.rep_full_index, [0, 2, 4, 9])
+        np.testing.assert_equal(
+            red.rep_index, [0, 0, 1, 0, 2, 0, 0, 0, 0, 3]
+        )
         # Equal length without indels needs no positions
-        assert sorted(red.positions) == [3, 6, 7]
+        assert sorted(red.positions) == [3, 6, 7, 8]
         np.testing.assert_equal(red.positions[3], np.arange(2, 100))
         np.testing.assert_equal(red.positions[6], INDELS_POS)
         np.testing.assert_equal(red.positions[7], DELETION_POS)
+        np.testing.assert_equal(red.positions[8], np.arange(20, 80))
 
         red = find_near_identical(data, 0.97, work_dir)
-        np.testing.assert_equal(red.rep_full_index, [0, 4])
+        np.testing.assert_equal(red.rep_full_index, [0, 4, 9])
 
-        assert find_near_identical(data, 1.0, work_dir).num_rep == 7
+        assert find_near_identical(data, 1.0, work_dir).num_rep == 9
     assert list(work_dir.iterdir()) == []
 
 
@@ -214,7 +222,9 @@ def test_find_near_identical_without_mmseqs(
     monkeypatch.setattr(shutil, "which", lambda _: None)
     with SequenceDataset(near_identical_fasta) as data:
         red = find_near_identical(data, 0.9, tmp_path)
-    np.testing.assert_equal(red.rep_full_index, [0, 1, 2, 3, 4, 6, 7])
+    np.testing.assert_equal(
+        red.rep_full_index, [0, 1, 2, 3, 4, 6, 7, 8, 9]
+    )
 
 
 def test_embed_representatives(dup_fasta: Path, tmp_path: Path) -> None:
@@ -268,3 +278,4 @@ def test_embed_representatives_aligned(
     np.testing.assert_equal(values[3], np.arange(2, 100))
     np.testing.assert_equal(values[6], INDELS_POS)
     np.testing.assert_equal(values[7], DELETION_POS)
+    np.testing.assert_equal(values[8], np.arange(20, 80))

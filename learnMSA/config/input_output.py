@@ -49,7 +49,8 @@ class InputOutputConfig(BaseModel):
 
     posterior_file: PathField = Path()
     """If set, the posterior probability of the decoded state of each residue
-    will be saved to the specified file in fasta-like format."""
+    will be saved to the specified file in fasta-like format, or as a float32
+    array (residues concatenated in output order) if the path ends in .npy."""
 
     posterior_full: bool = False
     """If True, posterior_file instead holds a float32 .npy matrix with the

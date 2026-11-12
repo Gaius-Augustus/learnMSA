@@ -84,3 +84,27 @@ def test_posterior_duplicates(simple_config, felix_with_duplicates, tmp_path):
         for am, path in zip((full, dedup), paths):
             am.posterior_to_file(path, 0, full=full_out, batch_size=3)
         assert paths[0].read_bytes() == paths[1].read_bytes()
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_posterior_npy(multi_hit_data, simple_model, mode, tmp_path):
+    """A .npy path writes the decoded-state posteriors as one float32 array,
+    records in the order and lengths of the text file."""
+    am = AlignmentModel(multi_hit_data, simple_model)
+    am.posterior_to_file(tmp_path / "p.txt", 0, mode)
+    am.posterior_to_file(tmp_path / "p.npy", 0, mode)
+    _, values = read_posterior_file(tmp_path / "p.txt")
+    arr = np.load(tmp_path / "p.npy")
+    assert arr.dtype == np.float32 and arr.ndim == 1
+    assert arr.size == sum(len(v) for v in values)
+    np.testing.assert_allclose(arr, np.concatenate(values), atol=6e-5)
+
+
+def test_posterior_npy_duplicates(
+    simple_config, felix_with_duplicates, tmp_path
+):
+    full, dedup = _duplicate_models(simple_config, felix_with_duplicates)
+    paths = [tmp_path / f"{name}.npy" for name in ("a", "b")]
+    for am, path in zip((full, dedup), paths):
+        am.posterior_to_file(path, 0)
+    np.testing.assert_array_equal(np.load(paths[0]), np.load(paths[1]))

@@ -753,7 +753,10 @@ class AlignmentModel():
             posterior probabilities as numpy array of shape
             ``(total residues, 2L+2)``, written by memmap; slice it per
             sequence with the sequence lengths, e.g.
-            ``np.load(path, mmap_mode="r")``).
+            ``np.load(path, mmap_mode="r")``). A ``.npy`` filepath without
+            ``full`` writes the posteriors of the decoded states as a float32
+            array of shape ``(total residues,)``, records in the order of
+            :meth:`states_to_file`.
 
         Args:
             filepath: Path of the output file.
@@ -776,12 +779,12 @@ class AlignmentModel():
             r = rows[o]
             return flat[row_offsets[r]:row_offsets[r+1]]
 
-        if full:
+        if full or str(filepath).endswith(".npy"):
             out_lens = np.diff(row_offsets)[rows]
             total = int(out_lens.sum())
             values = np.lib.format.open_memmap(
                 filepath, mode="w+", dtype=np.float32,
-                shape=(total, flat.shape[1]),
+                shape=(total,) + flat.shape[1:],
             )
             offset = 0
             for o in range(rows.size):

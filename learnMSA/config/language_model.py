@@ -29,7 +29,9 @@ class LanguageModelConfig(BaseModel):
     """Sequence identity at which sequences are clustered before the language
     model runs. The language model runs only on the cluster representatives.
     A member joins a cluster if its alignment to the representative has at
-    least this sequence identity and covers 95% of both sequences.
+    least this sequence identity and covers 70% of the member (the
+    representative may be longer), as in the template selection of
+    Expresso (Armougom et al., 2006).
     Cluster members copy embedding vectors at positions aligned to their
     representative.
     Also applies to the 3Di logits that ProstT5 predicts with ``--struct``.

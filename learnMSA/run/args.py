@@ -182,7 +182,9 @@ def parse_args(
         default="" if io.posterior_file == Path() else str(io.posterior_file),
         help="Additional fasta-like file with, per residue, the posterior "
             "probability of the state decoded by --decode (the state written "
-            "to --decode_file). PyTorch backend only.",
+            "to --decode_file). A .npy path writes a float32 array instead: "
+            "the residues of all sequences concatenated in the record order "
+            "of --decode_file. PyTorch backend only.",
     )
     io_group.add_argument(
         "--posterior_full",
