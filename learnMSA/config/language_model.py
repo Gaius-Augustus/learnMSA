@@ -25,7 +25,7 @@ class LanguageModelConfig(BaseModel):
     language_model: str = "protT5"
     """Name of the language model to use."""
 
-    plm_cluster_id: float = 1.0
+    plm_cluster_id: float = 0.6
     """Sequence identity at which sequences are clustered before the language
     model runs. The language model runs only on the cluster representatives.
     A member joins a cluster if its alignment to the representative has at
