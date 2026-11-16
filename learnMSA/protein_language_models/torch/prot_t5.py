@@ -46,6 +46,7 @@ class TorchProtT5LanguageModel(TorchLanguageModel):
         self.model = T5EncoderModel.from_pretrained(
             prot_t5.MODEL_CHECKPOINT,
             cache_dir=make_cache_dir(cache_dir, prot_t5.CACHE_ID),
+            use_safetensors=False,
             **{dtype_key: dtype},
         )
         self.model.requires_grad_(trainable)

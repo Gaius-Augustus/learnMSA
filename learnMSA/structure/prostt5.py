@@ -57,9 +57,39 @@ CNN_WEIGHTS = Path(__file__).parent / "weights" / "prostt5_3di_cnn.npz"
 EMBEDDING_DIM = 1024
 
 
+#: Name of the download cache subdirectory.
+CACHE_ID = "prostt5"
+
+
 def default_cache_dir() -> Path:
     """Where the ProstT5 encoder is cached (``~/.cache/learnmsa/prostt5``)."""
-    return Path.home() / ".cache" / "learnmsa" / "prostt5"
+    return Path.home() / ".cache" / "learnmsa" / CACHE_ID
+
+
+def cache_dir(plm_cache_dir: str | Path | None = None) -> Path:
+    """The ProstT5 cache under ``--plm_cache_dir``.
+
+    A subdirectory of ``plm_cache_dir``, like the other language models (see
+    ``make_cache_dir``), or ``default_cache_dir()`` when it is None.
+    """
+    if plm_cache_dir is None:
+        return default_cache_dir()
+    return Path(plm_cache_dir) / CACHE_ID
+
+
+def download_encoder(plm_cache_dir: str | Path | None = None) -> Path:
+    """Downloads the files ``load_encoder`` reads, if they are not cached.
+    """
+    from huggingface_hub import snapshot_download
+
+    return Path(snapshot_download(
+        PROSTT5_REPO,
+        revision=PROSTT5_REVISION,
+        cache_dir=str(cache_dir(plm_cache_dir)),
+        # load_encoder reads the weights without safetensors and tokenizes
+        # itself, so it needs only these.
+        allow_patterns=["*.json", "pytorch_model.bin"],
+    ))
 
 
 def tokenize(seq: str) -> np.ndarray:

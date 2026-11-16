@@ -29,6 +29,23 @@ CACHE_ID = "protT5_model"
 DIM = 1024
 
 
+def download(cache_dir: str | None = None) -> str:
+    """Downloads the files the ProtT5 model and tokenizer read, if they are
+    not cached.
+
+    Args:
+        cache_dir: Cache root (``--plm_cache_dir``), see ``make_cache_dir``.
+    """
+    from huggingface_hub import snapshot_download
+
+    return snapshot_download(
+        MODEL_CHECKPOINT,
+        cache_dir=make_cache_dir(cache_dir, CACHE_ID),
+        # The weights (loaded without safetensors) and the T5Tokenizer files.
+        allow_patterns=["*.json", "spiece.model", "pytorch_model.bin"],
+    )
+
+
 class ProtT5InputEncoder(InputEncoder):
     """Tokenizes proteins for ProtT5.
 

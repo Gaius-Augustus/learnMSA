@@ -104,10 +104,12 @@ Arguments
       the 3Di FASTA to the work directory. ``-i`` can be omitted.
     - **With structures for only some sequences:** pass all sequences with
       ``-i`` and the structures (a directory, a 3Di FASTA or an ``.npz``)
-      with ``--struct``. The 3Di of the sequences without a structure is
-      predicted with ProstT5 (as for ``--struct`` without a path; PyTorch
-      backend only). Structures whose ID is not in ``-i`` are an error, and
-      so is ``--plm_cluster_id``.
+      with ``--struct``. All sequences are clustered with
+      ``--plm_cluster_id``. A sequence without a structure copies the 3Di of
+      a sequence with a structure in its cluster at aligned residues (the
+      others are unknown). ProstT5 predicts the 3Di only for clusters without
+      any structure (as for ``--struct`` without a path; PyTorch backend
+      only). Structures whose ID is not in ``-i`` are an error.
     - **Which sequence is aligned:** with a directory and ``-i``, a sequence
       that has a structure is aligned in the version of its structure file,
       all others in the version of ``-i``; residues of the two are never
@@ -143,6 +145,14 @@ Arguments
     ``plm-torch`` extra) and downloads ``Rostlab/ProstT5_fp16`` (MIT license,
     about 5.6 GB) once into ``~/.cache/learnmsa/prostt5``. A GPU is strongly
     recommended.
+
+``learnMSA-download-weights`` {``prostt5``, ``prott5``} [``--plm_cache_dir`` *DIR*]
+    A separate command that downloads the weights of ProstT5 (``--struct``
+    without a path) and/or ProtT5 (``--use_language_model``) ahead of a run,
+    into the cache learnMSA reads them from. Pass the same ``--plm_cache_dir``
+    to learnMSA. Useful where the run itself should not download, e.g. in a
+    cluster job with a file size limit below the 5.6 GB of ProstT5. Cached
+    files are not downloaded again.
 
 ``--load_emb`` *EMB_FILE*
     Path to a file containing embeddings for each sequence. This file should be

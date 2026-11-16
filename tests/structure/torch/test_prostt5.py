@@ -150,3 +150,51 @@ def test_struct_without_path_matches_the_cli(tmp_path, monkeypatch) -> None:
             np.testing.assert_array_equal(in_memory.get_encoded_seq(i),
                                           from_file.get_encoded_seq(i))
     assert sorted(p.name for p in tmp_path.iterdir()) == ["in.fasta", "out"]
+
+
+def test_cache_dir_follows_plm_cache_dir(tmp_path) -> None:
+    assert prostt5.cache_dir() == prostt5.default_cache_dir()
+    assert prostt5.cache_dir(tmp_path) == tmp_path / "prostt5"
+    assert prostt5.cache_dir(str(tmp_path)) == tmp_path / "prostt5"
+
+
+def test_download_encoder_fetches_the_pinned_files(tmp_path,
+                                                   monkeypatch) -> None:
+    import huggingface_hub
+    calls = []
+
+    def fake_snapshot_download(repo_id, **kwargs):
+        calls.append((repo_id, kwargs))
+        return str(tmp_path / "snapshot")
+
+    monkeypatch.setattr(huggingface_hub, "snapshot_download",
+                        fake_snapshot_download)
+    assert prostt5.download_encoder(tmp_path) == tmp_path / "snapshot"
+    assert calls == [(prostt5.PROSTT5_REPO, {
+        "revision": prostt5.PROSTT5_REVISION,
+        "cache_dir": str(tmp_path / "prostt5"),
+        "allow_patterns": ["*.json", "pytorch_model.bin"],
+    })]
+
+
+def test_struct_without_path_uses_plm_cache_dir(tmp_path,
+                                                monkeypatch) -> None:
+    """``learnMSA --struct --plm_cache_dir DIR`` loads ProstT5 from DIR."""
+    fasta = tmp_path / "in.fasta"
+    fasta.write_text(">s1\nMKTAYIAKQR\n>s2\nMSTNPK\n")
+    seen = []
+
+    def fake_load_encoder(device, cache_dir=None):
+        seen.append(cache_dir)
+        return _tiny_encoder()
+
+    monkeypatch.setattr(prostt5, "load_encoder", fake_load_encoder)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    with SequenceDataset(fasta, "fasta") as data:
+        config = Configuration()
+        config.input_output.verbose = False
+        config.structure.use_structure = True
+        config.structure.predict_3di = True
+        config.language_model.plm_cache_dir = str(tmp_path / "weights")
+        load_struct_data(config, data)
+    assert seen == [tmp_path / "weights" / "prostt5"]

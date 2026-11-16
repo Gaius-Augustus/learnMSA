@@ -12,7 +12,7 @@ from learnMSA.run import util
 from learnMSA.util import (AlignedDataset, EmbeddingCache, EmbeddingDataset,
                            SequenceDataset)
 from learnMSA.util.redundancy import (RedundancyMap, find_duplicates,
-                                      find_near_identical)
+                                      find_near_identical, share_structures)
 
 ALPHABET = "ACDEFGHIKLMNPQRSTVWY"
 
@@ -279,3 +279,64 @@ def test_embed_representatives_aligned(
     np.testing.assert_equal(values[6], INDELS_POS)
     np.testing.assert_equal(values[7], DELETION_POS)
     np.testing.assert_equal(values[8], np.arange(20, 80))
+
+
+def _cluster() -> tuple[RedundancyMap, np.ndarray]:
+    """Representative 0 (6 residues); member 1 lacks its residue 2, member 2
+    has an unaligned first residue; 3 is alone."""
+    reuse = RedundancyMap.from_rep_of(
+        np.array([0, 0, 0, 3]),
+        {1: np.array([0, 1, 3, 4, 5]), 2: np.array([-1, 1, 2, 3, 4])},
+    )
+    return reuse, np.array([6, 5, 5, 4])
+
+
+def _assert_maps_equal(a: RedundancyMap, b: RedundancyMap) -> None:
+    np.testing.assert_equal(a.rep_index, b.rep_index)
+    np.testing.assert_equal(a.rep_full_index, b.rep_full_index)
+    assert sorted(a.positions) == sorted(b.positions)
+    for i in a.positions:
+        np.testing.assert_equal(a.positions[i], b.positions[i])
+
+
+def test_share_structures_without_structures_keeps_the_clusters() -> None:
+    reuse, lens = _cluster()
+    _assert_maps_equal(share_structures(reuse, lens, [False] * 4), reuse)
+
+
+def test_share_structures_from_a_representative_with_a_structure() -> None:
+    reuse, lens = _cluster()
+    _assert_maps_equal(
+        share_structures(reuse, lens, [True, False, False, False]), reuse)
+
+
+def test_share_structures_borrows_from_a_member() -> None:
+    reuse, lens = _cluster()
+    shared = share_structures(reuse, lens, [False, True, False, False])
+    np.testing.assert_equal(shared.rep_full_index, [1, 3])
+    np.testing.assert_equal(shared.rep_full_index[shared.rep_index],
+                            [1, 1, 1, 3])
+    # Representative -> member 1, which lacks its residue 2
+    np.testing.assert_equal(shared.positions[0], [0, 1, -1, 2, 3, 4])
+    # Member 2 -> representative -> member 1
+    np.testing.assert_equal(shared.positions[2], [-1, 1, -1, 2, 3])
+    assert sorted(shared.positions) == [0, 2]
+
+
+def test_share_structures_keeps_every_structure() -> None:
+    reuse, lens = _cluster()
+    # Member 1 has more residues aligned to the representative than 2
+    shared = share_structures(reuse, lens, [False, True, True, False])
+    np.testing.assert_equal(shared.rep_full_index, [1, 2, 3])
+    np.testing.assert_equal(shared.rep_full_index[shared.rep_index],
+                            [1, 1, 2, 3])
+    assert sorted(shared.positions) == [0]
+
+
+def test_share_structures_ties_go_to_the_first_member() -> None:
+    reuse = RedundancyMap.from_rep_of(np.array([0, 0, 0]))
+    shared = share_structures(reuse, np.array([3, 3, 3]),
+                              [False, True, True])
+    np.testing.assert_equal(shared.rep_full_index[shared.rep_index],
+                            [1, 1, 2])
+    assert shared.positions == {}

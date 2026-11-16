@@ -18,9 +18,10 @@ Arguments
 
 
 ``--plm_cache_dir`` *PLM_CACHE_DIR*
-    Directory where the protein language model is stored.
+    Directory where the protein language models are stored, including ProstT5
+    for ``--struct``. ``learnMSA-download-weights`` fills it ahead of a run.
 
-    Default: learnMSA install directory
+    Default: ``~/.cache/learnmsa``
 
 ``--language_model`` *LANGUAGE_MODEL*
     Name of the language model to use.
@@ -32,14 +33,16 @@ Arguments
     Sequence identity at which sequences are clustered before the language
     model runs. The language model runs only on the cluster representatives.
     A member joins a cluster if its alignment to the representative has at
-    least this sequence identity and covers 95% of both sequences.
+    least this sequence identity and covers 70% of the member.
     Cluster members copy embedding vectors at positions aligned to their
     representative.
     Also applies to the 3Di logits that ProstT5 predicts with ``--struct``.
+    When ``--struct`` covers only some sequences, the others copy the 3Di of
+    a sequence with a structure in their cluster, if there is one.
     1.0 only clusters identical sequences, which gives the same
     result faster. Values below 1 save more runtime and require mmseqs2.
 
-    Default: 1.0
+    Default: 0.6
 
 
 Usage Example

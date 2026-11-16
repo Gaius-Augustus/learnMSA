@@ -151,6 +151,67 @@ def find_near_identical(
     )
 
 
+def share_structures(
+    reuse: RedundancyMap,
+    seq_lens: np.ndarray,
+    has_structure: np.ndarray,
+) -> RedundancyMap:
+    """ Updates a ``RedundancyMap`` such that any cluster with a representative
+    without a structure, but at least one member with a structure, gets the
+    member with a structure that has the most residues aligned to the
+    representative as the new representative. A sequence with a structure
+    always keeps its own. Only representatives of clusters without any
+    structure are predicted.
+
+    Use when structures are only available for some of the sequences and
+    `plm_cluster_id` < 1.
+
+    Args:
+        reuse: Clusters of all sequences.
+        seq_lens: Length of every sequence.
+        has_structure: Shape (num_full,). True for sequences with a
+            structure.
+    """
+    has_structure = np.asarray(has_structure, dtype=bool)
+    seq_lens = np.asarray(seq_lens)
+
+    def to_rep(i: int) -> np.ndarray:
+        """Position in its representative of every residue of sequence i."""
+        pos = reuse.positions.get(i)
+        return np.arange(seq_lens[i]) if pos is None else pos
+
+    rep_of = reuse.rep_full_index[reuse.rep_index]
+    # The source of each cluster with a structure, by representative
+    source: dict[int, int] = {}
+    aligned: dict[int, int] = {}
+    for i in np.flatnonzero(has_structure):
+        r = int(rep_of[i])
+        if has_structure[r]:
+            source[r] = r
+            continue
+        n = int(np.count_nonzero(to_rep(int(i)) >= 0))
+        if r not in aligned or n > aligned[r]:
+            source[r], aligned[r] = int(i), n
+
+    new_rep_of = np.arange(rep_of.size, dtype=np.int64)
+    positions: dict[int, np.ndarray] = {}
+    for i in np.flatnonzero(~has_structure):
+        i = int(i)
+        r = int(rep_of[i])
+        s = source.get(r, r)
+        new_rep_of[i] = s
+        pos = to_rep(i)
+        if s != r:
+            # Representative -> source, -1 where the source has no residue
+            to_s = to_rep(s)
+            inv = np.full(seq_lens[r], -1, dtype=np.int64)
+            inv[to_s[to_s >= 0]] = np.flatnonzero(to_s >= 0)
+            pos = np.where(pos >= 0, inv[np.maximum(pos, 0)], -1)
+        if seq_lens[i] != seq_lens[s] or np.any(pos != np.arange(seq_lens[i])):
+            positions[i] = pos.astype(np.int32)
+    return RedundancyMap.from_rep_of(new_rep_of, positions)
+
+
 def _align_to_representatives(
     fasta: str, tmp: str, identity: float
 ) -> pd.DataFrame:

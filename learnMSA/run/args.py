@@ -578,8 +578,8 @@ def parse_args(
         dest="plm_cache_dir",
         type=str,
         default=lm.plm_cache_dir,
-        help="Directory where the protein language model is stored. "\
-            "(default: learnMSA install dir)"
+        help="Directory where protein language models weights are stored. "\
+            "(default: ~/.cache/learnmsa)"
     )
     plm_group.add_argument(
         "--language_model",

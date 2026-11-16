@@ -17,6 +17,7 @@ from learnMSA.backend import get_backend
 if TYPE_CHECKING:
     from learnMSA.util import (EmbeddingCache, EmbeddingDataset,
                                SequenceDataset)
+    from learnMSA.config.structure import StructureConfig
     from learnMSA.util.redundancy import RedundancyMap
 
 
@@ -591,7 +592,7 @@ def load_struct_data(
             f"{struct_len} vs {length}."
         )
     if len(index) < data.num_seq:
-        return _complete_struct_logits(config, data, struct_data)
+        return _complete_struct_logits(config, data, struct_data, reuse)
     struct_data.adapt_order(data)
     return struct_data
 
@@ -600,59 +601,79 @@ def _complete_struct_logits(
     config: Configuration,
     data: "SequenceDataset",
     struct_data: "SequenceDataset | EmbeddingDataset",
+    reuse: "RedundancyMap | None" = None,
 ) -> "EmbeddingDataset":
     """The structural track of all sequences in ``data`` when
     ``struct_data`` covers only some of them.
 
-    The 3Di of sequences with missing structures is predicted with ProstT5.
-    Everything is stored as logits: 3Di letters are encoded such that the
-    observation layer maps them back to their one-hot vectors.
+    All sequences are clustered (``plm_cluster_id``, or ``reuse`` if
+    given). A sequence with a structure keeps its 3Di. One without copies
+    the 3Di of a sequence with a structure in its cluster at aligned
+    residues, see ``share_structures``. Only the representatives of clusters
+    without any structure are predicted with ProstT5. Everything is stored
+    as logits: 3Di letters are encoded such that the observation layer maps
+    them back to their one-hot vectors.
     """
     from learnMSA.structure.io import tokens_as_logits
-    from learnMSA.util import EmbeddingCache, EmbeddingDataset
+    from learnMSA.util import EmbeddingCache
+    from learnMSA.util.redundancy import share_structures
 
     index = {seq_id: i for i, seq_id in enumerate(struct_data.seq_ids)}
-    if config.language_model.plm_cluster_id < 1:
-        raise ValueError(
-            f"--struct covers only {len(index)} of {data.num_seq} sequences. "
-            "--plm_cluster_id can not be used with such mixed structural "
-            "inputs, only with --struct without a path (ProstT5 predicts the "
-            "3Di of all sequences). Please remove --plm_cluster_id."
-        )
     _require_torch_for_logits()
     st = config.structure
     from_tokens = st.input_format == "tokens"
-    missing = data.subset(np.array(
-        [i for i, seq_id in enumerate(data.seq_ids) if seq_id not in index]
-    ))
-    if config.input_output.verbose:
-        print(
-            f"{len(index)} of {data.num_seq} sequences have a structure. "
-            f"The 3Di of the other {missing.num_seq} is predicted with "
-            "ProstT5."
-        )
-    predicted = _predict_struct_logits(config, missing)
-
-    seq_lens = np.asarray(data.seq_lens, dtype=np.int64)
-    starts = np.cumsum(seq_lens) - seq_lens
+    # The track is stored as logits, also when nothing is predicted
+    st.input_format = "logits"
+    if reuse is None:
+        reuse = find_plm_representatives(config, data)
+    has_structure = np.array([seq_id in index for seq_id in data.seq_ids])
+    sources = share_structures(reuse, data.seq_lens, has_structure)
     dim = len(st.structural_alphabet)
-    cache = np.empty((int(seq_lens.sum()), dim), dtype=np.float16)
-    k = 0
-    for i, seq_id in enumerate(data.seq_ids):
-        if seq_id in index:
-            z = struct_data.get_encoded_seq(index[seq_id])
-            if from_tokens:
-                z = tokens_as_logits(
-                    z, st.background_distribution, st.input_temperature
-                )
-        else:
-            z = predicted.get_encoded_seq(k)
-            k += 1
-        cache[starts[i]:starts[i] + seq_lens[i]] = z
-    return EmbeddingDataset(
-        embedding_cache=EmbeddingCache(seq_lens, dim, cache=cache),
-        seq_ids=list(data.seq_ids),
+    num_predicted = []
+
+    def own_logits(seq_id: str) -> np.ndarray:
+        z = struct_data.get_encoded_seq(index[seq_id])
+        if from_tokens:
+            z = tokens_as_logits(
+                z, st.background_distribution, st.input_temperature
+            )
+        return z
+
+    def embed(reps: "SequenceDataset") -> "EmbeddingCache":
+        need = np.array([i for i, seq_id in enumerate(reps.seq_ids)
+                         if seq_id not in index], dtype=np.int64)
+        num_predicted.append(need.size)
+        predicted = (_predict_struct_logits(config, reps.subset(need))
+                     if need.size else None)
+        cache = EmbeddingCache(reps.seq_lens, dim, cache=np.empty(
+            (int(reps.seq_lens.sum()), dim), dtype=np.float16))
+        k = 0
+        for i, seq_id in enumerate(reps.seq_ids):
+            if seq_id in index:
+                z = own_logits(seq_id)
+            else:
+                z = predicted.get_encoded_seq(k)
+                k += 1
+            start = cache.cum_lens[i]
+            cache.cache[start:start + reps.seq_lens[i]] = z
+        return cache
+
+    dataset = embed_representatives(
+        data, sources, embed, _no_letter_logits(st)
     )
+    if config.input_output.verbose:
+        num_struct = int(has_structure.sum())
+        shared = int(np.count_nonzero(
+            has_structure[sources.rep_full_index[sources.rep_index]]
+        )) - num_struct
+        print(
+            f"{num_struct} of {data.num_seq} sequences have a structure, "
+            f"{shared} more share the 3Di of a similar sequence with one. "
+            "ProstT5 predicts the 3Di of the other "
+            f"{data.num_seq - num_struct - shared} sequences "
+            f"({num_predicted[0]} representatives)."
+        )
+    return dataset
 
 
 def _require_torch_for_logits() -> None:
@@ -711,29 +732,38 @@ def _predict_struct_logits(
     the logits of their representative in ``reuse``.
     """
     _require_torch_for_logits()
-    from learnMSA.structure.io import tokens_as_logits
-    from learnMSA.structure.prostt5 import (PROSTT5_CLASS_ORDER,
+    from learnMSA.structure.prostt5 import (PROSTT5_CLASS_ORDER, cache_dir,
                                             predict_dataset)
 
     st = config.structure
     st.input_format = "logits"
 
     def predict(seqs: "SequenceDataset") -> "EmbeddingDataset":
-        dataset = predict_dataset(seqs, verbose=config.input_output.verbose)
+        dataset = predict_dataset(
+            seqs, verbose=config.input_output.verbose,
+            cache_dir=cache_dir(config.language_model.plm_cache_dir),
+        )
         _match_alphabet(dataset, PROSTT5_CLASS_ORDER,
                         st.structural_alphabet, "ProstT5")
         return dataset
 
     if reuse is None:
         return predict(data)
-    # Residues without a counterpart in their representative carry no letter
-    no_letter = tokens_as_logits(
+    return embed_representatives(
+        data, reuse, lambda reps: predict(reps).embedding_cache,
+        _no_letter_logits(st),
+    )
+
+
+def _no_letter_logits(st: "StructureConfig") -> np.ndarray:
+    """Logits of a residue without a 3Di letter, for residues without a
+    counterpart in the sequence they copy their 3Di from."""
+    from learnMSA.structure.io import tokens_as_logits
+
+    return tokens_as_logits(
         np.ones(len(st.structural_alphabet)),
         st.background_distribution,
         st.input_temperature,
-    )
-    return embed_representatives(
-        data, reuse, lambda reps: predict(reps).embedding_cache, no_letter
     )
 
 

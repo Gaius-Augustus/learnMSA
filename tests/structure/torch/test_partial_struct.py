@@ -69,12 +69,13 @@ def test_partial_3di_fasta_is_completed_with_prostt5(tmp_path) -> None:
     x[[0, -1]] = 1.0
     np.testing.assert_allclose(
         _observe(config, struct.get_encoded_seq(0)), x, atol=ATOL)
-    # Predicted logits for the others, in input order.
-    predicted = _predicted(data, ["s3", "s4"])
-    for i, k in [(2, 0), (3, 1)]:
-        np.testing.assert_allclose(
-            struct.get_encoded_seq(i), predicted.get_encoded_seq(k),
-            rtol=1e-3, atol=1e-3)
+    # s3 is identical to s1 and shares its structure.
+    np.testing.assert_array_equal(struct.get_encoded_seq(2),
+                                  struct.get_encoded_seq(0))
+    # Predicted logits for the other.
+    np.testing.assert_allclose(
+        struct.get_encoded_seq(3),
+        _predicted(data, ["s4"]).get_encoded_seq(0), rtol=1e-3, atol=1e-3)
 
 
 def test_partial_logits_file_is_completed_with_prostt5(tmp_path) -> None:
@@ -99,13 +100,56 @@ def test_partial_logits_file_is_completed_with_prostt5(tmp_path) -> None:
         rtol=1e-3, atol=1e-3)
 
 
-def test_partial_structures_reject_plm_cluster_id(tmp_path) -> None:
-    (tmp_path / "s.fasta").write_text(">s2\nDVLP\n")
+@pytest.mark.parametrize("cluster_id", [1.0, 0.6])
+@pytest.mark.parametrize("with_structure, without", [("s1", 2), ("s3", 0)])
+def test_partial_structures_are_shared_within_clusters(
+        tmp_path, monkeypatch, cluster_id, with_structure, without) -> None:
+    """s1 and s3 are identical. Whichever has a structure (the
+    representative s1 or its member s3) lends its 3Di to the other, and
+    ProstT5 runs only for the sequences of clusters without a structure."""
+    (tmp_path / "s.fasta").write_text(f">{with_structure}\nDPQRSD\n")
     config = Configuration()
     config.input_output.struct_file = tmp_path / "s.fasta"
-    config.language_model.plm_cluster_id = 0.9
-    with pytest.raises(ValueError, match="plm_cluster_id"):
-        load_struct_data(config, SequenceDataset(sequences=SEQS))
+    config.input_output.work_dir = str(tmp_path / "work")
+    config.input_output.verbose = False
+    config.structure.use_structure = True
+    config.language_model.plm_cluster_id = cluster_id
+    predicted = []
+    predict_dataset = prostt5.predict_dataset
+
+    def counting(seqs, **kwargs):
+        predicted.extend(seqs.seq_ids)
+        return predict_dataset(seqs, **kwargs)
+
+    monkeypatch.setattr(prostt5, "predict_dataset", counting)
+    data = SequenceDataset(sequences=SEQS)
+    struct = load_struct_data(config, data)
+
+    assert predicted == ["s2", "s4"]
+    assert config.structure.input_format == "logits"
+    np.testing.assert_array_equal(struct.get_encoded_seq(without),
+                                  struct.get_encoded_seq(2 - without))
+    x = np.eye(20)[[ALPHABET.index(c) for c in "DPQRSD"]]
+    x[[0, -1]] = 1.0
+    np.testing.assert_allclose(
+        _observe(config, struct.get_encoded_seq(without)), x, atol=ATOL)
+
+
+def test_structures_for_all_representatives_need_no_prediction(
+        tmp_path, monkeypatch) -> None:
+    (tmp_path / "s.fasta").write_text(
+        ">s1\nDPQRSD\n>s2\nDVLP\n>s4\nAAAA\n")
+    config = Configuration()
+    config.input_output.struct_file = tmp_path / "s.fasta"
+    config.input_output.work_dir = str(tmp_path / "work")
+    config.input_output.verbose = False
+    config.structure.use_structure = True
+    monkeypatch.setattr(prostt5, "predict_dataset", None)
+    struct = load_struct_data(config, SequenceDataset(sequences=SEQS))
+
+    assert config.structure.input_format == "logits"
+    np.testing.assert_array_equal(struct.get_encoded_seq(2),
+                                  struct.get_encoded_seq(0))
 
 
 def test_partial_structures_need_pytorch(tmp_path, monkeypatch) -> None:
