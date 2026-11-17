@@ -53,4 +53,11 @@ def main(argv: list[str] | None = None) -> None:
 
 
 if __name__ == "__main__":
+    # Run as a file, Python puts this directory first on sys.path, where the
+    # sibling packages torch/ and tf/ would shadow PyTorch and TensorFlow.
+    import os
+    import sys
+    _here = os.path.dirname(os.path.abspath(__file__))
+    sys.path[:] = [p for p in sys.path
+                   if os.path.abspath(p or os.curdir) != _here]
     main()

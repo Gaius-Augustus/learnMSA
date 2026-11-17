@@ -610,9 +610,7 @@ def _complete_struct_logits(
     given). A sequence with a structure keeps its 3Di. One without copies
     the 3Di of a sequence with a structure in its cluster at aligned
     residues, see ``share_structures``. Only the representatives of clusters
-    without any structure are predicted with ProstT5. Everything is stored
-    as logits: 3Di letters are encoded such that the observation layer maps
-    them back to their one-hot vectors.
+    without any structure are predicted with ProstT5.
     """
     from learnMSA.structure.io import tokens_as_logits
     from learnMSA.util import EmbeddingCache
